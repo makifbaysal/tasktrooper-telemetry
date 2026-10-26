@@ -1,0 +1,61 @@
+// TrooperRum native module (contracts.md §9 hybrid bridge). AGP / Kotlin / RN Gradle plugin come from the host app's
+// root build script (which also configures the JDK 17 toolchain for Java + Kotlin); `react-android` is version-aligned by the React Native Gradle plugin.
+
+def safeExtGet(name, fallback) {
+  return rootProject.ext.has(name) ? rootProject.ext.get(name) : fallback
+}
+
+// RN >= 0.76 defaults to the New Architecture (0.82+ is New-Arch-only); only an explicit `newArchEnabled=false` opts out.
+def isNewArchitectureEnabled() {
+  return !rootProject.hasProperty("newArchEnabled") || rootProject.getProperty("newArchEnabled") != "false"
+}
+
+apply plugin: "com.android.library"
+apply plugin: "kotlin-android"
+if (isNewArchitectureEnabled()) {
+  apply plugin: "com.facebook.react"
+}
+
+android {
+  namespace "dev.tasktrooper.reactnative"
+  compileSdkVersion safeExtGet("compileSdkVersion", 35)
+
+  defaultConfig {
+    minSdkVersion safeExtGet("minSdkVersion", 24)
+    targetSdkVersion safeExtGet("targetSdkVersion", 35)
+    consumerProguardFiles "consumer-rules.pro"
+    buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", isNewArchitectureEnabled().toString()
+  }
+
+  buildFeatures {
+    buildConfig true
+  }
+
+  sourceSets {
+    main {
+      if (isNewArchitectureEnabled()) {
+        java.srcDirs += ["src/newarch"]
+      } else {
+        java.srcDirs += ["src/oldarch"]
+      }
+    }
+  }
+}
+
+repositories {
+  google()
+  mavenCentral()
+}
+
+dependencies {
+  implementation "com.facebook.react:react-android"
+  // No dependency on trooper-android: TrooperHybridBridge is resolved via reflection when the host app includes it.
+}
+
+if (isNewArchitectureEnabled()) {
+  react {
+    jsRootDir = file("../src/")
+    libraryName = "TrooperRumSpec"
+    codegenJavaPackageName = "dev.tasktrooper.reactnative"
+  }
+}

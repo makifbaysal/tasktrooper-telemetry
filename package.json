@@ -1,0 +1,8 @@
+{
+  "name": "trooper-telemetry",
+  "private": true,
+  "scripts": {
+    "dev:web": "pnpm --filter @trooper/web dev",
+    "build:web": "pnpm --filter @trooper/web build"
+  }
+}

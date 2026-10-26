@@ -1,0 +1,17 @@
+Thread 0 Crashed:
+0   libsystem_kernel.dylib         0x000000018fc285e8 0x18fc0d000 + 112104
+1   libsystem_pthread.dylib        0x000000018fc638d8 0x18fc5c000 + 30936
+2   libsystem_c.dylib              0x000000018fb69978 0x18faee000 + 506232
+3   ShopApp                        0x0000000104a1d490 0x104a1c000 + 5264
+4   ShopApp                        0x0000000104a1d440 0x104a1c000 + 5184
+5   ShopApp                        0x0000000104a1cc38 0x104a1c000 + 3128
+6   ShopApp                        0x0000000104a1ca00 0x104a1c000 + 2560
+7   ShopApp                        0x0000000104a1c8b0 0x104a1c000 + 2224
+8   dyld                           0x000000018f8984e4 0x18f892000 + 25828
+
+Binary Images:
+0x104a1c000 - 0x104a1ffff ShopApp arm64 <4089D1C1-9AD1-3B24-85D2-527099F8E383> /private/var/containers/Bundle/Application/5A1B2C3D/ShopApp.app/ShopApp
+0x18fc0d000 - 0x18fc46fff libsystem_kernel.dylib arm64 <1A2B3C4D-0000-1111-2222-333344445555> /usr/lib/system/libsystem_kernel.dylib
+0x18fc5c000 - 0x18fc67fff libsystem_pthread.dylib arm64 <2A2B3C4D-0000-1111-2222-333344445555> /usr/lib/system/libsystem_pthread.dylib
+0x18faee000 - 0x18fb6dfff libsystem_c.dylib arm64 <3A2B3C4D-0000-1111-2222-333344445555> /usr/lib/system/libsystem_c.dylib
+0x18f892000 - 0x18f921fff dyld arm64 <4A2B3C4D-0000-1111-2222-333344445555> /usr/lib/dyld

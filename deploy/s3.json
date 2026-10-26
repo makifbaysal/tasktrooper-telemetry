@@ -1,0 +1,9 @@
+{
+  "identities": [
+    {
+      "name": "trooper",
+      "credentials": [{ "accessKey": "trooper", "secretKey": "trooper-secret" }],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

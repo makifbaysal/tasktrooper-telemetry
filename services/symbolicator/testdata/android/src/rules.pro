@@ -1,0 +1,3 @@
+-keep class com.example.shop.Main { public static void main(java.lang.String[]); }
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile

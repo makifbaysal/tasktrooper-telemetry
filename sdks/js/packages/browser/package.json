@@ -1,0 +1,50 @@
+{
+  "name": "@trooper/browser",
+  "version": "0.1.0",
+  "description": "TaskTrooper Telemetry RUM SDK for the browser.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json",
+    "./iife": "./dist/trooper.iife.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json",
+    "size": "node scripts/size.mjs"
+  },
+  "dependencies": {
+    "@trooper/core": "workspace:*",
+    "web-vitals": "^6.2.3"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "tsup": "^9.0.0",
+    "vitest": "^5.0.5",
+    "happy-dom": "^21.0.0",
+    "fake-indexeddb": "^6.0.0",
+    "esbuild": "^0.28.0",
+    "@types/node": "^26.6.5"
+  },
+  "unpkg": "./dist/trooper.iife.js",
+  "jsdelivr": "./dist/trooper.iife.js"
+}

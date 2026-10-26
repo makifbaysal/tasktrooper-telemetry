@@ -1,0 +1,154 @@
+syntax = "proto3";
+
+// RUM wire schema shared by every client SDK (web, React Native, Flutter, Android, iOS).
+// Transport: POST /v1/rum with JSON (field names exactly as below, snake_case) or protobuf
+// (Content-Type: application/x-protobuf). Body may be gzip-encoded.
+package trooper.rum.v1;
+
+option go_package = "github.com/tasktrooper/telemetry/services/pkg/rumpb;rumpb";
+
+message RumBatch {
+  Resource resource = 1;
+  repeated RumEvent events = 2;
+}
+
+// Who sent the batch. Constant for the lifetime of an app process / page load.
+message Resource {
+  string app = 1;          // service name of the client app, e.g. "shop-web", "courier-app"
+  string version = 2;      // app version / build, used as deploy marker
+  string environment = 3;  // production | staging | ...
+  Platform platform = 4;
+  Sdk sdk = 5;
+  Device device = 6;
+  Os os = 7;
+  Browser browser = 8;     // web only
+  map<string, string> attributes = 9;
+}
+
+enum Platform {
+  PLATFORM_UNSPECIFIED = 0;
+  PLATFORM_WEB = 1;
+  PLATFORM_ANDROID = 2;
+  PLATFORM_IOS = 3;
+  PLATFORM_FLUTTER = 4;
+  PLATFORM_REACT_NATIVE = 5;
+}
+
+message Sdk {
+  string name = 1;     // "@trooper/browser", "trooper_flutter", "TaskTrooper-iOS", ...
+  string version = 2;
+}
+
+message Device {
+  string type = 1;         // desktop | mobile | tablet | tv
+  string manufacturer = 2;
+  string model = 3;
+  string locale = 4;
+  int32 screen_width = 5;
+  int32 screen_height = 6;
+}
+
+message Os {
+  string name = 1;     // iOS, Android, Windows, macOS, Linux
+  string version = 2;
+}
+
+message Browser {
+  string name = 1;
+  string version = 2;
+}
+
+message User {
+  string id = 1;                       // only after identify(); never inferred
+  map<string, string> traits = 2;      // opt-in, e.g. plan; PII is the app's responsibility
+}
+
+message RumEvent {
+  EventType type = 1;
+  int64 ts_ms = 2;              // unix epoch milliseconds (client clock; server corrects skew with received_at)
+  string session_id = 3;        // rotated after 30 min inactivity or 4 h total
+  string view_id = 4;           // page / screen instance
+  string view_name = 5;         // route template or screen name: "/products/:slug", "CheckoutScreen"
+  string anonymous_id = 6;      // stable per device/browser
+  User user = 7;
+  string connection = 8;        // wifi | cellular | 4g | 3g | offline | unknown
+
+  oneof payload {
+    ViewPayload view = 20;
+    VitalPayload vital = 21;
+    ErrorPayload error = 22;
+    ResourcePayload resource = 23;
+    ActionPayload action = 24;
+    AppStartPayload app_start = 25;
+    CustomPayload custom = 26;
+  }
+
+  map<string, string> attributes = 40;
+}
+
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  SESSION_START = 1;
+  VIEW_START = 2;
+  VIEW_END = 3;      // carries ViewPayload with time on view
+  VITAL = 4;
+  ERROR = 5;
+  RESOURCE = 6;      // network request (fetch/XHR/URLSession/OkHttp/dio...)
+  ACTION = 7;        // click / tap
+  APP_START = 8;     // mobile cold/warm start
+  CUSTOM = 9;        // track(name, props)
+}
+
+message ViewPayload {
+  string url = 1;               // web: full URL without query values (keys kept); mobile: empty
+  string referrer = 2;
+  double loading_time_ms = 3;   // web: load event / SPA route settle; mobile: screen first frame
+  double time_spent_ms = 4;     // VIEW_END only
+  bool is_initial = 5;          // first view of the session/page load
+}
+
+message VitalPayload {
+  string name = 1;              // LCP | INP | CLS | FCP | TTFB | FID | FROZEN_FRAMES | SLOW_FRAMES | ...
+  double value = 2;             // ms, except CLS (unitless) and frame counts
+  string rating = 3;            // good | needs-improvement | poor
+}
+
+message ErrorPayload {
+  string type = 1;              // TypeError, NullPointerException, SIGSEGV, ...
+  string message = 2;
+  string stack = 3;             // raw stack; minified (web) or symbolicated later via sourcemap / dSYM / mapping
+  string source = 4;            // source | network | console | crash | anr | promise
+  bool is_crash = 5;            // app terminated (mobile) / unhandled (web)
+  string thread = 6;
+  string fingerprint = 7;       // optional client-side grouping hint; server computes its own
+}
+
+message ResourcePayload {
+  string url = 1;               // query values stripped
+  string method = 2;
+  int32 status_code = 3;        // 0 = network error / aborted
+  double duration_ms = 4;
+  int64 request_bytes = 5;
+  int64 response_bytes = 6;
+  string trace_id = 7;          // W3C traceparent sent with the request (when URL matched tracePropagationTargets)
+  string span_id = 8;
+  string initiator = 9;         // fetch | xhr | okhttp | urlsession | dio | http
+}
+
+message ActionPayload {
+  string name = 1;              // derived label: button text / accessibility label / custom
+  string target = 2;            // selector or view id
+  bool rage = 3;                // ≥3 taps/clicks on the same target within 1 s
+  bool dead = 4;                // no DOM change / navigation / request within 1 s
+}
+
+message AppStartPayload {
+  string kind = 1;              // cold | warm | hot
+  double duration_ms = 2;       // process start → first frame
+}
+
+message CustomPayload {
+  string name = 1;
+  map<string, string> props = 2;
+  double value = 3;             // optional numeric measure
+}

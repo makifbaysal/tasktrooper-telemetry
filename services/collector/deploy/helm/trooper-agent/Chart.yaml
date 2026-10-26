@@ -1,0 +1,7 @@
+apiVersion: v2
+name: trooper-agent
+description: TaskTrooper database and message broker collector (trooper-agent)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords: [tasktrooper, observability, postgres, mysql, redis, kafka, rabbitmq]

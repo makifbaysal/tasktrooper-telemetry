@@ -1,0 +1,24 @@
+<Project>
+  <PropertyGroup>
+    <OTelVersion>1.20.1</OTelVersion>
+    <OTelBetaVersion>1.20.1-beta.1</OTelBetaVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageVersion Include="OpenTelemetry" Version="$(OTelVersion)" />
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="$(OTelVersion)" />
+    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="$(OTelVersion)" />
+    <PackageVersion Include="OpenTelemetry.Exporter.InMemory" Version="$(OTelVersion)" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="$(OTelVersion)" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.SqlClient" Version="$(OTelVersion)" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="$(OTelVersion)" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.EntityFrameworkCore" Version="$(OTelBetaVersion)" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.StackExchangeRedis" Version="$(OTelBetaVersion)" />
+    <PackageVersion Include="Confluent.Kafka" Version="2.16.0" />
+    <PackageVersion Include="RabbitMQ.Client" Version="7.2.2" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.13" />
+  </ItemGroup>
+</Project>

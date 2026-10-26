@@ -1,0 +1,25 @@
+# compiler: R8
+# compiler_version: 8.11.18
+# common_typos_disable
+# {"id":"com.android.tools.r8.mapping","version":"2.2"}
+# pg_map_id: c6ba1e1
+# pg_map_hash: SHA-256 c6ba1e13e6df20a0403a6fb6ef52d2e589512c947ffb9eeb94ae709eff6bb556
+com.example.shop.CartService -> R8$$REMOVED$$CLASS$$0:
+# {"id":"sourceFile","fileName":"CartService.java"}
+com.example.shop.Main -> com.example.shop.Main:
+# {"id":"sourceFile","fileName":"Main.java"}
+    1:1:void main(java.lang.String[]):7:7 -> main
+    2:2:int com.example.shop.CartService.computeTotal(int[]):16:16 -> main
+    2:2:int com.example.shop.CartService.checkout(int[]):7 -> main
+    2:2:void main(java.lang.String[]):7 -> main
+    3:3:int com.example.shop.PriceValidator.validate(int):6:6 -> main
+    3:3:int com.example.shop.CartService.computeTotal(int[]):17 -> main
+      # {"id":"com.android.tools.r8.rewriteFrame","conditions":["throws(Ljava/lang/NullPointerException;)"],"actions":["removeInnerFrames(1)"]}
+    3:3:int com.example.shop.CartService.checkout(int[]):7 -> main
+    3:3:void main(java.lang.String[]):7 -> main
+    4:4:int com.example.shop.CartService.checkout(int[]):9:9 -> main
+    4:4:void main(java.lang.String[]):7 -> main
+    5:5:void main(java.lang.String[]):9:9 -> main
+com.example.shop.PriceValidator -> a.a:
+# {"id":"sourceFile","fileName":"PriceValidator.java"}
+    1:1:void fail(int):12:12 -> a

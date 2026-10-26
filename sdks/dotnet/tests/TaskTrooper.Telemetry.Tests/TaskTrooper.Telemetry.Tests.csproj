@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+    <PackageReference Include="OpenTelemetry.Exporter.InMemory" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\TaskTrooper.Telemetry\TaskTrooper.Telemetry.csproj" />
+    <ProjectReference Include="..\..\src\TaskTrooper.Telemetry.AspNetCore\TaskTrooper.Telemetry.AspNetCore.csproj" />
+    <ProjectReference Include="..\..\src\TaskTrooper.Telemetry.Kafka\TaskTrooper.Telemetry.Kafka.csproj" />
+    <ProjectReference Include="..\..\src\TaskTrooper.Telemetry.RabbitMQ\TaskTrooper.Telemetry.RabbitMQ.csproj" />
+    <ProjectReference Include="..\..\src\TaskTrooper.Telemetry.MassTransit\TaskTrooper.Telemetry.MassTransit.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+</Project>

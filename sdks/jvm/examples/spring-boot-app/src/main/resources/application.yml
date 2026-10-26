@@ -1,0 +1,7 @@
+spring:
+  application:
+    name: orders-api
+trooper:
+  dsn: ${TROOPER_DSN:http://tt_dev_ingest_key@localhost:4318/1}
+  environment: dev
+  sample-rate: 1.0

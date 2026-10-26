@@ -1,0 +1,8 @@
+*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***
+pid: 4211, tid: 4240, name 1.ui
+os: android arch: arm64 comp: yes sim: no
+build_id: '14cdd50aa7bf4b3b70149ed6d1e8cfcb'
+isolate_dso_base: 7a1c400000, vm_dso_base: 7a1c400000
+isolate_instructions: 7a1c410000, vm_instructions: 7a1c404000
+    #00 abs 0000007a1c487e5b virt 0000000000087e5b _kDartIsolateSnapshotInstructions+0x77e5b
+    #01 abs 0000007a1c493053 virt 0000000000093053 _kDartIsolateSnapshotInstructions+0x83053

@@ -1,0 +1,9 @@
+*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***
+Build fingerprint: 'google/sdk_gphone64_arm64/emu64a:14/UE1A.230829.036/10808522:user/release-keys'
+ABI: 'arm64'
+signal 6 (SIGABRT), code -1 (SI_QUEUE), fault addr --------
+backtrace:
+      #00 pc 000000000005d1c4  /apex/com.android.runtime/lib64/bionic/libc.so (abort+164) (BuildId: 6b5e3b2a3f0c4d5e6f708192a3b4c5d6)
+      #01 pc 00000000000003e0  /data/app/~~a1b2c3==/com.example.shop-d4e5f6==/lib/arm64/libshop.so (compute_total+68) (BuildId: 1b7d8b602688b7defd914a42844e8d4a71a6648a)
+      #02 pc 00000000000003ec  /data/app/~~a1b2c3==/com.example.shop-d4e5f6==/base.apk!libshop.so (offset 0x4000) (BuildId: 1b7d8b602688b7defd914a42844e8d4a71a6648a)
+      #03 pc 0000000000355c30  /apex/com.android.art/lib64/libart.so (art_quick_generic_jni_trampoline+144) (BuildId: 9a8b7c6d5e4f30211203f4e5d6c7b8a9)

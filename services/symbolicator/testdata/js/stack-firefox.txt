@@ -1,0 +1,4 @@
+n@https://shop.example.com/assets/app.min.js:1:88
+r@https://shop.example.com/assets/app.min.js:1:47
+u@https://shop.example.com/assets/app.min.js:1:150
+@https://shop.example.com/:12:5

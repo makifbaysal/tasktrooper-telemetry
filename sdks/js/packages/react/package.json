@@ -1,0 +1,98 @@
+{
+  "name": "@trooper/react",
+  "version": "0.1.0",
+  "description": "React integration for @trooper/browser: provider, ErrorBoundary, router view names.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./react-router": {
+      "import": {
+        "types": "./dist/react-router.d.ts",
+        "default": "./dist/react-router.js"
+      },
+      "require": {
+        "types": "./dist/react-router.d.cts",
+        "default": "./dist/react-router.cjs"
+      }
+    },
+    "./nextjs": {
+      "import": {
+        "types": "./dist/nextjs.d.ts",
+        "default": "./dist/nextjs.js"
+      },
+      "require": {
+        "types": "./dist/nextjs.d.cts",
+        "default": "./dist/nextjs.cjs"
+      }
+    },
+    "./tanstack-router": {
+      "import": {
+        "types": "./dist/tanstack-router.d.ts",
+        "default": "./dist/tanstack-router.js"
+      },
+      "require": {
+        "types": "./dist/tanstack-router.d.cts",
+        "default": "./dist/tanstack-router.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@trooper/browser": "workspace:*",
+    "@trooper/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-router": ">=6.4",
+    "next": ">=13.4",
+    "@tanstack/react-router": ">=1"
+  },
+  "peerDependenciesMeta": {
+    "react-router": {
+      "optional": true
+    },
+    "next": {
+      "optional": true
+    },
+    "@tanstack/react-router": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "tsup": "^9.0.0",
+    "vitest": "^5.0.5",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/dom": "^10.4.0",
+    "react-router": "^7.18.4",
+    "happy-dom": "^21.0.0",
+    "@types/node": "^26.6.5"
+  }
+}

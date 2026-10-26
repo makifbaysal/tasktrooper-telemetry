@@ -1,0 +1,23 @@
+go 1.26.3
+
+use (
+	.
+	./examples
+	./integrations/amqp091
+	./integrations/chi
+	./integrations/echo
+	./integrations/fiber
+	./integrations/fiberv3
+	./integrations/franzgo
+	./integrations/gin
+	./integrations/goredis
+	./integrations/grpc
+	./integrations/kafkago
+	./integrations/mongo
+	./integrations/nethttp
+	./integrations/pgx
+	./integrations/sarama
+	./integrations/slog
+	./integrations/sql
+	./integrations/zap
+)

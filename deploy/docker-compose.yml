@@ -1,0 +1,131 @@
+# Local stack. Infra only by default; `--profile app` also runs the Go services.
+#   docker compose -f deploy/docker-compose.yml up -d
+#   docker compose -f deploy/docker-compose.yml --profile app up -d --build
+name: tasktrooper
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8
+    ports: ["8123:8123", "9000:9000"]
+    environment:
+      CLICKHOUSE_DB: telemetry
+      CLICKHOUSE_USER: trooper
+      CLICKHOUSE_PASSWORD: trooper
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ulimits: { nofile: { soft: 262144, hard: 262144 } }
+    volumes:
+      - clickhouse:/var/lib/clickhouse
+      - ./clickhouse:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--user", "trooper", "--password", "trooper", "-q", "SELECT 1"]
+      interval: 5s
+      retries: 30
+
+  postgres:
+    image: postgres:17
+    ports: ["5432:5432"]
+    environment:
+      POSTGRES_DB: trooper
+      POSTGRES_USER: trooper
+      POSTGRES_PASSWORD: trooper
+    volumes:
+      - postgres:/var/lib/postgresql/data
+      - ./postgres:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "trooper"]
+      interval: 5s
+      retries: 30
+
+  redpanda:
+    image: redpandadata/redpanda:v25.2.1
+    command:
+      - redpanda start
+      - --mode dev-container
+      - --smp 1
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+    ports: ["19092:19092", "9644:9644"]
+    volumes: [redpanda:/var/lib/redpanda/data]
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health", "--exit-when-healthy"]
+      interval: 5s
+      retries: 30
+
+  redpanda-init:
+    image: redpandadata/redpanda:v25.2.1
+    depends_on: { redpanda: { condition: service_healthy } }
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        for t in tt.otlp.traces tt.otlp.metrics tt.otlp.logs tt.rum; do
+          rpk topic create $$t -p 3 -c retention.ms=86400000 -X brokers=redpanda:9092 || true;
+        done
+
+  redis:
+    image: redis:7.4
+    ports: ["6379:6379"]
+
+  # S3-compatible blob store: sourcemaps, dSYMs, R8 mappings (symbolicator). SeaweedFS in S3 mode.
+  s3:
+    image: chrislusf/seaweedfs:4.50
+    command: server -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -dir=/data
+    ports: ["9002:8333"]
+    volumes:
+      - s3:/data
+      - ./s3.json:/etc/seaweedfs/s3.json:ro
+
+  # ── Go services (profile "app") ──
+  ingest-gw:
+    profiles: [app]
+    build: { context: ../services, dockerfile: ingest/Dockerfile, args: { CMD: ingest-gw } }
+    ports: ["4317:4317", "4318:4318"]
+    environment: &svc_env
+      TT_POSTGRES_URL: postgres://trooper:trooper@postgres:5432/trooper?sslmode=disable
+      TT_CLICKHOUSE_URL: clickhouse://trooper:trooper@clickhouse:9000/telemetry
+      TT_KAFKA_BROKERS: redpanda:9092
+      TT_REDIS_URL: redis://redis:6379/0
+      TT_LOG_LEVEL: info
+    depends_on: [postgres, redpanda, redis]
+
+  ingest-writer:
+    profiles: [app]
+    build: { context: ../services, dockerfile: ingest/Dockerfile, args: { CMD: ingest-writer } }
+    environment: *svc_env
+    depends_on: [clickhouse, redpanda]
+
+  api:
+    profiles: [app]
+    build: { context: ../services, dockerfile: api/Dockerfile }
+    ports: ["8080:8080"]
+    environment: *svc_env
+    depends_on: [clickhouse, postgres]
+
+  alert-engine:
+    profiles: [app]
+    build: { context: ../services, dockerfile: alerting/Dockerfile, args: { CMD: alert-engine } }
+    environment: *svc_env
+    depends_on: [clickhouse, postgres]
+
+  notifier:
+    profiles: [app]
+    build: { context: ../services, dockerfile: alerting/Dockerfile, args: { CMD: notifier } }
+    environment: *svc_env
+    depends_on: [postgres]
+
+  # Cloud integrations (AWS / GCP / Neon / Vercel) → databases, broker_clusters, deploy_markers + OTLP metrics (ADR-012)
+  trooper-cloud:
+    profiles: [app]
+    build: { context: ../services, dockerfile: integrations/Dockerfile }
+    environment:
+      TT_POSTGRES_URL: postgres://trooper:trooper@postgres:5432/trooper?sslmode=disable
+      TT_DSN: http://tt_dev_ingest_key@ingest-gw:4318/1
+      TT_SECRETS_KEY: ${TT_SECRETS_KEY:-}
+      TT_CLOUD_INGEST_KEYS: ${TT_CLOUD_INGEST_KEYS:-}
+      TT_LOG_LEVEL: info
+    depends_on: [postgres, ingest-gw]
+
+volumes:
+  clickhouse:
+  postgres:
+  redpanda:
+  s3:

@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>$(LibraryTargetFrameworks)</TargetFrameworks>
+    <Description>TaskTrooper Telemetry distribution of OpenTelemetry .NET: one-line setup (DSN, resource, sampling, OTLP export) plus trooper.* semantic conventions.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.SqlClient" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="TaskTrooper.Telemetry.Tests" />
+    <InternalsVisibleTo Include="TaskTrooper.Telemetry.AspNetCore" />
+    <InternalsVisibleTo Include="TaskTrooper.Telemetry.Kafka" />
+    <InternalsVisibleTo Include="TaskTrooper.Telemetry.RabbitMQ" />
+    <InternalsVisibleTo Include="TaskTrooper.Telemetry.MassTransit" />
+  </ItemGroup>
+</Project>

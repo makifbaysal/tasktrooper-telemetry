@@ -1,0 +1,224 @@
+/*
+ * TaskTrooper Telemetry design tokens — single source of truth.
+ * Follows the TaskTrooper app theme (tasktrooper-company/desktop/ui/src/styles/globals.css):
+ * hue-265 cool neutrals, navy brand mark #15214b, navy primary, warm amber accent,
+ * Inter + JetBrains Mono, 10px base radius, rounded-xl cards.
+ * Docs: .ai/design-system.md — never use raw hex / px in components; reference these tokens.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* ---------- Typography ---------- */
+  --font-sans: 'Inter Variable', 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  --text-xs: 11px;   --lh-xs: 14px;   /* TaskTrooper "micro" */
+  --text-sm: 12px;   --lh-sm: 16px;   /* "caption" */
+  --text-md: 14px;   --lh-md: 20px;   /* "body" */
+  --text-lg: 16px;   --lh-lg: 24px;   /* "heading" */
+  --text-xl: 20px;   --lh-xl: 28px;   /* "title" */
+  --text-2xl: 28px;  --lh-2xl: 36px;  /* "display" */
+  --text-hero: 44px; --lh-hero: 48px;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  /* ---------- Spacing (4px grid) ---------- */
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* ---------- Radius (TaskTrooper --radius: 10px) ---------- */
+  --radius-xs: 4px;
+  --radius-sm: 6px;   /* radius-sm */
+  --radius-md: 8px;   /* radius-md — buttons, inputs */
+  --radius-lg: 14px;  /* rounded-xl — cards */
+  --radius-full: 999px;
+
+  /* ---------- Layout ---------- */
+  --sidebar-w: 240px;
+  --topbar-h: 56px;
+  --content-max: 1440px;
+  --control-h-sm: 30px;
+  --control-h-md: 36px;
+
+  /* ---------- Motion ---------- */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --dur-fast: 120ms;
+  --dur-med: 200ms;
+
+  /* ---------- Brand ---------- */
+  --brand-mark: #15214b;               /* app icon navy — same in both themes */
+  --accent-warm: oklch(0.818 0.112 72.9);
+  --accent-warm-soft: oklch(0.818 0.112 72.9 / 0.16);
+
+  /* ---------- Surfaces & ink (light) ---------- */
+  --bg-page: oklch(0.962 0.007 265);
+  --bg-surface: oklch(0.99 0.003 265);     /* cards, chart surface */
+  --bg-raised: oklch(0.995 0.002 265);     /* popovers, inputs */
+  --bg-sunken: oklch(0.945 0.01 265);      /* wells, table header, code */
+  --bg-hover: oklch(0.935 0.014 265 / 0.6);
+  --bg-active: oklch(0.935 0.014 265);
+  --bg-sidebar: oklch(0.962 0.007 265);
+
+  --text-primary: oklch(0.145 0.02 265);
+  --text-secondary: oklch(0.35 0.02 265);
+  --text-muted: oklch(0.5 0.02 265);
+  --text-inverse: oklch(0.985 0.002 247);
+
+  --border: oklch(0.895 0.012 265);
+  --border-strong: oklch(0.82 0.015 265);
+  --divider: oklch(0.915 0.01 265);
+
+  /* primary = TaskTrooper navy */
+  --accent: oklch(0.264 0.079 268.5);
+  --accent-hover: oklch(0.32 0.09 268.5);
+  --accent-soft: oklch(0.455 0.118 265 / 0.10);
+  --accent-text: oklch(0.455 0.118 265);
+  --focus-ring: 0 0 0 2px var(--bg-page), 0 0 0 4px oklch(0.455 0.118 265 / 0.55);
+
+  /* ---------- Status (always paired with icon + label) ---------- */
+  --status-good: oklch(0.55 0.15 145);
+  --status-warning: oklch(0.75 0.15 85);
+  --status-serious: oklch(0.68 0.15 50);
+  --status-critical: oklch(0.577 0.22 27);
+  --status-good-soft: oklch(0.55 0.15 145 / 0.14);
+  --status-warning-soft: oklch(0.75 0.15 85 / 0.18);
+  --status-serious-soft: oklch(0.68 0.15 50 / 0.16);
+  --status-critical-soft: oklch(0.577 0.22 27 / 0.12);
+  --status-good-text: oklch(0.45 0.13 145);
+  --status-warning-text: oklch(0.5 0.12 75);
+  --status-serious-text: oklch(0.5 0.14 45);
+  --status-critical-text: oklch(0.5 0.2 27);
+  --status-neutral: oklch(0.5 0.02 265);
+
+  /* ---------- Data viz: categorical (TaskTrooper --chart-1..8, fixed order) ---------- */
+  --series-1: #2a78d6; /* blue */
+  --series-2: #eb6834; /* orange */
+  --series-3: #1baf7a; /* aqua */
+  --series-4: #eda100; /* yellow */
+  --series-5: #e87ba4; /* magenta */
+  --series-6: #008300; /* green */
+  --series-7: #6250d6; /* violet */
+  --series-8: #e34948; /* red */
+
+  /* sequential (blue) */
+  --seq-100: #cde2fb; --seq-200: #9ec5f4; --seq-300: #6da7ec; --seq-400: #3987e5;
+  --seq-500: #256abf; --seq-600: #184f95; --seq-700: #0d366b;
+
+  --viz-grid: oklch(0.915 0.01 265);
+  --viz-axis: oklch(0.85 0.012 265);
+  --viz-area-opacity: 0.10;
+
+  /* ---------- Scrollbar (TaskTrooper) ---------- */
+  --scrollbar-thumb: oklch(0.72 0.02 265 / 0.45);
+  --scrollbar-thumb-hover: oklch(0.55 0.03 265 / 0.65);
+  --scrollbar-track: transparent;
+
+  /* ---------- Elevation (TaskTrooper shadow-raised / overlay) ---------- */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.06), 0 1px 3px 0 rgb(0 0 0 / 0.08);
+  --shadow-md: 0 4px 16px -4px rgb(0 0 0 / 0.12), 0 1px 3px 0 rgb(0 0 0 / 0.06);
+  --shadow-lg: 0 8px 24px -4px rgb(0 0 0 / 0.18), 0 2px 8px -2px rgb(0 0 0 / 0.12);
+}
+
+/* ---------- Dark theme: TaskTrooper .dark steps, not an inversion ---------- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --bg-page: oklch(0.13 0.015 265);
+    --bg-surface: oklch(0.17 0.015 265);
+    --bg-raised: oklch(0.21 0.015 265);
+    --bg-sunken: oklch(0.1 0.015 265);
+    --bg-hover: oklch(0.22 0.02 265 / 0.6);
+    --bg-active: oklch(0.22 0.02 265);
+    --bg-sidebar: oklch(0.15 0.015 265);
+    --text-primary: oklch(0.93 0.01 265);
+    --text-secondary: oklch(0.78 0.01 265);
+    --text-muted: oklch(0.62 0.02 265);
+    --text-inverse: oklch(0.985 0.002 247);
+    --border: oklch(0.28 0.015 265);
+    --border-strong: oklch(0.36 0.02 265);
+    --divider: oklch(0.24 0.015 265);
+    --accent: oklch(0.5 0.12 265);
+    --accent-hover: oklch(0.56 0.13 265);
+    --accent-soft: oklch(0.61 0.15 265 / 0.16);
+    --accent-text: oklch(0.74 0.11 265);
+    --focus-ring: 0 0 0 2px var(--bg-page), 0 0 0 4px oklch(0.61 0.15 265 / 0.6);
+    --accent-warm: oklch(0.8 0.13 72.9);
+    --status-good: oklch(0.65 0.17 145);
+    --status-warning: oklch(0.78 0.14 85);
+    --status-critical: oklch(0.62 0.2 27);
+    --status-good-soft: oklch(0.65 0.17 145 / 0.15);
+    --status-warning-soft: oklch(0.78 0.14 85 / 0.14);
+    --status-serious-soft: oklch(0.7 0.15 50 / 0.16);
+    --status-critical-soft: oklch(0.62 0.2 27 / 0.18);
+    --status-good-text: oklch(0.75 0.15 145);
+    --status-warning-text: oklch(0.82 0.13 85);
+    --status-serious-text: oklch(0.78 0.13 50);
+    --status-critical-text: oklch(0.74 0.15 27);
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+    --series-5: #d55181; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767;
+    --viz-grid: oklch(0.23 0.015 265);
+    --viz-axis: oklch(0.32 0.015 265);
+    --viz-area-opacity: 0.14;
+  --scrollbar-thumb: oklch(0.38 0.02 265 / 0.85);
+  --scrollbar-thumb-hover: oklch(0.48 0.03 265 / 0.95);
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+    --shadow-md: 0 4px 16px -4px rgb(0 0 0 / 0.45);
+    --shadow-lg: 0 8px 24px -4px rgb(0 0 0 / 0.55);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg-page: oklch(0.13 0.015 265);
+  --bg-surface: oklch(0.17 0.015 265);
+  --bg-raised: oklch(0.21 0.015 265);
+  --bg-sunken: oklch(0.1 0.015 265);
+  --bg-hover: oklch(0.22 0.02 265 / 0.6);
+  --bg-active: oklch(0.22 0.02 265);
+  --bg-sidebar: oklch(0.15 0.015 265);
+  --text-primary: oklch(0.93 0.01 265);
+  --text-secondary: oklch(0.78 0.01 265);
+  --text-muted: oklch(0.62 0.02 265);
+  --text-inverse: oklch(0.985 0.002 247);
+  --border: oklch(0.28 0.015 265);
+  --border-strong: oklch(0.36 0.02 265);
+  --divider: oklch(0.24 0.015 265);
+  --accent: oklch(0.5 0.12 265);
+  --accent-hover: oklch(0.56 0.13 265);
+  --accent-soft: oklch(0.61 0.15 265 / 0.16);
+  --accent-text: oklch(0.74 0.11 265);
+  --focus-ring: 0 0 0 2px var(--bg-page), 0 0 0 4px oklch(0.61 0.15 265 / 0.6);
+  --accent-warm: oklch(0.8 0.13 72.9);
+  --status-good: oklch(0.65 0.17 145);
+  --status-warning: oklch(0.78 0.14 85);
+  --status-critical: oklch(0.62 0.2 27);
+  --status-good-soft: oklch(0.65 0.17 145 / 0.15);
+  --status-warning-soft: oklch(0.78 0.14 85 / 0.14);
+  --status-serious-soft: oklch(0.7 0.15 50 / 0.16);
+  --status-critical-soft: oklch(0.62 0.2 27 / 0.18);
+  --status-good-text: oklch(0.75 0.15 145);
+  --status-warning-text: oklch(0.82 0.13 85);
+  --status-serious-text: oklch(0.78 0.13 50);
+  --status-critical-text: oklch(0.74 0.15 27);
+  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+  --series-5: #d55181; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767;
+  --viz-grid: oklch(0.23 0.015 265);
+  --viz-axis: oklch(0.32 0.015 265);
+  --viz-area-opacity: 0.14;
+  --scrollbar-thumb: oklch(0.38 0.02 265 / 0.85);
+  --scrollbar-thumb-hover: oklch(0.48 0.03 265 / 0.95);
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+  --shadow-md: 0 4px 16px -4px rgb(0 0 0 / 0.45);
+  --shadow-lg: 0 8px 24px -4px rgb(0 0 0 / 0.55);
+}

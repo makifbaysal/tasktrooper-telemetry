@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>$(LibraryTargetFrameworks)</TargetFrameworks>
+    <Description>TaskTrooper Telemetry integration for MassTransit.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+
+    <ProjectReference Include="..\TaskTrooper.Telemetry\TaskTrooper.Telemetry.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="TaskTrooper.Telemetry.Tests" />
+  </ItemGroup>
+</Project>

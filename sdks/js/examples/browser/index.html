@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TaskTrooper RUM example</title>
+    <!--
+      Build first:  pnpm --filter @trooper/browser build
+      Serve sdks/js: npx serve sdks/js   (or: cd sdks/js && python3 -m http.server 8000)
+      Open:          http://localhost:8000/examples/browser/
+      Needs ingest-gw on :4318 with CORS allowing this origin (see sdks/js/README.md).
+    -->
+    <script src="../../packages/browser/dist/trooper.iife.js"></script>
+    <script>
+      Trooper.init({
+        dsn: 'http://tt_dev_ingest_key@localhost:4318/1',
+        app: 'example-web',
+        version: '0.0.1',
+        environment: 'development',
+        // fetch/XHR to these URLs get a W3C traceparent header (same-origin is the default).
+        tracePropagationTargets: [location.origin, 'http://localhost:8080'],
+        captureConsoleErrors: true,
+        debug: true,
+      });
+    </script>
+    <style>
+      body { font: 15px/1.5 system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 16px; }
+      button { margin: 4px; }
+      nav a { margin-right: 12px; }
+    </style>
+  </head>
+  <body>
+    <h1>TaskTrooper RUM example</h1>
+    <nav>
+      <a href="#" data-path="/products/123">/products/123</a>
+      <a href="#" data-path="/orders/550e8400-e29b-41d4-a716-446655440000">/orders/&lt;uuid&gt;</a>
+      <a href="#" data-path="/">/</a>
+    </nav>
+    <p>Current route: <code id="route"></code></p>
+
+    <h2>Try it</h2>
+    <button id="identify">identify("user-42")</button>
+    <button id="track">track("checkout_started")</button>
+    <button id="error">throw error</button>
+    <button id="reject">unhandled rejection</button>
+    <button id="handled">captureError()</button>
+    <button id="fetch">fetch same-origin</button>
+    <button id="rage">rage-click me (3× fast)</button>
+    <button id="dead">dead click (does nothing)</button>
+    <button id="named" data-trooper-name="Open help">?</button>
+    <button id="flush">flush now</button>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const show = () => ($('route').textContent = location.pathname);
+      show();
+      document.querySelectorAll('nav a').forEach((a) =>
+        a.addEventListener('click', (e) => {
+          e.preventDefault();
+          history.pushState(null, '', a.dataset.path + '?utm_source=example'); // SPA navigation → new view
+          show();
+        }),
+      );
+      $('identify').onclick = () => Trooper.identify('user-42', { plan: 'pro' });
+      $('track').onclick = () => Trooper.track('checkout_started', { cart_value: 120 }, 120);
+      $('error').onclick = () => {
+        null.boom();
+      };
+      $('reject').onclick = () => Promise.reject(new Error('async failure'));
+      $('handled').onclick = () => Trooper.captureError(new Error('handled failure'), { attributes: { where: 'example' } });
+      $('fetch').onclick = () => fetch(location.href + '?q=secret').then((r) => r.text());
+      $('rage').onclick = () => {};
+      $('dead').onclick = () => {};
+      $('named').onclick = () => alert('help');
+      $('flush').onclick = () => Trooper.flush();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,5 @@
+Error: negative price: -2
+    at n (https://shop.example.com/assets/app.min.js:1:88)
+    at r (https://shop.example.com/assets/app.min.js:1:47)
+    at u (https://shop.example.com/assets/app.min.js:1:150)
+    at HTMLButtonElement.onclick (https://shop.example.com/:12:5)

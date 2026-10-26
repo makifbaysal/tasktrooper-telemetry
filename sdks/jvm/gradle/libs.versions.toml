@@ -1,0 +1,39 @@
+[versions]
+otel = "1.67.0"
+otelInstrumentation = "2.33.0"
+otelInstrumentationAlpha = "2.33.0-alpha"
+otelProto = "1.11.1-alpha"
+springBoot = "3.5.16"
+quarkus = "3.40.1"
+ktor = "3.6.0"
+kotlin = "2.4.21"
+coroutines = "1.11.0"
+junit = "5.14.4"
+assertj = "3.27.7"
+
+[libraries]
+otel-bom = { module = "io.opentelemetry:opentelemetry-bom", version.ref = "otel" }
+otel-bom-alpha = { module = "io.opentelemetry:opentelemetry-bom-alpha", version = "1.67.0-alpha" }
+otel-instrumentation-bom = { module = "io.opentelemetry.instrumentation:opentelemetry-instrumentation-bom", version.ref = "otelInstrumentation" }
+otel-instrumentation-bom-alpha = { module = "io.opentelemetry.instrumentation:opentelemetry-instrumentation-bom-alpha", version.ref = "otelInstrumentationAlpha" }
+otel-api = { module = "io.opentelemetry:opentelemetry-api" }
+otel-sdk = { module = "io.opentelemetry:opentelemetry-sdk" }
+otel-sdk-testing = { module = "io.opentelemetry:opentelemetry-sdk-testing" }
+otel-exporter-otlp = { module = "io.opentelemetry:opentelemetry-exporter-otlp" }
+otel-autoconfigure = { module = "io.opentelemetry:opentelemetry-sdk-extension-autoconfigure" }
+otel-autoconfigure-spi = { module = "io.opentelemetry:opentelemetry-sdk-extension-autoconfigure-spi" }
+otel-extension-kotlin = { module = "io.opentelemetry:opentelemetry-extension-kotlin" }
+otel-proto = { module = "io.opentelemetry.proto:opentelemetry-proto", version.ref = "otelProto" }
+otel-javaagent-extension-api = { module = "io.opentelemetry.javaagent:opentelemetry-javaagent-extension-api", version.ref = "otelInstrumentationAlpha" }
+otel-javaagent = { module = "io.opentelemetry.javaagent:opentelemetry-javaagent", version.ref = "otelInstrumentation" }
+otel-spring-boot-starter = { module = "io.opentelemetry.instrumentation:opentelemetry-spring-boot-starter" }
+otel-ktor3 = { module = "io.opentelemetry.instrumentation:opentelemetry-ktor-3.0" }
+spring-boot-bom = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "springBoot" }
+quarkus-bom = { module = "io.quarkus.platform:quarkus-bom", version.ref = "quarkus" }
+ktor-bom = { module = "io.ktor:ktor-bom", version.ref = "ktor" }
+coroutines-bom = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-bom", version.ref = "coroutines" }
+junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
+assertj = { module = "org.assertj:assertj-core", version.ref = "assertj" }
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

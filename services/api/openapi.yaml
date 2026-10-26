@@ -1,0 +1,2918 @@
+openapi: 3.1.0
+info:
+  title: TaskTrooper Telemetry API
+  version: 1.0.0
+  license: { name: Proprietary, identifier: LicenseRef-Proprietary }
+  description: |
+    Query API behind the dashboard (apps/web). Single source of truth for the HTTP contract (.ai/contracts.md).
+
+    * Auth: `Authorization: Bearer <api key>` (api_keys.kind = 'api'); the key selects org + project. Every query is tenant-scoped.
+    * JSON, camelCase. Times are unix ms, durations ms, ratios 0..1.
+    * Series are `{timestamps, series: [{id, label, data}]}`, zero-filled, one point per bucket:
+      1h → 60×1m, 6h → 72×5m, 24h → 96×15m, 7d → 84×2h (red_1m for ≤ 24h, red_1h for 7d). The last bucket contains now.
+    * Errors: `{"error": "..."}` with 400 (validation), 401, 404, 409 (state conflict / duplicate id), 500.
+servers:
+  - url: http://localhost:8080
+security:
+  - apiKey: []
+tags:
+  - { name: System, description: "Health check" }
+  - { name: APM, description: "Services, endpoints, processes, RED series, callers, dependencies, deploys" }
+  - { name: Traces, description: "Trace search/detail and error issues" }
+  - { name: Logs, description: "Log search, volume and patterns" }
+  - { name: RUM, description: "Web and mobile apps" }
+  - { name: Alerting, description: "Monitors, previews and incidents" }
+  - { name: KPIs, description: "SLOs, error budgets and burn-rate rules" }
+  - { name: Infrastructure, description: "Databases and message brokers" }
+  - { name: Load tests, description: "Scenarios and runs" }
+  - { name: Internal, description: "Service-to-service endpoints (collector)" }
+  - { name: Integrations, description: "Cloud integrations (AWS, Google Cloud, Vercel, Neon — ADR-012)" }
+  - { name: Code insights, description: "Repo analysis, code inventory and monitor suggestions (no backend yet: empty lists)" }
+paths:
+  /healthz:
+    get:
+      tags: [System]
+      operationId: healthz
+      summary: Liveness + Postgres/ClickHouse ping (no auth)
+      security: []
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Health_' } } } }
+        '503': { description: A dependency is down, content: { application/json: { schema: { $ref: '#/components/schemas/Health_' } } } }
+  /api/v1/overview/series:
+    get:
+      tags: [APM]
+      operationId: getOverviewSeries
+      summary: 'Project-wide RED series (rpm, errorRate, p50/p95/p99, s2xx..s5xx)'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/SeriesSet' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/services:
+    get:
+      tags: [APM]
+      operationId: getServices
+      summary: 'Services (http, worker, web, mobile) with RED summary and sparkline'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+        - $ref: '#/components/parameters/type'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Service' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/services/{service}:
+    parameters:
+      - { name: service, in: path, required: true, description: 'Service name', schema: { type: string } }
+    get:
+      tags: [APM]
+      operationId: getServicesService
+      summary: 'One service'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Service' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/services/{service}/series:
+    parameters:
+      - { name: service, in: path, required: true, description: 'Service name', schema: { type: string } }
+    get:
+      tags: [APM]
+      operationId: getServicesServiceSeries
+      summary: 'RED series of a service'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/SeriesSet' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/services/{service}/endpoints:
+    parameters:
+      - { name: service, in: path, required: true, description: 'Service name', schema: { type: string } }
+    get:
+      tags: [APM]
+      operationId: getServicesServiceEndpoints
+      summary: 'Endpoints (HTTP) or processes (consumers) of a service'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Endpoint' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/services/{service}/callers:
+    parameters:
+      - { name: service, in: path, required: true, description: 'Service name', schema: { type: string } }
+    get:
+      tags: [APM]
+      operationId: getServicesServiceCallers
+      summary: 'Incoming traffic by caller'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/CallerTraffic' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/services/{service}/callers/series:
+    parameters:
+      - { name: service, in: path, required: true, description: 'Service name', schema: { type: string } }
+    get:
+      tags: [APM]
+      operationId: getServicesServiceCallersSeries
+      summary: 'Request rate per caller'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/SeriesSet' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/services/{service}/dependencies:
+    parameters:
+      - { name: service, in: path, required: true, description: 'Service name', schema: { type: string } }
+    get:
+      tags: [APM]
+      operationId: getServicesServiceDependencies
+      summary: 'Outgoing dependencies ("<system> · <name>")'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Dependency' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/services/{service}/dependencies/{dep}/series:
+    parameters:
+      - { name: service, in: path, required: true, description: 'Service name', schema: { type: string } }
+      - { name: dep, in: path, required: true, description: 'Dependency name, e.g. "postgres · orders-db"', schema: { type: string } }
+    get:
+      tags: [APM]
+      operationId: getServicesServiceDependenciesDepSeries
+      summary: 'Calls, errors and latency of one dependency'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/SeriesSet' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/services/{service}/breakdown:
+    parameters:
+      - { name: service, in: path, required: true, description: 'Service name', schema: { type: string } }
+    get:
+      tags: [APM]
+      operationId: getServicesServiceBreakdown
+      summary: 'Where time goes (app vs. db/cache/http/queue)'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/TimeBreakdown' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/services/{service}/breakdown/series:
+    parameters:
+      - { name: service, in: path, required: true, description: 'Service name', schema: { type: string } }
+    get:
+      tags: [APM]
+      operationId: getServicesServiceBreakdownSeries
+      summary: 'Time breakdown over time'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/SeriesSet' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/services/{service}/deploys:
+    parameters:
+      - { name: service, in: path, required: true, description: 'Service name', schema: { type: string } }
+    get:
+      tags: [APM]
+      operationId: getServicesServiceDeploys
+      summary: 'Deploy markers of a service (spans + deploy_markers)'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+        - $ref: '#/components/parameters/deploySource'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/DeployMarker' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/services/{service}/endpoints/{endpoint}:
+    parameters:
+      - { name: service, in: path, required: true, description: 'Service name', schema: { type: string } }
+      - { name: endpoint, in: path, required: true, description: 'Endpoint id (e.g. get-orders-id) or process name', schema: { type: string } }
+    get:
+      tags: [APM]
+      operationId: getServicesServiceEndpointsEndpoint
+      summary: 'One endpoint or process (id = UI endpoint id, process name)'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Endpoint' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/services/{service}/endpoints/{endpoint}/series:
+    parameters:
+      - { name: service, in: path, required: true, description: 'Service name', schema: { type: string } }
+      - { name: endpoint, in: path, required: true, description: 'Endpoint id (e.g. get-orders-id) or process name', schema: { type: string } }
+    get:
+      tags: [APM]
+      operationId: getServicesServiceEndpointsEndpointSeries
+      summary: 'RED series of an endpoint (processes add retried, dlq)'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/SeriesSet' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/services/{service}/endpoints/{endpoint}/callers:
+    parameters:
+      - { name: service, in: path, required: true, description: 'Service name', schema: { type: string } }
+      - { name: endpoint, in: path, required: true, description: 'Endpoint id (e.g. get-orders-id) or process name', schema: { type: string } }
+    get:
+      tags: [APM]
+      operationId: getServicesServiceEndpointsEndpointCallers
+      summary: 'Callers of an endpoint (producers for processes)'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/CallerTraffic' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/services/{service}/endpoints/{endpoint}/callers/series:
+    parameters:
+      - { name: service, in: path, required: true, description: 'Service name', schema: { type: string } }
+      - { name: endpoint, in: path, required: true, description: 'Endpoint id (e.g. get-orders-id) or process name', schema: { type: string } }
+    get:
+      tags: [APM]
+      operationId: getServicesServiceEndpointsEndpointCallersSeries
+      summary: 'Request rate per caller of an endpoint'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/SeriesSet' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/services/{service}/endpoints/{endpoint}/calls:
+    parameters:
+      - { name: service, in: path, required: true, description: 'Service name', schema: { type: string } }
+      - { name: endpoint, in: path, required: true, description: 'Endpoint id (e.g. get-orders-id) or process name', schema: { type: string } }
+    get:
+      tags: [APM]
+      operationId: getServicesServiceEndpointsEndpointCalls
+      summary: 'Downstream calls made per request'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/EndpointCall' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/services/{service}/endpoints/{endpoint}/breakdown:
+    parameters:
+      - { name: service, in: path, required: true, description: 'Service name', schema: { type: string } }
+      - { name: endpoint, in: path, required: true, description: 'Endpoint id (e.g. get-orders-id) or process name', schema: { type: string } }
+    get:
+      tags: [APM]
+      operationId: getServicesServiceEndpointsEndpointBreakdown
+      summary: 'Time breakdown of an endpoint'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/TimeBreakdown' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/services/{service}/endpoints/{endpoint}/breakdown/series:
+    parameters:
+      - { name: service, in: path, required: true, description: 'Service name', schema: { type: string } }
+      - { name: endpoint, in: path, required: true, description: 'Endpoint id (e.g. get-orders-id) or process name', schema: { type: string } }
+    get:
+      tags: [APM]
+      operationId: getServicesServiceEndpointsEndpointBreakdownSeries
+      summary: 'Time breakdown of an endpoint over time'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/SeriesSet' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/services/{service}/endpoints/{endpoint}/rca:
+    parameters:
+      - { name: service, in: path, required: true, description: 'Service name', schema: { type: string } }
+      - { name: endpoint, in: path, required: true, description: 'Endpoint id (e.g. get-orders-id) or process name', schema: { type: string } }
+    get:
+      tags: [APM]
+      operationId: getServicesServiceEndpointsEndpointRca
+      summary: 'Root-cause baseline: the endpoint and each dependency (edges_1m) in the range vs a baseline window'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+        - { name: baseline, in: query, required: false, description: 'prev (default, the window just before) | 1d | 7d (same window shifted back)', schema: { type: string, enum: [prev, 1d, 7d] } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/EndpointRca' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/suggestions:
+    get:
+      tags: [Code insights]
+      operationId: getSuggestions
+      summary: 'Monitor suggestions from code analysis (no backend yet: always [])'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/CodeSuggestion' } } } }
+        '401': { $ref: '#/components/responses/E401' }
+  /api/v1/repos:
+    get:
+      tags: [Code insights]
+      operationId: getRepos
+      summary: 'Analyzed repositories (no backend yet: always [])'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Repo' } } } }
+        '401': { $ref: '#/components/responses/E401' }
+  /api/v1/inventory:
+    get:
+      tags: [Code insights]
+      operationId: getInventory
+      summary: 'Code inventory: endpoints, consumers, crons, views, dependencies (no backend yet: always [])'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/InventoryItem' } } } }
+        '401': { $ref: '#/components/responses/E401' }
+  /api/v1/deploys:
+    get:
+      tags: [APM]
+      operationId: getDeploys
+      summary: 'Deploy markers: versions first seen in spans (source spans) merged with Postgres deploy_markers (Vercel, CI, …), newest first'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+        - $ref: '#/components/parameters/service'
+        - $ref: '#/components/parameters/deploySource'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/DeployMarker' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/traces:
+    get:
+      tags: [Traces]
+      operationId: getTraces
+      summary: 'Search traces (entry spans)'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+        - $ref: '#/components/parameters/service'
+        - $ref: '#/components/parameters/endpoint'
+        - $ref: '#/components/parameters/errors'
+        - $ref: '#/components/parameters/minMs'
+        - $ref: '#/components/parameters/sort'
+        - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/TraceSummary' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/traces/{traceId}:
+    parameters:
+      - { name: traceId, in: path, required: true, description: '32 hex chars', schema: { type: string } }
+    get:
+      tags: [Traces]
+      operationId: getTracesTraceId
+      summary: 'Trace with all spans'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Trace' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/errors:
+    get:
+      tags: [Traces]
+      operationId: getErrors
+      summary: 'Error issues (grouped by fingerprint)'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+        - $ref: '#/components/parameters/service'
+        - $ref: '#/components/parameters/route'
+        - $ref: '#/components/parameters/status'
+        - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ErrorIssue' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/errors/{fingerprint}:
+    parameters:
+      - { name: fingerprint, in: path, required: true, description: 'Error fingerprint (uint64 as string)', schema: { type: string } }
+    get:
+      tags: [Traces]
+      operationId: getErrorsFingerprint
+      summary: 'Error issue with the stack of its latest occurrence, symbolicated via TT_SYMBOLICATOR_URL (2 s budget; raw stack on failure)'
+      parameters:
+        - $ref: '#/components/parameters/range'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/ErrorDetail' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+    patch:
+      tags: [Traces]
+      operationId: patchErrorsFingerprint
+      summary: 'Set error issue status'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ErrorStatusInput' } } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/ErrorStatusInput' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/logs:
+    get:
+      tags: [Logs]
+      operationId: getLogs
+      summary: 'Search logs (newest first, cursor = nextBefore)'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+        - $ref: '#/components/parameters/service'
+        - $ref: '#/components/parameters/level'
+        - $ref: '#/components/parameters/q'
+        - $ref: '#/components/parameters/traceId'
+        - $ref: '#/components/parameters/route'
+        - $ref: '#/components/parameters/before'
+        - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/LogPage' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/logs/series:
+    get:
+      tags: [Logs]
+      operationId: getLogsSeries
+      summary: 'Log volume per level'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+        - $ref: '#/components/parameters/service'
+        - $ref: '#/components/parameters/level'
+        - $ref: '#/components/parameters/q'
+        - $ref: '#/components/parameters/traceId'
+        - $ref: '#/components/parameters/route'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/SeriesSet' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/logs/patterns:
+    get:
+      tags: [Logs]
+      operationId: getLogsPatterns
+      summary: 'Log patterns (Drain templates)'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+        - $ref: '#/components/parameters/service'
+        - $ref: '#/components/parameters/level'
+        - $ref: '#/components/parameters/q'
+        - $ref: '#/components/parameters/route'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/LogPattern' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/apps/{app}/summary:
+    parameters:
+      - { name: app, in: path, required: true, description: 'RUM app (service) name', schema: { type: string } }
+    get:
+      tags: [RUM]
+      operationId: getAppsAppSummary
+      summary: 'App summary: users, sessions, vitals (web) or start/frames (mobile)'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/AppSummary' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/apps/{app}/pages:
+    parameters:
+      - { name: app, in: path, required: true, description: 'RUM app (service) name', schema: { type: string } }
+    get:
+      tags: [RUM]
+      operationId: getAppsAppPages
+      summary: 'Pages / screens'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/RumPage' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/apps/{app}/sessions:
+    parameters:
+      - { name: app, in: path, required: true, description: 'RUM app (service) name', schema: { type: string } }
+    get:
+      tags: [RUM]
+      operationId: getAppsAppSessions
+      summary: 'Recent sessions'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+        - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Session' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/apps/{app}/errors:
+    parameters:
+      - { name: app, in: path, required: true, description: 'RUM app (service) name', schema: { type: string } }
+    get:
+      tags: [RUM]
+      operationId: getAppsAppErrors
+      summary: 'JS errors / crashes'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/RumError' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/apps/{app}/errors/{fingerprint}:
+    parameters:
+      - { name: app, in: path, required: true, description: 'RUM app (service) name', schema: { type: string } }
+      - { name: fingerprint, in: path, required: true, description: 'Error fingerprint (uint64 as string)', schema: { type: string } }
+    get:
+      tags: [RUM]
+      operationId: getAppsAppErrorsFingerprint
+      summary: 'One JS error / crash with its latest stack, symbolicated (sourcemap / dSYM / R8) when the symbolicator has the release'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/RumErrorDetail' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/apps/{app}/resources:
+    parameters:
+      - { name: app, in: path, required: true, description: 'RUM app (service) name', schema: { type: string } }
+    get:
+      tags: [RUM]
+      operationId: getAppsAppResources
+      summary: 'Resources / network calls'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/RumResource' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/apps/{app}/app-starts:
+    parameters:
+      - { name: app, in: path, required: true, description: 'RUM app (service) name', schema: { type: string } }
+    get:
+      tags: [RUM]
+      operationId: getAppsAppAppStarts
+      summary: 'Mobile app starts'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/AppStart' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/apps/{app}/api-calls:
+    parameters:
+      - { name: app, in: path, required: true, description: 'RUM app (service) name', schema: { type: string } }
+    get:
+      tags: [RUM]
+      operationId: getAppsAppApiCalls
+      summary: 'API calls made by the app'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/AppAPICall' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/apps/{app}/series:
+    parameters:
+      - { name: app, in: path, required: true, description: 'RUM app (service) name', schema: { type: string } }
+    get:
+      tags: [RUM]
+      operationId: getAppsAppSeries
+      summary: 'Views, users and errors over time'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+        - $ref: '#/components/parameters/view'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/SeriesSet' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/apps/{app}/vitals/{vital}/series:
+    parameters:
+      - { name: app, in: path, required: true, description: 'RUM app (service) name', schema: { type: string } }
+      - { name: vital, in: path, required: true, description: 'lcp | inp | cls | ttfb | fcp | cold_start | warm_start', schema: { type: string } }
+    get:
+      tags: [RUM]
+      operationId: getAppsAppVitalsVitalSeries
+      summary: 'Vital percentiles over time (lcp, inp, cls, ttfb, ...)'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+        - $ref: '#/components/parameters/view'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/SeriesSet' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/monitors:
+    get:
+      tags: [Alerting]
+      operationId: getMonitors
+      summary: 'Monitors'
+      parameters:
+        - $ref: '#/components/parameters/service'
+        - $ref: '#/components/parameters/endpoint'
+        - $ref: '#/components/parameters/kind'
+        - $ref: '#/components/parameters/clusterId'
+        - $ref: '#/components/parameters/group'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Monitor' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+    post:
+      tags: [Alerting]
+      operationId: postMonitors
+      summary: 'Create a monitor (consumer_lag takes a queue rule)'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/MonitorInput' } } }
+      responses:
+        '201':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Monitor' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+        '409': { $ref: '#/components/responses/E409' }
+  /api/v1/monitors/preview:
+    post:
+      tags: [Alerting]
+      operationId: postMonitorsPreview
+      summary: 'Evaluate an unsaved monitor over the range'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/MonitorInput' } } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Preview' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+        '409': { $ref: '#/components/responses/E409' }
+  /api/v1/monitors/{id}:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+    get:
+      tags: [Alerting]
+      operationId: getMonitorsId
+      summary: 'One monitor'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Monitor' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+    put:
+      tags: [Alerting]
+      operationId: putMonitorsId
+      summary: 'Replace a monitor'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/MonitorInput' } } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Monitor' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+        '409': { $ref: '#/components/responses/E409' }
+    patch:
+      tags: [Alerting]
+      operationId: patchMonitorsId
+      summary: 'Change name / severity / channels / status / condition, or mute until a time (mutedUntil unix ms; null or 0 unmutes)'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/MonitorPatch' } } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Monitor' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+    delete:
+      tags: [Alerting]
+      operationId: deleteMonitorsId
+      summary: 'Delete a monitor'
+      responses:
+        '204': { description: Done }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/monitors/{id}/preview:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+    get:
+      tags: [Alerting]
+      operationId: getMonitorsIdPreview
+      summary: 'Evaluate a saved monitor over the range'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Preview' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/incidents:
+    get:
+      tags: [Alerting]
+      operationId: getIncidents
+      summary: 'Incidents'
+      parameters:
+        - $ref: '#/components/parameters/state'
+        - $ref: '#/components/parameters/service'
+        - $ref: '#/components/parameters/endpoint'
+        - $ref: '#/components/parameters/monitorId'
+        - $ref: '#/components/parameters/kpiId'
+        - $ref: '#/components/parameters/since'
+        - $ref: '#/components/parameters/limit'
+        - { name: includeQuiet, in: query, description: "Also list incidents resolved from pending without notifying", schema: { type: boolean } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Incident' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/incidents/{id}:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+    get:
+      tags: [Alerting]
+      operationId: getIncidentsId
+      summary: 'One incident'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Incident' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/incidents/{id}/ack:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+    post:
+      tags: [Alerting]
+      operationId: postIncidentsIdAck
+      summary: 'Acknowledge (409 unless firing)'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Incident' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+        '409': { $ref: '#/components/responses/E409' }
+  /api/v1/incidents/{id}/resolve:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+    post:
+      tags: [Alerting]
+      operationId: postIncidentsIdResolve
+      summary: 'Resolve (409 if already resolved)'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Incident' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+        '409': { $ref: '#/components/responses/E409' }
+  /api/v1/incidents/{id}/events:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+    get:
+      tags: [Alerting]
+      operationId: getIncidentsIdEvents
+      summary: 'Incident timeline'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/IncidentEvent' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/kpis:
+    get:
+      tags: [KPIs]
+      operationId: getKpis
+      summary: 'KPIs with current SLI, budget, burn rates and rule states'
+      parameters:
+        - $ref: '#/components/parameters/serviceId'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Kpi' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+    post:
+      tags: [KPIs]
+      operationId: postKpis
+      summary: 'Create a KPI'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/KpiInput' } } }
+      responses:
+        '201':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Kpi' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+        '409': { $ref: '#/components/responses/E409' }
+  /api/v1/kpis/{id}:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+    get:
+      tags: [KPIs]
+      operationId: getKpisId
+      summary: 'One KPI'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Kpi' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+    put:
+      tags: [KPIs]
+      operationId: putKpisId
+      summary: 'Replace a KPI (and its alert rules)'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/KpiInput' } } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Kpi' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+        '409': { $ref: '#/components/responses/E409' }
+    delete:
+      tags: [KPIs]
+      operationId: deleteKpisId
+      summary: 'Delete a KPI'
+      responses:
+        '204': { description: Done }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/kpis/{id}/series:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+    get:
+      tags: [KPIs]
+      operationId: getKpisIdSeries
+      summary: 'good, total, burnRate and metric over time'
+      description: 'metric is the headline value per bucket: for latency KPIs the same percentile as Kpi.metric (endpoint p95, page p75 vital, app start p75, ms); otherwise the good ratio.'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/SeriesSet' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/infra/databases:
+    get:
+      tags: [Infrastructure]
+      operationId: getInfraDatabases
+      summary: 'Registered databases with live health'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Database' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+    post:
+      tags: [Infrastructure]
+      operationId: postInfraDatabases
+      summary: 'Register a database (409 on duplicate id)'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/DatabaseInput' } } }
+      responses:
+        '201':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Database' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+        '409': { $ref: '#/components/responses/E409' }
+  /api/v1/infra/databases/test-connection:
+    post:
+      tags: [Infrastructure]
+      operationId: postInfraDatabasesTestConnection
+      summary: 'Test a database connection'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ConnTestInput' } } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/ConnTestResult' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/infra/databases/{id}:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+    get:
+      tags: [Infrastructure]
+      operationId: getInfraDatabasesId
+      summary: 'One database'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Database' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+    delete:
+      tags: [Infrastructure]
+      operationId: deleteInfraDatabasesId
+      summary: 'Unregister a database'
+      responses:
+        '204': { description: Done }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/infra/databases/{id}/series:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+    get:
+      tags: [Infrastructure]
+      operationId: getInfraDatabasesIdSeries
+      summary: 'Node metric over time'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+        - $ref: '#/components/parameters/metric'
+        - $ref: '#/components/parameters/node'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/SeriesSet' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/infra/databases/{id}/queries:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+    get:
+      tags: [Infrastructure]
+      operationId: getInfraDatabasesIdQueries
+      summary: 'Top queries with the calling endpoint'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/DbQueryRow' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/infra/databases/{id}/users:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+    get:
+      tags: [Infrastructure]
+      operationId: getInfraDatabasesIdUsers
+      summary: 'Services/endpoints using the database'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/DbUser' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/infra/databases/{id}/test-connection:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+    post:
+      tags: [Infrastructure]
+      operationId: postInfraDatabasesIdTestConnection
+      summary: 'Test the registered host/port (credentials in body, never stored)'
+      requestBody:
+        required: false
+        content: { application/json: { schema: { $ref: '#/components/schemas/ConnTestInput' } } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/ConnTestResult' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/infra/clusters:
+    get:
+      tags: [Infrastructure]
+      operationId: getInfraClusters
+      summary: 'Broker clusters (Kafka, RabbitMQ)'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Cluster' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+    post:
+      tags: [Infrastructure]
+      operationId: postInfraClusters
+      summary: 'Register a cluster (409 on duplicate id)'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ClusterInput' } } }
+      responses:
+        '201':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Cluster' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+        '409': { $ref: '#/components/responses/E409' }
+  /api/v1/infra/clusters/test-connection:
+    post:
+      tags: [Infrastructure]
+      operationId: postInfraClustersTestConnection
+      summary: 'Test a broker connection (Kafka metadata, RabbitMQ management API)'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ConnTestInput' } } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/ConnTestResult' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/infra/clusters/{id}:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+    get:
+      tags: [Infrastructure]
+      operationId: getInfraClustersId
+      summary: 'One cluster'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Cluster' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+    delete:
+      tags: [Infrastructure]
+      operationId: deleteInfraClustersId
+      summary: 'Unregister a cluster'
+      responses:
+        '204': { description: Done }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/infra/clusters/{id}/test-connection:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+    post:
+      tags: [Infrastructure]
+      operationId: postInfraClustersIdTestConnection
+      summary: 'Test the registered endpoint'
+      requestBody:
+        required: false
+        content: { application/json: { schema: { $ref: '#/components/schemas/ConnTestInput' } } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/ConnTestResult' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/infra/clusters/{id}/topics:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+    get:
+      tags: [Infrastructure]
+      operationId: getInfraClustersIdTopics
+      summary: 'Topics / queues of a cluster'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Topic' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/infra/clusters/{id}/topics/{topic}/series:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+      - { name: topic, in: path, required: true, description: 'Topic / queue name', schema: { type: string } }
+    get:
+      tags: [Infrastructure]
+      operationId: getInfraClustersIdTopicsTopicSeries
+      summary: 'Topic produce rate and lag over time'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/SeriesSet' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/infra/clusters/{id}/groups:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+    get:
+      tags: [Infrastructure]
+      operationId: getInfraClustersIdGroups
+      summary: 'Consumer groups of a cluster'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ConsumerGroup' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/infra/clusters/{id}/groups/{group}:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+      - { name: group, in: path, required: true, description: 'Consumer group', schema: { type: string } }
+    get:
+      tags: [Infrastructure]
+      operationId: getInfraClustersIdGroupsGroup
+      summary: 'One consumer group'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/ConsumerGroup' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/infra/clusters/{id}/groups/{group}/lag:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+      - { name: group, in: path, required: true, description: 'Consumer group', schema: { type: string } }
+    get:
+      tags: [Infrastructure]
+      operationId: getInfraClustersIdGroupsGroupLag
+      summary: 'Group lag over time (per topic, or per partition with by=partition)'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+        - $ref: '#/components/parameters/topic'
+        - $ref: '#/components/parameters/by'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/SeriesSet' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/infra/clusters/{id}/groups/{group}/owner:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+      - { name: group, in: path, required: true, description: 'Consumer group', schema: { type: string } }
+    put:
+      tags: [Infrastructure]
+      operationId: putInfraClustersIdGroupsGroupOwner
+      summary: 'Set the owning service/process of a group'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/GroupOwnerInput' } } }
+      responses:
+        '204': { description: Done }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+        '409': { $ref: '#/components/responses/E409' }
+  /api/v1/infra/clusters/{id}/nodes/series:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+    get:
+      tags: [Infrastructure]
+      operationId: getInfraClustersIdNodesSeries
+      summary: 'Broker node metric over time'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+        - $ref: '#/components/parameters/brokerMetric'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/SeriesSet' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/infra/topics:
+    get:
+      tags: [Infrastructure]
+      operationId: getInfraTopics
+      summary: 'Topics across clusters'
+      parameters:
+        - $ref: '#/components/parameters/clusterId'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Topic' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/infra/groups:
+    get:
+      tags: [Infrastructure]
+      operationId: getInfraGroups
+      summary: 'Consumer groups across clusters'
+      parameters:
+        - $ref: '#/components/parameters/clusterId'
+        - $ref: '#/components/parameters/serviceId'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ConsumerGroup' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/internal/collector-config:
+    get:
+      tags: [Internal]
+      operationId: getInternalCollectorConfig
+      summary: 'Collector targets of the project of the key (services/collector/README.md)'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/CollectorConfig' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/loadtests/scenarios:
+    get:
+      tags: [Load tests]
+      operationId: getLoadtestsScenarios
+      summary: 'Scenarios'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/LoadTestScenario' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+    post:
+      tags: [Load tests]
+      operationId: postLoadtestsScenarios
+      summary: 'Create a scenario'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ScenarioInput' } } }
+      responses:
+        '201':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/LoadTestScenario' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+        '409': { $ref: '#/components/responses/E409' }
+  /api/v1/loadtests/scenarios/{id}:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+    get:
+      tags: [Load tests]
+      operationId: getLoadtestsScenariosId
+      summary: 'One scenario'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/LoadTestScenario' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+    put:
+      tags: [Load tests]
+      operationId: putLoadtestsScenariosId
+      summary: 'Replace a scenario'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ScenarioInput' } } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/LoadTestScenario' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+        '409': { $ref: '#/components/responses/E409' }
+    delete:
+      tags: [Load tests]
+      operationId: deleteLoadtestsScenariosId
+      summary: 'Delete a scenario'
+      responses:
+        '204': { description: Done }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/loadtests/scenarios/{id}/runs:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+    post:
+      tags: [Load tests]
+      operationId: postLoadtestsScenariosIdRuns
+      summary: 'Queue a run'
+      responses:
+        '201':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/LoadTestRun' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+        '409': { $ref: '#/components/responses/E409' }
+  /api/v1/loadtests/runs:
+    get:
+      tags: [Load tests]
+      operationId: getLoadtestsRuns
+      summary: 'Runs'
+      parameters:
+        - $ref: '#/components/parameters/scenarioId'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/LoadTestRun' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/loadtests/runs/{id}:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+    get:
+      tags: [Load tests]
+      operationId: getLoadtestsRunsId
+      summary: 'One run'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/LoadTestRun' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/loadtests/runs/{id}/stop:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+    post:
+      tags: [Load tests]
+      operationId: postLoadtestsRunsIdStop
+      summary: 'Abort a queued/running run (409 otherwise)'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/LoadTestRun' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+        '409': { $ref: '#/components/responses/E409' }
+  /api/v1/maintenance-windows:
+    get:
+      tags: [Alerting]
+      operationId: getMaintenanceWindows
+      summary: 'Maintenance windows (the alert engine does not notify for scoped monitors while one is active)'
+      parameters:
+        - { name: only, in: query, schema: { type: string, enum: [active, upcoming] } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/MaintenanceWindow' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+    post:
+      tags: [Alerting]
+      operationId: postMaintenanceWindows
+      summary: 'Create a maintenance window'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/MaintenanceWindowInput' } } }
+      responses:
+        '201':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/MaintenanceWindow' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/maintenance-windows/{id}:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+    get:
+      tags: [Alerting]
+      operationId: getMaintenanceWindowsId
+      summary: 'One maintenance window'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/MaintenanceWindow' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+    put:
+      tags: [Alerting]
+      operationId: putMaintenanceWindowsId
+      summary: 'Replace a maintenance window'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/MaintenanceWindowInput' } } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/MaintenanceWindow' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+    delete:
+      tags: [Alerting]
+      operationId: deleteMaintenanceWindowsId
+      summary: 'Delete a maintenance window'
+      responses:
+        '204': { description: Done }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/notification-channels:
+    get:
+      tags: [Alerting]
+      operationId: getNotificationChannels
+      summary: 'Notification channels; secret config fields are returned as their reference (secret:<id>)'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/NotificationChannel' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+    post:
+      tags: [Alerting]
+      operationId: postNotificationChannels
+      summary: 'Create a channel. Plain values of webhookUrl (slack, teams), routingKey (pagerduty), apiKey (opsgenie), secret (webhook) are sealed into the secrets table; env:/file:/secret: references are kept'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/NotificationChannelInput' } } }
+      responses:
+        '201':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/NotificationChannel' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+        '409': { $ref: '#/components/responses/E409' }
+  /api/v1/notification-channels/{id}:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+    get:
+      tags: [Alerting]
+      operationId: getNotificationChannelsId
+      summary: 'One channel'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/NotificationChannel' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+    put:
+      tags: [Alerting]
+      operationId: putNotificationChannelsId
+      summary: 'Replace a channel; omitted / empty secret fields keep the stored secret, new values rotate it'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/NotificationChannelInput' } } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/NotificationChannel' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+        '409': { $ref: '#/components/responses/E409' }
+    delete:
+      tags: [Alerting]
+      operationId: deleteNotificationChannelsId
+      summary: 'Delete a channel and its secrets'
+      responses:
+        '204': { description: Done }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/integrations:
+    get:
+      tags: [Integrations]
+      operationId: getIntegrations
+      summary: 'Cloud integrations with the resources they discovered (databases, clusters, queues, deploy projects)'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Integration' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+    post:
+      tags: [Integrations]
+      operationId: postIntegrations
+      summary: 'Connect a provider. `secret` (access key JSON, service-account JSON, token, API key) is sealed (AES-256-GCM, AAD = project id) and never returned'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/IntegrationInput' } } }
+      responses:
+        '201':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Integration' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+        '409': { $ref: '#/components/responses/E409' }
+  /api/v1/integrations/test:
+    post:
+      tags: [Integrations]
+      operationId: postIntegrationsTest
+      summary: 'Check credentials without saving: AWS STS GetCallerIdentity (+ AssumeRole), GCP token + Resource Manager, Vercel /v2/user, Neon /api/v2/projects (10 s timeout; never echoes the secret)'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/IntegrationInput' } } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/IntegrationTestResult' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+        '501': { description: Not configured, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /api/v1/integrations/{id}:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+    get:
+      tags: [Integrations]
+      operationId: getIntegrationsId
+      summary: 'One integration'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Integration' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+    patch:
+      tags: [Integrations]
+      operationId: patchIntegrationsId
+      summary: 'Rename, merge config (null removes a key), disable / re-enable (status), or rotate the secret'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/IntegrationPatch' } } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Integration' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+        '409': { $ref: '#/components/responses/E409' }
+    delete:
+      tags: [Integrations]
+      operationId: deleteIntegrationsId
+      summary: 'Delete an integration and its secrets; discovered rows keep their data with integrationId unset'
+      responses:
+        '204': { description: Done }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/integrations/{id}/sync:
+    parameters:
+      - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
+    post:
+      tags: [Integrations]
+      operationId: postIntegrationsIdSync
+      summary: 'Request an out-of-schedule sync: stamps config.syncRequestedAt, which trooper-cloud polls'
+      responses:
+        '202':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Integration' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+components:
+  securitySchemes:
+    apiKey: { type: http, scheme: bearer, description: "Project API key (kind = api), e.g. tt_dev_api_key" }
+  parameters:
+    range: { name: range, in: query, description: "Time range (default 1h)", schema: { type: string, enum: [1h, 6h, 24h, 7d], default: 1h } }
+    env: { name: env, in: query, description: "Deployment environment filter", schema: { type: string } }
+    type: { name: type, in: query, description: "Service types, comma separated (http | worker | web | mobile)", schema: { type: string } }
+    service: { name: service, in: query, description: "Service name (repeatable / comma separated on /logs)", schema: { type: string } }
+    serviceId: { name: serviceId, in: query, schema: { type: string } }
+    endpoint: { name: endpoint, in: query, description: '"METHOD /route" or a process name', schema: { type: string } }
+    errors: { name: errors, in: query, description: "Only failed traces", schema: { type: boolean } }
+    minMs: { name: minMs, in: query, description: "Minimum duration (ms)", schema: { type: number } }
+    sort: { name: sort, in: query, schema: { type: string, enum: [recent, slowest] } }
+    limit: { name: limit, in: query, schema: { type: integer, minimum: 1 } }
+    route: { name: route, in: query, schema: { type: string } }
+    status: { name: status, in: query, schema: { type: string, enum: [open, resolved, ignored] } }
+    level: { name: level, in: query, description: "error | warn | info | debug (repeatable / comma separated)", schema: { type: string } }
+    q: { name: q, in: query, description: "Full-text search (single token uses the token index)", schema: { type: string } }
+    traceId: { name: traceId, in: query, schema: { type: string } }
+    before: { name: before, in: query, description: "Cursor: nextBefore of the previous page (unix µs)", schema: { type: integer } }
+    view: { name: view, in: query, description: "Page / screen name", schema: { type: string } }
+    kind: { name: kind, in: query, schema: { type: string } }
+    clusterId: { name: clusterId, in: query, schema: { type: string } }
+    group: { name: group, in: query, schema: { type: string } }
+    state: { name: state, in: query, description: "open = not resolved (pending included)", schema: { type: string, enum: [open, pending, firing, acknowledged, resolved] } }
+    deploySource: { name: source, in: query, schema: { type: string, enum: [spans, vercel, ci, manual, aws, gcp] } }
+    monitorId: { name: monitorId, in: query, schema: { type: string } }
+    kpiId: { name: kpiId, in: query, schema: { type: string } }
+    since: { name: since, in: query, description: "Unix ms", schema: { type: integer } }
+    metric: { name: metric, in: query, required: true, schema: { type: string, enum: [cpu, memory, disk, connections, ops, p95, hit, repl, slow, evictions] } }
+    brokerMetric: { name: metric, in: query, required: true, schema: { type: string, enum: [cpu, memory, disk, net] } }
+    node: { name: node, in: query, schema: { type: string } }
+    topic: { name: topic, in: query, schema: { type: string } }
+    by: { name: by, in: query, schema: { type: string, enum: [topic, partition] } }
+    scenarioId: { name: scenarioId, in: query, schema: { type: string } }
+  responses:
+    E400: { description: Invalid parameter or body, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+    E401: { description: Missing or invalid API key, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+    E404: { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+    E409: { description: Conflict (duplicate id or invalid state transition), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+    E500: { description: Internal error, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  schemas:
+    CodeSuggestion:
+      type: object
+      required: [id, title, kind, target, condition, criticality, confidence, rationale, codeRef, calibrated]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        kind: { type: string, description: 'Monitor kind' }
+        target: { type: string }
+        condition: { type: string }
+        criticality: { type: string }
+        confidence: { type: number }
+        rationale: { type: string }
+        codeRef: { type: string }
+        calibrated: { type: boolean }
+    Repo:
+      type: object
+      required: [id, name, branch, sha, analyzedAt, services, language, status]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        branch: { type: string }
+        sha: { type: string }
+        analyzedAt: { type: integer, format: int64 }
+        services: { type: array, items: { type: string } }
+        language: { type: string }
+        status: { type: string, enum: [ready, analyzing, error] }
+    InventoryItem:
+      type: object
+      required: [id, kind, key, service, file, line, criticality, observed, monitored]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [endpoint, consumer, cron, view, dependency] }
+        key: { type: string, description: '"METHOD /route" or process name' }
+        source: { type: string, description: 'Consumer: topic/queue; cron: schedule' }
+        service: { type: string }
+        file: { type: string }
+        line: { type: integer }
+        criticality: { type: string }
+        observed: { type: boolean }
+        monitored: { type: boolean }
+    RcaStats:
+      type: object
+      required: [requests, rpm, avgMs, p50, p95, errorRate]
+      properties:
+        requests: { type: number }
+        rpm: { type: number }
+        avgMs: { type: number }
+        p50: { type: number }
+        p95: { type: number }
+        errorRate: { type: number }
+    RcaChildStats:
+      type: object
+      required: [calls, callsPerMin, callsPerReq, msPerReq, avgMs, p50, p95, errorRate]
+      properties:
+        calls: { type: number }
+        callsPerMin: { type: number }
+        callsPerReq: { type: number }
+        msPerReq: { type: number, description: 'Dependency time per endpoint request' }
+        avgMs: { type: number }
+        p50: { type: number }
+        p95: { type: number }
+        errorRate: { type: number }
+    RcaChild:
+      type: object
+      required: [dep, kind, current, baseline, deltaMsPerReq, share]
+      properties:
+        dep: { type: string }
+        kind: { type: string, enum: [db, cache, http, queue] }
+        current: { $ref: '#/components/schemas/RcaChildStats' }
+        baseline: { $ref: '#/components/schemas/RcaChildStats' }
+        deltaMsPerReq: { type: number, description: 'current − baseline ms per request' }
+        share: { type: number, description: 'deltaMsPerReq / deltaAvgMs (0 when the average did not change)' }
+    EndpointRca:
+      type: object
+      required: [service, endpoint, from, to, baselineFrom, baselineTo, current, baseline, ownMs, deltaAvgMs, children]
+      properties:
+        service: { type: string }
+        endpoint: { type: string, description: '"METHOD /route" or process name' }
+        from: { type: integer, format: int64 }
+        to: { type: integer, format: int64 }
+        baselineFrom: { type: integer, format: int64 }
+        baselineTo: { type: integer, format: int64 }
+        current: { $ref: '#/components/schemas/RcaStats' }
+        baseline: { $ref: '#/components/schemas/RcaStats' }
+        ownMs: { type: array, minItems: 2, maxItems: 2, items: { type: number }, description: 'Own-code ms per request [current, baseline] = avg − Σ dependency ms (≥ 0)' }
+        deltaAvgMs: { type: number }
+        children: { type: array, items: { $ref: '#/components/schemas/RcaChild' }, description: 'Sorted by deltaMsPerReq descending' }
+    ApiError:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+    Health_:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [ok, unavailable] }
+        error: { type: string }
+    Health:
+      type: string
+      enum: [ok, warning, critical]
+    ErrorStatusInput:
+      type: object
+      required: [status]
+      properties:
+        fingerprint: { type: string }
+        status: { type: string, enum: [open, resolved, ignored] }
+    Series:
+      type: object
+      required: [id, label, data]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        data: { type: array, items: { type: number } }
+    SeriesSet:
+      type: object
+      required: [timestamps, series]
+      properties:
+        timestamps: { type: array, items: { type: integer } }
+        series: { type: array, items: { $ref: '#/components/schemas/Series' } }
+    Service:
+      type: object
+      required: [id, name, type, language, version, rpm, errorRate, p95, prevRpm, prevErrorRate, prevP95, status, instances]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        type: { type: string }
+        language: { type: string }
+        version: { type: string }
+        rpm: { type: number }
+        errorRate: { type: number }
+        p95: { type: number }
+        prevRpm: { type: number }
+        prevErrorRate: { type: number }
+        prevP95: { type: number }
+        status: { $ref: '#/components/schemas/Health' }
+        instances: { type: integer }
+        lag: { type: number, description: "Consumer services only (summed group lag); omitted otherwise" }
+        spark: { type: array, items: { type: number } }
+    Subscription:
+      type: object
+      required: [process, source, topic, lag, retriesPerMin, dlqPerMin]
+      properties:
+        process: { type: string }
+        source: { type: string }
+        topic: { type: string }
+        group: { type: string }
+        partitions: { type: integer }
+        schedule: { type: string }
+        lag: { type: number }
+        retriesPerMin: { type: number }
+        dlqPerMin: { type: number }
+    Endpoint:
+      type: object
+      required: [id, serviceId, method, route, rpm, errorRate, p50, p95, p99, monitored, criticality]
+      properties:
+        id: { type: string }
+        serviceId: { type: string }
+        method: { type: string }
+        route: { type: string }
+        rpm: { type: number }
+        errorRate: { type: number }
+        p50: { type: number }
+        p95: { type: number }
+        p99: { type: number }
+        monitored: { type: boolean }
+        criticality: { type: string }
+        sub: { oneOf: [{ $ref: '#/components/schemas/Subscription' }, { type: "null" }] }
+        status: { oneOf: [{ $ref: '#/components/schemas/StatusCounts' }, { type: "null" }] }
+        spark: { type: array, items: { type: number } }
+    StatusCounts:
+      type: object
+      required: [s2xx, s3xx, s4xx, s5xx]
+      properties:
+        s2xx: { type: number }
+        s3xx: { type: number }
+        s4xx: { type: number }
+        s5xx: { type: number }
+    Dependency:
+      type: object
+      required: [id, serviceId, name, kind, avgMs, p95, errorRate, callsPerMin]
+      properties:
+        id: { type: string }
+        serviceId: { type: string }
+        name: { type: string }
+        kind: { type: string }
+        avgMs: { type: number }
+        p95: { type: number }
+        errorRate: { type: number }
+        callsPerMin: { type: number }
+    EndpointCall:
+      type: object
+      required: [dep, callsPerReq, msPerReq]
+      properties:
+        dep: { $ref: '#/components/schemas/Dependency' }
+        callsPerReq: { type: number }
+        msPerReq: { type: number }
+    TimeBreakdown:
+      type: object
+      required: [avgMs, parts]
+      properties:
+        avgMs: { type: number }
+        parts: { type: object, additionalProperties: { type: number } }
+    Caller:
+      type: object
+      required: [id, name, kind, via]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        kind: { type: string }
+        via: { type: string }
+    CallerTraffic:
+      type: object
+      required: [caller, rpm, share, errorRate, p95]
+      properties:
+        caller: { $ref: '#/components/schemas/Caller' }
+        rpm: { type: number }
+        share: { type: number }
+        errorRate: { type: number }
+        p95: { type: number }
+        topEndpoint: { oneOf: [{ $ref: '#/components/schemas/Endpoint' }, { type: "null" }] }
+    TraceSummary:
+      type: object
+      required: [id, ts, dur, status, service, method, route, isError]
+      properties:
+        id: { type: string }
+        ts: { type: integer }
+        dur: { type: number }
+        status: { type: integer }
+        service: { type: string }
+        method: { type: string }
+        route: { type: string }
+        isError: { type: boolean }
+    Span:
+      type: object
+      required: [spanId, service, name, kind, category, start, dur, status, failed]
+      properties:
+        spanId: { type: string }
+        parentSpanId: { type: string }
+        service: { type: string }
+        name: { type: string }
+        kind: { type: string }
+        category: { type: string }
+        start: { type: number }
+        dur: { type: number }
+        status: { type: integer }
+        failed: { type: boolean }
+        dep: { type: string }
+        route: { type: string }
+        errorType: { type: string }
+        attrs: { type: object, additionalProperties: { type: string } }
+    Trace:
+      type: object
+      required: [id, ts, dur, services, errors, spans]
+      properties:
+        id: { type: string }
+        ts: { type: integer }
+        dur: { type: number }
+        services: { type: array, items: { type: string } }
+        errors: { type: integer }
+        spans: { type: array, items: { $ref: '#/components/schemas/Span' } }
+    ErrorIssue:
+      type: object
+      required: [fingerprint, service, type, message, route, firstSeen, lastSeen, count, status]
+      properties:
+        fingerprint: { type: string }
+        service: { type: string }
+        type: { type: string }
+        message: { type: string }
+        route: { type: string }
+        firstSeen: { type: integer }
+        lastSeen: { type: integer }
+        count: { type: number }
+        sampleTraceId: { type: string }
+        status: { type: string }
+    DeployMarker:
+      type: object
+      required: [service, env, version, ts, source]
+      properties:
+        service: { type: string }
+        env: { type: string }
+        version: { type: string }
+        ts: { type: integer }
+        source: { type: string, enum: [spans, vercel, ci, manual, aws, gcp] }
+        url: { type: string }
+        commitMessage: { type: string }
+        author: { type: string }
+        state: { type: string, enum: [building, ready, error, canceled] }
+        integrationId: { type: string }
+    Frame:
+      type: object
+      required: [fn, file, line, col, inApp]
+      properties:
+        fn: { type: string }
+        file: { type: string }
+        line: { type: integer }
+        col: { type: integer }
+        inApp: { type: boolean }
+    ErrorDetail:
+      allOf:
+        - $ref: '#/components/schemas/ErrorIssue'
+        - type: object
+          required: [release, platform, stack, frames, symbolicated]
+          properties:
+            release: { type: string, description: "service.version of the latest occurrence" }
+            platform: { type: string, description: "telemetry.sdk.language" }
+            stack: { type: string }
+            frames: { type: array, items: { $ref: '#/components/schemas/Frame' } }
+            symbolicated: { type: boolean }
+    LogLine:
+      type: object
+      required: [id, ts, level, service, message]
+      properties:
+        id: { type: string }
+        ts: { type: integer }
+        level: { type: string }
+        service: { type: string }
+        message: { type: string }
+        traceId: { type: string }
+        route: { type: string }
+    LogPage:
+      type: object
+      required: [lines, nextBefore, levels, services]
+      properties:
+        lines: { type: array, items: { $ref: '#/components/schemas/LogLine' } }
+        nextBefore: { type: integer }
+        levels: { type: object, additionalProperties: { type: number } }
+        services: { type: object, additionalProperties: { type: number } }
+    LogPattern:
+      type: object
+      required: [id, pattern, level, services, count, last]
+      properties:
+        id: { type: string }
+        pattern: { type: string }
+        level: { type: string }
+        services: { type: array, items: { type: string } }
+        count: { type: number }
+        last: { type: integer }
+    Vital:
+      type: object
+      required: [id, label, value, good, poor, unit]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        value: { type: number }
+        good: { type: number }
+        poor: { type: number }
+        unit: { type: string }
+    AppSummary:
+      type: object
+      required: [activeUsers, prevActiveUsers, sessions, pageViewsPerMin, avgSessionSec, errorRate, prevErrorRate, vitals]
+      properties:
+        activeUsers: { type: number }
+        prevActiveUsers: { type: number }
+        sessions: { type: number }
+        pageViewsPerMin: { type: number }
+        avgSessionSec: { type: number }
+        errorRate: { type: number }
+        prevErrorRate: { type: number }
+        vitals: { type: array, items: { $ref: '#/components/schemas/Vital' } }
+    RumPage:
+      type: object
+      required: [id, path, views, users, avgTime, lcp, inp, cls, errorRate, bounce]
+      properties:
+        id: { type: string }
+        path: { type: string }
+        views: { type: number }
+        users: { type: number }
+        avgTime: { type: number }
+        lcp: { type: number }
+        inp: { type: number }
+        cls: { type: number }
+        errorRate: { type: number }
+        bounce: { type: number }
+    Session:
+      type: object
+      required: [id, user, identified, country, device, startedAt, duration, pages, errors, entry, exit]
+      properties:
+        id: { type: string }
+        user: { type: string }
+        identified: { type: boolean }
+        country: { type: string }
+        device: { type: string }
+        startedAt: { type: integer }
+        duration: { type: number }
+        pages: { type: number }
+        errors: { type: number }
+        entry: { type: string }
+        exit: { type: string }
+    RumError:
+      type: object
+      required: [fingerprint, type, message, view, count, sessions, crash, firstSeen, lastSeen, appVersion]
+      properties:
+        fingerprint: { type: string }
+        type: { type: string }
+        message: { type: string }
+        view: { type: string }
+        count: { type: number }
+        sessions: { type: number }
+        crash: { type: boolean }
+        firstSeen: { type: integer }
+        lastSeen: { type: integer }
+        appVersion: { type: string }
+    RumErrorDetail:
+      allOf:
+        - $ref: '#/components/schemas/RumError'
+        - type: object
+          required: [app, platform, stack, frames, symbolicated]
+          properties:
+            app: { type: string }
+            platform: { type: string }
+            stack: { type: string }
+            frames: { type: array, items: { $ref: '#/components/schemas/Frame' } }
+            symbolicated: { type: boolean }
+    RumResource:
+      type: object
+      required: [url, method, callsPerMin, errorRate, p50, p95]
+      properties:
+        url: { type: string }
+        method: { type: string }
+        callsPerMin: { type: number }
+        errorRate: { type: number }
+        p50: { type: number }
+        p95: { type: number }
+    AppStart:
+      type: object
+      required: [kind, count, p50, p75, p95]
+      properties:
+        kind: { type: string }
+        count: { type: number }
+        p50: { type: number }
+        p75: { type: number }
+        p95: { type: number }
+    AppAPICall:
+      type: object
+      required: [endpoint, service, rpm, errorRate, p95]
+      properties:
+        endpoint: { $ref: '#/components/schemas/Endpoint' }
+        service: { $ref: '#/components/schemas/Service' }
+        rpm: { type: number }
+        errorRate: { type: number }
+        p95: { type: number }
+    QueueRule:
+      type: object
+      required: [clusterId, group, metric, threshold, forMin]
+      properties:
+        clusterId: { type: string }
+        group: { type: string }
+        topic: { type: string }
+        metric: { type: string, enum: [lag, time_behind, partition_lag, growing, not_drained, rebalances, oldest_age], description: "oldest_age: seconds (SQS / Pub/Sub / RabbitMQ)" }
+        threshold: { type: number }
+        forMin: { type: number }
+    MonitorTarget:
+      type: object
+      properties:
+        service: { type: string }
+        endpoint: { type: string }
+        process: { type: string }
+        view: { type: string }
+        kpiId: { type: string }
+        env: { type: string }
+    MonitorCondition:
+      type: object
+      required: [op, threshold, forMin]
+      properties:
+        op: { type: string }
+        threshold: { type: number }
+        forMin: { type: number }
+        minRequests: { type: number }
+        window: { description: 'Evaluation window ("5m" or minutes; default 5m)', oneOf: [{ type: string }, { type: number }] }
+    Monitor:
+      type: object
+      required: [id, name, kind, target, condition, severity, state, source, lastChange, channels, status, targetSpec, query, rule]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        kind: { type: string }
+        target: { type: string }
+        condition: { type: string }
+        severity: { type: string }
+        state: { type: string }
+        source: { type: string }
+        lastChange: { type: integer }
+        channels: { type: array, items: { type: string } }
+        queue: { oneOf: [{ $ref: '#/components/schemas/QueueRule' }, { type: "null" }] }
+        status: { type: string }
+        targetSpec: { $ref: '#/components/schemas/MonitorTarget' }
+        query: {}
+        rule: { $ref: '#/components/schemas/MonitorCondition' }
+        lastValue: { type: [number, "null"] }
+        mutedUntil: { type: integer, description: "unix ms; state is muted until then" }
+    MonitorPatch:
+      type: object
+      properties:
+        name: { type: string }
+        severity: { type: string }
+        channels: { type: array, items: { type: string } }
+        status: { type: string, enum: [active, muted, draft] }
+        condition: { $ref: '#/components/schemas/MonitorCondition' }
+        mutedUntil: { type: [integer, "null"] }
+    MaintenanceScope:
+      type: object
+      properties:
+        services: { type: array, items: { type: string } }
+        monitorIds: { type: array, items: { type: string } }
+    MaintenanceWindow:
+      type: object
+      required: [id, name, startsAt, endsAt, scope, active]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        startsAt: { type: integer }
+        endsAt: { type: integer }
+        scope: { $ref: '#/components/schemas/MaintenanceScope' }
+        active: { type: boolean }
+    MaintenanceWindowInput:
+      type: object
+      required: [name, startsAt, endsAt]
+      properties:
+        name: { type: string }
+        startsAt: { type: integer }
+        endsAt: { type: integer }
+        scope: { $ref: '#/components/schemas/MaintenanceScope' }
+    NotificationChannel:
+      type: object
+      required: [id, name, type, config, secrets]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        type: { type: string, enum: [slack, pagerduty, email, webhook, opsgenie, teams] }
+        config: { type: object }
+        secrets: { type: array, items: { type: string }, description: "config keys stored in the secrets table" }
+    NotificationChannelInput:
+      type: object
+      required: [name, type, config]
+      properties:
+        name: { type: string }
+        type: { type: string, enum: [slack, pagerduty, email, webhook, opsgenie, teams] }
+        config: { type: object }
+    DiscoveredResource:
+      type: object
+      required: [kind, name, detail]
+      properties:
+        kind: { type: string, enum: [database, cluster, project, queue, subscription] }
+        refId: { type: string }
+        name: { type: string }
+        detail: { type: string }
+    Integration:
+      type: object
+      required: [id, provider, name, status, config, resources, createdAt, resourceCount, hasSecret]
+      properties:
+        id: { type: string }
+        provider: { type: string, enum: [aws, gcp, vercel, neon] }
+        name: { type: string }
+        status: { type: string, enum: [pending, ok, error, disabled] }
+        error: { type: string }
+        lastSyncAt: { type: integer }
+        config: { type: object, description: "provider config; never contains secrets" }
+        resources: { type: array, items: { $ref: '#/components/schemas/DiscoveredResource' } }
+        createdAt: { type: integer }
+        resourceCount: { type: integer }
+        hasSecret: { type: boolean }
+        syncRequestedAt: { type: integer }
+    IntegrationInput:
+      type: object
+      required: [provider, config]
+      properties:
+        provider: { type: string, enum: [aws, gcp, vercel, neon] }
+        name: { type: string }
+        config: { type: object }
+        secret: { type: string, writeOnly: true, description: 'Provider credential; never returned. Vercel also accepts a JSON string {"token","drainSecret"}: the drain secret is sealed separately as config.drainSecretRef.' }
+    IntegrationPatch:
+      type: object
+      properties:
+        name: { type: string }
+        config: { type: object }
+        secret: { type: string, writeOnly: true, description: 'Provider credential; never returned. Vercel also accepts a JSON string {"token","drainSecret"}: the drain secret is sealed separately as config.drainSecretRef.' }
+        status: { type: string, enum: [disabled, pending] }
+    IntegrationTestResult:
+      type: object
+      required: [ok, message]
+      properties:
+        ok: { type: boolean }
+        message: { type: string }
+        resources: { type: array, items: { $ref: '#/components/schemas/DiscoveredResource' } }
+    MonitorInput:
+      type: object
+      required: [name, kind, target, condition, severity, channels]
+      properties:
+        name: { type: string }
+        kind: { type: string }
+        target: { $ref: '#/components/schemas/MonitorTarget' }
+        query: {}
+        condition: { $ref: '#/components/schemas/MonitorCondition' }
+        severity: { type: string }
+        channels: { type: array, items: { type: string } }
+        source: { type: string }
+        status: { type: string }
+        queue: { oneOf: [{ $ref: '#/components/schemas/QueueRule' }, { type: "null" }] }
+    Preview:
+      type: object
+      required: [timestamps, data, th, episodes, firingNow, now]
+      properties:
+        timestamps: { type: array, items: { type: integer } }
+        data: { type: array, items: { type: number } }
+        th: { type: number }
+        episodes: { type: integer }
+        firingNow: { type: boolean }
+        now: { type: number }
+    Incident:
+      type: object
+      required: [id, monitorId, title, severity, state, startedAt, value, service]
+      properties:
+        id: { type: string }
+        monitorId: { type: string }
+        kpiId: { type: string }
+        title: { type: string }
+        severity: { type: string }
+        state: { type: string }
+        startedAt: { type: integer }
+        value: { type: string }
+        service: { type: string }
+        endpoint: { type: string }
+        ackedAt: { type: integer }
+        resolvedAt: { type: integer }
+        peakValue: { type: [number, "null"] }
+        rootCause: {}
+        quiet: { type: boolean }
+    IncidentEvent:
+      type: object
+      required: [id, ts, kind, data]
+      properties:
+        id: { type: string }
+        ts: { type: integer }
+        kind: { type: string }
+        data: {}
+    KpiTarget:
+      type: object
+      required: [kind, serviceId, ref]
+      properties:
+        kind: { type: string }
+        serviceId: { type: string }
+        ref: { type: string }
+        endpointId: { type: string }
+    KpiGood:
+      type: object
+      properties:
+        metric: { type: string }
+        thresholdMs: { type: number }
+        statusBelow: { type: integer }
+        noError: { type: boolean }
+        description: { type: string }
+    KpiAlertRule:
+      type: object
+      required: [id, kind, condition, severity, channels, state, threshold]
+      properties:
+        id: { type: string }
+        kind: { type: string }
+        condition: { type: string }
+        severity: { type: string }
+        channels: { type: array, items: { type: string } }
+        state: { type: string }
+        longWindow: { type: string }
+        shortWindow: { type: string }
+        threshold: { type: number }
+        stateSince: { type: integer }
+        lastValue: { type: [number, "null"] }
+        lastEvalAt: { type: integer }
+    KpiThreshold:
+      type: object
+      required: [metric, value]
+      properties:
+        metric: { type: string }
+        value: { type: number }
+    KpiMetric:
+      type: object
+      required: [label, baseline, current, unit]
+      properties:
+        label: { type: string }
+        baseline: { type: number }
+        current: { type: number }
+        unit: { type: string }
+    Kpi:
+      type: object
+      required: [id, name, description, owner, target, sli, goodWhen, good, objective, window, current, windowGood, budgetRemaining, burnRate1h, burnRate6h, status, source, alerts]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        owner: { type: string }
+        target: { $ref: '#/components/schemas/KpiTarget' }
+        sli: { type: string }
+        goodWhen: { type: string }
+        good: { $ref: '#/components/schemas/KpiGood' }
+        threshold: { oneOf: [{ $ref: '#/components/schemas/KpiThreshold' }, { type: "null" }] }
+        objective: { type: number }
+        window: { type: string }
+        current: { type: number }
+        windowGood: { type: number }
+        budgetRemaining: { type: number }
+        burnRate1h: { type: number }
+        burnRate6h: { type: number }
+        status: { $ref: '#/components/schemas/Health' }
+        source: { type: string }
+        alerts: { type: array, items: { $ref: '#/components/schemas/KpiAlertRule' } }
+        degradedSince: { type: integer }
+        metric: { oneOf: [{ $ref: '#/components/schemas/KpiMetric' }, { type: "null" }] }
+        noData: { type: boolean }
+    KpiAlertRuleInput:
+      type: object
+      required: [kind, threshold, severity, channels]
+      properties:
+        kind: { type: string }
+        longWindow: { type: string }
+        shortWindow: { type: string }
+        threshold: { type: number }
+        severity: { type: string }
+        channels: { type: array, items: { type: string } }
+    KpiInput:
+      type: object
+      required: [name, description, owner, target, sli, good, objective, window, alerts]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        owner: { type: string }
+        target: { $ref: '#/components/schemas/KpiTarget' }
+        sli: { type: string }
+        good: { $ref: '#/components/schemas/KpiGood' }
+        objective: { type: number }
+        window: { type: string }
+        source: { type: string }
+        alerts: { type: array, items: { $ref: '#/components/schemas/KpiAlertRuleInput' } }
+    DbNode:
+      type: object
+      required: [id, role, zone, cpu, memory, connections]
+      properties:
+        id: { type: string }
+        role: { type: string }
+        zone: { type: string }
+        cpu: { type: number }
+        memory: { type: number }
+        connections: { type: number }
+        replLagMs: { type: [number, "null"] }
+    Problem:
+      type: object
+      required: [title, detail, fix]
+      properties:
+        title: { type: string }
+        detail: { type: string }
+        fix: { type: string }
+    Database:
+      type: object
+      required: [id, name, engine, version, host, port, env, instanceClass, collector, source, status, cpu, prevCpu, memory, disk, diskGb, connections, maxConnections, p95, prevP95, slowPerMin, opsPerSec, hitRatio, nodes, meta]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        engine: { type: string }
+        version: { type: string }
+        host: { type: string }
+        port: { type: integer }
+        env: { type: string }
+        instanceClass: { type: string }
+        collector: { type: string }
+        source: { type: string }
+        status: { $ref: '#/components/schemas/Health' }
+        cpu: { type: number }
+        prevCpu: { type: number }
+        memory: { type: number }
+        disk: { type: number }
+        diskGb: { type: number }
+        connections: { type: number }
+        maxConnections: { type: number }
+        p95: { type: number }
+        prevP95: { type: number }
+        slowPerMin: { type: number }
+        opsPerSec: { type: number }
+        hitRatio: { type: number }
+        evictionsPerMin: { type: [number, "null"] }
+        meta: { type: object, additionalProperties: true, description: 'Cloud provider metadata from databases.meta (Neon: project, branch, endpoint, state, cuMin, cuMax, cuNow, storageGb, storageLimitGb, activeHours; generic keys for others). Empty object when none.' }
+        nodes: { type: array, items: { $ref: '#/components/schemas/DbNode' } }
+        problem: { oneOf: [{ $ref: '#/components/schemas/Problem' }, { type: "null" }] }
+        addedAt: { type: integer }
+        since: { type: integer, format: int64, description: 'Same as addedAt (created_at, ms)' }
+        user: { type: string }
+        credentialsRef: { type: string }
+        cloudResourceId: { type: string }
+        noData: { type: boolean }
+        zone: { type: string }
+        integrationId: { type: string }
+        missing: { type: boolean }
+    DatabaseInput:
+      type: object
+      required: [name, engine, host, port, collector]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        engine: { type: string }
+        host: { type: string }
+        port: { type: integer }
+        collector: { type: string }
+        user: { type: string }
+        credentialsRef: { type: string }
+        cloudResourceId: { type: string }
+        env: { type: string }
+    DbQueryRow:
+      type: object
+      required: [id, text, serviceId, endpoint, perCall, avgMs, p95, rows, callsPerMin, share]
+      properties:
+        id: { type: string }
+        text: { type: string }
+        serviceId: { type: string }
+        endpoint: { type: string }
+        perCall: { type: number }
+        avgMs: { type: number }
+        p95: { type: number }
+        rows: { type: number }
+        callsPerMin: { type: number }
+        share: { type: number }
+    DbUser:
+      type: object
+      required: [service, dep]
+      properties:
+        service: { $ref: '#/components/schemas/Service' }
+        dep: { $ref: '#/components/schemas/Dependency' }
+    BrokerNode:
+      type: object
+      required: [id, host, cpu, memory, disk, netInMBs, status]
+      properties:
+        id: { type: string }
+        host: { type: string }
+        cpu: { type: number }
+        memory: { type: number }
+        disk: { type: number }
+        netInMBs: { type: number, description: "MB/s" }
+        leaders: { type: [number, "null"] }
+        underReplicated: { type: [number, "null"] }
+        status: { $ref: '#/components/schemas/Health' }
+        note: { type: string }
+    Cluster:
+      type: object
+      required: [id, name, kind, version, endpoint, source, collector, nodes, status, totalLag, topics, groups]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        kind: { type: string }
+        version: { type: string }
+        endpoint: { type: string }
+        vhost: { type: string }
+        source: { type: string }
+        collector: { type: string }
+        nodes: { type: array, items: { $ref: '#/components/schemas/BrokerNode' } }
+        addedAt: { type: integer }
+        auth: {}
+        credentialsRef: { type: string }
+        status: { $ref: '#/components/schemas/Health' }
+        totalLag: { type: number }
+        topics: { type: integer }
+        groups: { type: integer }
+        integrationId: { type: string }
+        missing: { type: boolean }
+    ClusterInput:
+      type: object
+      required: [name, kind, endpoint]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        kind: { type: string }
+        endpoint: { type: string }
+        vhost: { type: string }
+        auth: {}
+        credentialsRef: { type: string }
+        collector: { type: string }
+    Topic:
+      type: object
+      required: [clusterId, name, partitions, inPerSec, avgBytes, retention, producers, lag, health]
+      properties:
+        clusterId: { type: string }
+        name: { type: string }
+        partitions: { type: integer }
+        inPerSec: { type: number }
+        avgBytes: { type: number }
+        retention: { type: string }
+        retentionMs: { type: number, description: 'Raw retention.ms from the collector; -1 = unlimited (passed through as-is)' }
+        producers: { type: array, items: { type: string } }
+        binding: { type: string }
+        lag: { type: number }
+        health: { $ref: '#/components/schemas/Health' }
+        replication: { type: number }
+        sizeBytes: { type: number }
+        bytesInPerSec: { type: number }
+    GroupRead:
+      type: object
+      required: [topic, partitionLag, consumePerSec]
+      properties:
+        topic: { type: string }
+        partitionLag: { type: array, items: { type: number } }
+        oldestAgeS: { type: number, description: "seconds; SQS / Pub/Sub / RabbitMQ" }
+        consumePerSec: { type: number }
+        unacked: { type: [number, "null"] }
+    ConsumerGroup:
+      type: object
+      required: [clusterId, id, members, state, rebalancesPerHour, trend, reads, lag, health]
+      properties:
+        clusterId: { type: string }
+        id: { type: string }
+        serviceId: { type: string }
+        process: { type: string }
+        external: { type: string }
+        members: { type: number }
+        state: { type: string }
+        rebalancesPerHour: { type: number }
+        trend: { type: string }
+        reads: { type: array, items: { $ref: '#/components/schemas/GroupRead' } }
+        note: { type: string }
+        lag: { type: number }
+        health: { $ref: '#/components/schemas/Health' }
+    GroupOwnerInput:
+      type: object
+      required: [serviceId]
+      properties:
+        serviceId: { type: string }
+        process: { type: string }
+    ConnTestInput:
+      type: object
+      required: [kind]
+      properties:
+        kind: { type: string }
+        host: { type: string }
+        port: { type: integer }
+        endpoint: { type: string }
+        user: { type: string }
+        password: { type: string }
+        database: { type: string }
+        vhost: { type: string }
+        tls: { type: boolean }
+    ConnTestResult:
+      type: object
+      required: [ok, message, latencyMs]
+      properties:
+        ok: { type: boolean }
+        message: { type: string }
+        latencyMs: { type: number }
+        version: { type: string }
+    CollectorDatabase:
+      type: object
+      required: [id, slug, name, engine, host, port, collector, env]
+      properties:
+        id: { type: integer }
+        slug: { type: string }
+        name: { type: string }
+        engine: { type: string }
+        host: { type: string }
+        port: { type: integer }
+        collector: { type: string }
+        user: { type: [string, "null"] }
+        credentialsRef: { type: [string, "null"] }
+        cloudResourceId: { type: [string, "null"] }
+        env: { type: string }
+    CollectorCluster:
+      type: object
+      required: [id, slug, name, kind, endpoint, auth, collector]
+      properties:
+        id: { type: integer }
+        slug: { type: string }
+        name: { type: string }
+        kind: { type: string }
+        endpoint: { type: string }
+        vhost: { type: [string, "null"] }
+        auth: {}
+        credentialsRef: { type: [string, "null"] }
+        collector: { type: string }
+    CollectorConfig:
+      type: object
+      required: [interval, orgId, projectId, databases, brokerClusters]
+      properties:
+        interval: { type: integer }
+        orgId: { type: integer }
+        projectId: { type: integer }
+        databases: { type: array, items: { $ref: '#/components/schemas/CollectorDatabase' } }
+        brokerClusters: { type: array, items: { $ref: '#/components/schemas/CollectorCluster' } }
+    LoadTestScenario:
+      type: object
+      required: [id, name, target, source, steps, peakVus, duration, regions, spec]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        target: { type: string }
+        source: { type: string }
+        steps: { type: integer }
+        peakVus: { type: number }
+        duration: { type: number }
+        regions: { type: array, items: { type: string } }
+        lastRun: { type: string }
+        spec: {}
+    ScenarioInput:
+      type: object
+      required: [name, spec]
+      properties:
+        name: { type: string }
+        source: { type: string }
+        spec: {}
+    Threshold:
+      type: object
+      required: [name, passed]
+      properties:
+        name: { type: string }
+        passed: { type: boolean }
+    LoadTestRun:
+      type: object
+      required: [id, scenarioId, state, startedAt, progress, rps, p95, errorRate, vus, thresholds]
+      properties:
+        id: { type: string }
+        scenarioId: { type: string }
+        state: { type: string }
+        startedAt: { type: integer }
+        finishedAt: { type: integer }
+        progress: { type: number }
+        rps: { type: number }
+        p95: { type: number }
+        errorRate: { type: number }
+        vus: { type: number }
+        thresholds: { type: array, items: { $ref: '#/components/schemas/Threshold' } }

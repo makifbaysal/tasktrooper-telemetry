@@ -1,0 +1,30 @@
+PODS:
+  - device_info_plus (0.0.1):
+    - Flutter
+  - Flutter (1.0.0)
+  - trooper_flutter (0.1.0):
+    - trooper_flutter/Core (= 0.1.0)
+  - trooper_flutter/Core (0.1.0):
+    - Flutter
+
+DEPENDENCIES:
+  - device_info_plus (from `.symlinks/plugins/device_info_plus/ios`)
+  - Flutter (from `Flutter`)
+  - trooper_flutter (from `.symlinks/plugins/trooper_flutter/ios`)
+
+EXTERNAL SOURCES:
+  device_info_plus:
+    :path: ".symlinks/plugins/device_info_plus/ios"
+  Flutter:
+    :path: Flutter
+  trooper_flutter:
+    :path: ".symlinks/plugins/trooper_flutter/ios"
+
+SPEC CHECKSUMS:
+  device_info_plus: 21fcca2080fbcd348be798aa36c3e5ed849eefbe
+  Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
+  trooper_flutter: 6f712cacd7b2d44847b7861cb66922bbddd540ef
+
+PODFILE CHECKSUM: aa1191b7dfbe8b9f96794b148986529028ea21ad
+
+COCOAPODS: 1.16.2

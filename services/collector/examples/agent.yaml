@@ -1,0 +1,66 @@
+# trooper-agent static config (--config). Same field names as the api's collector-config JSON.
+interval: 15s          # default scrape interval
+timeout: 10s           # default per-target timeout
+
+databases:
+  - id: orders-db                       # → trooper.db.id (slug)
+    name: orders-db                     # → trooper.db.name; matches the dependency "postgres · orders-db"
+    engine: postgres                    # postgres | mysql | redis | mongodb
+    host: orders-db.internal
+    port: 5432
+    user: trooper_monitor               # default trooper_monitor
+    database: postgres
+    tls: require                        # postgres sslmode (default prefer)
+    collector: agent                    # agent | direct | cloud
+    credentialsRef: env:ORDERS_DB_PASSWORD   # password, or a full DSN; or file:/secrets/orders-db
+    node: orders-db-1                   # → trooper.db.node (default host)
+    hostMetrics: true                   # CPU/memory/disk of the machine the agent runs on
+    topQueries: 50
+    slowQueryMs: 500
+
+  - id: billing-mysql
+    engine: mysql
+    host: billing-db.internal
+    credentialsRef: file:/secrets/billing-mysql
+
+  - id: session-cache
+    engine: redis
+    dsn: redis://localhost:6379/0       # inline DSN ($VARS are expanded)
+    interval: 10s
+
+  - id: catalog-db
+    engine: mongodb                     # user with the clusterMonitor role
+    host: catalog-db.internal
+    credentialsRef: env:CATALOG_DB_PASSWORD   # password, or a full mongodb:// / mongodb+srv:// URI
+    topQueriesSource: auto              # $queryStats (7.0.12+/8.0), else system.profile; querystats | profiler | none
+
+brokerClusters:
+  - id: kafka-main                      # → trooper.broker.cluster
+    kind: kafka
+    endpoint: b-1.kafka.internal:9096,b-2.kafka.internal:9096
+    auth: { mechanism: scram-sha-512, tls: true }   # none | plain | scram-sha-256 | scram-sha-512 (+ caFile/certFile/keyFile)
+    credentialsRef: env:KAFKA_MAIN_CREDS            # "user:password" or just the password (user: trooper)
+    groupFilter: "^(orders|billing)-"               # optional RE2 filters on group / topic names
+    topicMetadataEvery: 5m                          # partitions / replication / retention refresh
+    nodes:                                          # optional Prometheus endpoints → trooper.broker.node.*
+      - { name: kafka-1, brokerId: 1, metricsUrl: "http://b-1.kafka.internal:9100/metrics", diskMount: /var/lib/kafka }
+      - { name: kafka-2, brokerId: 2, metricsUrl: "http://b-2.kafka.internal:7071/metrics" }   # JMX exporter
+
+  - id: msk-orders
+    kind: kafka
+    endpoint: b-1.orders.abc.c2.kafka.eu-west-1.amazonaws.com:9098
+    auth: { mechanism: iam, awsRegion: eu-west-1 }  # default AWS chain; optional roleArn, awsProfile
+    # credentialsRef: env:MSK_KEYS                  # or static "accessKeyId:secret[:sessionToken]"
+
+  - id: kafka-oauth
+    kind: kafka
+    endpoint: kafka.internal:9093
+    auth: { mechanism: oauthbearer, tls: true, tokenUrl: "https://idp.internal/oauth2/token", scopes: [kafka] }
+    credentialsRef: env:KAFKA_OAUTH_CLIENT          # clientId:clientSecret (without tokenUrl: a static token)
+
+  - id: rabbit-jobs
+    kind: rabbitmq
+    endpoint: https://rabbit.internal:15672
+    vhost: /shop
+    credentialsRef: env:RABBIT_JOBS_PASSWORD
+    nodeMetrics: auto                   # probe rabbitmq_prometheus on <host>:15692 (off to disable), or list nodes[].metricsUrl

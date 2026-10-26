@@ -1,0 +1,120 @@
+# trooper-agent Helm values.
+#
+# Quick start (what the "Connect database → Agent" drawer shows):
+#   helm upgrade --install trooper-agent trooper/agent \
+#     --set dsn=https://<ingest key>@ingest.tasktrooper.io/<project> \
+#     --set integrations.postgres.enabled=true \
+#     --set integrations.postgres.address=localhost:5432 \
+#     --set integrations.postgres.user=trooper_monitor \
+#     --set integrations.postgres.passwordSecret.name=orders-db-monitor
+
+image:
+  repository: ghcr.io/tasktrooper/trooper-agent
+  tag: ""                # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+# Ingest DSN: <scheme>://<ingest key>@<host>[:port]/<project_id>  (TT_DSN)
+dsn: ""
+# Pull targets from the TaskTrooper api every 60 s (TT_API_URL / TT_API_KEY). Optional when
+# `targets` / `integrations` are set; both can be combined (static targets win on id clashes).
+apiUrl: ""
+apiKey: ""
+# Use an existing Secret instead of the values above. Keys: dsn, apiKey.
+existingSecret: ""
+
+# Only scrape targets whose `collector` is in this list (agent, direct, cloud). Empty = all.
+modes: []
+# Report the node's CPU / memory / disk for agent-mode databases (run as DaemonSet on DB nodes
+# or as a sidecar/VM agent next to the database).
+hostMetrics: false
+logLevel: info
+
+# Static targets, rendered into config.yaml (same schema as examples/agent.yaml).
+targets:
+  interval: 15s
+  timeout: 10s
+  databases: []
+  #  - id: orders-db
+  #    engine: postgres
+  #    host: orders-db.internal
+  #    credentialsRef: env:ORDERS_DB_PASSWORD
+  brokerClusters: []
+  #  - id: kafka-main
+  #    kind: kafka
+  #    endpoint: b-1:9096,b-2:9096
+  #    auth: { mechanism: scram-sha-512, tls: true }
+  #    credentialsRef: env:KAFKA_MAIN_CREDS
+  #    nodes:                                   # optional Prometheus endpoints → trooper.broker.node.*
+  #      - { name: kafka-1, brokerId: 1, metricsUrl: "http://kafka-1:9100/metrics", diskMount: /var/lib/kafka }
+  #  - id: msk-orders                           # AWS MSK IAM: default AWS chain (IRSA → serviceAccount.annotations)
+  #    kind: kafka
+  #    endpoint: b-1.orders.abc.c2.kafka.eu-west-1.amazonaws.com:9098
+  #    auth: { mechanism: iam, awsRegion: eu-west-1 }   # optional roleArn / awsProfile
+  #  - id: confluent
+  #    kind: kafka
+  #    endpoint: pkc-xxx.confluent.cloud:9092
+  #    auth: { mechanism: oauthbearer, tls: true, tokenUrl: "https://idp/oauth2/token", scopes: [kafka] }
+  #    credentialsRef: env:KAFKA_OAUTH_CLIENT     # clientId:clientSecret (or a static token without tokenUrl)
+  #  - id: rabbit-jobs
+  #    kind: rabbitmq
+  #    endpoint: http://rabbit:15672               # rabbitmq_prometheus on :15692 is probed automatically
+  #    credentialsRef: env:RABBIT_JOBS_CREDS
+
+# Shorthand integrations (one target per engine). Rendered as agent-mode databases.
+# passwordSecret: the password is read from that Secret key into an env var and referenced as
+# credentialsRef env:TT_<ENGINE>_PASSWORD.
+integrations:
+  postgres:
+    enabled: false
+    name: ""              # database id / name (default: postgres)
+    address: localhost:5432
+    user: trooper_monitor
+    database: postgres
+    tls: prefer
+    passwordSecret: { name: "", key: password }
+  mysql:
+    enabled: false
+    name: ""
+    address: localhost:3306
+    user: trooper_monitor
+    passwordSecret: { name: "", key: password }
+  redis:
+    enabled: false
+    name: ""
+    address: localhost:6379
+    user: ""
+    passwordSecret: { name: "", key: password }
+  mongodb:
+    enabled: false        # user needs the clusterMonitor role
+    name: ""
+    address: localhost:27017
+    user: trooper_monitor
+    topQueriesSource: auto   # auto ($queryStats, else profiler) | querystats | profiler | none
+    passwordSecret: { name: "", key: password }
+
+# Extra env (e.g. secrets referenced by targets[].credentialsRef: env:NAME)
+extraEnv: []
+#  - name: ORDERS_DB_PASSWORD
+#    valueFrom: { secretKeyRef: { name: orders-db-monitor, key: password } }
+# Extra secret volumes (credentialsRef: file:/secrets/<name>/<key>)
+extraSecretMounts: []
+#  - name: kafka-main
+#    secretName: kafka-main-creds
+#    mountPath: /secrets/kafka-main
+
+# Deployment (one agent for remote targets) or DaemonSet (host metrics on every node).
+kind: Deployment
+replicas: 1
+
+resources:
+  requests: { cpu: 20m, memory: 48Mi }
+  limits: { memory: 128Mi }
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+serviceAccount:
+  create: true
+  name: ""
+  # e.g. IRSA for MSK IAM: eks.amazonaws.com/role-arn: arn:aws:iam::<account>:role/trooper-agent
+  annotations: {}

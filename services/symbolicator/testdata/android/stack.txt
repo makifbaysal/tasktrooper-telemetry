@@ -1,0 +1,3 @@
+java.lang.IllegalStateException: negative price: -3
+	at a.a.a(SourceFile:1)
+	at com.example.shop.Main.main(SourceFile:3)

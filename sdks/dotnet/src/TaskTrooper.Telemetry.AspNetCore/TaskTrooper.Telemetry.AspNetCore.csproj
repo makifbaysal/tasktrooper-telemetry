@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>$(LibraryTargetFrameworks)</TargetFrameworks>
+    <Description>TaskTrooper Telemetry for ASP.NET Core: server spans with trooper.route (normalized route template), caller and exception capture.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />
+    <ProjectReference Include="..\TaskTrooper.Telemetry\TaskTrooper.Telemetry.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="TaskTrooper.Telemetry.Tests" />
+  </ItemGroup>
+</Project>

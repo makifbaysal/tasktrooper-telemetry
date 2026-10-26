@@ -1,0 +1,36 @@
+name: trooper_flutter
+description: TaskTrooper Telemetry RUM SDK for Flutter — views, errors, network, frame vitals, app start and sessions.
+version: 0.1.0
+homepage: https://tasktrooper.dev
+publish_to: none
+
+environment:
+  sdk: ^3.11.4
+  flutter: ">=3.27.0"
+
+dependencies:
+  clock: ^1.1.2
+  device_info_plus: ^13.3.0
+  flutter:
+    sdk: flutter
+  http: ^1.6.0
+  meta: ^1.17.0
+  path_provider: ^2.1.6
+  web: ^1.1.1
+
+dev_dependencies:
+  fake_async: ^1.3.3
+  flutter_lints: ^6.0.0
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  # Native side of the `dev.tasktrooper.telemetry/rum` channel (contracts.md §9). Other platforms
+  # (web, desktop) have no implementation; the Dart SDK tolerates MissingPluginException.
+  plugin:
+    platforms:
+      android:
+        package: dev.tasktrooper.trooper_flutter
+        pluginClass: TrooperFlutterPlugin
+      ios:
+        pluginClass: TrooperFlutterPlugin
