@@ -11,6 +11,7 @@ import (
 
 	"github.com/tasktrooper/telemetry/services/integrations/internal/model"
 	"github.com/tasktrooper/telemetry/services/integrations/internal/provider/aws"
+	"github.com/tasktrooper/telemetry/services/integrations/internal/provider/azure"
 	"github.com/tasktrooper/telemetry/services/integrations/internal/provider/gcp"
 	"github.com/tasktrooper/telemetry/services/integrations/internal/provider/neon"
 	"github.com/tasktrooper/telemetry/services/integrations/internal/provider/vercel"
@@ -22,6 +23,9 @@ type Endpoints struct {
 	GCP    string // <base>/sql, /redis, /pubsub, /mon
 	Neon   string
 	Vercel string
+	// AzureLogin / AzureARM: TT_AZURE_LOGIN_URL / TT_AZURE_ARM_URL.
+	AzureLogin string
+	AzureARM   string
 }
 
 // Factory resolves credentials and builds providers.
@@ -55,6 +59,8 @@ func (f *Factory) Build(ctx context.Context, in model.Integration) (model.Provid
 	switch in.Provider {
 	case "aws":
 		return aws.New(ctx, in.Config, cred, aws.Options{Endpoint: f.Endpoints.AWS})
+	case "azure":
+		return azure.New(in.Config, cred, azure.Options{LoginURL: f.Endpoints.AzureLogin, ARMURL: f.Endpoints.AzureARM})
 	case "gcp":
 		ep := gcp.Endpoints{}
 		if b := f.Endpoints.GCP; b != "" {

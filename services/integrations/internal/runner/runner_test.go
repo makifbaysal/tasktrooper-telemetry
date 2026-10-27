@@ -55,6 +55,16 @@ func (s *fakeStore) SyncBrokers(context.Context, model.Integration, []model.Brok
 	return nil, nil
 }
 
+func (s *fakeStore) SyncFunctions(_ context.Context, _ model.Integration, fns []model.Function) ([]string, error) {
+	var out []string
+	for _, f := range fns {
+		if !s.taken[f.Slug] {
+			out = append(out, f.Slug)
+		}
+	}
+	return out, nil
+}
+
 func (s *fakeStore) PatchDatabaseMeta(context.Context, model.Integration, map[string]map[string]any) error {
 	return nil
 }
@@ -262,5 +272,30 @@ func TestSyncRequestTriggersWithoutRestart(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	if b, d := count(); b != 1 || d != 2 {
 		t.Fatalf("sync request: builds %d discovers %d (want 1, 2)", b, d)
+	}
+}
+
+func TestRunOnceFiltersUnownedFunctions(t *testing.T) {
+	st := &fakeStore{status: map[int64]string{}, errs: map[int64]string{}, res: map[int64]int{}, taken: map[string]bool{"azure-manual": true}}
+	snd := &fakeSender{sent: map[int64][]model.Sample{}}
+	factory := func(context.Context, model.Integration) (model.Provider, error) {
+		return &fakeProvider{
+			discover: func() (*model.Inventory, error) {
+				return &model.Inventory{Functions: []model.Function{{Slug: "azure-app", Name: "app"}, {Slug: "azure-manual", Name: "manual"}}}, nil
+			},
+			collect: func() (*model.Result, error) {
+				return &model.Result{Samples: []model.Sample{
+					{Name: model.FaaSInvocations, Value: 1, Attrs: model.FaaSAttrs("azure-app", "app")},
+					{Name: model.FaaSInvocations, Value: 2, Attrs: model.FaaSAttrs("azure-manual", "manual")},
+				}}, nil
+			},
+		}, nil
+	}
+	r := New(Options{Store: st, Sender: snd, Factory: factory, Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	if err := r.RunOnce(context.Background(), model.Integration{ID: 4, Provider: "azure"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(snd.sent[4]) != 1 || snd.sent[4][0].Attrs["trooper.faas.id"] != "azure-app" || st.res[4] != 2 {
+		t.Fatalf("sent %v resources %d", snd.sent[4], st.res[4])
 	}
 }

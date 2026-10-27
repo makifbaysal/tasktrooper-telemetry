@@ -1,12 +1,14 @@
 # trooper-cloud — cloud integrations (ADR-012)
 
 `services/integrations` (`cmd/trooper-cloud`) pulls infrastructure data that only exists in cloud provider APIs
-(AWS, Google Cloud, Neon, Vercel) into TaskTrooper:
+(AWS, Google Cloud, Azure, Neon, Vercel) into TaskTrooper:
 
 - **Discovery** (every 10 min) upserts `databases` / `broker_clusters` rows (contracts §10) and counts resources.
 - **Metrics** (every 60 s) are sent to ingest-gw as OTLP/HTTP gauges with the **same names as trooper-agent**
   (contracts §5), so the writer, api and alerting treat cloud resources like any other DB / broker.
 - **Vercel deployments** become `deploy_markers`.
+- **Serverless functions** (AWS Lambda, Azure Function Apps) become `serverless_functions` rows; their metrics are
+  `trooper.faas.*` gauges (ClickHouse `faas_1m`, contracts §21).
 
 ```
 Postgres integrations ──(30 s reload)──► runner ── per integration goroutine (isolated, panic-safe)
@@ -38,6 +40,7 @@ docker build -f services/integrations/Dockerfile -t trooper-cloud services/   # 
 | `TT_CLOUD_RELOAD_INTERVAL` / `TT_CLOUD_DISCOVERY_INTERVAL` / `TT_CLOUD_METRICS_INTERVAL` | `30s` / `10m` / `60s` | |
 | `TT_LOG_LEVEL` | `info` | |
 | `TT_CLOUD_AWS_ENDPOINT`, `TT_CLOUD_GCP_ENDPOINT`, `TT_CLOUD_NEON_URL`, `TT_CLOUD_VERCEL_URL` | — | **testing only**: point providers at fakes (AWS: every service + static creds; GCP: `<base>/sql`, `/redis`, `/pubsub`, `/mon`, no auth) |
+| `TT_AZURE_LOGIN_URL` / `TT_AZURE_ARM_URL` | `https://login.microsoftonline.com` / `https://management.azure.com` | Entra ID token endpoint base / ARM base (tests: `internal/fakes` Azure fake; the token scope stays `https://management.azure.com/.default`) |
 
 **Auth to ingest-gw.** Metrics must land in the integration's project. With `TT_INTERNAL_TOKEN` set (same value as
 ingest-gw's), every request carries `x-trooper-internal: <token>` + `x-trooper-project: <integration project id>`
@@ -71,8 +74,11 @@ ingest key because the drain URL is public.
 
 ## AWS
 
-`config`: `{ "roleArn", "externalId", "regions": ["eu-central-1"], "services": ["rds","elasticache","msk","sqs"],
-"sqsConsumers": {"<queue>": "<group>"}, "instanceMemoryGb": {"db.z1d.large": 16}, "maxQueues": 1000, "env": "production" }`
+`config`: `{ "roleArn", "externalId", "regions": ["eu-central-1"], "services": ["rds","elasticache","msk","sqs","lambda"],
+"sqsConsumers": {"<queue>": "<group>"}, "instanceMemoryGb": {"db.z1d.large": 16}, "maxQueues": 1000, "maxFunctions": 1000, "env": "production" }`
+
+`services` empty or missing = every service (incl. `lambda`). An explicit list is honoured as is: existing integrations
+with `["rds","sqs"]` do not get Lambda until `lambda` is added (the UI pre-selects it for new integrations).
 
 Credentials: **AssumeRole** with `roleArn` + `externalId` (recommended; base credentials from the default chain —
 instance profile / IRSA / env) or an **access key** `credentials_ref` → `{"accessKeyId","secretAccessKey"[,"sessionToken"]}`
@@ -94,6 +100,8 @@ Permissions policy (read-only):
   "elasticache:DescribeReplicationGroups",
   "kafka:ListClustersV2", "kafka:ListNodes", "kafka:GetBootstrapBrokers",
   "sqs:ListQueues", "sqs:GetQueueAttributes",
+  "lambda:ListFunctions", "lambda:ListTags", "lambda:ListEventSourceMappings",
+  "lambda:GetFunctionConcurrency", "lambda:GetPolicy", "lambda:ListFunctionUrlConfigs",
   "cloudwatch:GetMetricData", "cloudwatch:ListMetrics" ] }] }
 ```
 
@@ -137,6 +145,44 @@ large 8 GiB …; `db.m*` 8 GiB per `large`; `db.r*` 16 GiB per `large`; `db.x*` 
 `Nxlarge` = 2N×. Other classes (Serverless v2, `z1d`, `metal`, custom) report no memory unless set in
 `config.instanceMemoryGb`.
 
+### AWS Lambda (`lambda`)
+
+Discovery (every 10 min, per region): `ListFunctions` (paginated, `$LATEST`, ≤ `maxFunctions` per region) → one
+`serverless_functions` row per function (contracts §21, `deploy/postgres/011_serverless.sql`):
+
+| Column | Source |
+|---|---|
+| `slug` | `aws-<region>-<name>` (lower-case, non `[a-z0-9]` → `-`) |
+| `name`, `region`, `runtime`, `memory_mb`, `timeout_s`, `arch` | `FunctionName`, region, `Runtime` (`container` for image functions), `MemorySize`, `Timeout`, `Architectures[0]` |
+| `service` | tag `tasktrooper.service`, else the function name — must equal the spans' `service.name` |
+| `triggers` | event source mappings (one `ListEventSourceMappings` per region; disabled ones skipped): `sqs:<queue>`, `kinesis:<stream>`, `dynamodb:<table>`, `kafka:<cluster>` (MSK) / `kafka` (self-managed), `mq:<broker>`, `docdb:<cluster>`; resource policy (`GetPolicy`): API Gateway → `api`, EventBridge rule → `schedule:<rule>` (rule name contains schedule/cron/rate) or `eventbridge:<rule>`, `scheduler` → `schedule`, S3 → `s3:<bucket>`, SNS → `sns:<topic>`, ALB → `alb`; Function URL (`ListFunctionUrlConfigs`) → `http` |
+| `url` | Function URL, if any |
+| `meta` | `arn`, `region`, `tags`, `handler`, `packageType`, `state`, `lastModified`, `reservedConcurrency` (`GetFunctionConcurrency`), `otel: true` when an OTel/ADOT layer or `AWS_LAMBDA_EXEC_WRAPPER` is present (env var **names** only — values are never read into meta) |
+
+`ListTags` failures are reported in `integrations.error`; `GetFunctionConcurrency`, `GetPolicy` and
+`ListFunctionUrlConfigs` are optional — on `AccessDenied` they are skipped for the rest of the run (no `api` / `http`
+triggers then). Functions not found any more get `missing = true` (rows are never deleted), cleared when they come back.
+Rows with `integration_id` NULL or owned by another integration are never touched (no metrics are sent for them).
+
+Metrics (every 60 s): `GetMetricData` on `AWS/Lambda` with dimension `FunctionName`, batched with the other services
+(≤ 500 queries per call), period 60 s over the last 10 min. Unlike RDS/SQS, **every datapoint of the window** is sent
+(CloudWatch Lambda sums arrive late and minutes without invocations have no point; `faas_1m` keeps the max per minute,
+so resends are idempotent). Gauges carry `trooper.faas.id` = slug and `faas.name`; resource `cloud.provider=aws`,
+`cloud.region`.
+
+| CloudWatch `AWS/Lambda` (stat) | trooper metric | `faas_1m` column |
+|---|---|---|
+| `Invocations` (Sum) | `trooper.faas.invocations` | `invocations` |
+| `Errors` (Sum) | `trooper.faas.errors` | `errors` |
+| `Throttles` (Sum) | `trooper.faas.throttles` | `throttles` |
+| `Duration` (Average / Maximum / p95 / p99), ms | `trooper.faas.duration.avg` / `.max` / `.p95` / `.p99` | `duration_avg` / `duration_max` / `duration_p95` / `duration_p99` |
+| `ConcurrentExecutions` (Maximum) | `trooper.faas.concurrency` | `concurrency` |
+| `IteratorAge` (Maximum), ms — only for functions with a stream trigger (Kinesis, DynamoDB, Kafka, DocumentDB) | `trooper.faas.iterator_age_ms` | `iterator_age_ms` |
+
+8 queries per function (+1 with a stream trigger): CloudWatch bills `GetMetricData` per metric requested, so 100
+functions ≈ 800 metrics/min. Cold starts are not in CloudWatch: they come from spans (`faas.coldstart=true`) — use
+`@trooper/node` `wrapLambda` or the OTel/ADOT Lambda layer (`.ai/sdk.md` § Serverless).
+
 ## Google Cloud
 
 `config`: `{ "projectIds": ["shop-prod"], "services": ["cloudsql","memorystore","pubsub"], "consumerMap": {"<subscription>": "<group>"}, "env": "production" }`
@@ -169,6 +215,57 @@ Metrics: Cloud Monitoring `timeSeries.list`, alignment 60 s over the last 5 min,
 | `pubsub…/subscription/oldest_unacked_message_age` | `trooper.broker.oldest_age_s` | |
 | `pubsub…/subscription/ack_message_count` (RATE) | `trooper.broker.consume_rate` | /s |
 | `pubsub…/topic/send_message_operation_count` (RATE) | `trooper.broker.produce_rate`, `trooper.broker.topic.in_rate` | /s |
+
+## Azure (Function Apps)
+
+`provider = 'azure'`. `config`: `{ "tenantId": "<directory id>", "clientId": "<app id>", "subscriptionIds": ["<sub>"],
+"resourceGroups": ["rg-a"], "env": "production", "maxApps": 500 }` — `subscriptionIds` empty = every enabled
+subscription the principal can list; `resourceGroups` optional filter. Credentials: the service principal's **client
+secret** behind `credentials_ref` (plain sealed secret; JSON `{"clientSecret": "..."}` is accepted too).
+
+Setup: register an app (Entra ID → App registrations), create a client secret, and assign it **Reader** and
+**Monitoring Reader** on each subscription (or resource group):
+
+```bash
+az ad sp create-for-rbac --name tasktrooper-reader --role Reader --scopes /subscriptions/<sub>
+az role assignment create --assignee <appId> --role "Monitoring Reader" --scope /subscriptions/<sub>
+# tenantId = "tenant", clientId = "appId", secret = "password" of the output
+```
+
+Token: `POST {TT_AZURE_LOGIN_URL}/{tenantId}/oauth2/v2.0/token` (client credentials, scope
+`https://management.azure.com/.default`), cached until 2 min before expiry. AAD errors are reported with their code and
+first description line (never the secret).
+
+Discovery (every 10 min): `GET /subscriptions` (if needed) → `GET /subscriptions/{sub}[/resourceGroups/{rg}]/providers/Microsoft.Web/sites`
+(api-version 2023-12-01, `nextLink` followed on the same host only) → sites whose `kind` contains `functionapp`
+(Logic Apps `workflowapp` skipped) → `GET {site}/functions`. One `serverless_functions` row **per Function App** (Azure
+Monitor metrics are app-level):
+
+| Column | Source |
+|---|---|
+| `slug`, `name`, `app` | `azure-<app>`, app name, app name |
+| `region` | `location` normalized (`West Europe` → `westeurope`) |
+| `runtime` | `functionAppConfig.runtime` (Flex), else `siteConfig.linuxFxVersion`, else `GET {site}/config/web` (`python 3.11`, `node 20`, `dotnet-isolated 8.0`, `container`) |
+| `memory_mb` | Flex `instanceMemoryMB` (else NULL); `timeout_s`, `arch` not available |
+| `triggers` | trigger bindings of the enabled functions: `http`, `schedule`, `queue:<q>`, `servicebus:<queue or topic>`, `eventhub:<hub>`, `blob`, `cosmosdb:<container>`, `eventgrid`, `kafka:<topic>`, `rabbitmq:<q>` (app-setting references `%X%` drop the name) |
+| `service` | tag `tasktrooper.service`, else the app name (app settings are not read: listing them needs a write-level permission) |
+| `url` | `https://<defaultHostName>` |
+| `meta` | `id`, `subscriptionId`, `resourceGroup`, `kind`, `state`, `os`, `plan` (`Consumption` = SKU Dynamic, `Flex` = FlexConsumption, `Premium` = ElasticPremium, else `Dedicated`), `tags`, `functions: [{name, trigger, disabled?}]` |
+
+Metrics (every 60 s, one request per app): `GET {site}/providers/microsoft.insights/metrics` (api-version
+2023-10-01, `interval=PT1M`, last 10 min, every datapoint sent):
+
+| Azure Monitor metric (aggregation) | trooper metric | conversion |
+|---|---|---|
+| `FunctionExecutionCount` (Total); Flex: `OnDemandFunctionExecutionCount` + `AlwaysReadyFunctionExecutionCount` | `trooper.faas.invocations` | Flex series summed per minute |
+| `FunctionExecutionUnits` (Total); Flex: `OnDemand…` + `AlwaysReadyFunctionExecutionUnits` | `trooper.faas.execution_units` | MB·ms |
+| `Http5xx` (Total) | `trooper.faas.errors` | |
+| `HttpResponseTime` (Average / Maximum) | `trooper.faas.duration.avg` / `.max` | s × 1000 → ms |
+| `MemoryWorkingSet` (Average) | `trooper.faas.memory_bytes` | bytes |
+
+No throttles, p95/p99, concurrency or iterator age on Azure. A metric the app rejects (HTTP 400, e.g. on Flex or Linux
+Consumption) is retried alone and then skipped for that app until restart. ARM read quota: ~12 000 requests/h per
+subscription and principal → roughly 150 apps at one metrics call per minute.
 
 ## Neon
 
@@ -214,11 +311,15 @@ custom metrics). Query statistics come from trooper-agent's direct mode (`pg_sta
 
 ```bash
 GOWORK=off go test ./...                                     # unit: mappers with fixture API responses (httptest)
-GOWORK=off go test -tags integration ./internal/store/       # live Postgres (project 9301, cleaned up)
+GOWORK=off go test -tags integration ./internal/store/       # live Postgres (projects 9301 + 9701 for serverless_functions, cleaned up)
 GOWORK=off go test -tags e2e -count=1 -v ./e2e/              # fake AWS+Vercel → real ingest-gw/writer → ClickHouse (project 9301)
 ```
 
 - AWS fakes speak the real wire protocols (`internal/fakes`): awsquery XML (RDS, ElastiCache), awsJson (SQS), restJson
-  (MSK) and rpc-v2-CBOR (CloudWatch `GetMetricData` / `ListMetrics`); GCP / Neon / Vercel fakes serve recorded-shape JSON.
+  (MSK, Lambda) and rpc-v2-CBOR (CloudWatch `GetMetricData` / `ListMetrics`); GCP / Neon / Vercel fakes serve recorded-shape JSON.
+- `fakes.NewAzure` is an Entra ID token endpoint + ARM (sites, functions, Azure Monitor metrics; one Flex app rejects
+  `MemoryWorkingSet` to exercise the per-metric fallback). Run trooper-cloud against it with `TT_AZURE_LOGIN_URL` /
+  `TT_AZURE_ARM_URL`.
 - The e2e test asserts `db_1m`, `broker_lag_1m` (incl. `oldest_age_s`), `broker_nodes_1m` rows and Postgres
-  `deploy_markers` / `databases` / `broker_clusters` / `integrations.status`, then deletes project 9301 everywhere.
+  `deploy_markers` / `databases` / `broker_clusters` / `integrations.status`, then deletes project 9301 everywhere. Its AWS integration lists
+  `services` explicitly (no Lambda), so it does not depend on `faas_1m`.

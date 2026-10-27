@@ -1,4 +1,4 @@
-// Package aws discovers RDS/Aurora, ElastiCache, MSK and SQS resources and reads their CloudWatch metrics
+// Package aws discovers RDS/Aurora, ElastiCache, MSK, SQS and Lambda resources and reads their CloudWatch metrics
 // with GetMetricData (contracts §5, §10; mapping table in README.md).
 package aws
 
@@ -20,6 +20,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
 	"github.com/aws/aws-sdk-go-v2/service/elasticache"
 	"github.com/aws/aws-sdk-go-v2/service/kafka"
+	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
@@ -30,7 +31,7 @@ type Config struct {
 	RoleArn     string   `json:"roleArn"`
 	ExternalID  string   `json:"externalId"`
 	Regions     []string `json:"regions"`
-	Services    []string `json:"services"` // rds | elasticache | msk | sqs (empty = all)
+	Services    []string `json:"services"` // rds | elasticache | msk | sqs | lambda (empty = all)
 	Env         string   `json:"env"`
 	SessionName string   `json:"sessionName"`
 	// SQSConsumers maps a queue name to the consumer group shown in the UI (default: queue name).
@@ -39,6 +40,8 @@ type Config struct {
 	InstanceMemoryGB map[string]float64 `json:"instanceMemoryGb"`
 	// MaxQueues caps SQS queues per region (default 1000).
 	MaxQueues int `json:"maxQueues"`
+	// MaxFunctions caps Lambda functions per region (default 1000).
+	MaxFunctions int `json:"maxFunctions"`
 }
 
 // AccessKey is the JSON stored behind credentials_ref for access-key auth.
@@ -61,6 +64,7 @@ type clients struct {
 	ec     *elasticache.Client
 	msk    *kafka.Client
 	sqs    *sqs.Client
+	lambda *lambda.Client
 	cw     *cloudwatch.Client
 }
 
@@ -68,6 +72,7 @@ type clients struct {
 type Provider struct {
 	cfg     Config
 	regions []*clients
+	opt     *optional
 }
 
 // New resolves credentials (access key JSON and/or AssumeRole with external id) and builds per-region clients.
@@ -80,6 +85,9 @@ func New(ctx context.Context, raw json.RawMessage, secret []byte, o Options) (*P
 	}
 	if cfg.MaxQueues <= 0 {
 		cfg.MaxQueues = 1000
+	}
+	if cfg.MaxFunctions <= 0 {
+		cfg.MaxFunctions = 1000
 	}
 	loadOpts := []func(*awsconfig.LoadOptions) error{
 		awsconfig.WithRetryer(func() sdk.Retryer {
@@ -125,7 +133,7 @@ func New(ctx context.Context, raw json.RawMessage, secret []byte, o Options) (*P
 			}
 		}))
 	}
-	p := &Provider{cfg: cfg}
+	p := &Provider{cfg: cfg, opt: &optional{denied: map[string]bool{}}}
 	for _, region := range cfg.Regions {
 		c := base.Copy()
 		c.Region = region
@@ -139,6 +147,7 @@ func New(ctx context.Context, raw json.RawMessage, secret []byte, o Options) (*P
 			ec:     elasticache.NewFromConfig(c, func(x *elasticache.Options) { x.BaseEndpoint = ep }),
 			msk:    kafka.NewFromConfig(c, func(x *kafka.Options) { x.BaseEndpoint = ep }),
 			sqs:    sqs.NewFromConfig(c, func(x *sqs.Options) { x.BaseEndpoint = ep }),
+			lambda: lambda.NewFromConfig(c, func(x *lambda.Options) { x.BaseEndpoint = ep }),
 			cw:     cloudwatch.NewFromConfig(c, func(x *cloudwatch.Options) { x.BaseEndpoint = ep }),
 		})
 	}

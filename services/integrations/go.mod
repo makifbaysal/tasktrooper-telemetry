@@ -9,6 +9,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/cloudwatch v1.75.1
 	github.com/aws/aws-sdk-go-v2/service/elasticache v1.64.1
 	github.com/aws/aws-sdk-go-v2/service/kafka v1.65.6
+	github.com/aws/aws-sdk-go-v2/service/lambda v1.109.0
 	github.com/aws/aws-sdk-go-v2/service/rds v1.131.1
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.52.6
 	github.com/aws/aws-sdk-go-v2/service/sts v1.51.5
@@ -22,6 +23,7 @@ require (
 
 require (
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
+	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.20 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.20.4 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.5.7 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.8.7 // indirect

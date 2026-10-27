@@ -102,6 +102,42 @@ new Worker('emails', instrumentBullmqProcessor(async (job) => send(job.data)), {
 await processMessage({ system: 'sqs', destination: 'orders', headers: msg.attributes }, () => handle(msg));
 ```
 
+### AWS Lambda
+
+```ts
+import { init, wrapLambda } from '@trooper/node';
+
+init({ service: 'orders' });   // module scope, once per execution environment (TT_DSN / OTLP env as usual)
+
+export const handler = wrapLambda(async (event, context) => {
+  return { statusCode: 200, body: 'ok' };
+});
+// callback handlers work too: wrapLambda((event, context, callback) => callback(null, result))
+```
+
+`wrapLambda(handler, opts?)` runs every invocation in an entry span with the OTel FaaS conventions
+(.ai/contracts.md §21):
+
+| Attribute | Value |
+|---|---|
+| `faas.name` | `opts.name` → `AWS_LAMBDA_FUNCTION_NAME` → `context.functionName` |
+| `faas.coldstart` | `true` on the first invocation of the execution environment, then `false` |
+| `faas.invocation_id` | `context.awsRequestId` |
+| `faas.trigger` | `opts.trigger` or inferred: API Gateway (REST/HTTP API), Function URL, ALB → `http`; SQS/SNS/Kinesis/Kafka/MQ/EventBridge events → `pubsub`; DynamoDB streams, S3 → `datasource`; EventBridge schedules → `timer`; else `other` |
+| `cloud.provider` / `cloud.platform` / `cloud.region` | `aws` / `aws_lambda` / `AWS_REGION` |
+| `faas.version`, `faas.max_memory`, `cloud.resource_id` | function version, memory (bytes), invoked ARN |
+
+HTTP events give a SERVER span `GET /users/:id` (route from `routeKey` / `resource`, else the normalized path;
+`http.response.status_code` from the result, ≥ 500 = error) that continues the caller's `traceparent` header. SQS / SNS /
+Kinesis batches give a CONSUMER span `process <queue>` (`messaging.*`, `trooper.process` = function name).
+Before the wrapper resolves it flushes traces/metrics/logs (`getHandle().forceFlush()`, bounded by
+`opts.flushTimeoutMs`, default 2000 ms) — Lambda freezes the process after the handler returns. Handler errors are
+recorded and re-thrown unchanged; telemetry failures (including a slow or failing flush) never surface. Options:
+`name`, `trigger`, `flush` (default `true`), `flushTimeoutMs`, `propagate` (default `true`), `flushFn`.
+
+The span's `service.name` must match the function's `service` in TaskTrooper (default: function name; override with
+the Lambda tag `tasktrooper.service`), so cold starts and errors line up with the CloudWatch metrics.
+
 ## Guarantees
 
 - **Never crashes the host** (AGENTS.md rule 5): helpers, hooks, the span processor, sampler and propagator swallow

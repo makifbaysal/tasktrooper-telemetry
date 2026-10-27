@@ -25,6 +25,7 @@ type Store interface {
 	SetStatus(ctx context.Context, id int64, status, errMsg string, resources int) error
 	SyncDatabases(ctx context.Context, in model.Integration, dbs []model.Database) ([]string, error)
 	SyncBrokers(ctx context.Context, in model.Integration, brokers []model.Broker) ([]string, error)
+	SyncFunctions(ctx context.Context, in model.Integration, fns []model.Function) ([]string, error)
 	PatchDatabaseMeta(ctx context.Context, in model.Integration, patches map[string]map[string]any) error
 	UpsertDeploys(ctx context.Context, in model.Integration, ds []model.DeployMarker) error
 }
@@ -302,7 +303,13 @@ func (s *session) discover(ctx context.Context) (err error) {
 	if err != nil {
 		derr = errors.Join(derr, fmt.Errorf("store brokers: %w", err))
 	}
-	for _, sl := range append(dbSlugs, brSlugs...) {
+	var fnSlugs []string
+	if len(inv.Functions) > 0 || s.in.Provider == "aws" || s.in.Provider == "azure" {
+		if fnSlugs, err = s.r.o.Store.SyncFunctions(cctx, s.in, inv.Functions); err != nil {
+			derr = errors.Join(derr, fmt.Errorf("store functions: %w", err))
+		}
+	}
+	for _, sl := range append(append(dbSlugs, brSlugs...), fnSlugs...) {
 		owned[sl] = true
 	}
 	s.inv, s.owned, s.discoverErr = inv, owned, derr
@@ -310,7 +317,7 @@ func (s *session) discover(ctx context.Context) (err error) {
 		derr = fmt.Errorf("discovery: %w", derr)
 	}
 	s.status(ctx, derr, inv.Count())
-	s.log.Info("discovery done", "databases", len(inv.Databases), "brokers", len(inv.Brokers), "other", inv.Other,
+	s.log.Info("discovery done", "databases", len(inv.Databases), "brokers", len(inv.Brokers), "functions", len(inv.Functions), "other", inv.Other,
 		"took", time.Since(start).Round(time.Millisecond), "err", errString(derr))
 	return derr
 }
@@ -354,6 +361,9 @@ func (s *session) filter(in []model.Sample) []model.Sample {
 			continue
 		}
 		if id, ok := x.Attrs["trooper.broker.cluster"]; ok && !s.owned[id] {
+			continue
+		}
+		if id, ok := x.Attrs["trooper.faas.id"]; ok && !s.owned[id] {
 			continue
 		}
 		out = append(out, x)

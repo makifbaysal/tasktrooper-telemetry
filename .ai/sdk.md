@@ -91,6 +91,63 @@ Client SDK'lar (browser, React Native, Android OkHttp, iOS URLSession, Flutter h
 Backend bunu `trooper.caller` olarak okur, çağrı genel `web`/`mobile` yerine uygulama adıyla görünür. Cross-origin müşteri API'leri
 CORS `Access-Control-Allow-Headers`'a `traceparent` ile birlikte `baggage`'ı da eklemeli.
 
+### Serverless (AWS Lambda, Azure Functions — ADR-020)
+
+Metrikler (invocations, errors, throttles, duration, concurrency …) SDK'sız gelir: AWS/Azure entegrasyonu
+(`services/integrations`, contracts §21) CloudWatch / Azure Monitor'dan çeker. **Trace ve cold start** için fonksiyon OTel
+ile enstrümante edilir; span'ların `service.name`'i `serverless_functions.service` ile aynı olmalı (varsayılan fonksiyon /
+app adı; override: Lambda tag'i veya Function App tag'i `tasktrooper.service`).
+
+**Node.js Lambda — `@trooper/node`:**
+
+```ts
+import { init, wrapLambda } from '@trooper/node';
+init({ service: 'orders-api' });                       // modül seviyesinde; DSN env'den (TROOPER_DSN)
+export const handler = wrapLambda(async (event, context) => ({ statusCode: 200, body: 'ok' }));
+```
+
+`wrapLambda(handler, opts?)`: ilk çağrıda `faas.coldstart=true` (sonra `false`), `faas.invocation_id` = `awsRequestId`,
+`faas.name` = `AWS_LAMBDA_FUNCTION_NAME`, `faas.trigger` event şeklinden (API Gateway / Function URL / ALB → `http`,
+SQS/SNS/Kinesis/EventBridge event → `pubsub`, DynamoDB/S3 → `datasource`, EventBridge schedule → `timer`), `cloud.provider=aws`.
+HTTP event'te SERVER span (`GET /users/:id`, `traceparent` devam eder), kuyruk batch'inde CONSUMER span. Dönmeden önce
+flush eder (en fazla `flushTimeoutMs`, varsayılan 2 sn); async ve callback handler'ları destekler; telemetri hatası asla
+handler'a yansımaz.
+
+**Diğer diller — OTel / ADOT Lambda layer:** dil layer'ı (ör. `aws-otel-python-*`, `opentelemetry-nodejs-*`) + env:
+
+```bash
+AWS_LAMBDA_EXEC_WRAPPER=/opt/otel-instrument          # node/java: /opt/otel-handler
+OTEL_SERVICE_NAME=orders-api
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+OTEL_EXPORTER_OTLP_ENDPOINT=https://ingest.trooper.dev
+OTEL_EXPORTER_OTLP_HEADERS=x-trooper-key=<ingest key>
+OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=production
+```
+
+Collector layer'ı (ADOT) kullanılıyorsa SDK `localhost:4318`'e yollar; collector config'inde (`OPENTELEMETRY_COLLECTOR_CONFIG_URI`)
+`otlphttp` exporter'ı `endpoint: https://ingest.trooper.dev`, `headers: {x-trooper-key: <ingest key>}` ile tanımlanır.
+OTel semconv Lambda instrumentation'ı `faas.coldstart` / `faas.trigger` / `faas.invocation_id`'yi kendisi yazar.
+
+**Azure Functions — OpenTelemetry modu:** `host.json`:
+
+```json
+{ "version": "2.0", "telemetryMode": "OpenTelemetry" }
+```
+
+App settings (Function App → Environment variables):
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=https://ingest.trooper.dev
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+OTEL_EXPORTER_OTLP_HEADERS=x-trooper-key=<ingest key>
+OTEL_SERVICE_NAME=billing-func                         # = Function App adı veya tag tasktrooper.service
+```
+
+Worker tarafında da OTel açılır (.NET isolated: `builder.Services.AddOpenTelemetry().UseFunctionsWorkerDefaults().UseOtlpExporter()`;
+Node: `@azure/functions-opentelemetry-instrumentation` + OTLP exporter; Python: `PYTHON_ENABLE_OPENTELEMETRY=true`).
+Host span'ları `faas.trigger`, `faas.invocation_id` (ve host destekliyorsa `faas.coldstart`) taşır; cold start sayısı api'de
+`faas.coldstart='true'` entry span'larından hesaplanır.
+
 ## Wire formatı
 
 - Backend: **OTLP/HTTP protobuf** → `POST /v1/traces`, `/v1/metrics`, `/v1/logs`. Header: `x-trooper-key`.

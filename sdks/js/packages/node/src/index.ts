@@ -48,5 +48,16 @@ export { TrooperSampler, rateFromTraceState } from './sampler';
 export { TrooperSpanProcessor } from './processor';
 export { TrooperBaggagePropagator, createPropagator, callerFromContext } from './propagation';
 export { internalErrorCount } from './errors';
+export {
+  wrapLambda,
+  inferTrigger,
+  resetColdStart,
+  type WrapLambdaOptions,
+  type FaasTrigger,
+  type LambdaContext,
+  type LambdaCallback,
+  type AsyncLambdaHandler,
+  type CallbackLambdaHandler,
+} from './lambda';
 export { trackedSpans } from './entry';
 export * from './attrs';
