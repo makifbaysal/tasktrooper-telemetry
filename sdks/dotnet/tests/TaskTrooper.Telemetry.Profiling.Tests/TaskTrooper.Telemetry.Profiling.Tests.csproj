@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\TaskTrooper.Telemetry\TaskTrooper.Telemetry.csproj" />
+    <ProjectReference Include="..\..\src\TaskTrooper.Telemetry.Profiling\TaskTrooper.Telemetry.Profiling.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- CaptureServer (fake ingest endpoint) -->
+    <Compile Include="..\TaskTrooper.Telemetry.Tests\TestUtil.cs" Link="TestUtil.cs" />
+    <Using Include="Xunit" />
+  </ItemGroup>
+</Project>

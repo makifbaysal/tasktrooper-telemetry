@@ -50,6 +50,7 @@ public static class TaskTrooperOpenTelemetryBuilderExtensions
         services.AddSingleton<IConfigureOptions<TaskTrooperOptions>>(sp => sp.GetRequiredService<TaskTrooperOptionsSetup>());
         services.AddSingleton<IPostConfigureOptions<TaskTrooperOptions>>(sp => sp.GetRequiredService<TaskTrooperOptionsSetup>());
         if (configure is not null) services.Configure(configure); // after env/config so code wins
+        TrooperProfilingHooks.TryAutoRegister(services);            // TaskTrooper.Telemetry.Profiling, when referenced
 
         builder.ConfigureResource(r => r.AddDetector(sp => new TrooperResourceDetector(Options(sp))));
 
