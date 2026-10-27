@@ -68,7 +68,7 @@ export function ServiceInfraTab({ serviceId }: { serviceId: string }) {
           <Card>
             <div className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}>
               {infra.functions.map((f) => (
-                <Link key={f.id} to={`/serverless/functions/${encodeURIComponent(f.id)}`}><Badge>{f.name} · {f.provider}</Badge></Link>
+                <Link key={f.id} to={`/infrastructure/serverless/${encodeURIComponent(f.id)}`}><Badge>{f.name} · {f.provider}</Badge></Link>
               ))}
             </div>
           </Card>
