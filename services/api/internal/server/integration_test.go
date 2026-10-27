@@ -1161,6 +1161,75 @@ func TestIntegration(t *testing.T) {
 		}
 	})
 
+	t.Run("gitlab and bitbucket repositories", func(t *testing.T) {
+		c.t = t
+		for _, bad := range []map[string]any{
+			{"provider": "gitlab", "fullName": "acme"},                                                 // one segment
+			{"provider": "gitlab", "fullName": "acme/x", "baseUrl": "http://gitlab.acme.test"},         // not https
+			{"provider": "gitlab", "fullName": "acme/x", "baseUrl": "https://u:p@gitlab.acme.test"},    // credentials
+			{"provider": "bitbucket", "fullName": "ws/group/repo"},                                     // 3 segments
+			{"provider": "bitbucket", "fullName": "ws/repo", "baseUrl": "https://bitbucket.acme.test"}, // gitlab only
+			{"provider": "gitlab", "fullName": "acme/x", "defaultBranch": "-x"},                        // branch
+			{"provider": "gitlab", "fullName": "acme/x", "installationId": 1},                          // github only
+		} {
+			c.json("POST", "/repos", bad, 400, nil)
+		}
+		var gl model.Repo
+		c.json("POST", "/repos", map[string]any{"provider": "gitlab", "fullName": "acme/platform/orders", "token": "glpat-it",
+			"baseUrl": "https://GitLab.acme.test/", "defaultBranch": "develop"}, 201, &gl)
+		if gl.Provider != "gitlab" || gl.BaseURL != "https://gitlab.acme.test" || gl.URL != "https://gitlab.acme.test/acme/platform/orders" ||
+			gl.Branch != "develop" || gl.WebhookActive || gl.Webhook == nil || len(gl.Webhook.Secret) < 40 ||
+			gl.Webhook.URL != "http://localhost:8096/v1/webhooks/gitlab" {
+			t.Fatalf("gitlab repo: %+v webhook %+v", gl, gl.Webhook)
+		}
+		var cred, hook string
+		_ = pool.QueryRow(ctx, `SELECT credentials_ref, webhook_secret_ref FROM repositories WHERE id = $1`, gl.ID).Scan(&cred, &hook)
+		for ref, want := range map[string]string{cred: "glpat-it", hook: gl.Webhook.Secret} {
+			if plain, err := secrets.Resolve(ctx, ref, itTenant, st.SecretsKeyOrDefault(), pgSecrets{pool}); err != nil || string(plain) != want {
+				t.Errorf("sealed %q: %v", ref, err)
+			}
+		}
+		// The secret is shown once: reads do not carry it.
+		var again model.Repo
+		c.json("GET", "/repos/"+gl.ID, nil, 200, &again)
+		if again.Webhook != nil {
+			t.Errorf("webhook secret returned by GET")
+		}
+		// codeintel recorded a delivery → active; rotation issues a new secret, drops the old one and resets it.
+		if _, err := pool.Exec(ctx, `UPDATE repositories SET webhook_received_at = now() WHERE id = $1`, gl.ID); err != nil {
+			t.Fatal(err)
+		}
+		c.json("GET", "/repos/"+gl.ID, nil, 200, &again)
+		if !again.WebhookActive || again.WebhookReceivedAt == 0 {
+			t.Errorf("webhook not active: %+v", again)
+		}
+		var rot model.Repo
+		c.json("POST", "/repos/"+gl.ID+"/webhook-secret", nil, 200, &rot)
+		if rot.Webhook == nil || rot.Webhook.Secret == gl.Webhook.Secret || rot.WebhookActive {
+			t.Errorf("rotated: %+v %+v", rot, rot.Webhook)
+		}
+		var nOld int
+		_ = pool.QueryRow(ctx, `SELECT count(*) FROM secrets WHERE project_id = 9101 AND $1 = 'secret:' || id::text`, hook).Scan(&nOld)
+		if nOld != 0 {
+			t.Errorf("old webhook secret left behind")
+		}
+
+		var bb model.Repo
+		c.json("POST", "/repos", map[string]any{"provider": "bitbucket", "fullName": "acme-ws/shop", "token": "jane:app-pass"}, 201, &bb)
+		if bb.URL != "https://bitbucket.org/acme-ws/shop" || bb.Webhook == nil || bb.Webhook.URL != "http://localhost:8096/v1/webhooks/bitbucket" {
+			t.Errorf("bitbucket repo: %+v %+v", bb, bb.Webhook)
+		}
+		for _, id := range []string{gl.ID, bb.ID} {
+			c.json("DELETE", "/repos/"+id, nil, 204, nil)
+		}
+		var nLeft int
+		_ = pool.QueryRow(ctx, `SELECT count(*) FROM secrets WHERE project_id = 9101 AND name LIKE 'repo %'
+		  AND NOT EXISTS (SELECT 1 FROM repositories r WHERE r.project_id = 9101 AND 'secret:' || secrets.id::text IN (r.credentials_ref, r.webhook_secret_ref))`).Scan(&nLeft)
+		if nLeft != 0 {
+			t.Errorf("%d repo secrets left behind", nLeft)
+		}
+	})
+
 	t.Run("logs source and short ranges", func(t *testing.T) {
 		c.t = t
 		if err := ch.Exec(ctx, `INSERT INTO logs (org_id, project_id, ts, service, env, severity, body, attrs)

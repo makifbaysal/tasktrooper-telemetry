@@ -141,6 +141,7 @@ type Store interface {
 	CreateRepo(ctx context.Context, in model.RepoInput) (*model.Repo, error)
 	DeleteRepo(ctx context.Context, id string) error
 	AnalyzeRepo(ctx context.Context, id string) (*model.Repo, error)
+	RotateRepoWebhookSecret(ctx context.Context, id string) (*model.Repo, error)
 	ListInventory(ctx context.Context, f store.InventoryFilter) ([]model.InventoryItem, error)
 	ListSuggestions(ctx context.Context, state string) ([]model.CodeSuggestion, error)
 	AcceptSuggestion(ctx context.Context, id string, o model.SuggestionAccept) (*model.SuggestionAccepted, error)
@@ -193,6 +194,9 @@ type Server struct {
 	GitHub *GitHubApp
 	// PublicAPIURL is this api as reachable by browsers and Slack (OAuth redirect URIs; TT_PUBLIC_API_URL).
 	PublicAPIURL string
+	// PublicWebhookURL is codeintel as reachable by GitHub / GitLab / Bitbucket (repository webhook URLs;
+	// TT_PUBLIC_WEBHOOK_URL, contracts §18a).
+	PublicWebhookURL string
 	// StateKey signs install states (derived from TT_SECRETS_KEY).
 	StateKey []byte
 

@@ -39,6 +39,18 @@ type Fetcher interface {
 	Fetch(ctx context.Context, repo model.Repo) (*source.Checkout, error)
 }
 
+// Differ lists files changed since an analyzed commit (implemented by source.Fetcher). Optional: a Fetcher without it
+// keeps manual / overflow requests on a full scan.
+type Differ interface {
+	ChangedSince(ctx context.Context, co *source.Checkout, sha string) (*source.Diff, error)
+}
+
+// Changed-file sources of an incremental analysis (Report.DiffSource).
+const (
+	DiffWebhook = "webhook" // pending_paths from push webhooks
+	DiffGit     = "git"     // git diff last_analyzed_sha..HEAD (manual request, webhook overflow)
+)
+
 // Analyzer runs analyses. Traffic and LLM are optional (nil).
 type Analyzer struct {
 	Store       Store
@@ -59,7 +71,9 @@ type Budgets interface {
 type Report struct {
 	SHA         string
 	Incremental bool
-	Changed     int // files re-extracted (incremental)
+	Changed     int    // files re-extracted (incremental)
+	DiffSource  string // webhook | git ("" = full scan)
+	FullReason  string // why an analyzed repository got a full scan (logs only)
 	Languages   []string
 	Services    []string
 	Items       int
@@ -102,16 +116,12 @@ func (a *Analyzer) Run(ctx context.Context, repo model.Repo, pending []string) (
 	rep.SHA = co.SHA
 
 	opt := extract.Options{RepoName: path.Base(repo.FullName)}
-	var changed map[string]bool
-	if Incremental(repo, pending) {
-		changed = map[string]bool{}
-		for _, p := range pending {
-			if source.InTree(p) {
-				changed[path.Clean(p)] = true
-			}
-		}
+	changed := a.changedFiles(ctx, repo, pending, co, rep)
+	if changed != nil {
 		opt.Only = changed
 		rep.Incremental, rep.Changed = true, len(changed)
+	} else if rep.FullReason != "" {
+		log.Info("full scan", "repo", repo.FullName, "reason", rep.FullReason)
 	}
 	res, err := extract.Repo(co.Dir, opt)
 	if err != nil {
@@ -257,6 +267,61 @@ func (a *Analyzer) Run(ctx context.Context, repo model.Repo, pending []string) (
 	}
 	rep.Scenarios = len(scen)
 	return rep, nil
+}
+
+// changedFiles decides between incremental and full analysis. It returns the changed-file set (possibly empty: HEAD
+// is the analyzed commit) or nil for a full scan, recording the source / full-scan reason in rep.
+//
+//   - never analyzed → full scan;
+//   - a usable webhook list (Incremental) → that list;
+//   - otherwise (manual request `{*}`, webhook overflow, empty list) → git diff last_analyzed_sha..HEAD when the
+//     fetcher can diff; full scan when the base commit is gone (history rewrite), the diff is over MaxPendingPaths,
+//     git fails, or the checkout is local.
+//
+// Either way a change to the service layout (`.trooper/config.yaml`, added/deleted module manifests) forces a full
+// scan: untouched files keep their stored service otherwise.
+func (a *Analyzer) changedFiles(ctx context.Context, repo model.Repo, pending []string, co *source.Checkout, rep *Report) map[string]bool {
+	if repo.AnalyzedAt == nil || repo.LastAnalyzedSHA == "" {
+		return nil
+	}
+	var paths []string
+	if Incremental(repo, pending) {
+		for _, p := range pending {
+			// The webhook list does not say added vs modified: only the config file itself is a known layout change
+			// ("M" never matches a manifest).
+			if source.LayoutChange(p, "M") {
+				rep.FullReason = "service layout changed: " + p
+				return nil
+			}
+		}
+		paths, rep.DiffSource = pending, DiffWebhook
+	} else {
+		d, ok := a.Fetcher.(Differ)
+		if !ok {
+			rep.FullReason = "fetcher cannot diff"
+			return nil
+		}
+		diff, err := d.ChangedSince(ctx, co, repo.LastAnalyzedSHA)
+		switch {
+		case err != nil:
+			rep.FullReason = "git diff: " + err.Error()
+			return nil
+		case len(diff.Paths) > store.MaxPendingPaths:
+			rep.FullReason = fmt.Sprintf("git diff: %d files changed (> %d)", len(diff.Paths), store.MaxPendingPaths)
+			return nil
+		case len(diff.Layout) > 0:
+			rep.FullReason = "service layout changed: " + strings.Join(diff.Layout, ", ")
+			return nil
+		}
+		paths, rep.DiffSource = diff.Paths, DiffGit
+	}
+	changed := make(map[string]bool, len(paths))
+	for _, p := range paths {
+		if source.InTree(p) {
+			changed[path.Clean(p)] = true
+		}
+	}
+	return changed
 }
 
 // keepObserved carries stored observed/dead flags over when traffic is unavailable.

@@ -147,6 +147,10 @@ RED metrikleri span'lardan gelir (OTel/Vercel trace drain); bulut metriklerinden
   (`code_ref` = repo:path). UI ve api bu monitor'leri read-only tutar. Repo'dan silinen dosyanın monitor'ü silinir.
 - Webhook: `POST /v1/webhooks/github` (HMAC `X-Hub-Signature-256`) → default branch push'unda incremental analiz.
 **Sonuç:** Ek dil/framework yeni extractor dosyası demek. Tree-sitter doğruluğu gerekirse sonradan eklenebilir.
+**Ek (GitLab / Bitbucket, contracts §18a):** OAuth uygulaması yerine repo başına token + repo başına webhook. Self-managed
+GitLab adresi ayrı bir integration satırında değil `repositories.base_url`'de (repo başına tek alan; aynı projede farklı
+GitLab'lar mümkün, sorgular basit kalır). Webhook secret'ını kullanıcı değil api üretir (zayıf secret riski yok) ve bir kez
+gösterir. Bitbucket push payload'ı dosya listelemediği için her push `{*}` kuyruğa koyar; asıl daraltma git diff incremental'da.
 
 ## ADR-015 — Load test kontrolcüsü ve runner (`services/loadtest`)
 **Bağlam:** Faz 5: api senaryo/run CRUD'u var, runner yok; run'lar `queued` kalıyor.

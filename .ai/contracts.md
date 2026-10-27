@@ -321,7 +321,9 @@ offline kuyruktan gelen ≤ 24 saatlik event'ler kendi zamanlarında kalır.
 
 ## 13. Code intelligence (`services/codeintel`, ADR-014)
 
-- Port :8096 (`/healthz`, `/metrics`, `POST /v1/webhooks/github`). Migration `deploy/postgres/005_codeintel.sql` (codeintel sahibi):
+- Port :8096 (`/healthz`, `/metrics`, `POST /v1/webhooks/github`, `POST /v1/webhooks/gitlab`, `POST /v1/webhooks/bitbucket`).
+  Provider'lar: `github` (App / token / public), `gitlab` (gitlab.com + self-managed `base_url`), `bitbucket` (Cloud),
+  `local` (dev) — §18a. Migration `deploy/postgres/005_codeintel.sql` (codeintel sahibi):
   - `repositories` + `installation_id bigint`, `credentials_ref text`, `local_path text` (provider `local` eklenir),
     `analyze_requested_at timestamptz`, `analyzed_at timestamptz`, `error text`, `languages text[]`, `services text[]`,
     `webhook_secret_ref text`.
@@ -370,8 +372,10 @@ offline kuyruktan gelen ≤ 24 saatlik event'ler kendi zamanlarında kalır.
 ## 16. Faz 4–5 api uçları ve diğer açık işler
 
 - Code intelligence (api, Postgres'ten okur/yazar):
-  - `GET /repos` → UI `Repo[]`; `POST /repos {provider, fullName, defaultBranch?, token? | installationId? | localPath?}`;
-    `DELETE /repos/{id}`; `POST /repos/{id}/analyze` (→ `analyze_requested_at`).
+  - `GET /repos` → UI `Repo[]`; `POST /repos {provider, fullName, defaultBranch?, token? | installationId? | localPath?, baseUrl?}`
+    (`baseUrl` sadece gitlab; cevapta App'siz github/gitlab/bitbucket için bir kerelik `webhook {url, secret}`, §18a);
+    `DELETE /repos/{id}`; `POST /repos/{id}/analyze` (→ `analyze_requested_at`, `pending_paths='{*}'`; codeintel
+    `last_analyzed_sha..HEAD` git diff'iyle incremental koşar, olmazsa full scan — code-intelligence.md § Incremental analiz); `POST /repos/{id}/webhook-secret` (yeni secret).
   - `GET /inventory?repoId=&kind=&service=` → UI `InventoryItem[]` (+ `dead`, `shadow`, `summary`).
   - `GET /suggestions?state=proposed` → UI `Suggestion[]`; `POST /suggestions/{id}/accept` (monitor oluşturur, `source=suggestion`)
     ; `POST /suggestions/{id}/reject`.
@@ -420,6 +424,32 @@ offline kuyruktan gelen ≤ 24 saatlik event'ler kendi zamanlarında kalır.
 - Webhook (codeintel `POST /v1/webhooks/github`, App webhook URL'si): `push` default branch → `repositories.analyze_requested_at
   = now()` + değişen dosya listesi (`pending_paths text[]`) → incremental analiz; `installation_repositories` removed → repo
   `status='disconnected'`; `installation` deleted → integration `status='error'`. Teslim id'si (`X-GitHub-Delivery`) ile idempotent.
+
+## 18a. GitLab ve Bitbucket kaynakları
+
+- Migration `deploy/postgres/013_vcs_sources.sql` (codeintel sahibi): `repositories.base_url text` (sadece `provider='gitlab'`,
+  self-managed; NULL → `https://gitlab.com`; CHECK `base_url IS NULL OR provider = 'gitlab'`), `repositories.webhook_received_at
+  timestamptz` (son doğrulanmış webhook teslimi; tüm provider'lar).
+- Ortak kurallar `services/pkg/vcs`: `ValidFullName(provider, name)` (github `owner/name`, gitlab `group/…/project` 2–20
+  segment, bitbucket tam `workspace/repo`; segment `[A-Za-z0-9_][A-Za-z0-9_.-]*`, `.git`/`.atom` ile bitemez),
+  `NormalizeBaseURL` (https, host zorunlu, userinfo/query/fragment yok, sondaki `/` atılır), `CloneURL`, `AuthHeader`
+  (gitlab `Basic oauth2:<token>`, bitbucket `Basic x-token-auth:<token>`; `kullanıcı:parola` biçimli token iki sağlayıcıda da
+  olduğu gibi Basic olur).
+- api: `POST /repos` gitlab/bitbucket'ta `fullName`, `defaultBranch?`, `token?` (yoksa public), `baseUrl?` (gitlab) alır.
+  App'siz github, gitlab ve bitbucket repo'ları için 32 bayt rastgele secret (URL-safe base64) `secrets`'a mühürlenir
+  (`webhook_secret_ref`) ve cevap **bir kez** `webhook: {url: <TT_PUBLIC_WEBHOOK_URL>/v1/webhooks/<provider>, secret}` taşır.
+  `POST /repos/{id}/webhook-secret` secret'ı yeniler (eski ref silinir), aynı şekli döner (installation repo'ları → 400).
+  `Repo` + `baseUrl?`, `url` (tarayıcı linki), `webhookActive` = installation var **veya** `webhook_received_at` dolu.
+- codeintel webhook'ları (kurulum: GitLab → Settings → Webhooks, "Push events", Secret token = secret; Bitbucket →
+  Repository settings → Webhooks, "Repository push", Secret = secret):
+  - `POST /v1/webhooks/gitlab`: `X-Gitlab-Token` sabit zamanlı karşılaştırma, `X-Gitlab-Event: Push Hook`, idempotency
+    `Idempotency-Key` → `X-Gitlab-Event-UUID`; `commits[]` dosyaları, `total_commits_count > len(commits)` → `{*}`.
+  - `POST /v1/webhooks/bitbucket`: `X-Hub-Signature: sha256=<hex>` (HMAC-SHA256), `X-Event-Key: repo:push`, idempotency
+    `X-Request-UUID`; payload dosya listelemez → `{*}` (incremental diff `last_analyzed_sha`'dan).
+  - Cevaplar GitHub ile aynı: 202 "queued", 200 "ignored" / "duplicate" / "pong", 401 imza/token, 400 JSON, 413 > 25 MB.
+    Teslim id'leri `codeintel_webhook_deliveries`'e `gitlab:<webhook uuid>:<id>` / `bitbucket:<hook uuid>:<id>` olarak yazılır.
+- Desteklenmeyenler: Bitbucket Server / Data Center, GitLab/Bitbucket OAuth uygulama akışı ve repo seçici (token elle girilir),
+  sağlayıcı API'siyle otomatik webhook kurulumu.
 
 ## 19. AI kullanım kotası (ADR-018)
 

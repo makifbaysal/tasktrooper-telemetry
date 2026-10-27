@@ -1,14 +1,15 @@
 # codeintel
 
-Code intelligence (ADR-014, `.ai/code-intelligence.md`, contracts §13/§18): reads connected repositories, extracts an
+Code intelligence (ADR-014, `.ai/code-intelligence.md`, contracts §13/§18/§18a): reads connected repositories (GitHub,
+GitLab, Bitbucket Cloud, local), extracts an
 inventory of endpoints / consumers / crons / views / dependencies, matches it with observed traffic, scores criticality
 (static rules + optional Claude enrichment), and writes alert suggestions, generated load test drafts and
 alert-as-code monitors to Postgres.
 
 ```bash
-make infra && make migrate                     # Postgres + ClickHouse (005_codeintel.sql, 009_slack_github.sql)
+make infra && make migrate                     # Postgres + ClickHouse (005_codeintel.sql, 009_slack_github.sql, 013_vcs_sources.sql)
 cd services/codeintel
-GOWORK=off go run ./cmd/codeintel              # :8096 — /healthz, /metrics, POST /v1/webhooks/github
+GOWORK=off go run ./cmd/codeintel              # :8096 — /healthz, /metrics, POST /v1/webhooks/{github,gitlab,bitbucket}
 GOWORK=off go run ./cmd/codeintel -once 12     # analyze repository 12 now (full scan) and print a report
 GOWORK=off go test ./...                       # unit tests
 GOWORK=off go test -tags integration ./internal/analyze/   # end-to-end against live Postgres + ClickHouse (project 9401)
@@ -54,10 +55,15 @@ The runtime image needs the `git` CLI (`Dockerfile`: alpine + git; build context
 | `github` + `credentials_ref` | token from `secret:<id>` / `env:NAME` / `file:/path` |
 | `github` (neither) | public clone |
 | `local` | `local_path` read in place (dev/demo) |
-| `gitlab`, `bitbucket` | not supported yet (analysis ends in `error`) |
+| `gitlab` (+ `credentials_ref`) | `https://gitlab.com/<group>/<sub>/<project>.git`, or `<base_url>/…` for self-managed GitLab. Personal / project / group access token (`read_repository`) → `Basic oauth2:<token>`; no token → public clone |
+| `bitbucket` (+ `credentials_ref`) | `https://bitbucket.org/<workspace>/<repo>.git`. Repository / project / workspace access token → `Basic x-token-auth:<token>`; app password or API token stored as `username:password` → `Basic username:password`; no token → public clone |
 
 `git clone --depth 1 --single-branch --no-tags --branch <default>`; the token goes only into `GIT_CONFIG_*` environment
-variables as `http.extraHeader` (never argv, URLs, logs or stored errors). The clone is removed after the analysis.
+variables as `http.extraHeader` (never argv, URLs, logs or stored errors; the token, password and Basic credential are
+scrubbed from git errors). The clone is removed after the analysis. Full-name formats, `base_url` validation (https only,
+no userinfo/query/fragment), clone URLs and auth headers live in `services/pkg/vcs` (shared with the api). Bitbucket
+Server / Data Center is not supported. A self-managed `base_url` is any https host the tenant enters, so codeintel needs
+egress to it (restrict egress at the network level if tenants must not reach internal hosts).
 
 ## GitHub App setup
 
@@ -74,15 +80,54 @@ that repository.
 
 | event | effect |
 |---|---|
-| `push` on the default branch | `analyze_requested_at = now()`, `pending_paths ∪= added+modified+removed`; ≥20 commits, no commits or >200 files → `{*}` (full scan) |
+| `push` on the default branch | `analyze_requested_at = now()`, `pending_paths ∪= added+modified+removed`; ≥20 commits, no commits or >200 files → `{*}` (git diff, see below) |
 | `installation_repositories` removed / added | repository `disconnected` / back to `pending` with a full scan |
 | `installation` deleted / suspend / unsuspend | github integration `error` + repositories `disconnected` / restored |
 | `ping` | 200 |
 
 Signature `X-Hub-Signature-256` is required (401 otherwise). Deliveries are idempotent by `X-GitHub-Delivery`
 (`codeintel_webhook_deliveries`, 7 days); a delivery whose processing failed is forgotten so GitHub's redelivery works.
+A push verified by a repository secret (classic webhook) also sets `repositories.webhook_received_at`.
+
+### GitLab and Bitbucket webhooks
+
+The api generates a webhook secret when a GitLab / Bitbucket (or App-less GitHub) repository is connected, seals it into
+`webhook_secret_ref` and shows it once with the URL `<TT_PUBLIC_WEBHOOK_URL>/v1/webhooks/<provider>`
+(`POST /repos/{id}/webhook-secret` rotates it).
+
+| | `POST /v1/webhooks/gitlab` | `POST /v1/webhooks/bitbucket` |
+|---|---|---|
+| setup | Project → Settings → Webhooks: URL, **Secret token** = secret, trigger **Push events** | Repository settings → Webhooks: URL, **Secret** = secret, trigger **Repository push** |
+| auth | `X-Gitlab-Token` equals the secret (constant time) | `X-Hub-Signature: sha256=<HMAC-SHA256(body)>` |
+| push | `X-Gitlab-Event: Push Hook` | `X-Event-Key: repo:push` |
+| idempotency | `Idempotency-Key`, else `X-Gitlab-Event-UUID` (scoped by `X-Gitlab-Webhook-UUID`) | `X-Request-UUID` (scoped by `X-Hook-UUID`) |
+| changed files | `commits[].added/modified/removed`; `total_commits_count > len(commits)` (GitLab lists 20) → `{*}` | not in the payload → `{*}` |
+
+Candidates are repositories with that provider and full name (case-insensitive); only those whose secret verifies the
+delivery are touched (401 when none). Default-branch pushes queue an analysis; other branches, branch deletions and other
+events answer 200 "ignored". Every verified delivery sets `webhook_received_at` (the api reports `webhookActive`).
+
 Pushes are debounced (`TT_CODEINTEL_DEBOUNCE`) and coalesced into one incremental analysis that re-extracts only the
 changed files (other items stay as stored, cached LLM results are reused by `code_hash`).
+
+## Incremental analysis
+
+The changed-file set of an analysis comes from, in order:
+
+1. never analyzed (`analyzed_at` / `last_analyzed_sha` unset) → full scan;
+2. a usable webhook list in `pending_paths` (no `*`, ≤ 200 files) → that list;
+3. otherwise (manual re-analysis `{*}`, webhook overflow `{*}`, empty list) → `git diff` between `last_analyzed_sha`
+   and the cloned HEAD: the base commit is fetched into the shallow clone with `git fetch --depth=1 origin <sha>` (same
+   `GIT_CONFIG_*` credentials as the clone), then `git diff --name-status -z --no-renames` (a rename counts as both
+   paths; deleted files drop their items). HEAD == base → zero-file incremental (monitors, traffic, suggestions and load
+   test drafts are still refreshed).
+
+Falls back to a full scan (logged as `full scan reason=…`) when the base commit cannot be fetched (history rewritten and
+garbage collected, fetch/auth error), the diff has more than 200 files, `.trooper/config.yaml` changed or a module
+manifest (`go.mod`, `package.json`, `pyproject.toml`, `requirements.txt`, `setup.py`) was added or deleted (service
+mapping may move unchanged files), or the provider is `local` (read in place with uncommitted changes, so a commit diff
+does not describe what the previous analysis saw). `-once` always runs a full scan — use it after an extractor upgrade,
+since incremental analyses never re-extract unchanged files. The `analysis done` log carries `diff_source=webhook|git`.
 
 ## Extractor coverage
 

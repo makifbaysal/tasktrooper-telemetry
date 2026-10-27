@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tasktrooper/telemetry/services/api/internal/model"
@@ -181,6 +182,19 @@ func (s *Server) adminRoutes(r chi.Router) {
 	})
 }
 
+// withWebhookURL completes a freshly issued repository webhook secret with the URL the provider must call
+// (codeintel's `POST /v1/webhooks/<provider>`, contracts §18a).
+func (s *Server) withWebhookURL(v *model.Repo) {
+	if v == nil || v.Webhook == nil {
+		return
+	}
+	base := strings.TrimRight(s.PublicWebhookURL, "/")
+	if base == "" {
+		base = "http://localhost:8096"
+	}
+	v.Webhook.URL = base + "/v1/webhooks/" + v.Provider
+}
+
 // codeInsightRoutes: code intelligence (ADR-014). services/codeintel analyzes; the api registers repos, queues
 // analyses and turns suggestions into monitors.
 func (s *Server) codeInsightRoutes(r chi.Router) {
@@ -195,7 +209,13 @@ func (s *Server) codeInsightRoutes(r chi.Router) {
 			return
 		}
 		v, err := s.Store.CreateRepo(r.Context(), in)
+		s.withWebhookURL(v)
 		s.created(w, r, v, err)
+	})
+	r.Post("/repos/{id}/webhook-secret", func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Store.RotateRepoWebhookSecret(r.Context(), param(r, "id"))
+		s.withWebhookURL(v)
+		s.reply(w, r, v, err)
 	})
 	r.Get("/repos/{id}", func(w http.ResponseWriter, r *http.Request) {
 		v, err := s.Store.GetRepo(r.Context(), param(r, "id"))

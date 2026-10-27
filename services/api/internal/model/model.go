@@ -378,6 +378,10 @@ type MonitorCondition struct {
 	MinRequests float64 `json:"minRequests,omitempty"`
 	// Window is the evaluation window ("5m" or minutes; alert engine default 5m).
 	Window any `json:"window,omitempty"`
+	// RenotifyMin re-sends a still-firing, unacknowledged incident every N minutes (0/absent = once).
+	RenotifyMin float64 `json:"renotifyMin,omitempty"`
+	// Stream evaluates the monitor on every ingested batch instead of the periodic tick (alert engine).
+	Stream bool `json:"stream,omitempty"`
 }
 
 type Monitor struct {
@@ -1108,8 +1112,17 @@ type Repo struct {
 	LastAnalyzedSha    string   `json:"lastAnalyzedSha"`
 	// PendingPaths are files changed by pushes since the last analysis (incremental analysis queue).
 	PendingPaths []string `json:"pendingPaths"`
-	// WebhookActive: the repo is connected through the GitHub App, so pushes trigger analyses.
+	// WebhookActive: pushes trigger analyses — GitHub App installation, or a verified per-repository webhook delivery
+	// (webhook_received_at; contracts §18a).
 	WebhookActive bool `json:"webhookActive"`
+	// WebhookReceivedAt is the last verified per-repository webhook delivery (ms).
+	WebhookReceivedAt int64 `json:"webhookReceivedAt,omitempty"`
+	// BaseURL is a self-managed GitLab address ("" = gitlab.com / provider default).
+	BaseURL string `json:"baseUrl,omitempty"`
+	// URL is the repository page on its host ("" for local).
+	URL string `json:"url,omitempty"`
+	// Webhook is set only in the answers of POST /repos and POST /repos/{id}/webhook-secret: the secret is shown once.
+	Webhook *RepoWebhook `json:"webhook,omitempty"`
 	// Analysis is codeintel's summary of the last analysis ({sha, items, llmItems, incremental, llm: {status:
 	// ok|disabled|quota_exceeded, reason?, credits, skipped?}}), passed through as stored.
 	Analysis json.RawMessage `json:"analysis,omitempty"`
@@ -1123,6 +1136,14 @@ type RepoInput struct {
 	Token          string  `json:"token,omitempty"`
 	InstallationID FlexInt `json:"installationId,omitempty"`
 	LocalPath      string  `json:"localPath,omitempty"`
+	// BaseURL: self-managed GitLab (https, no credentials); provider gitlab only.
+	BaseURL string `json:"baseUrl,omitempty"`
+}
+
+// RepoWebhook tells the user where to point a GitLab / Bitbucket / GitHub repository webhook and with which secret.
+type RepoWebhook struct {
+	URL    string `json:"url"`
+	Secret string `json:"secret"`
 }
 
 // FlexInt accepts a JSON number or a numeric string (ids from GitHub are numbers, the UI sends strings).

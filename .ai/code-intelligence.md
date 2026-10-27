@@ -2,18 +2,35 @@
 
 Müşterinin kod tabanını okuyup **envanter** çıkaran ve bu envanterden alert + load test önerileri üreten servis
 (`services/codeintel`, ADR-014; sözleşme: [contracts.md §13](contracts.md#13-code-intelligence-servicescodeintel-adr-014),
-GitHub App: [§18](contracts.md#18-github-app-adr-017)). Kurulum/env: `services/codeintel/README.md`.
+GitHub App: [§18](contracts.md#18-github-app-adr-017), GitLab/Bitbucket: [§18a](contracts.md#18a-gitlab-ve-bitbucket-kaynakları)).
+Kurulum/env: `services/codeintel/README.md`.
 
 ## Bağlantı
 
 - **GitHub App** (ADR-017): api install akışı + repo seçici → `repositories(provider='github', installation_id)`.
   codeintel clone için installation token alır (`services/pkg/githubapp`: RS256 JWT, token cache).
 - Alternatifler: `credentials_ref` (PAT; `secret:<id>|env:|file:`), public repo (token yok), `provider='local'` +
-  `local_path` (dev/demo, yerinde okunur). GitLab/Bitbucket henüz yok (analiz `error` ile biter).
+  `local_path` (dev/demo, yerinde okunur).
+- **GitLab** (`provider='gitlab'`): gitlab.com veya self-managed. `full_name` = `group/subgroup/project` (2+ segment),
+  self-managed için `repositories.base_url` (`https://gitlab.example.com[/yol]`; sadece https, userinfo/query/fragment yok;
+  NULL → `https://gitlab.com`). Token: personal / project / group access token (`read_repository` scope'u yeter) →
+  `credentials_ref`; git'e `Authorization: Basic base64("oauth2:<token>")` olarak gider.
+- **Bitbucket Cloud** (`provider='bitbucket'`): `full_name` = `workspace/repo` (tam 2 segment), host sabit
+  `https://bitbucket.org` (`base_url` kabul edilmez). Token: repository/project/workspace access token →
+  `Basic base64("x-token-auth:<token>")`; app password / API token `kullanıcı:parola` biçiminde girilir →
+  `Basic base64(kullanıcı:parola)`. Bitbucket Server / Data Center desteklenmez.
+- Ortak kurallar `services/pkg/vcs`'te (api + codeintel): full name biçimi, base URL doğrulaması, clone URL'si, auth header'ı.
+  Tüm sağlayıcılarda token sadece `GIT_CONFIG_*` env'inde (`http.extraHeader`); argv/URL/log/`repositories.error`'da asla
+  (hata mesajında ham token, parola ve base64 biçimi `***` olur). Token yoksa public clone.
+- Webhook secret'ı: GitLab, Bitbucket ve App'siz GitHub repo'larında api bağlantıda rastgele secret üretir, `secrets`'a
+  mühürler (`webhook_secret_ref`) ve webhook URL'si ile **bir kez** döner (`POST /repos/{id}/webhook-secret` yeniler).
+  İlk doğrulanmış teslim `repositories.webhook_received_at`'i yazar → `webhookActive` (UI "webhook aktif").
 - Monorepo: `.trooper/config.yaml` (`services: [{path, name}]`); yoksa SDK init çağrıları (`TROOPER_SERVICE`,
   `service: "..."` + trooper), sonra modül kökü (go.mod/package.json/pyproject), en son repo adı.
-- Tetikleyiciler: ilk bağlantı (full scan), default branch'e push (webhook → incremental), manuel "yeniden analiz"
-  (api `analyze_requested_at = now()`; tam tarama için `pending_paths = '{*}'`).
+- Tetikleyiciler: ilk bağlantı (full scan), default branch'e push (webhook dosya listesi → incremental), manuel "yeniden
+  analiz" (api `analyze_requested_at = now()`, `pending_paths = '{*}'`). `{*}` artık "liste bilinmiyor" demektir: daha önce
+  analiz edilmiş repo'da değişen dosyalar `git diff last_analyzed_sha..HEAD` ile bulunur → yine incremental (bkz.
+  [Incremental analiz](#incremental-analiz)). Zorla full scan: `codeintel -once <id>` (ya da `last_analyzed_sha = NULL`).
 
 ## Pipeline
 
@@ -21,6 +38,7 @@ GitHub App: [§18](contracts.md#18-github-app-adr-017)). Kurulum/env: `services/
 runner (15 sn tick) → due repo (hiç analiz yok | analyze_requested_at > analyzed_at) → debounce (30 sn)
   → Postgres claim (status=analyzing, analysis_started_at; replica'lar arası tek analiz, bayat claim 2×timeout sonra geri alınır)
   → fetch: git clone --depth 1 --single-branch (token sadece GIT_CONFIG_* env'de http.extraHeader; argv/URL/log'da asla)
+  → değişen dosyalar: webhook listesi | yoksa git diff last_analyzed_sha..HEAD | yoksa full scan (aşağıda)
   → extract (deterministik; Go: go/ast, JS/TS: tokenizer, Python: regex+decorator) → ham envanter
   → incremental ise: sadece değişen dosyaların öğeleri yenilenir, diğerleri DB'den aynen kalır
   → alert-as-code senkronu (.trooper/monitors/*.yaml → monitors source='code')
@@ -36,6 +54,34 @@ runner (15 sn tick) → due repo (hiç analiz yok | analyze_requested_at > analy
 - Başarılı analiz: `status='ready'`, `last_analyzed_sha`, `languages`, `services`, `analyzed_at` (analiz sürerken yeni istek
   geldiyse `analyzed_at = başlangıç` → repo due kalır). Hata: `status='error'`, `error`, `pending_paths` geri yazılır.
 
+### Incremental analiz
+
+Değişen dosya kümesi (`analyze.changedFiles`) şu sırayla belirlenir:
+
+1. Repo hiç analiz edilmemiş (`analyzed_at` / `last_analyzed_sha` yok) → **full scan**.
+2. `pending_paths` kullanılabilir bir liste (`*` yok, ≤ 200 dosya) → webhook listesi (`diff_source=webhook`).
+3. Aksi halde (manuel istek `{*}`, webhook taşması `{*}`, boş liste) → **git diff** (`diff_source=git`,
+   `source.Fetcher.ChangedSince`): shallow clone'a eski commit `git fetch --depth=1 --no-tags origin <last_analyzed_sha>`
+   ile çekilir (clone'la aynı `GIT_CONFIG_*` kimlik bilgisi; GitHub/GitLab/Bitbucket protocol v2'de commit id ile fetch'e
+   izin verir), sonra `git diff --name-status -z --no-renames <last_sha> HEAD`. Diff ağaçtan ağaca olduğu için force push
+   sonrası da doğrudur (eski commit sunucuda duruyorsa). Rename = eski + yeni yol; silinen dosyaların öğeleri
+   webhook yolundaki gibi envanterden düşer (değişen dosya, extract'ta artık öğe vermez).
+4. HEAD == `last_analyzed_sha` → sıfır dosyalı incremental: extract öğe yenilemez ama alert-as-code, trafik eşleştirme,
+   monitored işareti, öneriler ve load test taslakları yine yenilenir.
+
+Full scan'e düşüş (sebep `full scan` log'unda `reason` olarak yazılır):
+
+- eski commit alınamıyor (`source.ErrNoBase`: geçmiş yeniden yazılmış + GC, geçersiz sha, fetch/auth hatası);
+- git diff 200 dosyadan (`store.MaxPendingPaths`) fazla; başka git hatası;
+- servis eşlemesini değiştirebilecek değişiklik: `.trooper/config.yaml|yml` (her iki kaynakta), git diff'te eklenen/silinen
+  modül manifest'i (`go.mod`, `package.json`, `pyproject.toml`, `requirements.txt`, `setup.py`) — değişmeyen dosyaların
+  öğeleri DB'deki servisle kalacağı için;
+- `provider='local'`: yerinde okunur, commit edilmemiş değişiklikler de dahil → commit diff'i önceki analizin gördüğünü
+  tarif etmez; her `{*}` full scan.
+
+Not: extractor'lar geliştiğinde değişmeyen dosyalar incremental analizde yeniden çıkarılmaz; tüm envanteri yenilemek için
+full scan zorlanmalı (yukarıda).
+
 ## GitHub webhook (`POST /v1/webhooks/github`)
 
 - İmza: `X-Hub-Signature-256`, App secret'ı (`TT_GITHUB_WEBHOOK_SECRET`) her event için; repo `webhook_secret_ref`
@@ -43,11 +89,35 @@ runner (15 sn tick) → due repo (hiç analiz yok | analyze_requested_at > analy
 - Idempotency: `X-GitHub-Delivery` → `codeintel_webhook_deliveries` (7 gün); tekrar → 200 "duplicate"; işleme hatası →
   kayıt silinir (GitHub redelivery işlenir).
 - `push` default branch: `analyze_requested_at = now()`, `pending_paths ∪= added+modified+removed`. 20+ commit (GitHub listeyi
-  keser), commit'siz push veya >200 dosya → `{*}` (full scan). Branch silme / diğer branch'ler yok sayılır.
+  keser), commit'siz push veya >200 dosya → `{*}` (git diff, olmazsa full scan). Branch silme / diğer branch'ler yok sayılır.
 - Debounce: son istekten 30 sn geçmeden analiz başlamaz (push patlamaları tek analizde birleşir); patlama 10× debounce'tan
   uzun sürerse yine de koşar. Aynı repo için asla iki analiz aynı anda koşmaz.
 - `installation_repositories` removed → repo `status='disconnected'` (runner atlar); added → `pending` + full scan.
 - `installation` deleted/suspend → github integration `status='error'` + repo'lar disconnected; unsuspend → geri.
+
+## GitLab / Bitbucket webhook (`POST /v1/webhooks/gitlab`, `POST /v1/webhooks/bitbucket`)
+
+Repo başına webhook (App yok), codeintel'in public adresinde; api URL'yi `TT_PUBLIC_WEBHOOK_URL` tabanıyla verir. Aday
+repo'lar `provider` + `lower(full_name)` ile bulunur (tüm projeler); sadece secret'ı tutan repo'lar etkilenir, hiçbiri
+tutmazsa 401.
+
+| | GitLab | Bitbucket Cloud |
+|---|---|---|
+| Doğrulama | `X-Gitlab-Token` = repo'nun webhook secret'ı (sabit zamanlı karşılaştırma) | `X-Hub-Signature: sha256=<hex>` = HMAC-SHA256(gövde, secret) |
+| Event | `X-Gitlab-Event: Push Hook`; diğerleri 200 "ignored" | `X-Event-Key: repo:push`; diğerleri 200 "ignored" |
+| Repo | `project.path_with_namespace` | `repository.full_name` |
+| Idempotency | `Idempotency-Key`, yoksa `X-Gitlab-Event-UUID` (`X-Gitlab-Webhook-UUID` ile birlikte) | `X-Request-UUID` (`X-Hook-UUID` ile birlikte) |
+| Değişen dosyalar | `commits[].added/modified/removed`; GitLab en çok 20 commit listeler → `total_commits_count > len(commits)`, commit'siz push veya >200 dosya → `{*}` | push payload'ı dosya listelemez → her zaman `{*}` |
+| Branch silme | `after` sıfır / `checkout_sha` null → yok sayılır | `changes[].new == null` → yok sayılır |
+
+- Default branch push'u (repo'nun `default_branch`'i; boşsa payload'daki): `analyze_requested_at = now()`,
+  `analyze_requested_by = NULL`, `pending_paths ∪= dosyalar`; diğer branch'ler "ignored". `{*}` incremental pipeline'da
+  `last_analyzed_sha` diff'ine çevrilir (bkz. Pipeline).
+- Teslim id'leri `codeintel_webhook_deliveries`'e sağlayıcı ön ekiyle yazılır (`gitlab:<hook>:<id>`, `bitbucket:<hook>:<id>`;
+  GitHub id'leriyle ve aynı repo'yu bağlamış başka projelerin hook'larıyla çakışmaz). Tekrar → 200 "duplicate"; işleme
+  hatası → kayıt silinir (sağlayıcının yeniden denemesi işlenir). Gövde sınırı 25 MB. Id header'ı yoksa idempotency yok.
+- Doğrulanmış her teslim (diğer branch dahil) `webhook_received_at = now()` yazar.
+- Metrik: `codeintel_webhooks_total{event="gitlab:push"|"gitlab:other"|"bitbucket:repo:push"|"bitbucket:other", result}` (event etiketi sınırlı; doğrulanmamış header değerleri kardinalite üretmez).
 
 ## Extractor'lar (framework bazlı, deterministik)
 

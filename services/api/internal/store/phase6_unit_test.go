@@ -255,3 +255,36 @@ func TestHostGPUs(t *testing.T) {
 		t.Errorf("gpu set: %+v", s)
 	}
 }
+
+// Regression: renotifyMin and stream used to be dropped on create because the condition struct lacked them.
+func TestMonitorConditionKeepsReminderAndStream(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want map[string]any
+	}{
+		{"reminder", `{"op":">","threshold":0.1,"forMin":5,"renotifyMin":30}`, map[string]any{"renotifyMin": 30.0}},
+		{"stream", `{"op":">","threshold":0,"forMin":0,"stream":true}`, map[string]any{"stream": true}},
+		{"neither", `{"op":">","threshold":1,"forMin":0}`, map[string]any{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := model.MonitorInput{Name: "m", Kind: "log_match", Severity: "warning", Source: "manual", Query: []byte(`{}`)}
+			if err := json.Unmarshal([]byte(tc.in), &in.Condition); err != nil {
+				t.Fatal(err)
+			}
+			_, _, cond, _, err := normalizeMonitor(&in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got map[string]any
+			_ = json.Unmarshal(cond, &got)
+			for _, k := range []string{"renotifyMin", "stream"} {
+				w, ok := tc.want[k]
+				if g, has := got[k]; has != ok || (ok && g != w) {
+					t.Fatalf("%s: got %v (present %v), want %v (present %v); cond=%s", k, g, has, w, ok, cond)
+				}
+			}
+		})
+	}
+}

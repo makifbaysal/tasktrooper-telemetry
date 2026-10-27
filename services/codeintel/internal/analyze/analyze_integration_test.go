@@ -333,6 +333,52 @@ func TestAnalyzeEndToEnd(t *testing.T) {
 		WHERE i.repository_id = $1 AND i.key = 'POST /v1/orders' AND s.state = 'proposed'`, repoID); n == 0 {
 		t.Fatal("unmonitored critical endpoint got no suggestion")
 	}
+
+	// --- 4. same repository as a (file://) GitHub clone: a manual request ("*") is incremental via git diff ---
+	remotes := t.TempDir()
+	git(t, remotes, "clone", "-q", "--bare", repoDir, filepath.Join(remotes, "acme", "shop.git"))
+	exec1(`UPDATE repositories SET provider = 'github', local_path = NULL WHERE id = $1`, repoID)
+	an.Fetcher = &source.Fetcher{WorkDir: t.TempDir(), CloneBase: "file://" + remotes + "/"}
+	push := func(msg string) {
+		t.Helper()
+		git(t, repoDir, "add", "-A")
+		git(t, repoDir, "commit", "-q", "--allow-empty", "-m", msg)
+		git(t, repoDir, "push", "-q", filepath.Join(remotes, "acme", "shop.git"), "main")
+		time.Sleep(10 * time.Millisecond)
+		if err := st.RequestAnalysis(ctx, repoID, []string{store.FullScan}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	kafkaItems := count(`SELECT count(*) FROM inventory_items WHERE repository_id = $1 AND file = 'services/orders/kafka.go'`, repoID)
+	if kafkaItems == 0 {
+		t.Fatal("fixture has no items in kafka.go")
+	}
+	_ = os.Remove(filepath.Join(repoDir, "services", "orders", "kafka.go"))
+	push("drop consumers")
+	rep4 := analyze(true)
+	if rep4.DiffSource != DiffGit || rep4.Changed != 1 || rep4.Items != rep3.Items-kafkaItems {
+		t.Fatalf("git-diff report %+v (before %d items, kafka.go %d)", rep4, rep3.Items, kafkaItems)
+	}
+	if n := count(`SELECT count(*) FROM inventory_items WHERE repository_id = $1 AND file = 'services/orders/kafka.go'`, repoID); n != 0 {
+		t.Fatalf("items of a deleted file still stored: %d", n)
+	}
+	if again := llm.reset(); len(again) != 0 {
+		t.Fatalf("unchanged code re-sent to the LLM: %v", again)
+	}
+
+	// HEAD == last_analyzed_sha → zero-change incremental (monitors/suggestions still refreshed).
+	push("nothing")
+	rep5 := analyze(true)
+	if rep5.Changed != 0 || rep5.Items != rep4.Items {
+		t.Fatalf("no-change report %+v", rep5)
+	}
+
+	// Service layout change → full scan.
+	_ = os.WriteFile(filepath.Join(repoDir, ".trooper", "config.yaml"), []byte("services: [{path: services/orders, name: orders-api}]\n"), 0o644)
+	push("layout")
+	if rep6 := analyze(false); rep6.FullReason == "" || rep6.Items != rep4.Items {
+		t.Fatalf("layout report %+v", rep6)
+	}
 }
 
 func TestWebhookState(t *testing.T) {

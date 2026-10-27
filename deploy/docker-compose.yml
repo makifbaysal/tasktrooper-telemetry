@@ -124,6 +124,7 @@ services:
       TT_AUTH_DEV: ${TT_AUTH_DEV:-true}
       TT_WEB_URL: ${TT_WEB_URL:-http://localhost:5173}
       TT_PUBLIC_API_URL: ${TT_PUBLIC_API_URL:-http://localhost:8080}
+      TT_PUBLIC_WEBHOOK_URL: ${TT_PUBLIC_WEBHOOK_URL:-http://localhost:8096}
       TT_OIDC_ISSUER: ${TT_OIDC_ISSUER:-}
       TT_OIDC_CLIENT_ID: ${TT_OIDC_CLIENT_ID:-}
       TT_OIDC_CLIENT_SECRET: ${TT_OIDC_CLIENT_SECRET:-}

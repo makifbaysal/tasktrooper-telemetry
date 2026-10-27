@@ -105,6 +105,7 @@ func run(cfg config.Common, log *slog.Logger) error {
 	}
 	srv.StateKey = key
 	srv.PublicAPIURL = config.String("TT_PUBLIC_API_URL", "http://localhost:8080")
+	srv.PublicWebhookURL = config.String("TT_PUBLIC_WEBHOOK_URL", "http://localhost:8096")
 	if id := config.String("TT_SLACK_CLIENT_ID", ""); id != "" {
 		srv.Slack = &server.SlackApp{ClientID: id, ClientSecret: config.String("TT_SLACK_CLIENT_SECRET", ""),
 			SigningSecret: config.String("TT_SLACK_SIGNING_SECRET", ""),
