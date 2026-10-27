@@ -657,3 +657,45 @@ cluster?, node?, reason, restarts?, value?, title, confidence}]`, `treeSummary`,
 `warning` cpu|memory > 0.85, aralıkta restart veya throttled > 0.25; `stale` 5 dk veri yok. eBPF tespiti son 6 saat; servisin tüm
 span'ları OBI/beyla ise `source: 'ebpf'`. `GET /serverless/functions/{id}` numeric id veya slug kabul eder; satırlarda `costUsd`.
 Faas `relativeToTimeout` sadece `duration_p95|duration_p99` ile geçerli.
+
+## 22. Faz 6 tamamlayıcıları
+
+**trooper-agent:**
+- Cluster modu **watch** kullanır: her kaynak için ilk `list` + `watch?resourceVersion=` (allowWatchBookmarks); 410 Gone → yeniden
+  list. Snapshot metrikleri yine 30 sn'de bir bellekteki durumdan üretilir. Event'ler de watch ile.
+- Container kaynakları sırası (host modu, K8s dışı): Docker Engine API → Podman (Docker uyumlu socket; `TT_AGENT_PODMAN_SOCKET`,
+  varsayılan `/run/podman/podman.sock`, rootless `$XDG_RUNTIME_DIR/podman/podman.sock`) → **cgroup v2 fallback** (Linux,
+  `/sys/fs/cgroup`; containerd/nerdctl/diğerleri: `cpu.stat`, `memory.current`, `memory.max`, `cpu.max`; container id cgroup yolundan,
+  ad/imaj bilinmiyorsa id'nin ilk 12 karakteri). Aynı container iki kaynaktan gelirse ilki kazanır.
+- **GPU** (host modu, `nvidia-smi` PATH'te varsa veya `TT_AGENT_NVIDIA_SMI`): `trooper.host.gpu.utilization` (0..1),
+  `.memory` (0..1), `.memory_bytes`, `.temperature_c`, `.power_w`; attr `gpu.index`, `gpu.model`, `gpu.uuid`. ClickHouse
+  `gpus_1m (org_id, project_id, cluster, host, gpu_index UInt8, gpu_uuid, model, minute | utilization, memory, memory_bytes,
+  temperature_c, power_w)` (`deploy/clickhouse/004_gpu.sql`). Host'a ek alan: `hosts_1m` değişmez; api host satırına
+  `gpus: [{index, model, utilization, memory}]` ekler (son dakika).
+- **Windows** node/host: agent `GOOS=windows` build edilir (host + docker npipe `//./pipe/docker_engine`; process `fds` yok);
+  Helm `windows.enabled` → `kubernetes.io/os: windows` nodeSelector'lı ayrı DaemonSet (HostProcess container). `os.type=windows`.
+- **Tek Helm chart:** `deploy/helm/trooper-agent` tek kaynak; eski `services/collector/deploy/helm/trooper-agent` silinir.
+  DB/broker hedefleri yeni chart'ta `db.enabled` + `db.targets` (statik YAML, eski chart'ın configmap formatı) ve/veya
+  `db.fromApi` (`TT_API_URL`/`TT_API_KEY`) ile cluster Deployment'ında çalışır.
+
+**Azure fonksiyon bazında metrik (Application Insights):**
+- Function App'e bağlı App Insights bileşeni ARM'dan bulunur: `Microsoft.Insights/components` kaynaklarının
+  `hidden-link:<siteId>` tag'i (Reader yeterli). Sorgu ARM proxy'si üzerinden: `POST {componentId}/query?api-version=2018-04-20`
+  (`{"query": KQL, "timespan": "PT15M"}`), aynı ARM token'ı.
+- KQL: `requests | where timestamp > ago(15m) | summarize invocations=count(), errors=countif(success == false),
+  avg=avg(duration), p95=percentile(duration,95), p99=percentile(duration,99), max=max(duration) by bin(timestamp, 1m),
+  operation_Name, cloud_RoleName`. Cold start: `customMetrics`/trace yoksa boş.
+- Her fonksiyon ayrı `serverless_functions` satırı: slug `azure-<app>-<function>`, `name` = fonksiyon, `app` = app adı,
+  `meta.parent` = app slug'ı, `meta.source = 'appinsights'`, `triggers` = fonksiyonun tetikleyicisi. App satırı kalır (app
+  seviyesi metrikler). `service` = `cloud_RoleName` (yoksa tag, yoksa app). Metrik attr'ı `trooper.faas.id` = fonksiyon slug'ı.
+- App Insights yoksa veya erişim yoksa sadece app satırı (bugünkü davranış), `meta.appInsights = 'unavailable'`.
+- Opsiyonel `config.readAppSettings: true` → `POST {site}/config/appsettings/list` (Website Contributor gerekir) ile
+  `TASKTROOPER_SERVICE` / `OTEL_SERVICE_NAME` okunur; yetki yoksa sessizce atlanır.
+- api: `GET /serverless/functions` satırlarına `parentId` (app satırının id'si, sadece Azure fonksiyon satırlarında); liste varsayılan
+  olarak hepsini döner; `?parent=<id>` filtresi. Function detail'da Azure app için `children: Function[]`.
+
+**Pod bazında trace ve log:**
+- `GET /traces` yeni filtreler: `pod`, `namespace`, `node`, `host` (span `resource_attrs['k8s.pod.name']`,
+  `['k8s.namespace.name']`, `['k8s.node.name']`, `['host.name']`).
+- `GET /logs` yeni filtreler: `pod`, `namespace` (`attrs['k8s.pod.name']`, `attrs['k8s.namespace.name']`).
+- Pod sayfası: "Traces" bölümü `/traces?service=&pod=` listesini gösterir; "Logs" linki `/logs?pod=&namespace=` ile sunucu tarafı filtre.
