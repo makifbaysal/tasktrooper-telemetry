@@ -671,7 +671,8 @@ Faas `relativeToTimeout` sadece `duration_p95|duration_p99` ile geçerli.
   `.memory` (0..1), `.memory_bytes`, `.temperature_c`, `.power_w`; attr `gpu.index`, `gpu.model`, `gpu.uuid`. ClickHouse
   `gpus_1m (org_id, project_id, cluster, host, gpu_index UInt8, gpu_uuid, model, minute | utilization, memory, memory_bytes,
   temperature_c, power_w)` (`deploy/clickhouse/004_gpu.sql`). Host'a ek alan: `hosts_1m` değişmez; api host satırına
-  `gpus: [{index, model, utilization, memory}]` ekler (son dakika).
+  `gpus: [{index, model, uuid, utilization, memory, memoryBytes, temperatureC, powerW}]` ekler (son dakika); host
+  detayı `series.gpu` (GPU başına seri, id `gpu<index>`).
 - **Windows** node/host: agent `GOOS=windows` build edilir (host + docker npipe `//./pipe/docker_engine`; process `fds` yok);
   Helm `windows.enabled` → `kubernetes.io/os: windows` nodeSelector'lı ayrı DaemonSet (HostProcess container). `os.type=windows`.
 - **Tek Helm chart:** `deploy/helm/trooper-agent` tek kaynak; eski `services/collector/deploy/helm/trooper-agent` silinir.
@@ -695,7 +696,9 @@ Faas `relativeToTimeout` sadece `duration_p95|duration_p99` ile geçerli.
 - Opsiyonel `config.readAppSettings: true` → `POST {site}/config/appsettings/list` (Website Contributor gerekir) ile
   `TASKTROOPER_SERVICE` / `OTEL_SERVICE_NAME` okunur; yetki yoksa sessizce atlanır.
 - api: `GET /serverless/functions` satırlarına `parentId` (app satırının id'si, sadece Azure fonksiyon satırlarında); liste varsayılan
-  olarak hepsini döner; `?parent=<id>` filtresi. Function detail'da Azure app için `children: Function[]`.
+  olarak hepsini döner; `?parent=<id>` filtresi. Function detail'da Azure app için `children: Function[]`. Satırlarda
+  `appInsights` (`connected|unavailable`). Özet: `meta.parent` olan satırlar toplamlara girmez; çocuğu olan app `functions`
+  sayısına girmez, maliyet app satırında.
 
 **Pod bazında trace ve log:**
 - `GET /traces` yeni filtreler: `pod`, `namespace`, `node`, `host` (span `resource_attrs['k8s.pod.name']`,
