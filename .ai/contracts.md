@@ -375,3 +375,34 @@ offline kuyruktan gelen ≤ 24 saatlik event'ler kendi zamanlarında kalır.
 - Ingest internal credential: `x-trooper-internal: <TT_INTERNAL_TOKEN>` + `x-trooper-project: <id>` başlıkları; ingest-gw
   token eşleşirse key aramaz. trooper-cloud ve loadtest-runner bunu kullanır (`TT_CLOUD_INGEST_KEYS` geri uyumlu kalır).
 - KPI kuralları: `kpi_alert_rules.condition jsonb` (`renotifyMin`) — migration `008_alerting_r3.sql` (alerting sahibi).
+
+## 17. Slack App (ADR-017)
+
+- Env (api + notifier): `TT_SLACK_CLIENT_ID`, `TT_SLACK_CLIENT_SECRET`, `TT_SLACK_SIGNING_SECRET`, `TT_PUBLIC_API_URL`
+  (OAuth redirect + interactivity URL tabanı), `TT_PUBLIC_APP_URL` (mesajlardaki linkler).
+- Postgres (`009_slack_github.sql`, api sahibi): `integrations.provider` += `slack`, `github`; Slack kurulumu
+  `integrations(provider='slack', config={teamId, teamName, botUserId}, credentials_ref=secret:<bot token>)`, org başına bir
+  tane (project_id = kurulumu yapan proje; okumada org geneli). `notification_messages (id, incident_id, channel, provider,
+  external_id /*slack ts*/, external_channel, created_at)`.
+- api uçları: `GET /integrations/slack/install` → Slack OAuth'a yönlendirir (state imzalı); `GET /integrations/slack/callback`;
+  `GET /integrations/slack/channels?q=` → `[{id, name, isPrivate, isMember}]` (cache 5 dk); `DELETE /integrations/slack`;
+  `POST /slack/interactions` (Ack / Mute 1h butonları; imza doğrulaması; Slack kullanıcısını e-posta ile `users`'a eşler).
+- Bildirim hedefi formatı: `slack:<channel_id>#<channel_name>` (örn. `slack:C0123ABCD#payments-alerts`). notifier: bot token ile
+  `chat.postMessage`; ilk mesajın `ts`'i `notification_messages`'e; `resolved`/`reminder`/`acknowledged` → `thread_ts` ile
+  thread'e cevap + ilk mesaj `chat.update` (renk/durum). `slack:https://hooks.slack.com/...` webhook hedefleri eskisi gibi.
+- Mesaj Block Kit: header (durum emoji + başlık), alanlar (servis, değer vs eşik, süre, severity), **"Likely cause"** bölümü
+  (`incidents.root_cause` → `summary` + `round(confidence*100)%`; `< 30%` → "low confidence"), deploy context, butonlar
+  (Open incident, Ack, Mute 1h).
+
+## 18. GitHub App (ADR-017)
+
+- Env (api + codeintel): `TT_GITHUB_APP_ID`, `TT_GITHUB_APP_SLUG`, `TT_GITHUB_APP_PRIVATE_KEY` (env:/file: ref),
+  `TT_GITHUB_WEBHOOK_SECRET`. Ortak istemci `services/pkg/githubapp` (JWT, installation token cache, repo listesi, sayfalama).
+- Kurulum: `integrations(provider='github', config={installationId, account, accountType}, project_id)`; `repositories.installation_id`.
+- api uçları: `GET /integrations/github/install` → `https://github.com/apps/<slug>/installations/new?state=<imzalı>`;
+  `GET /integrations/github/callback?installation_id&setup_action&state` → integration kaydı, UI'a `/settings/integrations?github=<id>`
+  ile döner; `GET /integrations/github/{id}/repos?q=` → `[{fullName, defaultBranch, private, language, added}]`;
+  `POST /repos {provider:'github', fullName, installationId}` (mevcut uç; token gerekmez).
+- Webhook (codeintel `POST /v1/webhooks/github`, App webhook URL'si): `push` default branch → `repositories.analyze_requested_at
+  = now()` + değişen dosya listesi (`pending_paths text[]`) → incremental analiz; `installation_repositories` removed → repo
+  `status='disconnected'`; `installation` deleted → integration `status='error'`. Teslim id'si (`X-GitHub-Delivery`) ile idempotent.

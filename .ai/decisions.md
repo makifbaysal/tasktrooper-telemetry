@@ -180,3 +180,22 @@ RED metrikleri span'lardan gelir (OTel/Vercel trace drain); bulut metriklerinden
   iken; UI bu durumda e-posta ile giriş gösterir. Mevcut `VITE_API_KEY` akışı dev için çalışmaya devam eder.
 - `audit_log` tablosu: kim, ne zaman, hangi mutasyon.
 **Sonuç:** SAML/SCIM sonraki iş. API key'ler proje kapsamlı kalır.
+
+## ADR-017 — Slack App ve GitHub App entegrasyonları
+**Bağlam:** Alert'ler bugün Slack'e sadece incoming webhook ile gidiyor (kanal webhook'a sabit). Repo bağlamak token/kurulum id
+elle girmeyi gerektiriyor.
+**Karar:**
+- **Slack App** (OAuth v2, bot scope'ları `chat:write`, `chat:write.public`, `channels:read`, `groups:read`): org başına bir
+  kurulum, bot token `secrets`'ta şifreli. Monitor/KPI kuralı bildirim hedefi `slack:<channel_id>` (görünen ad `#kanal`
+  ayrıca saklanır); notifier `chat.postMessage` ile o kanala yazar, mesaj `ts`'ini saklar ve resolve/hatırlatma/ack aynı
+  mesajın **thread**'ine gider (ilk mesaj `chat.update` ile durum rengini değiştirir). Eski `slack:` webhook kanalları çalışmaya
+  devam eder.
+- Mesaj içeriği: başlık, durum, değer/eşik, servis/endpoint, grafik linki, **olası kök neden + güven yüzdesi** (alert-engine'in
+  RCA sonucu: `rootCause.summary`, `rootCause.confidence` → "Likely cause: … (78% confidence)"; confidence < 0.3 ise "low
+  confidence" etiketi, RCA yoksa satır gösterilmez), deploy (son 1 saat), Ack / Open butonları (Slack interactivity →
+  api `POST /slack/interactions`, imza `X-Slack-Signature` doğrulaması).
+- **GitHub App**: kurulum akışı api'de (`/integrations/github/install` → GitHub → `/integrations/github/callback?installation_id=`),
+  kurulumun repo listesi UI'da seçilir, seçilen repolar `repositories`'e eklenir ve analiz kuyruğa girer. App webhook'u
+  (tek URL) codeintel'e gelir: `push` (default branch) → incremental analiz, `installation`/`installation_repositories` →
+  repo ekle/kaldır senkronu, `pull_request` → ileride. Ortak GitHub App istemcisi `services/pkg/githubapp`.
+**Sonuç:** Kanal seçimi UI'da listeden yapılır; webhook URL'si kopyalamak gerekmez.
