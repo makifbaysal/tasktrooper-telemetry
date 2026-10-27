@@ -11,6 +11,7 @@
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="Microsoft.AspNetCore.TestHost" />
     <PackageReference Include="OpenTelemetry.Exporter.InMemory" />
+    <PackageReference Include="Microsoft.Extensions.AI" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\TaskTrooper.Telemetry\TaskTrooper.Telemetry.csproj" />

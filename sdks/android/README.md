@@ -9,7 +9,8 @@ to `POST /v1/rum` on ingest-gw (gzip, `x-trooper-key`), per ADR-011 and `.ai/con
 | `trooper-ndk` | Optional native (NDK) crash handler (C, async-signal-safe). Depends on `trooper-android`; picked up automatically. |
 | `trooper-gradle-plugin` | Gradle plugin `com.tasktrooper.mapping-upload` (included build): uploads R8 `mapping.txt`. |
 | `trooper-okhttp` | OkHttp `Interceptor` → `RESOURCE` events + W3C `traceparent` injection. |
-| `trooper-compose` | Navigation Compose screen tracking + `Modifier.trooperAction()`. |
+| `trooper-compose` | Navigation Compose screen tracking + `Modifier.trooperAction()`, `Modifier.trooperUnmask()` and the Compose wireframe mapper for replay. |
+| `trooper-replay` | Optional wireframe session replay (no screenshots) → `POST /v1/replay` (contracts.md §23, ADR-021). |
 | `trooper-android-sample` | Sample app wiring all three. |
 
 minSdk 21, compileSdk 36. Built with AGP 8.13, Kotlin 2.2, Gradle 8.14 (wrapper).
@@ -143,6 +144,30 @@ host activity does not appear as a screen.
 
 No headers, bodies or query values are collected. User id and traits only via `identify`. Use `beforeSend` to mask
 anything else (e.g. view names, error messages).
+
+## Session replay (`trooper-replay`)
+
+Wireframe replay: the View hierarchy (and Compose semantics, when `trooper-compose` is on the classpath) is turned
+into rectangles with kind, colors, corner radius and **masked** text — never pixels or screenshots.
+
+```kotlin
+TaskTrooper.init(this, TrooperConfig(dsn = "...", app = "shop-android"))
+TrooperReplay.install(this, ReplayOptions(sampleRate = 0.1, onErrorSampleRate = 1.0, maskAllText = true))
+```
+
+- **Sampling** per RUM session (unsampled RUM sessions are never recorded): `sampleRate` records from the start;
+  otherwise `onErrorSampleRate` keeps the last 60 s in memory and uploads it (then keeps recording) on the first
+  ERROR / ANR / crash. Crashes write the buffer synchronously; it is sent on next launch.
+- **Privacy:** all text masked by default (`•`, length kept); `EditText`, password fields and Compose text fields /
+  `Password` always; images are boxes; WebView content is a black box. Opt in per subtree with `view.trooperUnmask()`
+  (or `view.setTag(R.id.trooper_unmask, true)`) / `Modifier.trooperUnmask()`; `view.trooperMask()` forces masking.
+- **Cost:** captures on the main thread only after a draw/layout, at most 2 fps; the throttle grows with capture cost
+  (≈ 1% of main-thread time), traversal stops at 1500 nodes / 12 ms. Unchanged frames are not recorded. Touches
+  (down / move ≤ 10/s / up) via a `Window.Callback` wrapper, keyboard visibility from window insets.
+- **Delivery:** segments of ≤ 5 s or ≤ 256 KB, gzip, same auth/backoff as `/v1/rum`; offline segments are kept up to
+  `maxQueueBytes` (2 MB) and newer ones are dropped beyond that.
+- Dialogs/popups are found through `WindowManagerGlobal` (reflection); if that is blocked only the resumed activity's
+  window is recorded. Compose nodes have bounds, role and text but no colors.
 
 ## Native crashes (`trooper-ndk`)
 

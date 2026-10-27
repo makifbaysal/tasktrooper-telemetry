@@ -81,6 +81,8 @@ export interface Session {
   errors: number;
   entry: string;
   exit: string;
+  /** a session replay was recorded (ADR-021, contracts §23) */
+  hasReplay?: boolean;
 }
 
 export interface LogLine {
@@ -217,7 +219,7 @@ export interface InventoryItem {
 }
 
 /** Where request time goes. Slot = fixed categorical color. */
-export type TimeCategory = 'app' | 'db' | 'cache' | 'http' | 'queue';
+export type TimeCategory = 'app' | 'db' | 'cache' | 'http' | 'queue' | 'ai';
 
 /** Outgoing dependency of a service (DB, cache, downstream HTTP, queue). */
 export interface Dependency {
@@ -318,7 +320,7 @@ export interface Kpi {
 
 // ---------- root cause analysis ----------
 
-export type RcaNodeKind = 'page' | 'app_start' | 'endpoint' | 'db' | 'cache' | 'http' | 'queue' | 'external' | 'code';
+export type RcaNodeKind = 'page' | 'app_start' | 'endpoint' | 'db' | 'cache' | 'http' | 'queue' | 'ai' | 'external' | 'code';
 
 /**
  * One node of the call tree behind a KPI (built from traces: page → API → service → dependency).

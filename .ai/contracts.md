@@ -46,7 +46,7 @@ gerekirse küçük tutulur (tek harici bağımlılık `google.golang.org/protobu
 
 | Servis | Port | Not |
 |---|---|---|
-| ingest-gw HTTP | 4318 | `POST /v1/traces`, `/v1/metrics`, `/v1/logs` (OTLP/HTTP protobuf **ve** JSON; `Content-Encoding: gzip` desteklenir), `POST /v1/rum` (RUM JSON, gzip opsiyonel), `GET /healthz` |
+| ingest-gw HTTP | 4318 | `POST /v1/replay` (§23), `POST /v1/profiles` (§24), `POST /v1/traces`, `/v1/metrics`, `/v1/logs` (OTLP/HTTP protobuf **ve** JSON; `Content-Encoding: gzip` desteklenir), `POST /v1/rum` (RUM JSON, gzip opsiyonel), `GET /healthz` |
 | ingest-gw gRPC | 4317 | OTLP gRPC (TraceService, MetricsService, LogsService) |
 | api | 8080 | `/api/v1/...` (bkz. `services/api/openapi.yaml`), `GET /healthz` |
 | alert-engine | 8090 | sadece `/healthz`, `/metrics` |
@@ -57,7 +57,7 @@ gerekirse küçük tutulur (tek harici bağımlılık `google.golang.org/protobu
 `x-trooper-project: <id>` gönderir (OTLP HTTP/gRPC metadata, `/v1/rum`); sabit zamanlı karşılaştırma, `Origin` varsa 403, token
 ayarlı değilse 401. Org Postgres'ten (60 sn cache).
 **Ingest auth:** `x-trooper-key: <ingest key>` header'ı, ya da `Authorization: Bearer <key>`. Browser `sendBeacon` header
-koyamadığı için `?key=` query parametresi de kabul edilir (sadece `/v1/rum`). Key Postgres `api_keys` tablosunda sha256 hash'i ile
+koyamadığı için `?key=` query parametresi de kabul edilir (sadece `/v1/rum` ve `/v1/replay`). Key Postgres `api_keys` tablosunda sha256 hash'i ile
 durur; ingest-gw 60 sn TTL'li in-memory cache tutar. Key → `(org_id, project_id)`. Browser key'lerinde `allowed_origins` kontrolü.
 **DSN:** `https://<key>@<host>[:port]/<project_id>` — SDK'lar DSN'den endpoint ve key çıkarır. Lokal: `http://tt_dev_ingest_key@localhost:4318/1`.
 **Dev seed:** org 1, project 1, ingest key `tt_dev_ingest_key`, api key `tt_dev_api_key` (postgres/002_seed.sql).
@@ -84,6 +84,8 @@ backend SDK'ları upstream retry politikasıyla yetinebilir (429/502/503/504, en
 | `tt.otlp.metrics` | `ExportMetricsServiceRequest` protobuf | `project_id` |
 | `tt.otlp.logs` | `ExportLogsServiceRequest` protobuf | `project_id` |
 | `tt.rum` | `RumBatch` protobuf (`proto/rum/v1`) | `project_id` |
+| `tt.replay` | gzip'li replay segment JSON'u (§23) | `project_id` |
+| `tt.profiles` | ham profil gövdesi (pprof / folded, §24) | `project_id` |
 
 Header'lar (hepsi string): `org_id`, `project_id`, `received_at` (unix ms), `client_ip` (sadece geo için, writer sonrası atılır),
 `user_agent` (sadece RUM). Topic'ler 24 saat retention, 24 partition (dev: 3). Writer consumer group: `tt-ingest-writer`.
@@ -123,7 +125,7 @@ ile taşınır; consumer SDK'sı bunu `trooper.consumer.attempt`'e yazar (Rabbit
 Spring Kafka'da `kafka_deliveryAttempt`).
 
 **SDK iç metriği:** her backend SDK'sı yuttuğu hataları `trooper.sdk.errors` counter'ında (meter `TaskTrooper.Telemetry`,
-attr `component`) sayar.
+attr `component`) sayar. Profiling/LLM bileşenleri: `profiler`, `profiler.cpu`, `exporter.profiles`, `llm`.
 
 ## 5. Collector metrikleri (trooper-agent → OTLP metrics → writer)
 
@@ -705,3 +707,192 @@ Faas `relativeToTimeout` sadece `duration_p95|duration_p99` ile geçerli.
   `['k8s.namespace.name']`, `['k8s.node.name']`, `['host.name']`).
 - `GET /logs` yeni filtreler: `pod`, `namespace` (`attrs['k8s.pod.name']`, `attrs['k8s.namespace.name']`).
 - Pod sayfası: "Traces" bölümü `/traces?service=&pod=` listesini gösterir; "Logs" linki `/logs?pod=&namespace=` ile sunucu tarafı filtre.
+
+## 23. Session replay (ADR-021)
+
+**Ingest:** `POST /v1/replay` (ingest-gw :4318). Auth, CORS, `?key=`, internal credential ve content type'lar `/v1/rum` ile aynı
+(§2). Gövde tek segment JSON'u; `Content-Encoding: gzip` önerilir (browser `CompressionStream`). Limit: sıkıştırılmış ≤ 1 MB,
+açılmış ≤ 10 MB → aşarsa 413. gw JSON'u parse edip doğrular (`session_id`, `segment`, `format`, `events` zorunlu), gövdeyi
+**gzip'li** halde `tt.replay`'e yollar (gzip değilse sıkıştırır). Rate limit RUM ile ortak.
+
+```jsonc
+{
+  "resource": { "service": "shop-web", "env": "production", "version": "1.4.0", "platform": "web",   // web | android | ios
+                "sdk_name": "@trooper/replay", "sdk_version": "0.1.0" },
+  "session_id": "…",            // RUM session_id ile aynı
+  "segment": 0,                 // oturum içinde 0'dan artan; web: localStorage'da oturum başına sayaç (sekmeler arası ortak, sayfa yüklemeleri arasında sürer)
+  "start_ts": 1730000000000,    // unix ms, ilk event
+  "end_ts":   1730000005000,    // unix ms, son event
+  "format": "rrweb",            // rrweb (web) | wireframe (mobil)
+  "has_full_snapshot": true,    // rrweb: segment FullSnapshot (type 2) içeriyor; wireframe: segmentte en az bir frame var (yoksa oynatıcı önceki frame'i tutar; her segment `screen` ile başlar)
+  "view_id": "…", "view_name": "/checkout",          // segment başındaki view (opsiyonel)
+  "user_id": "", "anonymous_id": "…",                 // RUM ile aynı (opsiyonel)
+  "stats": { "clicks": 3, "errors": 0, "rage_clicks": 0, "inputs": 1 },   // SDK sayar (opsiyonel)
+  "events": [ … ]
+}
+```
+
+- **rrweb:** `events` = `@rrweb/record` 2.x event'leri olduğu gibi (`{type, data, timestamp}`). Her sayfa yüklemesi ve her
+  `checkoutEveryNms` (5 dk) FullSnapshot ile başlar. Segment ≤ 5 sn veya ≤ 256 KB (sıkıştırmadan önce tahmini) dolunca gönderilir;
+  `pagehide`'da `fetch keepalive` (≤ 64 KB) ile son segment.
+- **wireframe** (mobil) event tipleri:
+  - `{"type":"screen","ts":…,"width":390,"height":844,"density":3,"name":"CheckoutScreen"}` — başta, ekran/rotasyon değişince.
+  - `{"type":"frame","ts":…,"nodes":[Node…]}` — her zaman tam kare (diff yok), sadece hiyerarşi değişince, ≤ 2 kare/sn.
+    `Node = {"id":int,"x","y","w","h" (dp/pt, ekran koordinatı),"kind":"view|text|image|button|input|switch|webview|list|icon",
+    "bg"?:"#rrggbb[aa]","fg"?:"#rrggbb","radius"?:num,"border"?:"#rrggbb","text"?:string,"masked"?:bool,"alpha"?:0..1,
+    "clip"?:[x,y,w,h]}`. Liste çizim sırasıdır (arkadan öne). Maskeli metin uzunluğu korunur (`"•••• •••"`).
+  - `{"type":"touch","ts":…,"x":…,"y":…,"phase":"down|move|up"}` (move ≤ 10/sn), `{"type":"keyboard","ts":…,"visible":bool}`.
+- **Gizlilik (SDK default):** web `maskAllText`, `maskAllInputs` true; `input[type=password]` her zaman maskeli; seçiciler
+  `data-trooper-block` (öğe boyutunda boş kutu), `data-trooper-mask`, `data-trooper-unmask`; canvas, cross-origin iframe, network
+  gövdesi, `<script>` kaydedilmez. Mobil: metin maskeli, görsel = kutu, input/secure text her zaman maskeli; Android
+  `View.setTag(R.id.trooper_unmask, true)` / Compose `Modifier.trooperUnmask()`, iOS `view.trooperUnmask = true`.
+- **Örnekleme:** `replay.sampleRate` (default 0.1), `replay.onErrorSampleRate` (default 1.0; son 60 sn bellekte ring buffer, ERROR
+  event'inde flush + kayda devam). Karar oturum başında verilir, oturum boyunca sabit (web: localStorage, oturum id'si anahtarlı — RUM oturumu sekmeler arası ortak olduğu için karar ve segment sayacı da ortak; her sekme kendi FullSnapshot'ı ile başlar). `replay.enabled=false` tamamen kapatır.
+
+**Kafka:** `tt.replay` — değer gzip'li segment JSON'u; key `project_id`; header'lar §3 + `session_id`, `segment`.
+`tt.replay` ve `tt.profiles` topic'leri `max.message.bytes=10485760` ile açılır (compose; prod/Helm'de aynı); gw bu iki topic için
+ayrı producer kullanır (kayıt ≤ 8 MiB). gw doğrulaması: `session_id` ≤ 128 karakter `[A-Za-z0-9._-]` (S3 anahtarının parçası),
+`segment` 0..999999.
+
+**Writer:** blob'u S3'e yazar, sonra indeks satırını ClickHouse'a (`deploy/clickhouse/005_replay_profiles_llm.sql`).
+- S3: §12'deki `TT_S3_*` env'leri; bucket `TT_REPLAY_S3_BUCKET` (default `tt-replays`, yoksa oluşturulur). Anahtar
+  `<org>/<project>/<yyyy-mm-dd>/<session_id>/<segment:06d>.json.gz` (tarih = `start_ts` UTC). `TT_S3_ENDPOINT` yoksa (default yok)
+  veya bucket 15 sn içinde açılamazsa writer replay topic'ini tüketmez (log + `tt_writer_replay_disabled` gauge = 1). Host'ta
+  çalışan writer için `TT_S3_ENDPOINT=http://localhost:9002`. Nesneler `Content-Encoding: gzip`, `Content-Type: application/json`. Prod'da bucket lifecycle 30 gün.
+- `replay_segments(org_id, project_id, session_id String, segment UInt32, service, env, version, platform, format
+  LowCardinality(String), start_ts, end_ts DateTime64(3), events UInt32, bytes UInt32 (sıkıştırılmış), blob_key String,
+  has_full_snapshot UInt8, clicks, errors, rage_clicks UInt16, view_name String, user_id, anonymous_id String, received_at
+  DateTime64(3))` — `MergeTree`, `PARTITION BY toDate(start_ts)`, `ORDER BY (org_id, project_id, session_id, segment)`,
+  TTL 30 gün. Aynı (session, segment) iki kez gelirse sorgu `argMax(…, received_at)` ile tekler.
+- MV `replay_sessions` (`AggregatingMergeTree`, `ORDER BY (org_id, project_id, service, session_id)`): `min(start_ts)`,
+  `max(end_ts)`, `count()` segment, `sum(clicks|errors|rage_clicks)`, `any(platform|format|user_id|anonymous_id)`,
+  `argMin(view_name, start_ts)` ilk view. Liste sorgusu buradan.
+
+**API** (`openapi.yaml`, tenant filtresi zorunlu):
+- `GET /api/v1/replays?app=&range=&q=&hasErrors=&minDurationS=&limit=` → `{ replays: ReplaySummary[] }`
+  `ReplaySummary = { sessionId, app, platform, startedAt (ms), durationMs, segments, user: {id?, anonymousId}, country?,
+  device?, browser?, os?, appVersion?, firstView, views, errors, clicks, rageClicks }` (kullanıcı/cihaz alanları `rum_events`'ten).
+  `q` user id / anonymous id / view adında arar. Sıra: en yeni önce.
+- `GET /api/v1/replays/{sessionId}` → `{ summary: ReplaySummary, segments: [{ segment, startTs, endTs, events, bytes,
+  hasFullSnapshot }], timeline: TimelineItem[] }`. `TimelineItem = { ts, kind: 'view'|'action'|'error'|'resource'|'vital',
+  label, detail?, viewName?, traceId?, fingerprint?, status?, durationMs? }` — `rum_events`'ten (oturumun tüm event'leri, ≤ 2000).
+- `GET /api/v1/replays/{sessionId}/segments/{segment}` → segment JSON'u (S3'teki gzip gövde `Content-Encoding: gzip` ile
+  olduğu gibi). 404: segment yok veya TTL geçti.
+- Mevcut uçlara ek: `GET /apps/{app}/sessions` satırlarında `hasReplay: boolean`; `GET /apps/{app}/errors/{fingerprint}` ve
+  `GET /errors/{fingerprint}` cevabında üst seviye `replay?: { sessionId, offsetMs }` (replay'in kapsadığı en yeni oluşum; backend hatasında trace id taşıyan RUM resource event'i üzerinden).
+
+**UI:** `/replays/:sessionId` oynatıcı (`?t=<offsetMs>`), client app detayında **Replays** sekmesi; Sessions satırında ve hata
+çekmecesinde "Watch replay". Web oynatıcı `@rrweb/replay`; wireframe oynatıcı kendi SVG'miz.
+
+## 24. Continuous profiling (ADR-022)
+
+**Ingest:** `POST /v1/profiles` (ingest-gw :4318; `x-trooper-key` / Bearer / internal credential; `Origin` header'lı istek 403, CORS yok,
+`?key=` **kabul edilmez**). gw profili parse ederek doğrular (bozuksa 400); `end − start` ≤ 1 saat, `unit` tiple uyumlu olmalı. Gövde tek profil, ≤ 4 MB (açılmış ≤ 32 MB); `Content-Encoding: gzip` her iki formatta kabul edilir. Metadata query parametreleriyle:
+
+| Param | Zorunlu | Anlam |
+|---|---|---|
+| `service` | ✓ | `service.name` |
+| `env`, `version`, `host`, `runtime` (`go|jvm|node|dotnet|python`) | | resource |
+| `start`, `end` | ✓ | unix ms, profilin kapsadığı pencere |
+| `format` | | `pprof` (default; `Content-Type: application/octet-stream`, gzip'li veya değil — magic `1f8b` ile anlaşılır) veya `folded` (`text/plain`) |
+| `type`, `unit` | folded'da ✓ | aşağıdaki tip adları; pprof'ta sample type'lardan çıkarılır |
+
+- **Tipler** (`type` / `unit`): `cpu` (nanoseconds), `wall` (nanoseconds), `alloc_space` (bytes), `alloc_objects` (count),
+  `inuse_space` (bytes), `inuse_objects` (count), `goroutines` (count), `lock` (nanoseconds — mutex/monitor bekleme),
+  `block` (nanoseconds). pprof sample type eşlemesi: `cpu/nanoseconds`→cpu, `samples/count` atlanır (cpu varsa),
+  `alloc_space/bytes`, `alloc_objects/count`, `inuse_space/bytes`, `inuse_objects/count`, `goroutine/count`→goroutines,
+  `delay/nanoseconds` (mutex)→lock (block profilinde `?type=block` ile), `contentions/count` atlanır.
+- **folded:** satır başına `frame1;frame2;…;frameN <değer>` (root önce, leaf son, değer tamsayı, `unit` cinsinden).
+  `# trooper.route=<route> trooper.method=<METHOD>` satırı sonraki satırlara endpoint etiketi uygular (bir sonraki `#` satırına kadar;
+  `# ` tek başına etiketi temizler). Frame adında `;` ve satır sonu olamaz.
+- **pprof label'ları:** sample label `trooper.route` + `trooper.method` → endpoint. Diğer label'lar atılır.
+- **Frame adı:** Go `pkg.(*T).Method`, JVM `com.acme.Foo.bar`, Node `fn (path/to/file.js)` (satır/sütun yok; anonim → `(anonymous)`).
+  Dosya/satır saklanmaz. Stack derinliği > 128 ise root tarafı `[truncated]` frame'i ile kesilir.
+
+**Kafka:** `tt.profiles` — değer ham gövde (gzip'li olabilir); header'lar §3 + `service`, `env`, `version`, `host`, `runtime`,
+`start`, `end`, `format`, `type`, `unit`.
+
+**Writer** (`deploy/clickhouse/005_replay_profiles_llm.sql`):
+- `profile_stacks(org_id, project_id, ts DateTime (profil start'ı), service, env, version, host, runtime, type, unit, route,
+  method LowCardinality(String), stack_hash UInt64 (cityHash64(stack)), stack Array(LowCardinality(String)), value Int64)` —
+  `PARTITION BY toDate(ts)`, `ORDER BY (org_id, project_id, service, type, ts, stack_hash)`, TTL 14 gün. Profil + tip + route +
+  stack başına bir satır (aynı stack'ler writer'da toplanır). Profil başına tip başına ≤ 10.000 stack; fazlası değere göre
+  küçükler `[other]` tek frame'li stack'e toplanır. Değeri 0 olanlar yazılmaz.
+- `profiles(org_id, project_id, ts DateTime64(3) (start), end_ts DateTime64(3), service, env, version, host, runtime, type, unit,
+  total Int64, stacks UInt32)` — profil + tip başına bir satır, `ORDER BY (org_id, project_id, service, type, ts)`, TTL 14 gün.
+  CPU kullanımı (core) = `total / ((end_ts - ts) ns)`; zaman serisi buradan.
+
+**API:**
+- `GET /api/v1/profiles/types?service=&range=` → `{ types: [{ type, unit, runtime, hosts: string[], versions: string[],
+  routes: number (route etiketli stack var mı / kaç route) }] }` (veri olanlar).
+- `GET /api/v1/profiles/flamegraph?service=&type=&range=&env=&version=&host=&route=&method=` →
+  `{ type, unit, total, profiles, from, to, root: FlameNode }`, `FlameNode = { name, value (total), self, children: FlameNode[] }`.
+  Kök adı `"all"`. Toplam değerin < %0.05'i olan düğümler kesilir (değerleri ebeveynin `self`'inde kalmaz, `"[pruned]"` adlı tek
+  çocukta toplanır); ≤ 5000 düğüm. Çocuklar değere göre azalan.
+- `GET /api/v1/profiles/diff?service=&type=&env=&host=&route=&method=` + taban ve hedef: (`baseVersion` & `version`) **veya**
+  (`baseFrom`, `baseTo`, `from`, `to` unix ms) → `{ type, unit, total, baseTotal, root: DiffNode }`, `DiffNode = FlameNode +
+  { baseValue, baseSelf }` (iki ağaç birleşik; olmayan tarafta 0). UI pay farkını (`value/total − baseValue/baseTotal`) çizer.
+- `GET /api/v1/profiles/top?service=&type=&range=&env=&version=&host=&route=&method=&limit=50` → `{ unit, total, functions:
+  [{ name, self, total }] }` (`total` = fonksiyonu içeren stack'lerin toplamı, recursion bir kez sayılır).
+- `GET /api/v1/profiles/series?service=&type=&range=&env=&version=` → Seri (§8): `cpu`/`wall` için ortalama core, diğerlerinde
+  dakika başına ortalama değer; host başına seri (≤ 8, fazlası "Other").
+- Endpoint sayfası route/method'u servis endpoint'inden alır; profil yoksa UI "Enable profiling" talimatını gösterir.
+
+**SDK config:** `TROOPER_PROFILING` (`true|false`, default false), `TROOPER_PROFILING_TYPES` (virgüllü; default
+`cpu,alloc_space,inuse_space` + Go'da `goroutines`), `TROOPER_PROFILING_PERIOD` (sn, default 60), `TROOPER_PROFILING_CPU_DURATION`
+(sn, default 10). Node: default `cpu,inuse_space` (V8 aynı anda tek sampling heap profiler çalıştırır), route etiketi yok (V8 sample'ları async context taşımaz); `cpu` = main thread `(idle)` hariç, `wall` opsiyonel. Overhead bütçesi < %2 CPU (sdk.md İlke 2). Gönderim başarısızsa profil atılır (kuyruk yok), backoff §2.
+
+## 25. AI / LLM monitoring (ADR-023)
+
+**Wire:** OTLP span (yeni endpoint yok). Writer'ın okuduğu OTel GenAI attribute'ları (span):
+
+| Attribute | Anlam |
+|---|---|
+| `gen_ai.operation.name` | `chat`, `text_completion`, `embeddings`, `generate_content`, `execute_tool`, `invoke_agent`, `create_agent` — **varlığı span'ı LLM span'ı yapar** |
+| `gen_ai.provider.name` (eski `gen_ai.system`) | `openai`, `anthropic`, `gcp.gemini`, `gcp.vertex_ai`, `aws.bedrock`, `azure.ai.openai`, `mistral_ai`, `cohere`, `groq`, `deepseek`, `x_ai`, `ollama`, `openrouter`, `together_ai`, `fireworks_ai`, `perplexity`, `cerebras` … |
+| `gen_ai.request.model`, `gen_ai.response.model` | model (response varsa o kazanır) |
+| `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens` | token'lar (int) |
+| `gen_ai.usage.cache_read.input_tokens`, `gen_ai.usage.cache_creation.input_tokens` | prompt cache token'ları (Anthropic/OpenAI) — **`input_tokens` bunları da içerir** (OTel semconv; Anthropic'te SDK `input_tokens + cache_read + cache_creation` yazar, OpenAI `prompt_tokens` zaten dahil). Maliyet: `(input − cache_read − cache_write) × input fiyatı + cache_read × cacheRead + cache_write × cacheWrite (yoksa input fiyatı) + output × output fiyatı` |
+| `gen_ai.request.max_tokens`, `gen_ai.request.temperature`, `gen_ai.response.finish_reasons` (string[]), `gen_ai.response.id`, `gen_ai.conversation.id`, `gen_ai.agent.name`, `gen_ai.tool.name` | meta (attrs'ta kalır) |
+| `trooper.llm.ttft_ms` (double) | stream'de ilk token süresi (SDK ölçer) |
+| `gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions` (JSON string) | **sadece `captureContent`** — writer bunları attrs'tan çıkarıp `llm_content`'e yazar |
+
+Vercel AI SDK provider span'ları (`ai.*.doGenerate|doStream|doEmbed`) `gen_ai.operation.name` taşımaz: writer `ai.operationId` / `gen_ai.system`'dan tamamlar (`anthropic.messages` → `anthropic`, TTFT `ai.response.msToFirstChunk`); `@trooper/node` bunu SDK'da da yapar.
+Eski OpenLLMetry adları da kabul: `gen_ai.prompt.N.*` / `gen_ai.completion.N.*` → içerik; `llm.usage.*` → token'lar.
+OTel log event'i `gen_ai.client.inference.operation.details` gelirse içerik oradan alınır.
+
+**Writer:**
+- LLM span'ında `dep_kind = 'ai'`, `dep = "<provider> · <model>"` (client/internal fark etmez; `execute_tool`/`invoke_agent`/
+  `create_agent` dep üretmez). Aynı istekte altındaki HTTP client span'ı (ör. `HTTP · api.openai.com`) **dep olarak sayılmaz**
+  (parent'ı LLM span'ı olan HTTP client span'ı atlanır) — süre çift sayılmasın.
+- `spans`'a normal yazılır (içerik attr'ları hariç). `llm_content(org_id, project_id, ts DateTime64(6), trace_id, span_id,
+  service, system String, input String, output String)` — alan başına 32 KB'ta kesilir (`…[truncated]`), TTL 7 gün,
+  `ORDER BY (org_id, project_id, trace_id, span_id)`.
+- MV `llm_1m` (`spans`'tan, sadece model çağrıları — `execute_tool` / `invoke_agent` / `create_agent` hariç; `/ai/calls` ve trace `llm` alanı da aynı kural; `AggregatingMergeTree`): `org_id, project_id, service, env, provider, model, operation, route
+  (entry route), method, minute | calls, errors, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens
+  (SimpleAggregateFunction(sum, UInt64)), duration_hist (quantilesTDigestWeighted), ttft_hist` — TTL 30 gün; MV `llm_1h` 13 ay.
+  `sample_weight` ile çarpılır (tail sampling).
+
+**API:**
+- `GET /api/v1/ai/overview?range=&env=&service=&provider=&model=` → `{ totals: { calls, errors, errorRate, inputTokens,
+  outputTokens, cacheReadTokens, costUsd (fiyatı bilinen modellerin toplamı; hiçbirinin fiyatı yoksa null), costPartial: boolean (fiyatsız çağrı var), p50Ms, p95Ms, ttftP95Ms? },
+  series: { calls, tokens (input/output), cost (model başına ≤ 8 + Other), latency (p95) },
+  byModel: [{ provider, model, calls, errors, inputTokens, outputTokens, costUsd, p95Ms, priceKnown }],
+  byService: [{ service, calls, inputTokens, outputTokens, costUsd, models: string[] }],
+  byEndpoint: [{ service, route, method, calls, avgInputTokens, avgOutputTokens, costUsd, costPerCallUsd, p95Ms }] }`.
+- `GET /api/v1/ai/calls?range=&service=&provider=&model=&errorsOnly=&route=&limit=50` → `{ calls: [{ ts, traceId, spanId,
+  service, route, provider, model, operation, inputTokens, outputTokens, costUsd, durationMs, ttftMs?, error?, finishReason?,
+  hasContent }] }` (son çağrılar, `spans`'tan).
+- `GET /api/v1/ai/calls/{traceId}/{spanId}` → `{ call, attributes: Record<string,string>, content?: { system?, input, output } }`
+  (`input`/`output` JSON string — GenAI mesaj dizisi; UI rol bazında gösterir).
+- `GET /api/v1/ai/prices` → `{ updated (default tablonun tarihi), prices: [{ provider, model, inputPerMTok, outputPerMTok, cacheReadPerMTok?, cacheWritePerMTok?,
+  source: 'default'|'org' }] }`; `PUT /api/v1/ai/prices` (admin+) `{ provider, model, inputPerMTok, outputPerMTok, … }` org
+  override; `DELETE /api/v1/ai/prices?provider=&model=` default'a döner. Fiyat anahtarı **aile** + model: provider aileye indirgenir (`gcp.gemini`/`gcp.vertex_ai` → `google`, `azure.ai.openai` → `openai`, `aws.bedrock` → modelin üreticisi, ör. `anthropic.claude-…` → `anthropic`). Model eşleşmesi: tam ad, yoksa alfanümerik olmayan sınırda en uzun önek
+  (ör. `claude-sonnet-4-5-20250929` → `claude-sonnet-4-5`). Varsayılan fiyatlar `services/api/internal/llmprice/defaults.json`.
+  Postgres `llm_prices(org_id, provider, model, input_per_mtok, output_per_mtok, cache_read_per_mtok, cache_write_per_mtok,
+  updated_by, updated_at)` (`deploy/postgres/012_llm_prices.sql`).
+- `GET /api/v1/services/{id}` cevabına `hasAi: boolean`; servis kapsamı `ai/overview?service=`.
+- `GET /api/v1/traces/{id}` span'larında LLM span'ı için `llm?: { provider, model, operation, inputTokens, outputTokens,
+  costUsd, ttftMs?, hasContent }`.
+
+**SDK yüzeyi:** bkz. sdk.md § AI / LLM. Ortak config: `TROOPER_LLM_CAPTURE_CONTENT` (`true|false`, default false).

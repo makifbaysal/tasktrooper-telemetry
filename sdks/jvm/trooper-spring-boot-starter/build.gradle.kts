@@ -6,6 +6,7 @@ description = "TaskTrooper Spring Boot 3 starter (no agent): OTel Spring Boot st
 
 dependencies {
     api(project(":trooper-otel-core"))
+    api(project(":trooper-llm"))
     api(platform(libs.otel.instrumentation.bom))
     api(platform(libs.otel.instrumentation.bom.alpha))
     api(libs.otel.spring.boot.starter)

@@ -70,6 +70,66 @@ export interface TrooperOptions {
   batchDelayMs?: number;
   /** Bounded span/log queue; items beyond it are dropped (never blocks). Default 2048. */
   maxQueueSize?: number;
+  /**
+   * Continuous profiling (`node:inspector` CPU + sampling heap profiler, folded stacks to `POST /v1/profiles`).
+   * Env: `TROOPER_PROFILING`, `TROOPER_PROFILING_TYPES`, `TROOPER_PROFILING_PERIOD`, `TROOPER_PROFILING_CPU_DURATION`.
+   * Default off. In AWS Lambda only the explicit option turns it on (the env vars are ignored there).
+   */
+  profiling?: boolean | ProfilingOptions;
+  /** LLM instrumentation defaults (`instrumentOpenAI` / `instrumentAnthropic`). */
+  llm?: LlmOptions;
+}
+
+/** Profile types the Node SDK can produce (.ai/contracts.md §24). */
+export type ProfileType = 'cpu' | 'wall' | 'inuse_space' | 'alloc_space';
+export const PROFILE_TYPES: readonly ProfileType[] = ['cpu', 'wall', 'inuse_space', 'alloc_space'];
+/** Default Node profile types: on-CPU time of the main thread + live heap. */
+export const DEFAULT_PROFILE_TYPES: readonly ProfileType[] = ['cpu', 'inuse_space'];
+
+export interface ProfilingOptions {
+  /** Default true when the object form is used. */
+  enabled?: boolean;
+  /**
+   * `cpu` (main-thread on-CPU time, idle samples excluded), `wall` (same samples incl. `[idle]`), `inuse_space` (live heap,
+   * sampled), `alloc_space` (bytes allocated during the period, sampled). The V8 heap sampler runs in one mode only: when
+   * both heap types are requested `inuse_space` wins. Default `cpu,inuse_space`.
+   */
+  types?: ProfileType[];
+  /** Seconds between profiles. Default 60. */
+  periodS?: number;
+  /** Length of each CPU profile, seconds (≤ periodS). Default 10. */
+  cpuDurationS?: number;
+  /** CPU sampling interval, microseconds. Default 10 000 (10 ms). */
+  cpuSamplingIntervalUs?: number;
+  /** Heap sampling interval, bytes. Default 524 288 (512 KiB). */
+  heapSamplingIntervalBytes?: number;
+}
+
+export interface ResolvedProfiling {
+  types: ProfileType[];
+  periodMs: number;
+  cpuDurationMs: number;
+  cpuSamplingIntervalUs: number;
+  heapSamplingIntervalBytes: number;
+}
+
+export interface LlmOptions {
+  /**
+   * Record prompts / completions (`gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions`).
+   * Default false (PII). Env: `TROOPER_LLM_CAPTURE_CONTENT=true`.
+   */
+  captureContent?: boolean;
+  /**
+   * OpenAI chat streams only report token usage with `stream_options: { include_usage: true }`. When true the wrapper
+   * adds it to streaming requests that don't set `stream_options.include_usage` (the stream then ends with an extra chunk
+   * whose `choices` is empty). Default false: the request is never changed and such streams carry no token counts.
+   */
+  injectStreamUsage?: boolean;
+}
+
+export interface ResolvedLlm {
+  captureContent: boolean;
+  injectStreamUsage: boolean;
 }
 
 export interface ResolvedConfig {
@@ -94,6 +154,11 @@ export interface ResolvedConfig {
   resourceAttributes: Record<string, string | number | boolean>;
   disableInstrumentations: Set<string> | true;
   instrumentations: Instrumentation[];
+  /** `POST /v1/profiles` URL (undefined without DSN / endpoint). */
+  profilesUrl?: string;
+  /** Profiling settings; undefined = profiling off. */
+  profiling?: ResolvedProfiling;
+  llm: ResolvedLlm;
   /** Why the DSN was rejected, if it was. */
   dsnError?: string;
 }
@@ -113,7 +178,7 @@ export function parseRate(v: unknown): number | undefined {
   return Number.isFinite(n) && n > 0 && n <= 1 ? n : undefined;
 }
 
-function parseBool(v: string | undefined): boolean | undefined {
+export function parseBool(v: string | undefined): boolean | undefined {
   const t = v?.trim().toLowerCase();
   if (t === 'true' || t === '1' || t === 'yes') return true;
   if (t === 'false' || t === '0' || t === 'no') return false;
@@ -133,6 +198,52 @@ export function parseHeaders(v: string | undefined): Record<string, string> {
     }
   }
   return out;
+}
+
+function positive(...vals: unknown[]): number | undefined {
+  for (const v of vals) {
+    const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v.trim()) : NaN;
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return undefined;
+}
+
+function profileTypes(v: unknown): ProfileType[] | undefined {
+  const list = Array.isArray(v) ? v : typeof v === 'string' ? v.split(',') : undefined;
+  if (!list) return undefined;
+  const out: ProfileType[] = [];
+  for (const raw of list) {
+    const t = String(raw).trim().toLowerCase() as ProfileType;
+    if (PROFILE_TYPES.includes(t) && !out.includes(t)) out.push(t);
+  }
+  return out.length ? out : undefined;
+}
+
+/** Profiling config: explicit option > `TROOPER_PROFILING*` env (ignored in AWS Lambda) > off. Never throws. */
+export function resolveProfiling(opt: TrooperOptions['profiling'], env: Env = process.env): ResolvedProfiling | undefined {
+  const o: ProfilingOptions = typeof opt === 'object' && opt !== null ? opt : {};
+  let on: boolean;
+  if (typeof opt === 'boolean') on = opt;
+  else if (typeof opt === 'object' && opt !== null) on = opt.enabled ?? true;
+  else on = !env.AWS_LAMBDA_FUNCTION_NAME && parseBool(env.TROOPER_PROFILING) === true;
+  if (!on) return undefined;
+  const periodMs = (positive(o.periodS, env.TROOPER_PROFILING_PERIOD) ?? 60) * 1000;
+  const cpuMs = (positive(o.cpuDurationS, env.TROOPER_PROFILING_CPU_DURATION) ?? 10) * 1000;
+  return {
+    types: profileTypes(o.types) ?? profileTypes(env.TROOPER_PROFILING_TYPES) ?? [...DEFAULT_PROFILE_TYPES],
+    periodMs: Math.max(1000, periodMs),
+    cpuDurationMs: Math.max(100, Math.min(cpuMs, periodMs)),
+    cpuSamplingIntervalUs: Math.round(positive(o.cpuSamplingIntervalUs) ?? 10_000),
+    heapSamplingIntervalBytes: Math.round(positive(o.heapSamplingIntervalBytes) ?? 512 * 1024),
+  };
+}
+
+/** LLM config: explicit option > `TROOPER_LLM_CAPTURE_CONTENT` > false. */
+export function resolveLlm(opt: LlmOptions | undefined, env: Env = process.env): ResolvedLlm {
+  return {
+    captureContent: opt?.captureContent ?? parseBool(env.TROOPER_LLM_CAPTURE_CONTENT) ?? false,
+    injectStreamUsage: opt?.injectStreamUsage ?? false,
+  };
 }
 
 /**
@@ -181,6 +292,9 @@ export function resolveConfig(opts: TrooperOptions = {}, env: Env = process.env)
     resourceAttributes: { ...(opts.resourceAttributes ?? {}) },
     disableInstrumentations: opts.disableInstrumentations === true ? true : new Set(opts.disableInstrumentations ?? []),
     instrumentations: opts.instrumentations ?? [],
+    profilesUrl: base ? base + '/v1/profiles' : undefined,
+    profiling: resolveProfiling(opts.profiling, env),
+    llm: resolveLlm(opts.llm, env),
     dsnError,
   };
 }

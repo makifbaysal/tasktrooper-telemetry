@@ -13,6 +13,8 @@ import org.springframework.core.env.MapPropertySource;
 /**
  * Translates {@code trooper.*} (application.yml, or {@code TROOPER_*} env vars via relaxed binding) into {@code otel.*}
  * defaults for the OpenTelemetry Spring Boot starter. Added with the lowest precedence: explicit {@code otel.*} wins.
+ * {@code trooper.profiling.*} starts the JFR profiler once the SDK resource is built; {@code trooper.llm.capture-content}
+ * also configures {@code TrooperLlm}.
  */
 public class TrooperEnvironmentPostProcessor implements EnvironmentPostProcessor, Ordered {
     public static final String PROPERTY_SOURCE = "trooperOtelDefaults";
@@ -24,6 +26,8 @@ public class TrooperEnvironmentPostProcessor implements EnvironmentPostProcessor
             Map<String, Object> props = new LinkedHashMap<>(config.toOtelProperties());
             environment.getPropertySources().remove(PROPERTY_SOURCE);
             environment.getPropertySources().addLast(new MapPropertySource(PROPERTY_SOURCE, props));
+            // TrooperLlm / TrooperChatModelListener read this; null keeps the -D / TROOPER_* lookup
+            io.tasktrooper.telemetry.llm.TrooperLlm.setCaptureContent(config.llmCaptureContent());
         } catch (Throwable t) {
             SdkErrors.record("spring_config", t); // never break application startup
         }

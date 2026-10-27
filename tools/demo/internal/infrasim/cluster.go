@@ -332,3 +332,15 @@ func factor(now time.Time) float64 {
 	h := float64(now.Hour()) + float64(now.Minute())/60
 	return 1 + 0.25*math.Sin((h-9)/24*2*math.Pi)
 }
+
+// PodNames returns the simulated pod names of a service's Deployment in namespace shop (stable across runs),
+// e.g. for synthetic per-pod profiles.
+func PodNames(service string) []string {
+	var out []string
+	for _, p := range NewWorld(time.Now()).pods {
+		if p.ns == Namespace && p.workload == service {
+			out = append(out, p.name)
+		}
+	}
+	return out
+}

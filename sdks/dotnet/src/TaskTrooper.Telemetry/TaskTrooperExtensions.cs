@@ -44,6 +44,8 @@ public static class TaskTrooperOpenTelemetryBuilderExtensions
         }
 
         services.AddSingleton<TaskTrooperMarker>();
+        // as early as possible: M.E.AI caches its EnableSensitiveData default on first use
+        if (TrooperLlm.EffectiveCaptureContent == true) EnableGenAIContentEnv();
         services.AddSingleton(sp => new TaskTrooperOptionsSetup(sp));
         services.AddSingleton<IConfigureOptions<TaskTrooperOptions>>(sp => sp.GetRequiredService<TaskTrooperOptionsSetup>());
         services.AddSingleton<IPostConfigureOptions<TaskTrooperOptions>>(sp => sp.GetRequiredService<TaskTrooperOptionsSetup>());
@@ -58,7 +60,8 @@ public static class TaskTrooperOpenTelemetryBuilderExtensions
                 .AddHttpClientInstrumentation(o => o.RecordException = true)
                 .AddSqlClientInstrumentation()
                 .SetSampler(sp => new TrooperSampler(Options(sp).SampleRate))
-                .AddProcessor(new TrooperSpanProcessor());
+                .AddProcessor(new TrooperSpanProcessor())
+                .AddProcessor(new TrooperGenAIProcessor());
 
             ((IDeferredTracerProviderBuilder)tracing).Configure((sp, b) =>
             {
@@ -66,6 +69,7 @@ public static class TaskTrooperOpenTelemetryBuilderExtensions
                 TrooperPropagation.ServiceName = o.ServiceName;
                 Sdk.SetDefaultTextMapPropagator(new TrooperTextMapPropagator());
                 if (o.Sources.Count > 0) b.AddSource(o.Sources.ToArray());
+                ConfigureLlm(o, b);
                 if (Exporter(o, "v1/traces") is { } exporterOptions && o.EnableTraces)
                     b.AddProcessor(new BatchActivityExportProcessor(new OtlpTraceExporter(exporterOptions)));
             });
@@ -100,6 +104,46 @@ public static class TaskTrooperOpenTelemetryBuilderExtensions
             });
 
         return new TaskTrooperBuilder(builder);
+    }
+
+    /// <summary>GenAI sources + content capture (contracts §25). Never throws.</summary>
+    internal static void ConfigureLlm(TaskTrooperOptions o, TracerProviderBuilder b)
+    {
+        try
+        {
+            if (o.LlmCaptureContent is { } capture) TrooperLlm.CaptureContent = capture;
+            if (!o.Enabled || !o.EnableLlm) return;
+            b.AddSource(TrooperLlm.GenAISources.ToArray());
+
+            // OpenAI .NET SDK only emits activities behind this switch; respect an explicit opt-out
+            if (!AppContext.TryGetSwitch(TrooperLlm.OpenAIOpenTelemetrySwitch, out _))
+                AppContext.SetSwitch(TrooperLlm.OpenAIOpenTelemetrySwitch, true);
+
+            // M.E.AI reads this as the default of OpenTelemetryChatClient.EnableSensitiveData (an explicit
+            // EnableSensitiveData in code still wins)
+            if (TrooperLlm.EffectiveCaptureContent == true) EnableGenAIContentEnv();
+        }
+        catch (Exception e)
+        {
+            TrooperSelfDiagnostics.Error("llm.config", e);
+        }
+    }
+
+    /// <summary>
+    /// Sets <c>OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true</c> (unless set): the default of M.E.AI's
+    /// <c>EnableSensitiveData</c> for telemetry clients created afterwards.
+    /// </summary>
+    private static void EnableGenAIContentEnv()
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(System.Environment.GetEnvironmentVariable(TrooperLlm.OtelCaptureContentEnv)))
+                System.Environment.SetEnvironmentVariable(TrooperLlm.OtelCaptureContentEnv, "true");
+        }
+        catch (Exception e)
+        {
+            TrooperSelfDiagnostics.Error("llm.config", e);
+        }
     }
 
     private static TaskTrooperOptions Options(IServiceProvider sp) => sp.GetRequiredService<IOptions<TaskTrooperOptions>>().Value;

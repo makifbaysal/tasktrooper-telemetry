@@ -40,6 +40,9 @@ tags:
   - { name: Hosts & Kubernetes, description: "Hosts, containers, processes and Kubernetes (trooper-agent host / cluster modes, ADR-019)" }
   - { name: Serverless, description: "AWS Lambda and Azure Functions (ADR-020)" }
   - { name: Code insights, description: "Repo analysis, code inventory and monitor suggestions (services/codeintel)" }
+  - { name: Session replay, description: "Recorded sessions (rrweb web / wireframe mobile), segments from S3, RUM timeline (ADR-021)" }
+  - { name: Profiling, description: "Continuous profiling: flame graphs, diffs, top functions, series (ADR-022)" }
+  - { name: AI monitoring, description: "LLM calls: tokens, estimated cost, latency, prompts; price table (ADR-023)" }
 paths:
   /healthz:
     get:
@@ -94,7 +97,7 @@ paths:
       responses:
         '200':
           description: OK
-          content: { application/json: { schema: { $ref: '#/components/schemas/Service' } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/ServiceDetail' } } }
         '400': { $ref: '#/components/responses/E400' }
         '404': { $ref: '#/components/responses/E404' }
         '401': { $ref: '#/components/responses/E401' }
@@ -2695,6 +2698,231 @@ paths:
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/MonitorTemplate' } } } } }
         '401': { $ref: '#/components/responses/E401' }
+  /api/v1/replays:
+    get:
+      tags: [Session replay]
+      operationId: listReplays
+      summary: 'Recorded sessions active in the range, newest first (replay_sessions + user / device fields from rum_events)'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+        - { name: app, in: query, description: 'Client app (RUM service name)', schema: { type: string } }
+        - { name: q, in: query, description: 'Searches session id, user id, anonymous id and view names', schema: { type: string } }
+        - { name: hasErrors, in: query, schema: { type: boolean } }
+        - { name: minDurationS, in: query, schema: { type: number } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 500 } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ReplayList' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/replays/{sessionId}:
+    get:
+      tags: [Session replay]
+      operationId: getReplay
+      summary: 'One recorded session: summary, segment index and the RUM timeline (≤ 2000 events)'
+      parameters:
+        - { name: sessionId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ReplayDetail' } } } }
+        '401': { $ref: '#/components/responses/E401' }
+        '404': { $ref: '#/components/responses/E404' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/replays/{sessionId}/segments/{segment}:
+    get:
+      tags: [Session replay]
+      operationId: getReplaySegment
+      summary: 'Segment JSON (contracts §23) streamed from S3 as stored, with Content-Encoding: gzip'
+      parameters:
+        - { name: sessionId, in: path, required: true, schema: { type: string } }
+        - { name: segment, in: path, required: true, schema: { type: integer, minimum: 0 } }
+      responses:
+        '200':
+          description: 'Segment JSON ({resource, session_id, segment, start_ts, end_ts, format, events, …}); body is gzip (Content-Encoding: gzip)'
+          content: { application/json: { schema: { type: object } } }
+        '401': { $ref: '#/components/responses/E401' }
+        '404': { $ref: '#/components/responses/E404' }
+        '500': { $ref: '#/components/responses/E500' }
+        '503': { $ref: '#/components/responses/E503' }
+  /api/v1/profiles/types:
+    get:
+      tags: [Profiling]
+      operationId: getProfileTypes
+      summary: 'Profile types with data for a service in the range'
+      parameters:
+        - { name: service, in: query, required: true, schema: { type: string } }
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ProfileTypes' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/profiles/flamegraph:
+    get:
+      tags: [Profiling]
+      operationId: getFlamegraph
+      summary: 'Merged flame graph (root "all"; nodes < 0.05 % of the total folded into a "[pruned]" child; ≤ 5000 nodes; children by value desc)'
+      parameters:
+        - $ref: '#/components/parameters/profileService'
+        - $ref: '#/components/parameters/profileType'
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+        - { name: version, in: query, schema: { type: string } }
+        - { name: host, in: query, schema: { type: string } }
+        - { name: route, in: query, description: 'Endpoint route (trooper.route label)', schema: { type: string } }
+        - { name: method, in: query, schema: { type: string } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Flamegraph' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/profiles/diff:
+    get:
+      tags: [Profiling]
+      operationId: getFlamegraphDiff
+      summary: 'Merged target + base trees: baseVersion & version (window = range, default 24h) or baseFrom, baseTo, from, to (unix ms)'
+      parameters:
+        - $ref: '#/components/parameters/profileService'
+        - $ref: '#/components/parameters/profileType'
+        - $ref: '#/components/parameters/env'
+        - { name: host, in: query, schema: { type: string } }
+        - { name: route, in: query, schema: { type: string } }
+        - { name: method, in: query, schema: { type: string } }
+        - { name: baseVersion, in: query, schema: { type: string } }
+        - { name: version, in: query, schema: { type: string } }
+        - { name: range, in: query, description: 'Version mode only (default 24h)', schema: { type: string, enum: [15m, 30m, 1h, 6h, 24h, 7d] } }
+        - { name: baseFrom, in: query, schema: { type: integer } }
+        - { name: baseTo, in: query, schema: { type: integer } }
+        - { name: from, in: query, schema: { type: integer } }
+        - { name: to, in: query, schema: { type: integer } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/FlameDiff' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/profiles/top:
+    get:
+      tags: [Profiling]
+      operationId: getTopFunctions
+      summary: 'Functions by self value; total = stacks containing the function (recursion counted once)'
+      parameters:
+        - $ref: '#/components/parameters/profileService'
+        - $ref: '#/components/parameters/profileType'
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+        - { name: version, in: query, schema: { type: string } }
+        - { name: host, in: query, schema: { type: string } }
+        - { name: route, in: query, schema: { type: string } }
+        - { name: method, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 500 } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TopFunctions' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/profiles/series:
+    get:
+      tags: [Profiling]
+      operationId: getProfileSeries
+      summary: 'Per host (≤ 8, rest "other"): cpu / wall → average cores; other types → value per minute'
+      parameters:
+        - $ref: '#/components/parameters/profileService'
+        - $ref: '#/components/parameters/profileType'
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+        - { name: version, in: query, schema: { type: string } }
+        - { name: host, in: query, schema: { type: string } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SeriesSet' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/ai/overview:
+    get:
+      tags: [AI monitoring]
+      operationId: getAIOverview
+      summary: 'LLM totals, series (per bucket: calls / errors, input / output tokens, cost per model ≤ 8 + other, p95), by model / service / endpoint (llm_1m, llm_1h for 7d)'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+        - { name: service, in: query, schema: { type: string } }
+        - { name: provider, in: query, description: 'gen_ai.provider.name', schema: { type: string } }
+        - { name: model, in: query, schema: { type: string } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AIOverview' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/ai/calls:
+    get:
+      tags: [AI monitoring]
+      operationId: listAICalls
+      summary: 'Newest LLM spans (gen_ai.operation.name set)'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+        - { name: service, in: query, schema: { type: string } }
+        - { name: provider, in: query, schema: { type: string } }
+        - { name: model, in: query, schema: { type: string } }
+        - { name: route, in: query, description: 'Entry route of the request', schema: { type: string } }
+        - { name: errorsOnly, in: query, schema: { type: boolean } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 500 } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AICalls' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/ai/calls/{traceId}/{spanId}:
+    get:
+      tags: [AI monitoring]
+      operationId: getAICall
+      summary: 'One LLM span: call, span attributes, captured content (llm_content, captureContent only)'
+      parameters:
+        - { name: traceId, in: path, required: true, schema: { type: string, pattern: '^[0-9a-fA-F]{32}$' } }
+        - { name: spanId, in: path, required: true, schema: { type: string, pattern: '^[0-9a-fA-F]{16}$' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AICallDetail' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '404': { $ref: '#/components/responses/E404' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/ai/prices:
+    get:
+      tags: [AI monitoring]
+      operationId: listAIPrices
+      summary: 'Price table (USD per 1M tokens): org overrides (source org) + defaults (source default, estimates as of `updated`)'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AIPrices' } } } }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+    put:
+      tags: [AI monitoring]
+      operationId: putAIPrice
+      summary: 'Set an org price override for provider + model (admin+; audit ai_prices.update). Model matching: exact, else longest prefix'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AIPriceInput' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AIPrice' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '500': { $ref: '#/components/responses/E500' }
+    delete:
+      tags: [AI monitoring]
+      operationId: deleteAIPrice
+      summary: 'Remove an org override; the default price applies again (admin+; audit ai_prices.delete)'
+      parameters:
+        - { name: provider, in: query, required: true, schema: { type: string } }
+        - { name: model, in: query, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '404': { $ref: '#/components/responses/E404' }
+        '500': { $ref: '#/components/responses/E500' }
 components:
   securitySchemes:
     apiKey: { type: http, scheme: bearer, description: "Project API key (kind = api), e.g. tt_dev_api_key" }
@@ -2704,6 +2932,8 @@ components:
     env: { name: env, in: query, description: "Deployment environment filter", schema: { type: string } }
     type: { name: type, in: query, description: "Service types, comma separated (http | worker | web | mobile)", schema: { type: string } }
     service: { name: service, in: query, description: "Service name (repeatable / comma separated on /logs)", schema: { type: string } }
+    profileService: { name: service, in: query, required: true, description: "Service name (service.name)", schema: { type: string } }
+    profileType: { name: type, in: query, required: true, description: "Profile type", schema: { type: string, enum: [cpu, wall, alloc_space, alloc_objects, inuse_space, inuse_objects, goroutines, lock, block] } }
     serviceId: { name: serviceId, in: query, schema: { type: string } }
     endpoint: { name: endpoint, in: query, description: '"METHOD /route" or a process name', schema: { type: string } }
     errors: { name: errors, in: query, description: "Only failed traces", schema: { type: boolean } }
@@ -2740,6 +2970,7 @@ components:
     E404: { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
     E409: { description: Conflict (duplicate id or invalid state transition), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
     E500: { description: Internal error, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+    E503: { description: Dependency not configured or unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
   schemas:
     CodeSuggestion:
       type: object
@@ -3037,6 +3268,7 @@ components:
         attrs: { type: object, additionalProperties: { type: string } }
         resource: { type: object, description: 'Resource attributes (k8s.pod.name, k8s.namespace.name, k8s.node.name, host.name …)', additionalProperties: { type: string } }
         events: { type: array, items: { $ref: '#/components/schemas/SpanEvent' } }
+        llm: { $ref: '#/components/schemas/SpanLLM' }
     SpanEvent:
       type: object
       required: [name, ts]
@@ -3102,6 +3334,7 @@ components:
             stack: { type: string }
             frames: { type: array, items: { $ref: '#/components/schemas/Frame' } }
             symbolicated: { type: boolean }
+            replay: { $ref: '#/components/schemas/ReplayRef' }
     LogLine:
       type: object
       required: [id, ts, level, service, message]
@@ -3183,6 +3416,7 @@ components:
         errors: { type: number }
         entry: { type: string }
         exit: { type: string }
+        hasReplay: { type: boolean, description: "A session replay was recorded (GET /replays/{sessionId})" }
     RumError:
       type: object
       required: [fingerprint, type, message, view, count, sessions, crash, firstSeen, lastSeen, appVersion]
@@ -3208,6 +3442,7 @@ components:
             stack: { type: string }
             frames: { type: array, items: { $ref: '#/components/schemas/Frame' } }
             symbolicated: { type: boolean }
+            replay: { $ref: '#/components/schemas/ReplayRef' }
     RumResource:
       type: object
       required: [url, method, callsPerMin, errorRate, p50, p95]
@@ -4413,3 +4648,295 @@ components:
         severity: { type: string }
         query: { type: object }
         condition: { type: object }
+    ServiceDetail:
+      allOf:
+        - $ref: '#/components/schemas/Service'
+        - type: object
+          required: [hasAi]
+          properties:
+            hasAi: { type: boolean, description: 'LLM calls in the last 7 days (llm_1h); AI tab → GET /ai/overview?service=' }
+    ReplayRef:
+      type: object
+      required: [sessionId, offsetMs]
+      properties:
+        sessionId: { type: string }
+        offsetMs: { type: integer, description: 'ms from the replay start (first segment) to the occurrence' }
+    ReplaySummary:
+      type: object
+      required: [sessionId, app, platform, format, startedAt, durationMs, segments, user, firstView, views, errors, clicks, rageClicks]
+      properties:
+        sessionId: { type: string }
+        app: { type: string }
+        platform: { type: string, description: 'web | android | ios' }
+        format: { type: string, enum: [rrweb, wireframe] }
+        startedAt: { type: integer }
+        durationMs: { type: number }
+        segments: { type: integer }
+        user:
+          type: object
+          required: [anonymousId]
+          properties:
+            id: { type: string }
+            anonymousId: { type: string }
+        country: { type: string }
+        device: { type: string }
+        browser: { type: string }
+        os: { type: string }
+        appVersion: { type: string }
+        firstView: { type: string }
+        views: { type: integer }
+        errors: { type: integer }
+        clicks: { type: integer }
+        rageClicks: { type: integer }
+    ReplayList:
+      type: object
+      required: [replays]
+      properties:
+        replays: { type: array, items: { $ref: '#/components/schemas/ReplaySummary' } }
+    ReplaySegment:
+      type: object
+      required: [segment, startTs, endTs, events, bytes, hasFullSnapshot]
+      properties:
+        segment: { type: integer }
+        startTs: { type: integer }
+        endTs: { type: integer }
+        events: { type: integer }
+        bytes: { type: integer, description: 'gzip size' }
+        hasFullSnapshot: { type: boolean }
+    TimelineItem:
+      type: object
+      required: [ts, kind, label]
+      properties:
+        ts: { type: integer }
+        kind: { type: string, enum: [view, action, error, resource, vital] }
+        label: { type: string }
+        detail: { type: string }
+        viewName: { type: string }
+        traceId: { type: string }
+        fingerprint: { type: string }
+        status: { type: integer }
+        durationMs: { type: number }
+    ReplayDetail:
+      type: object
+      required: [summary, segments, timeline]
+      properties:
+        summary: { $ref: '#/components/schemas/ReplaySummary' }
+        segments: { type: array, items: { $ref: '#/components/schemas/ReplaySegment' } }
+        timeline: { type: array, items: { $ref: '#/components/schemas/TimelineItem' } }
+    ProfileTypes:
+      type: object
+      required: [types]
+      properties:
+        types:
+          type: array
+          items:
+            type: object
+            required: [type, unit, runtime, hosts, versions, routes]
+            properties:
+              type: { type: string }
+              unit: { type: string, enum: [nanoseconds, bytes, count] }
+              runtime: { type: string }
+              hosts: { type: array, items: { type: string } }
+              versions: { type: array, items: { type: string } }
+              routes: { type: integer, description: 'Route-tagged (route, method) pairs' }
+    FlameNode:
+      type: object
+      required: [name, value, self, children]
+      properties:
+        name: { type: string }
+        value: { type: integer, description: 'Subtree total' }
+        self: { type: integer }
+        children: { type: array, items: { $ref: '#/components/schemas/FlameNode' } }
+    DiffNode:
+      type: object
+      required: [name, value, self, baseValue, baseSelf, children]
+      properties:
+        name: { type: string }
+        value: { type: integer }
+        self: { type: integer }
+        baseValue: { type: integer }
+        baseSelf: { type: integer }
+        children: { type: array, items: { $ref: '#/components/schemas/DiffNode' } }
+    Flamegraph:
+      type: object
+      required: [type, unit, total, profiles, from, to, root]
+      properties:
+        type: { type: string }
+        unit: { type: string }
+        total: { type: integer }
+        profiles: { type: integer }
+        from: { type: integer }
+        to: { type: integer }
+        root: { $ref: '#/components/schemas/FlameNode' }
+    FlameDiff:
+      type: object
+      required: [type, unit, total, baseTotal, root]
+      properties:
+        type: { type: string }
+        unit: { type: string }
+        total: { type: integer }
+        baseTotal: { type: integer }
+        root: { $ref: '#/components/schemas/DiffNode' }
+    TopFunctions:
+      type: object
+      required: [unit, total, functions]
+      properties:
+        unit: { type: string }
+        total: { type: integer }
+        functions:
+          type: array
+          items:
+            type: object
+            required: [name, self, total]
+            properties:
+              name: { type: string }
+              self: { type: integer }
+              total: { type: integer }
+    AITotals:
+      type: object
+      required: [calls, errors, errorRate, inputTokens, outputTokens, cacheReadTokens, costUsd, costPartial, p50Ms, p95Ms]
+      properties:
+        calls: { type: number }
+        errors: { type: number }
+        errorRate: { type: number }
+        inputTokens: { type: number }
+        outputTokens: { type: number }
+        cacheReadTokens: { type: number }
+        costUsd: { type: [number, 'null'], description: 'Sum over priced models (estimate); null when no model has a price' }
+        costPartial: { type: boolean, description: 'Some calls are on models without a price' }
+        p50Ms: { type: number }
+        p95Ms: { type: number }
+        ttftP95Ms: { type: number, description: 'Streaming calls only; omitted when none' }
+    AIOverview:
+      type: object
+      required: [totals, series, byModel, byService, byEndpoint]
+      properties:
+        totals: { $ref: '#/components/schemas/AITotals' }
+        series:
+          type: object
+          required: [calls, tokens, cost, latency]
+          properties:
+            calls: { $ref: '#/components/schemas/SeriesSet' }
+            tokens: { $ref: '#/components/schemas/SeriesSet' }
+            cost: { $ref: '#/components/schemas/SeriesSet' }
+            latency: { $ref: '#/components/schemas/SeriesSet' }
+        byModel:
+          type: array
+          items:
+            type: object
+            required: [provider, model, calls, errors, inputTokens, outputTokens, costUsd, p95Ms, priceKnown]
+            properties:
+              provider: { type: string }
+              model: { type: string }
+              calls: { type: number }
+              errors: { type: number }
+              inputTokens: { type: number }
+              outputTokens: { type: number }
+              costUsd: { type: [number, 'null'] }
+              p95Ms: { type: number }
+              priceKnown: { type: boolean }
+        byService:
+          type: array
+          items:
+            type: object
+            required: [service, calls, inputTokens, outputTokens, costUsd, models]
+            properties:
+              service: { type: string }
+              calls: { type: number }
+              inputTokens: { type: number }
+              outputTokens: { type: number }
+              costUsd: { type: [number, 'null'] }
+              models: { type: array, items: { type: string } }
+        byEndpoint:
+          type: array
+          description: 'Top 100 by calls'
+          items:
+            type: object
+            required: [service, route, method, calls, avgInputTokens, avgOutputTokens, costUsd, costPerCallUsd, p95Ms]
+            properties:
+              service: { type: string }
+              route: { type: string }
+              method: { type: string }
+              calls: { type: number }
+              avgInputTokens: { type: number }
+              avgOutputTokens: { type: number }
+              costUsd: { type: [number, 'null'] }
+              costPerCallUsd: { type: [number, 'null'] }
+              p95Ms: { type: number }
+    AICall:
+      type: object
+      required: [ts, traceId, spanId, service, route, provider, model, operation, inputTokens, outputTokens, costUsd, durationMs, hasContent]
+      properties:
+        ts: { type: integer }
+        traceId: { type: string }
+        spanId: { type: string }
+        service: { type: string }
+        route: { type: string }
+        provider: { type: string }
+        model: { type: string }
+        operation: { type: string }
+        inputTokens: { type: number }
+        outputTokens: { type: number }
+        costUsd: { type: [number, 'null'] }
+        durationMs: { type: number }
+        ttftMs: { type: number }
+        error: { type: string }
+        finishReason: { type: string }
+        hasContent: { type: boolean }
+    AICalls:
+      type: object
+      required: [calls]
+      properties:
+        calls: { type: array, items: { $ref: '#/components/schemas/AICall' } }
+    AICallDetail:
+      type: object
+      required: [call, attributes]
+      properties:
+        call: { $ref: '#/components/schemas/AICall' }
+        attributes: { type: object, additionalProperties: { type: string } }
+        content:
+          type: object
+          required: [input, output]
+          properties:
+            system: { type: string }
+            input: { type: string, description: 'JSON string: GenAI message array' }
+            output: { type: string, description: 'JSON string: GenAI message array' }
+    AIPrice:
+      type: object
+      required: [provider, model, inputPerMTok, outputPerMTok, source]
+      properties:
+        provider: { type: string }
+        model: { type: string }
+        inputPerMTok: { type: number }
+        outputPerMTok: { type: number }
+        cacheReadPerMTok: { type: number, description: 'Missing = input price' }
+        cacheWritePerMTok: { type: number, description: 'Missing = input price' }
+        source: { type: string, enum: [default, org] }
+    AIPrices:
+      type: object
+      required: [prices, updated]
+      properties:
+        prices: { type: array, items: { $ref: '#/components/schemas/AIPrice' } }
+        updated: { type: string, description: 'Date (YYYY-MM-DD) the default table was reviewed' }
+    AIPriceInput:
+      type: object
+      required: [provider, model, inputPerMTok, outputPerMTok]
+      properties:
+        provider: { type: string, description: 'gen_ai.provider.name as shown on /ai/overview, or a family (openai, anthropic, google …)' }
+        model: { type: string, description: 'Exact model or a prefix' }
+        inputPerMTok: { type: number, minimum: 0 }
+        outputPerMTok: { type: number, minimum: 0 }
+        cacheReadPerMTok: { type: number, minimum: 0 }
+        cacheWritePerMTok: { type: number, minimum: 0 }
+    SpanLLM:
+      type: object
+      required: [provider, model, operation, inputTokens, outputTokens, costUsd, hasContent]
+      properties:
+        provider: { type: string }
+        model: { type: string }
+        operation: { type: string }
+        inputTokens: { type: number }
+        outputTokens: { type: number }
+        costUsd: { type: [number, 'null'] }
+        ttftMs: { type: number }
+        hasContent: { type: boolean }

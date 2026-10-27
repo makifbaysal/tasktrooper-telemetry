@@ -1,9 +1,12 @@
 package troopergrpc
 
 import (
+	"bytes"
 	"context"
 	"net"
+	"runtime/pprof"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"time"
@@ -24,7 +27,10 @@ import (
 	"github.com/tasktrooper/telemetry-go/troopertest"
 )
 
-var gotBaggage string
+var (
+	gotBaggage string
+	gotLabels  atomic.Value
+)
 
 func unary(name string, fn func(ctx context.Context) error) grpc.MethodDesc {
 	return grpc.MethodDesc{MethodName: name, Handler: func(_ any, ctx context.Context, dec func(any) error, ic grpc.UnaryServerInterceptor) (any, error) {
@@ -52,6 +58,12 @@ var desc = grpc.ServiceDesc{
 			return nil
 		}),
 		unary("Panic", func(context.Context) error { panic("boom") }),
+		unary("Labels", func(ctx context.Context) error {
+			route, _ := pprof.Label(ctx, trooper.ProfileLabelRoute)
+			method, _ := pprof.Label(ctx, trooper.ProfileLabelMethod)
+			gotLabels.Store(route + " " + method)
+			return nil
+		}),
 	},
 }
 
@@ -156,4 +168,29 @@ func waitServerSpan(h *troopertest.Harness) sdktrace.ReadOnlySpan {
 		time.Sleep(5 * time.Millisecond)
 	}
 	return nil
+}
+
+func TestProfileLabels(t *testing.T) {
+	troopertest.New(t, "svc")
+	trooper.EnableProfileLabels(true)
+	t.Cleanup(func() { trooper.EnableProfileLabels(false) })
+	conn := dial(t, trooper.PanicRecover)
+	if err := conn.Invoke(t.Context(), "/test.Svc/Labels", &emptypb.Empty{}, &emptypb.Empty{}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := gotLabels.Load().(string); got != "/test.Svc/Labels GRPC" {
+		t.Errorf("labels = %q", got)
+	}
+	// The stream goroutine's labels are restored at stats.End.
+	for i := 0; ; i++ {
+		var b bytes.Buffer
+		_ = pprof.Lookup("goroutine").WriteTo(&b, 1)
+		if !strings.Contains(b.String(), `"trooper.route":"/test.Svc/Labels"`) {
+			break
+		}
+		if i == 50 {
+			t.Fatal("labels not restored after the RPC")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }

@@ -53,6 +53,8 @@ service of `deploy/docker-compose.yml` (profile `app`).
 | `TT_FAAS_LAMBDA_GBS_PRICE`, `TT_FAAS_LAMBDA_GBS_PRICE_ARM64` | `0.0000166667`, `0.0000133334` | USD per GB-second (x86_64 / arm64) |
 | `TT_FAAS_AZURE_GBS_PRICE`, `TT_FAAS_AZURE_REQUEST_PRICE` | `0.000016`, `0.20` | Azure Functions consumption plan: USD per GB-s, per 1M executions |
 | `TT_AZURE_LOGIN_URL`, `TT_AZURE_ARM_URL` | `https://login.microsoftonline.com`, `https://management.azure.com` | Azure endpoints for `POST /integrations/test` (tests / sovereign clouds) |
+| `TT_S3_ENDPOINT`, `TT_S3_ACCESS_KEY`, `TT_S3_SECRET_KEY`, `TT_S3_REGION` | –, –, –, `us-east-1` | S3-compatible store of session replay segments (contracts §12, §23; dev SeaweedFS `http://localhost:9002`, `trooper` / `trooper-secret`). Unset endpoint = `GET /replays/{id}/segments/{n}` answers 503 (index endpoints still work) |
+| `TT_REPLAY_S3_BUCKET` | `tt-replays` | replay bucket (read only; the ingest writer creates it) |
 
 ## Test
 
@@ -60,6 +62,8 @@ service of `deploy/docker-compose.yml` (profile `app`).
 GOWORK=off go build ./... && GOWORK=off go vet ./... && GOWORK=off go test ./...
 # live infra: seeds org/project 9101 in Postgres + ClickHouse, calls every endpoint group, deletes what it wrote
 GOWORK=off go test -tags integration -count=1 ./internal/server/ -run Integration -v
+# replay / profiling / AI only (org 9821; needs deploy/clickhouse/005 + deploy/postgres/012 applied; uploads one blob to the dev S3)
+GOWORK=off go test -tags integration -count=1 ./internal/server/ -run IntegrationObs -v
 npx @redocly/cli lint openapi.yaml
 ```
 
@@ -69,7 +73,7 @@ npx @redocly/cli lint openapi.yaml
 |---|---|
 | `cmd/api` | wiring, graceful shutdown |
 | `internal/server` | router, middleware (request id, panic recovery, JSON request log, CORS, gzip), auth, handlers. Handlers only parse parameters and call the `Store` interface (unit tests use a fake store) |
-| `internal/store` | all SQL. `apm.go`, `traces.go`, `logs.go`, `rum.go`, `alerting.go`, `kpi.go`, `infra.go`, `loadtest.go` |
+| `internal/store` | all SQL. `apm.go`, `traces.go`, `logs.go`, `rum.go`, `alerting.go`, `kpi.go`, `infra.go`, `loadtest.go`, `replay.go`, `profiles.go`, `llm.go` |
 | `internal/tq` | tenant guard: every query must contain `{{tenant}}` / `{{tenant:alias}}` (→ `org_id = O AND project_id = P` in ClickHouse, `project_id = P` in Postgres) or `{{project}}` / `{{org}}` for inserts; queries without one are rejected |
 | `internal/timerange` | `range` → aligned buckets (15m → 15×1m, 30m → 30×1m, 1h → 60×1m, 6h → 72×5m, 24h → 96×15m, 7d → 84×2h), zero-filled series builder |
 | `internal/rules` | consumer-lag rule math mirroring `apps/web/src/lib/lagAlerts.ts` (monitor preview) |
@@ -79,6 +83,9 @@ npx @redocly/cli lint openapi.yaml
 | `internal/cloudcheck` | `POST /integrations/test`: minimal live provider checks (AWS STS GetCallerIdentity / AssumeRole, GCP token + Resource Manager, Vercel `/v2/user`, Neon `/projects`), 10 s timeout, secrets scrubbed from messages |
 | `internal/symbolicate` | symbolicator client (forwards the caller's `Authorization`) |
 | `internal/conntest` | real connection tests: Postgres login + `pg_stat_statements` check, Redis PING, Kafka metadata + groups (franz-go), RabbitMQ management API; MySQL/MongoDB TCP only |
+| `internal/flame` | flame graph / diff tree building (root `all`, < 0.05 % → `[pruned]` child, ≤ 5000 nodes by a largest-share-first expansion), top functions (recursion counted once) |
+| `internal/llmprice` | LLM price table (`defaults.json`, embedded) + org overrides, provider family / model normalization, cost |
+| `internal/blob` | read-only S3 client for replay segments |
 
 ## Data sources
 
@@ -132,6 +139,30 @@ npx @redocly/cli lint openapi.yaml
   per-function rows is not counted in `functions` (its functions are). Child rows carry no execution units, so cost
   stays on the app row. The list itself returns every row with its own metrics; Azure app rows add `appInsights`
   (`connected|unavailable`, from `meta.appInsights`).
+
+* Session replay (ADR-021, contracts §23): list from `replay_sessions` (window: sessions overlapping the range), detail
+  segments from `replay_segments` (`argMax(…, received_at)` dedupes redeliveries), user / device / views / errors
+  joined from `rum_events` by `session_id`; timeline = the session's `rum_events` (view_start, action, error, resource,
+  vital, app_start; ≤ 2000). Segment bodies are streamed from S3 as stored (`Content-Encoding: gzip`, not re-compressed);
+  the blob key must start with `<org>/<project>/`. `hasReplay` on `/apps/{app}/sessions`; `replay` on error details =
+  newest occurrence inside a replay (RUM: the error event; backend: a RUM resource event carrying a trace of the
+  fingerprint), `offsetMs` from the replay's first segment.
+* Profiling (ADR-022, contracts §24): stacks are read as `GROUP BY stack_hash` (≤ 200k distinct stacks per tree, the
+  remainder folded into an `[other]` stack so totals stay exact) and turned into trees in Go (`internal/flame`). Diff:
+  `baseVersion` + `version` over `range` (default 24h) or explicit `baseFrom/baseTo/from/to`. Series: `cpu` / `wall`
+  → average cores (`total / profile duration` averaged per bucket minute, summed over a host's processes), other types
+  → value per minute; ≤ 8 hosts, rest `other`. Windows are limited to 14 days.
+* AI monitoring (ADR-023, contracts §25): overview from `llm_1m` (`llm_1h` for 7d), calls / call detail from `spans`
+  (`attrs['gen_ai.operation.name'] != ''`) + `llm_content`. Series values are per bucket (calls, tokens, USD). Cost =
+  (input − cache read − cache write, ≥ 0) × input + cache read × cacheRead + cache write × cacheWrite (missing cache
+  price = input price) + output × output, per 1M tokens. `costUsd` sums priced models (`null` when none is priced);
+  `costPartial` = some calls have no price. **Prices are estimates**: `internal/llmprice/defaults.json` (list prices,
+  `updated` date inside) — review it when providers change prices; orgs override rows with `PUT /ai/prices` (admin+,
+  Postgres `llm_prices`, audit `ai_prices.update` / `ai_prices.delete`). Matching: provider → family (`azure.ai.openai`
+  → openai, `gcp.*` → google, `aws.bedrock` → model vendor), model lower-cased without `vendor/` or Bedrock
+  `<region>.<vendor>.` prefixes; exact row, else the longest row that is a prefix ending at a non-alphanumeric char;
+  org rows first, then defaults of the family, then any default. `hasAi` on `GET /services/{id}` = `llm_1h` rows in the
+  last 7 days; trace spans with `gen_ai.operation.name` carry `llm`.
 
 ## Auth, roles, audit (ADR-016)
 

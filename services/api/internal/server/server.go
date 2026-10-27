@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/tasktrooper/telemetry/services/api/internal/auth"
+	"github.com/tasktrooper/telemetry/services/api/internal/blob"
 	"github.com/tasktrooper/telemetry/services/api/internal/model"
 	"github.com/tasktrooper/telemetry/services/api/internal/rules"
 	"github.com/tasktrooper/telemetry/services/api/internal/store"
@@ -148,6 +149,7 @@ type Store interface {
 	IdentityStore
 	ChatOpsStore
 	Phase6Store
+	ObsStore
 }
 
 var _ Store = (*store.DB)(nil)
@@ -169,7 +171,9 @@ type Server struct {
 	CloudTest CloudTester
 	// Symbolicator resolves error stacks (TT_SYMBOLICATOR_URL); nil = raw stacks.
 	Symbolicator *symbolicate.Client
-	Now          func() time.Time
+	// Replays reads session replay segments from S3 (TT_S3_ENDPOINT); nil = segments answer 503.
+	Replays blob.Reader
+	Now     func() time.Time
 	// Ready reports dependency health for /healthz (nil = always ok).
 	Ready func(ctx context.Context) error
 

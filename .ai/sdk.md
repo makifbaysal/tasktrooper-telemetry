@@ -19,10 +19,12 @@ attribute'ları). Client SDK'ları kendi hafif RUM katmanıdır ve `POST /v1/rum
 | `trooper-javaagent` (OTel agent + extension) | `sdks/jvm` | JVM (kod değişikliği yok) | OTel Java agent'ın tüm auto-instrumentation'ı + trooper preset'leri |
 | `trooper-spring-boot-starter` | `sdks/jvm` | Spring Boot 3 | MVC/WebFlux route template, `@KafkaListener`/`@RabbitListener` process adı |
 | `trooper-quarkus` | `sdks/jvm` | Quarkus 3 | quarkus-opentelemetry config'i, JAX-RS route template, reactive messaging (SmallRye Kafka/RabbitMQ consumer'larında `trooper.consumer.attempt` otomatik: `trooper` propagator'ı extract sırasında `tt-attempt` → `kafka_deliveryAttempt` → `x-delivery-count`+1 → `x-death`+1 → `delayed-retry-count`+1 okur) |
+| `trooper-llm` | `sdks/jvm` | JVM | GenAI span API'si (`TrooperLlm`), Anthropic SDK sarmalayıcısı, LangChain4j listener — ADR-023 |
 | `trooper-ktor` + `trooper-kotlin` | `sdks/jvm` | Kotlin / Ktor 3 | server + client plugin, coroutine context |
 | `TaskTrooper.Telemetry` (+ `.AspNetCore`, `.Kafka`, `.RabbitMQ`, `.MassTransit`, `.EntityFrameworkCore`, `.Redis`) | `sdks/dotnet` | .NET 8+ | ASP.NET Core, HttpClient, SqlClient/EF Core, Npgsql, Redis, gRPC, Confluent.Kafka, RabbitMQ, MassTransit |
 | `@trooper/node` | `sdks/js/packages/node` | Node.js ≥ 22.15 | `@opentelemetry/sdk-node` + OTLP/HTTP protobuf (traces/metrics/logs); http, undici, express, koa, NestJS, kafkajs, amqplib, pg, mysql2, mongodb, ioredis/redis, pino/winston log bridge; route template helper'ları (express, fastify, koa, Hono, NestJS interceptor), BullMQ processor wrapper'ı, `tt-attempt` okuma/yazma |
 | `@trooper/core` + `@trooper/browser` | `sdks/js/packages` | Web | page view, SPA route, Web Vitals, fetch/XHR + traceparent, JS error, click (rage/dead), sendBeacon, offline kuyruk |
+| `@trooper/replay` | `sdks/js/packages` | Web | session replay (rrweb kayıt, maskeleme, örnekleme) — ADR-021 |
 | `@trooper/react`, `@trooper/vue`, `@trooper/angular` | `sdks/js/packages` | Web framework'leri | ErrorBoundary/errorHandler, router entegrasyonu (react-router, Next.js, TanStack Router, vue-router, Angular Router) → route template view adı |
 | `@trooper/react-native` | `sdks/js/packages` | React Native | react-navigation ekranları, app start, JS hataları, network, AppState flush |
 | `trooper-android` (+ `-okhttp`, `-compose`) | `sdks/android` | Android | Activity/Fragment/Compose ekranları, app start, crash, ANR, frozen frame, OkHttp |
@@ -90,6 +92,52 @@ Client SDK'lar (browser, React Native, Android OkHttp, iOS URLSession, Flutter h
 `baggage: tt.svc=<app>` da ekler (değer percent-encoded; mevcut `baggage` header'ı korunur, eski `tt.svc` değiştirilir, toplam ≤ 8192 byte).
 Backend bunu `trooper.caller` olarak okur, çağrı genel `web`/`mobile` yerine uygulama adıyla görünür. Cross-origin müşteri API'leri
 CORS `Access-Control-Allow-Headers`'a `traceparent` ile birlikte `baggage`'ı da eklemeli.
+
+### Session replay (ADR-021, contracts §23)
+
+```ts
+import { init } from '@trooper/browser';
+import { replayIntegration } from '@trooper/replay';
+
+init({ dsn, service: 'shop-web', integrations: [
+  replayIntegration({ sampleRate: 0.1, onErrorSampleRate: 1.0, maskAllText: true, maskAllInputs: true }),
+] });
+```
+
+`@trooper/replay` `@rrweb/record`'u sarar (ayrı paket; `@trooper/browser` boyutu değişmez). CDN: `trooper-replay.iife.js`
+`window.TrooperReplay`. Oturum ve hata bilgisini `@trooper/browser`'ın integration kancalarından alır.
+
+Mobil (wireframe, ekran görüntüsü yok):
+- Android: `TrooperReplay.install(context, ReplayOptions(sampleRate = 0.1, onErrorSampleRate = 1.0))` (`trooper-replay` modülü; offline kuyruk ≤ 2 MB, dolunca yeni segment düşer);
+  Compose için `trooper-compose` semantics üzerinden. Unmask: `view.trooperUnmask()`, `Modifier.trooperUnmask()`.
+- iOS: `TaskTrooper.start(config, replay: .init(sampleRate: 0.1, onErrorSampleRate: 1.0))` (`TaskTrooperReplay` target'ı,
+  pod `TaskTrooper/Replay`; crash'te on-error buffer flush edilemez — signal handler); unmask
+  `view.trooperUnmask = true`, SwiftUI `.trooperUnmask()`.
+
+### Continuous profiling (ADR-022, contracts §24)
+
+Varsayılan kapalı; `TROOPER_PROFILING=true` veya kodda:
+- Go: `trooper.Start(ctx, trooper.Config{…}, trooper.WithProfiling())` — `runtime/pprof` (CPU ve goroutine pprof; heap/mutex/block kümülatif olduğu için periyot farkı folded olarak gönderilir, ilk periyot sadece baseline); HTTP/gRPC/consumer entry'lerinde goroutine'e
+  `trooper.route` / `trooper.method` pprof label'ı konur → endpoint bazında flame graph.
+- JVM: `-Dtrooper.profiling.enabled=true` (javaagent extension; JFR `RecordingStream`, JDK 17+). Spring Boot starter
+  `trooper.profiling.enabled`. Sürekli örnekleme (CPU 20 ms; `CPU_DURATION` yok sayılır), default tipler `cpu,alloc_space,lock`
+  (JFR'de in-use heap yok). Thread → entry span eşlemesiyle route etiketi (`# trooper.route=`).
+- Node: `init({ profiling: true })` — `node:inspector` CPU + sampling heap profiler, folded formatta.
+- .NET / Python: henüz yok.
+
+### AI / LLM (ADR-023, contracts §25)
+
+LLM çağrıları OTel GenAI span'ı olarak gider; içerik (`captureContent`) varsayılan kapalı.
+- Node: `instrumentOpenAI(new OpenAI())`, `instrumentAnthropic(new Anthropic())` (stream dahil token + TTFT); Vercel AI SDK
+  `experimental_telemetry: { isEnabled: true }` span'ları olduğu gibi gelir. `init({ llm: { captureContent: true } })`.
+- Go (`github.com/tasktrooper/telemetry-go/llm`): `client := openai.NewClient(option.WithHTTPClient(llm.HTTPClient(nil)))` / Anthropic aynı (`llm.HTTPClient` bilinen
+  provider host'larını tanır, request/response JSON'undan model + token okur, SSE stream'i bozmadan sayar); elle:
+  `ctx, call := llm.Start(ctx, llm.Request{Provider: "anthropic", Model: m, Operation: "chat"}); defer call.End(llm.Usage{…})`.
+- JVM (`trooper-llm` modülü — sadece `opentelemetry-api`, agent'ın yanında uygulama kodundan görünür; Spring starter içerir):
+  Spring AI span'ları normalize edilir, LangChain4j için `TrooperChatModelListener`, Anthropic Java SDK `TrooperLlm.wrap(client)`,
+  OpenAI Java SDK javaagent'ın upstream instrumentation'ı ile; elle `TrooperLlm.start(provider, model)` → `LlmCall`.
+- .NET: `Microsoft.Extensions.AI`, `OpenAI.*`, `Azure.AI.Inference*`, `Microsoft.SemanticKernel*` ActivitySource'ları varsayılan
+  dinlenir (`EnableLlm`, `LlmCaptureContent`); elle `TrooperLlm.Start(provider, model, op)`.
 
 ### Serverless (AWS Lambda, Azure Functions — ADR-020)
 
@@ -159,6 +207,7 @@ Host span'ları `faas.trigger`, `faas.invocation_id` (ve host destekliyorsa `faa
 ## Wire formatı
 
 - Backend: **OTLP/HTTP protobuf** → `POST /v1/traces`, `/v1/metrics`, `/v1/logs`. Header: `x-trooper-key`.
+- Replay segment'leri → `POST /v1/replay` (contracts §23); profiller → `POST /v1/profiles` (pprof veya folded, §24).
 - Browser/mobil: **RUM batch JSON** → `POST /v1/rum` (gzip). Şema `proto/rum/v1/rum.proto` içinde tanımlı, JSON mapping'i kullanılır (alan adları snake_case, enum'lar isim olarak).
 
 RUM event tipleri: `view_start`, `view_end`, `vital`, `resource`, `error`, `action`, `custom`, `session_start`.

@@ -15,6 +15,11 @@ import java.util.logging.Logger;
  * {@code trooper.sample-rate}, {@code trooper.enabled}. Environment equivalents: {@code TROOPER_DSN},
  * {@code TROOPER_SERVICE}, {@code TROOPER_ENV} / {@code TROOPER_ENVIRONMENT}, {@code TROOPER_VERSION}, {@code TROOPER_SAMPLE_RATE},
  * {@code TROOPER_ENABLED}.
+ *
+ * <p>Profiling (contracts.md §24): {@code trooper.profiling.enabled} (alias {@code trooper.profiling}; env
+ * {@code TROOPER_PROFILING} / {@code TROOPER_PROFILING_ENABLED}), {@code trooper.profiling.types}
+ * ({@code TROOPER_PROFILING_TYPES}), {@code trooper.profiling.period} (seconds, {@code TROOPER_PROFILING_PERIOD}).
+ * LLM (contracts.md §25): {@code trooper.llm.capture-content} ({@code TROOPER_LLM_CAPTURE_CONTENT}).
  */
 public final class TrooperConfig {
     private static final Logger LOG = Logger.getLogger(TrooperConfig.class.getName());
@@ -28,6 +33,15 @@ public final class TrooperConfig {
     public static final String VERSION = "trooper.version";
     public static final String SAMPLE_RATE = "trooper.sample-rate";
     public static final String ENABLED = "trooper.enabled";
+    public static final String PROFILING_ENABLED = "trooper.profiling.enabled";
+    /** Short form; the env var {@code TROOPER_PROFILING} maps here. */
+    public static final String PROFILING = "trooper.profiling";
+    public static final String PROFILING_TYPES = "trooper.profiling.types";
+    public static final String PROFILING_PERIOD = "trooper.profiling.period";
+    public static final String LLM_CAPTURE_CONTENT = "trooper.llm.capture-content";
+
+    /** Default upload period (contracts.md §24). */
+    public static final int DEFAULT_PROFILING_PERIOD_SECONDS = 60;
 
     private final Dsn dsn;
     private final String service;
@@ -35,6 +49,10 @@ public final class TrooperConfig {
     private final String version;
     private final double sampleRate;
     private final boolean enabled;
+    private final boolean profilingEnabled;
+    private final java.util.List<String> profilingTypes;
+    private final int profilingPeriodSeconds;
+    private final Boolean llmCaptureContent;
 
     private TrooperConfig(Builder b) {
         this.dsn = b.dsn;
@@ -43,6 +61,11 @@ public final class TrooperConfig {
         this.version = blankToNull(b.version);
         this.sampleRate = clamp(b.sampleRate);
         this.enabled = b.enabled;
+        this.profilingEnabled = b.profilingEnabled;
+        this.profilingTypes = b.profilingTypes == null ? java.util.List.of() : java.util.List.copyOf(b.profilingTypes);
+        this.profilingPeriodSeconds = b.profilingPeriodSeconds <= 0 ? DEFAULT_PROFILING_PERIOD_SECONDS
+                : Math.max(5, Math.min(3600, b.profilingPeriodSeconds));
+        this.llmCaptureContent = b.llmCaptureContent;
     }
 
     public static Builder builder() {
@@ -84,6 +107,33 @@ public final class TrooperConfig {
         String enabled = lookup.apply(ENABLED);
         if (enabled != null && !enabled.isBlank()) {
             b.enabled(Boolean.parseBoolean(enabled.trim()));
+        }
+        String profiling = lookup.apply(PROFILING_ENABLED);
+        if (profiling == null || profiling.isBlank()) {
+            profiling = lookup.apply(PROFILING);
+        }
+        if (profiling != null && !profiling.isBlank()) {
+            b.profilingEnabled(Boolean.parseBoolean(profiling.trim()));
+        }
+        String types = lookup.apply(PROFILING_TYPES);
+        if (types != null && !types.isBlank()) {
+            java.util.List<String> list = new java.util.ArrayList<>();
+            for (String t : types.split(",")) {
+                if (!t.isBlank()) list.add(t.trim().toLowerCase(Locale.ROOT));
+            }
+            b.profilingTypes(list);
+        }
+        String period = lookup.apply(PROFILING_PERIOD);
+        if (period != null && !period.isBlank()) {
+            try {
+                b.profilingPeriodSeconds(Integer.parseInt(period.trim()));
+            } catch (NumberFormatException e) {
+                LOG.log(Level.WARNING, "TaskTrooper: ignoring invalid profiling period '" + period + "'");
+            }
+        }
+        String capture = lookup.apply(LLM_CAPTURE_CONTENT);
+        if (capture != null && !capture.isBlank()) {
+            b.llmCaptureContent(Boolean.parseBoolean(capture.trim()));
         }
         return b.build();
     }
@@ -127,6 +177,10 @@ public final class TrooperConfig {
         p.put("otel.traces.sampler.arg", Double.toString(sampleRate));
         // Lets the span processor read tt-attempt / kafka_deliveryAttempt / x-delivery-count (trooper.consumer.attempt).
         p.put("otel.instrumentation.messaging.experimental.capture-headers", TrooperAttributes.CAPTURED_HEADERS);
+        if (Boolean.TRUE.equals(llmCaptureContent)) {
+            // OTel GenAI instrumentations (OpenAI Java SDK, AWS Bedrock ...) record prompts/completions only when asked.
+            p.put("otel.instrumentation.genai.capture-message-content", "true");
+        }
         return p;
     }
 
@@ -149,6 +203,15 @@ public final class TrooperConfig {
     public String version() { return version; }
     public double sampleRate() { return sampleRate; }
     public boolean enabled() { return enabled; }
+    public boolean profilingEnabled() { return profilingEnabled; }
+    /** Requested profile types (lower case); empty = runtime default. */
+    public java.util.List<String> profilingTypes() { return profilingTypes; }
+    public int profilingPeriodSeconds() { return profilingPeriodSeconds; }
+    /**
+     * {@code TRUE}: record LLM prompts/completions; {@code FALSE}: strip them even if a library recorded them;
+     * {@code null} (unset): leave each library's own opt-in (all default off) alone.
+     */
+    public Boolean llmCaptureContent() { return llmCaptureContent; }
 
     private static double clamp(double r) {
         if (Double.isNaN(r)) return 1.0;
@@ -162,7 +225,8 @@ public final class TrooperConfig {
     @Override
     public String toString() {
         return "TrooperConfig[dsn=" + dsn + ", service=" + service + ", environment=" + environment
-                + ", version=" + version + ", sampleRate=" + sampleRate + ", enabled=" + enabled + "]";
+                + ", version=" + version + ", sampleRate=" + sampleRate + ", enabled=" + enabled
+                + ", profiling=" + profilingEnabled + ", llmCaptureContent=" + llmCaptureContent + "]";
     }
 
     public static final class Builder {
@@ -172,6 +236,10 @@ public final class TrooperConfig {
         private String version;
         private double sampleRate = 1.0;
         private boolean enabled = true;
+        private boolean profilingEnabled;
+        private java.util.List<String> profilingTypes;
+        private int profilingPeriodSeconds = DEFAULT_PROFILING_PERIOD_SECONDS;
+        private Boolean llmCaptureContent;
 
         public Builder dsn(Dsn dsn) { this.dsn = dsn; return this; }
         /** Parses the DSN; invalid DSNs are logged and ignored. */
@@ -189,6 +257,10 @@ public final class TrooperConfig {
         public Builder version(String version) { this.version = version; return this; }
         public Builder sampleRate(double sampleRate) { this.sampleRate = sampleRate; return this; }
         public Builder enabled(boolean enabled) { this.enabled = enabled; return this; }
+        public Builder profilingEnabled(boolean profilingEnabled) { this.profilingEnabled = profilingEnabled; return this; }
+        public Builder profilingTypes(java.util.List<String> types) { this.profilingTypes = types; return this; }
+        public Builder profilingPeriodSeconds(int seconds) { this.profilingPeriodSeconds = seconds; return this; }
+        public Builder llmCaptureContent(Boolean capture) { this.llmCaptureContent = capture; return this; }
         public TrooperConfig build() { return new TrooperConfig(this); }
     }
 }

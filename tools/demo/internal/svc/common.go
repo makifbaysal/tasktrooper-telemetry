@@ -30,6 +30,7 @@ import (
 	trooperhttp "github.com/tasktrooper/telemetry-go/integrations/nethttp"
 	trooperpgx "github.com/tasktrooper/telemetry-go/integrations/pgx"
 	trooperslog "github.com/tasktrooper/telemetry-go/integrations/slog"
+	"github.com/tasktrooper/telemetry-go/llm"
 
 	"github.com/tasktrooper/telemetry/tools/demo/internal/world"
 )
@@ -56,6 +57,14 @@ func Run(ctx context.Context, name string, instance, port int) error {
 	if !ok {
 		return fmt.Errorf("unknown service %q", name)
 	}
+	var topts []trooper.Option
+	if rt.Profiling {
+		topts = append(topts, trooper.WithProfiling())
+	}
+	if rt.LLM {
+		// prompts / completions are recorded only for the support assistant (fake, PII-free messages)
+		llm.SetCaptureContent(name == "storefront-bff")
+	}
 	shutdown, err := trooper.Start(ctx, trooper.Config{
 		DSN:            rt.DSN,
 		Service:        name,
@@ -69,7 +78,7 @@ func Run(ctx context.Context, name string, instance, port int) error {
 			"service.instance.id": fmt.Sprintf("%s-%d", name, instance),
 			"k8s.pod.name":        fmt.Sprintf("%s-%x-%d", name, os.Getpid()&0xfffff, instance),
 		},
-	})
+	}, topts...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "telemetry disabled: %v\n", err)
 	}

@@ -1,6 +1,7 @@
 import SwiftUI
 import TaskTrooper
 import TaskTrooperSwiftUI
+import TaskTrooperReplay
 
 @main
 struct TrooperSampleApp: App {
@@ -13,7 +14,8 @@ struct TrooperSampleApp: App {
             tracePropagationTargets: ["localhost", "api.example.com"]
         )
         config.debug = true
-        TaskTrooper.start(config)
+        // Wireframe session replay (no screenshots); every session in the sample, text masked by default.
+        TaskTrooper.start(config, replay: .init(sampleRate: 1.0, onErrorSampleRate: 1.0))
     }
 
     var body: some Scene {
@@ -26,10 +28,13 @@ struct TrooperSampleApp: App {
 struct HomeScreen: View {
     @State private var showCheckout = false
     @State private var status = ""
+    @State private var password = ""
 
     var body: some View {
         VStack(spacing: 16) {
             Text("TaskTrooper sample").font(.headline)
+                .trooperUnmask() // static copy: safe to show in replay
+            SecureField("Password", text: $password) // always masked in replay
             Button("Log in as demo user") {
                 TaskTrooper.identify(id: "demo-user", traits: ["plan": "pro"])
             }

@@ -1,0 +1,43 @@
+/* FlameGraph (components/charts/FlameGraph.tsx). Tokens only; block fills come from --series-* / --diff-* via color-mix. */
+
+.flame { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.flame__bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); }
+.flame__crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); min-width: 0; flex: 1 1 320px; font-size: var(--text-sm); }
+.flame__crumb-wrap { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; }
+.flame__crumb-sep { color: var(--text-muted); }
+.flame__crumb {
+  border: 0; background: none; padding: 0; color: var(--accent-text); cursor: pointer; font: inherit;
+  font-family: var(--font-mono); font-size: var(--text-xs); max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.flame__crumb[aria-current='true'] { color: var(--text-primary); font-weight: var(--weight-semibold); cursor: default; }
+.flame__reset { margin-left: var(--space-2); }
+.flame__tools { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.flame__match, .flame__meta { font-size: var(--text-sm); color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.flame__search { width: 260px; max-width: 100%; }
+.flame__search .input { height: var(--control-h-sm); font-size: var(--text-sm); }
+
+.flame__frame { width: 100%; min-width: 0; }
+.flame__plot {
+  position: relative; overflow: auto; border: 1px solid var(--divider); border-radius: var(--radius-md); background: var(--bg-surface);
+}
+.flame__canvas { position: relative; width: 100%; }
+.flame__block {
+  position: absolute; height: calc(20px - 1px); box-sizing: border-box; overflow: hidden; cursor: pointer;
+  border-right: 1px solid var(--bg-surface); border-radius: 2px;
+  display: flex; align-items: center; padding: 0 var(--space-1);
+  transition: opacity var(--dur-fast) var(--ease);
+}
+.flame__block:hover { filter: brightness(0.94); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.flame__block.is-dim { opacity: 0.38; }
+.flame__block.is-match { box-shadow: inset 0 0 0 2px var(--accent-warm); opacity: 1; }
+.flame__label {
+  font-family: var(--font-mono); font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--text-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+}
+.flame__tip { max-width: 340px; }
+.flame__tip-name { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-primary); overflow-wrap: anywhere; margin-bottom: var(--space-1); font-weight: var(--weight-medium); }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .flame__block:hover { filter: brightness(1.15); }
+}
+:root[data-theme='dark'] .flame__block:hover { filter: brightness(1.15); }

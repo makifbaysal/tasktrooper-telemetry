@@ -26,6 +26,7 @@ import (
 	"github.com/tasktrooper/telemetry/tools/demo/internal/infra"
 	"github.com/tasktrooper/telemetry/tools/demo/internal/infrasim"
 	"github.com/tasktrooper/telemetry/tools/demo/internal/orch"
+	"github.com/tasktrooper/telemetry/tools/demo/internal/profsim"
 	"github.com/tasktrooper/telemetry/tools/demo/internal/seed"
 	"github.com/tasktrooper/telemetry/tools/demo/internal/sim"
 	"github.com/tasktrooper/telemetry/tools/demo/internal/svc"
@@ -33,11 +34,14 @@ import (
 )
 
 type opts struct {
-	api, apiKey, dsn, kafka, postgres string
-	rps                               float64
-	scenarios                         string
-	incidentAfter, duration, recoCyc  time.Duration
-	keep, debug, infraSim             bool
+	api, apiKey, dsn, kafka, postgres  string
+	rps                                float64
+	scenarios                          string
+	incidentAfter, duration, recoCyc   time.Duration
+	keep, debug, infraSim              bool
+	profiling, profileSim, llm, replay bool
+	profileBackfill                    time.Duration
+	replaySample                       float64
 }
 
 func main() {
@@ -81,6 +85,12 @@ func main() {
 	fs.BoolVar(&o.keep, "keep", false, "keep the ttdemo containers when stopping (up/run)")
 	fs.BoolVar(&o.debug, "debug", false, "SDK debug output")
 	fs.BoolVar(&o.infraSim, "infra-sim", true, "simulate the EKS cluster demo-eks, hosts, Warning events and 4 Lambda functions (trooper-agent host/cluster modes + AWS Lambda over OTLP)")
+	fs.BoolVar(&o.profiling, "profiling", true, "Go SDK continuous profiling (trooper.WithProfiling) in every demo service process")
+	fs.BoolVar(&o.profileSim, "profile-sim", true, "synthetic per-pod folded profiles (cpu, alloc_space, inuse_space; route sections) for the demo services every 60 s")
+	fs.DurationVar(&o.profileBackfill, "profile-backfill", 30*time.Minute, "--profile-sim: history of the previous service versions uploaded at start (version diff baseline; 0 = none)")
+	fs.BoolVar(&o.llm, "llm", true, "simulated LLM calls: support assistant (anthropic), search embeddings (openai), newsletter subjects (gemini)")
+	fs.BoolVar(&o.replay, "replay", true, "session replay segments for the client apps (rrweb for web, wireframe for mobile)")
+	fs.Float64Var(&o.replaySample, "replay-sample", 0.3, "share of sessions recorded from the start (sessions with an error are always recorded from their buffer)")
 	_ = fs.Parse(args)
 
 	var err error
@@ -266,7 +276,8 @@ func run(ctx context.Context, log *slog.Logger, o opts, sup *orch.Supervisor) er
 		}()
 	}
 
-	rt := &world.Runtime{DSN: o.dsn, Peers: map[string]string{}, Kafka: brokers(o), Scenarios: scen, RPS: o.rps, Debug: o.debug}
+	rt := &world.Runtime{DSN: o.dsn, Peers: map[string]string{}, Kafka: brokers(o), Scenarios: scen, RPS: o.rps, Debug: o.debug,
+		Profiling: o.profiling, LLM: o.llm}
 	ext, err := sim.Externals(runCtx, rt)
 	if err != nil {
 		return err
@@ -330,10 +341,18 @@ func run(ctx context.Context, log *slog.Logger, o opts, sup *orch.Supervisor) er
 	if err != nil {
 		return err
 	}
-	tr := &sim.Traffic{RT: rt, Log: log, RPS: o.rps, IngestURL: base, IngestKey: key}
+	if o.replay && orch.WriterReplayDisabled() {
+		log.Warn("ingest-writer runs without TT_S3_ENDPOINT: replay segments are accepted but not stored (restart it with TT_S3_ENDPOINT=http://localhost:9002, or let `demo up` start it)")
+	}
+	tr := &sim.Traffic{RT: rt, Log: log, RPS: o.rps, IngestURL: base, IngestKey: key, Replay: o.replay, ReplayRate: o.replaySample}
 	go tr.Run(runCtx)
 	if o.infraSim {
 		go infrasim.New(base, key, rt, o.postgres, log).Run(runCtx)
+	}
+	var ps *profsim.Sim
+	if o.profileSim {
+		ps = profsim.New(base, key, o.profileBackfill, log)
+		go ps.Run(runCtx)
 	}
 
 	active := []string{}
@@ -354,7 +373,8 @@ func run(ctx context.Context, log *slog.Logger, o opts, sup *orch.Supervisor) er
 			if sink != nil {
 				n = sink.Load()
 			}
-			log.Info("progress", "client_requests", tr.Requests.Load(), "rum_events", tr.RumSent.Load(), "rum_errors", tr.RumErr.Load(), "notifications", n)
+			log.Info("progress", "client_requests", tr.Requests.Load(), "rum_events", tr.RumSent.Load(), "rum_errors", tr.RumErr.Load(), "notifications", n,
+				"replay_sessions", tr.ReplaySessions.Load(), "replay_segments", tr.ReplaySegs.Load(), "replay_errors", tr.ReplayErr.Load(), "profiles", profilesSent(ps))
 			if p := sup.Exited(); p != nil {
 				return fmt.Errorf("%s exited unexpectedly (log: %s)", p.Name, p.Log)
 			}
@@ -380,4 +400,11 @@ func waitTCP(ctx context.Context, addr string, d time.Duration) bool {
 		time.Sleep(300 * time.Millisecond)
 	}
 	return false
+}
+
+func profilesSent(ps *profsim.Sim) string {
+	if ps == nil {
+		return "off"
+	}
+	return fmt.Sprintf("%d (errors %d)", ps.Sent.Load(), ps.Errs.Load())
 }

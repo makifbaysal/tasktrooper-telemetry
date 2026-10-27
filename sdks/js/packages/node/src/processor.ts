@@ -14,6 +14,7 @@ import {
 } from './attrs';
 import { entryOfKey, entryRoute, linkSpan, rawRoute, spanKey, unlinkSpan, type Entry } from './entry';
 import { recordError } from './errors';
+import { normalizeGenAiSpan } from './genai';
 import { callerFromContext } from './propagation';
 import { normalizeRoute, stripQueryString, stripQueryValues } from './route';
 import { rateFromTraceState } from './sampler';
@@ -68,7 +69,8 @@ function httpMethod(span: Span): string | undefined {
  *   remote parents), `trooper.caller` from baggage `tt.svc`, `trooper.route` (server), `trooper.process` +
  *   `trooper.consumer.attempt` (consumer), `trooper.entry.route` / `trooper.entry.method`;
  * - every span below an entry: `trooper.entry.route` / `trooper.entry.method`;
- * - URL attributes: query values stripped.
+ * - URL attributes: query values stripped;
+ * - Vercel AI SDK provider-call spans: `gen_ai.operation.name` / `gen_ai.provider.name` filled in (no span is dropped).
  * Never throws.
  */
 export class TrooperSpanProcessor implements SpanProcessor {
@@ -127,6 +129,7 @@ export class TrooperSpanProcessor implements SpanProcessor {
   onEnding(span: Span): void {
     try {
       scrubUrls(span);
+      normalizeGenAiSpan(span);
       const e = entryOfKey(spanKey(span.spanContext()));
       if (!e) return;
       if (e.root === span) this.finishEntry(span, e);

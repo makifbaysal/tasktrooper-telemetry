@@ -58,8 +58,12 @@ func (d *DB) GetError(ctx context.Context, q Q, fingerprint string) (*model.Erro
 			e.SampleTrace = trace
 		}
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	e.Frames = []model.Frame{}
-	return &e, rows.Err()
+	e.Replay = d.backendErrorReplay(ctx, q, e.Service, fp)
+	return &e, nil
 }
 
 // GetRumError returns one RUM error / crash of an app with the stack of its latest occurrence.
@@ -87,5 +91,6 @@ func (d *DB) GetRumError(ctx context.Context, q Q, app, fingerprint string) (*mo
 	}
 	e.Fingerprint, e.App, e.Crash, e.FirstSeen, e.LastSeen = fingerprint, app, crash == 1, ms(first), ms(last)
 	e.Frames = []model.Frame{}
+	e.Replay = d.rumErrorReplay(ctx, q, app, fp)
 	return &e, nil
 }

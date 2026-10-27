@@ -70,6 +70,21 @@ var (
 	WriterConsumerLag = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "tt_ingest_writer_consumer_lag", Help: "High watermark minus next offset to consume, per topic partition.",
 	}, []string{"topic", "partition"})
+	WriterBlobsStored = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "tt_ingest_writer_replay_blobs_total", Help: "Session replay segments stored in S3.",
+	})
+	WriterBlobBytes = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "tt_ingest_writer_replay_blob_bytes_total", Help: "Compressed bytes of session replay segments stored in S3.",
+	})
+	WriterBlobErrors = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "tt_ingest_writer_replay_blob_errors_total", Help: "Failed S3 uploads of replay segments (each is retried).",
+	})
+	WriterBlobDuration = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name: "tt_ingest_writer_replay_blob_upload_seconds", Help: "Upload time of all replay segments of one flush.", Buckets: latencyBuckets,
+	})
+	WriterReplayDisabled = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "tt_writer_replay_disabled", Help: "1 when S3 is not configured / not reachable at start and tt.replay is not consumed (contracts §23).",
+	})
 	WriterSpansSampled = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "tt_ingest_writer_tail_sampling_spans_total", Help: "Tail sampling decisions per span (keep_forced = error/slow trace, keep_sampled, drop).",
 	}, []string{"decision"})

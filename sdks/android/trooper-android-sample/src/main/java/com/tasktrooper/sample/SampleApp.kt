@@ -3,6 +3,8 @@ package com.tasktrooper.sample
 import android.app.Application
 import com.tasktrooper.android.TaskTrooper
 import com.tasktrooper.android.TrooperConfig
+import com.tasktrooper.android.replay.ReplayOptions
+import com.tasktrooper.android.replay.TrooperReplay
 
 class SampleApp : Application() {
     override fun onCreate() {
@@ -19,5 +21,8 @@ class SampleApp : Application() {
                 debug = true,
             ),
         )
+        // Wireframe session replay (no screenshots): record every session in the sample; text is masked
+        // except where `Modifier.trooperUnmask()` / `view.trooperUnmask()` opts in.
+        TrooperReplay.install(this, ReplayOptions(sampleRate = 1.0, onErrorSampleRate = 1.0))
     }
 }

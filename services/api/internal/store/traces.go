@@ -169,7 +169,11 @@ func (d *DB) GetTrace(ctx context.Context, id string) (*model.Trace, error) {
 		}
 		t.Spans = append(t.Spans, s)
 	}
-	return t, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	d.annotateLLM(ctx, t, start, finish)
+	return t, nil
 }
 
 // ---------------------------------------------------------------- errors

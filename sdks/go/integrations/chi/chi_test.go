@@ -3,6 +3,7 @@ package trooperchi
 import (
 	"net/http"
 	"net/http/httptest"
+	"runtime/pprof"
 	"strings"
 	"testing"
 
@@ -82,5 +83,25 @@ func TestChi(t *testing.T) {
 				t.Error("panic not recorded")
 			}
 		})
+	}
+}
+
+func TestProfileLabels(t *testing.T) {
+	troopertest.New(t, "svc")
+	trooper.EnableProfileLabels(true)
+	t.Cleanup(func() { trooper.EnableProfileLabels(false) })
+
+	var route, method string
+	r := chi.NewRouter()
+	r.Use(Middleware())
+	r.Route("/v1", func(r chi.Router) {
+		r.Get("/orders/{id}", func(w http.ResponseWriter, r *http.Request) {
+			route, _ = pprof.Label(r.Context(), trooper.ProfileLabelRoute)
+			method, _ = pprof.Label(r.Context(), trooper.ProfileLabelMethod)
+		})
+	})
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/v1/orders/7", nil))
+	if route != "/v1/orders/:id" || method != "GET" {
+		t.Errorf("labels = %q %q", route, method)
 	}
 }

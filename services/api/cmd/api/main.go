@@ -15,6 +15,7 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tasktrooper/telemetry/services/api/internal/auth"
+	"github.com/tasktrooper/telemetry/services/api/internal/blob"
 	"github.com/tasktrooper/telemetry/services/api/internal/cloudcheck"
 	"github.com/tasktrooper/telemetry/services/api/internal/conntest"
 	"github.com/tasktrooper/telemetry/services/api/internal/server"
@@ -98,6 +99,9 @@ func run(cfg config.Common, log *slog.Logger) error {
 		if srv.OIDC.ClientID == "" {
 			return errors.New("TT_OIDC_ISSUER is set but TT_OIDC_CLIENT_ID is empty")
 		}
+	}
+	if b := blob.FromEnv(); b != nil {
+		srv.Replays = b
 	}
 	srv.StateKey = key
 	srv.PublicAPIURL = config.String("TT_PUBLIC_API_URL", "http://localhost:8080")

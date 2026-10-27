@@ -8,6 +8,7 @@ import io.opentelemetry.context.Context;
 import io.opentelemetry.sdk.trace.ReadWriteSpan;
 import io.opentelemetry.sdk.trace.ReadableSpan;
 import io.opentelemetry.sdk.trace.internal.ExtendedSpanProcessor;
+import io.tasktrooper.telemetry.core.profiling.ProfileRoutes;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
@@ -29,6 +30,9 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>Entry route propagation: each span is mapped to its local root span while it is open; a child reads the root's
  * route when it starts and again when it ends (routes are often resolved after the server span started). Never throws.
+ *
+ * <p>While the profiler runs, entry spans (and children running on other threads) are also reported to
+ * {@link ProfileRoutes} so profile samples can be attributed to the endpoint.
  */
 public final class TrooperSpanProcessor implements ExtendedSpanProcessor {
     private static final int MAX_TRACKED = 200_000;
@@ -58,6 +62,15 @@ public final class TrooperSpanProcessor implements ExtendedSpanProcessor {
             }
 
             SpanKind kind = span.getKind();
+            if (ProfileRoutes.isActive()) {
+                if (localRoot && (kind == SpanKind.SERVER || kind == SpanKind.CONSUMER)) {
+                    ReadableSpan entrySpan = span;
+                    ProfileRoutes.entryStarted(key(span.getSpanContext()),
+                            () -> new String[] {entryRouteOf(entrySpan), entryMethodOf(entrySpan)});
+                } else if (!localRoot && root != null) {
+                    ProfileRoutes.childStarted(key(span.getSpanContext()), key(root.getSpanContext()));
+                }
+            }
             if (localRoot && kind == SpanKind.SERVER) {
                 String caller = Baggage.fromContext(parentContext).getEntryValue(TrooperAttributes.BAGGAGE_SERVICE);
                 if (caller != null && !caller.isBlank()) {
@@ -122,6 +135,9 @@ public final class TrooperSpanProcessor implements ExtendedSpanProcessor {
                     span.setAttribute(TrooperAttributes.ENTRY_METHOD, method);
                 }
             }
+            if (ProfileRoutes.isActive()) {
+                ProfileRoutes.spanEnding(key(span.getSpanContext()));
+            }
         } catch (Throwable t) {
             SdkErrors.record("span_processor", t);
         }
@@ -134,7 +150,11 @@ public final class TrooperSpanProcessor implements ExtendedSpanProcessor {
 
     @Override
     public void onEnd(ReadableSpan span) {
-        roots.remove(key(span.getSpanContext()));
+        String k = key(span.getSpanContext());
+        roots.remove(k);
+        if (ProfileRoutes.isActive()) {
+            ProfileRoutes.spanEnded(k);
+        }
     }
 
     @Override

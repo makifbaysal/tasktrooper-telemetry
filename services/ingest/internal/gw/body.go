@@ -26,10 +26,15 @@ func readBody(r *http.Request, max int64) ([]byte, error) {
 
 // readBodyWire is readBody that also returns the bytes as received (before decompression).
 func readBodyWire(r *http.Request, max int64) (wire, body []byte, err error) {
-	if r.ContentLength > max {
+	return readBodyLimits(r, max, max)
+}
+
+// readBodyLimits is readBodyWire with separate limits for the wire bytes and the decompressed body.
+func readBodyLimits(r *http.Request, maxWire, max int64) (wire, body []byte, err error) {
+	if r.ContentLength > maxWire {
 		return nil, nil, errTooLarge
 	}
-	raw, err := readLimited(r.Body, max, r.ContentLength)
+	raw, err := readLimited(r.Body, maxWire, r.ContentLength)
 	if err != nil {
 		return nil, nil, err
 	}

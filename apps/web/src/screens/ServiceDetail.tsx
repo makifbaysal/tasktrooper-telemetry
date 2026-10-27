@@ -25,9 +25,12 @@ import { FrontendApp } from './FrontendApp';
 import { DeployList } from './Integrations';
 import { ServiceInfraTab } from './ServiceInfra';
 import { EbpfBadge } from './k8sShared';
+import { AiMonitoringBody } from './AiMonitoring';
+import { serviceHasAi } from '@/data/aimon';
+import { ProfilingTab, compareProfilesUrl, hasProfiles } from './Profiling';
 
-type Tab = 'endpoints' | 'lag' | 'traffic' | 'time' | 'deploys' | 'loadtests' | 'kpis' | 'alerts' | 'logs' | 'infra';
-const TABS: Tab[] = ['endpoints', 'lag', 'traffic', 'time', 'deploys', 'loadtests', 'kpis', 'alerts', 'logs', 'infra'];
+type Tab = 'endpoints' | 'lag' | 'traffic' | 'time' | 'deploys' | 'loadtests' | 'kpis' | 'alerts' | 'logs' | 'infra' | 'ai' | 'profiling';
+const TABS: Tab[] = ['endpoints', 'lag', 'traffic', 'time', 'deploys', 'loadtests', 'kpis', 'alerts', 'logs', 'infra', 'ai', 'profiling'];
 
 /** Color slot = entity's fixed position in its list, not its rank, so it matches across charts. */
 const slotAt = (i: number) => LINE_SLOTS[i % LINE_SLOTS.length];
@@ -84,6 +87,8 @@ export function ServiceDetail() {
           ...(groupsOfService(svc.id).length ? [{ id: 'lag' as const, label: <>Lag <LagBadge serviceId={svc.id} /></> }] : []),
           { id: 'traffic', label: 'Traffic flow' },
           { id: 'time', label: 'Time spent' },
+          { id: 'profiling', label: 'Profiling' },
+          ...(serviceHasAi(svc.id) ? [{ id: 'ai' as const, label: 'AI' }] : []),
           { id: 'deploys', label: 'Deploys' },
           ...(svc.type === 'http' ? [{ id: 'loadtests' as const, label: 'Load tests' }] : []),
           { id: 'kpis', label: <>KPIs <KpiCount serviceId={svc.id} /></> },
@@ -94,6 +99,7 @@ export function ServiceDetail() {
         {tab === 'endpoints' && <EndpointsTab eps={eps} unit={unit} isConsumer={isConsumer} onOpen={(e) => nav(`/services/${svc.id}/endpoints/${e.id}`)} />}
         {tab === 'lag' && <ServiceLag serviceId={svc.id} />}
         {tab === 'traffic' && <TrafficTab svc={svc} eps={eps} ts={ts} unit={unit} isConsumer={isConsumer} />}
+        {tab === 'profiling' && <ProfilingTab key={svc.id} svc={svc} />}
         {tab === 'time' && <TimeTab svc={svc} eps={eps} ts={ts} critical={critical} onOpen={(e) => nav(`/services/${svc.id}/endpoints/${e.id}?tab=time`)} />}
         {tab === 'deploys' && <DeploysTab svc={svc} />}
         {tab === 'loadtests' && <ServiceLoadTests key={svc.id} serviceId={svc.id} />}
@@ -101,6 +107,7 @@ export function ServiceDetail() {
         {tab === 'alerts' && <AlertsBody key={svc.id} serviceId={svc.id} />}
         {tab === 'logs' && <LogExplorer key={svc.id} serviceId={svc.id} />}
         {tab === 'infra' && <ServiceInfraTab key={svc.id} serviceId={svc.id} />}
+        {tab === 'ai' && <div className="stack"><AiMonitoringBody key={svc.id} service={svc.id} /></div>}
       </Section>
     </>
   );
@@ -340,12 +347,16 @@ function DeploysTab({ svc }: { svc: Service }) {
   const deploys = deploysOf(svc.id);
   const ts = timestamps(range);
   const latest = !!d.item && d.item === deploys[0];
+  const prevVersion = d.item ? deploys.slice(deploys.indexOf(d.item) + 1).find((x) => x.version !== d.item!.version && x.state !== 'error' && x.state !== 'canceled')?.version : undefined;
   return (
     <>
       <DeployList deploys={deploys} onOpen={d.open} />
       {d.item && (
         <Drawer open onClose={d.close} title={<span className="mono">{d.item.version}</span>} subtitle={d.item.commitMessage}
-          actions={<Button size="sm" onClick={() => nav('/code')}>Code insights</Button>}>
+          actions={<>
+            {prevVersion && hasProfiles(svc) && <Button size="sm" onClick={() => nav(compareProfilesUrl(svc.id, prevVersion, d.item!.version))}>Compare profiles with {prevVersion}</Button>}
+            <Button size="sm" onClick={() => nav('/code')}>Code insights</Button>
+          </>}>
           <KeyValues items={[
             ['Deployed', `${dateTime(d.item.ts)} · ${ago(d.item.ts)}`], ['Author', d.item.author ?? '—'],
             ['Source', DEPLOY_SOURCE_LABEL[d.item.source]], ['Environment', d.item.env],

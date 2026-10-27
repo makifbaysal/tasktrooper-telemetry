@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 import {
   AlertOctagon, ArrowRight, Box, Cloud, Code2, Database, FileCode2, GitCommit, Globe, HardDrive, Inbox, Layers, Monitor, ScrollText, Server, Smartphone, Zap,
+  Sparkles,
 } from 'lucide-react';
 import { Badge, Button, Drawer, DrawerSection, useDrawer } from '@/components/ui';
 import { endpointNode, kpis, kpiTree, kpiUnit, monitors, serviceNode, services, type RcaEvidence, type RcaMetric, type RcaNode, type RcaResult } from '@/data';
@@ -122,10 +123,10 @@ export function PathCrumbs({ result, start }: { result: RcaResult; start?: RcaNo
 
 // ---------------------------------------------------------------- full chain
 const KIND_ICON: Record<RcaNode['kind'], typeof Server> = {
-  page: Globe, app_start: Smartphone, endpoint: Server, db: Database, cache: HardDrive, http: Cloud, queue: Inbox, external: Cloud, code: Code2,
+  page: Globe, app_start: Smartphone, endpoint: Server, db: Database, cache: HardDrive, http: Cloud, queue: Inbox, ai: Sparkles, external: Cloud, code: Code2,
 };
 const KIND_LABEL: Record<RcaNode['kind'], string> = {
-  page: 'Page', app_start: 'App start', endpoint: 'Endpoint', db: 'Database', cache: 'Cache', http: 'HTTP', queue: 'Queue', external: 'External', code: 'Own code',
+  page: 'Page', app_start: 'App start', endpoint: 'Endpoint', db: 'Database', cache: 'Cache', http: 'HTTP', queue: 'Queue', ai: 'AI / LLM', external: 'External', code: 'Own code',
 };
 
 export function RcaChain({ tree, result }: { tree: RcaNode; result: RcaResult }) {

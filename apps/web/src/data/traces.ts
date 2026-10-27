@@ -10,6 +10,7 @@ import { NOW, endpointCalls, endpointsFor, logs as baseLogs, podTraces, services
 import { allLogs } from './logs';
 import { mockK8sPods } from './k8s';
 import { serverlessFunction, serverlessFunctions } from './serverless';
+import { mockLlmCallForTrace, mockLlmTraceIds, type TraceLlm } from './aimon';
 import { isApi, remote, remoteStatus, seg } from './remote';
 import type { Endpoint, K8sPod, TimeCategory } from './types';
 
@@ -45,6 +46,8 @@ export interface TraceSpan {
   /** resource attributes: k8s.pod.name, k8s.namespace.name, k8s.node.name, host.name, service.version … */
   resource: Record<string, string>;
   events: TraceSpanEvent[];
+  /** GenAI (LLM) span summary — contracts §25 */
+  llm?: TraceLlm;
 }
 export interface TraceDetail {
   id: string;
@@ -64,11 +67,12 @@ interface RawSpan {
   status: number; failed: boolean; dep?: string | null; route?: string | null; errorType?: string | null;
   attrs?: Record<string, string> | null; resource?: Record<string, string> | null;
   events?: { name: string; ts: number; attrs?: Record<string, string> | null }[] | null;
+  llm?: { provider?: string; model?: string; operation?: string; inputTokens?: number; outputTokens?: number; costUsd?: number | null; ttftMs?: number | null; hasContent?: boolean } | null;
 }
 interface RawTrace { id: string; ts: number; dur: number; services: string[] | null; errors: number; spans: RawSpan[] | null }
 
 const KINDS: SpanKind[] = ['server', 'client', 'producer', 'consumer', 'internal'];
-const CATS: TimeCategory[] = ['app', 'db', 'cache', 'http', 'queue'];
+const CATS: TimeCategory[] = ['app', 'db', 'cache', 'http', 'queue', 'ai'];
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 /** Resource keys that older api versions merged into span attrs. */
 const RESOURCE_PREFIXES = ['k8s.', 'host.', 'container.', 'cloud.', 'process.', 'os.', 'telemetry.sdk.', 'service.version', 'service.instance.id', 'deployment.environment', 'faas.'];
@@ -89,6 +93,10 @@ export function mapTrace(r: RawTrace): TraceDetail {
       start: num(s.start), dur: num(s.dur), status: num(s.status), failed: !!s.failed,
       ...(s.dep ? { dep: s.dep } : {}), ...(s.route ? { route: s.route } : {}), ...(s.errorType ? { errorType: s.errorType } : {}),
       attrs, resource, events: (s.events ?? []).map((e) => ({ name: e.name, ts: num(e.ts), attrs: e.attrs ?? {} })),
+      ...(s.llm ? { llm: {
+        provider: s.llm.provider ?? '', model: s.llm.model ?? '', operation: s.llm.operation ?? 'chat', inputTokens: num(s.llm.inputTokens), outputTokens: num(s.llm.outputTokens),
+        costUsd: typeof s.llm.costUsd === 'number' ? s.llm.costUsd : null, ttftMs: typeof s.llm.ttftMs === 'number' ? s.llm.ttftMs : undefined, hasContent: !!s.llm.hasContent,
+      } } : {}),
     };
   });
   return {
@@ -150,6 +158,11 @@ function seedIndex(): Map<string, Seed> {
       if (!m.has(e.traceId)) m.set(e.traceId, { ts: e.ts, dur: (f.p95Ms || 800) * 1.4, status: 500, isError: true, service: f.service || f.name, method: 'POST', route: `/${f.name}`, message: e.message });
     }
   }
+  // LLM calls of AI monitoring (data/aimon.ts): their trace carries the GenAI span
+  for (const id of mockLlmTraceIds()) {
+    const ai = mockLlmCallForTrace(id);
+    if (ai && !m.has(id)) m.set(id, { ts: ai.call.ts - 40, dur: ai.call.durationMs * 2 + 200, status: 200, isError: false, service: ai.call.service, method: ai.method, route: ai.call.route });
+  }
   for (const l of [...baseLogs, ...allLogs]) {
     if (!l.traceId || m.has(l.traceId)) continue;
     const svc = services.find((s) => s.name === l.service);
@@ -184,6 +197,8 @@ interface Node {
   attrs?: Record<string, string>; dep?: string; route?: string; status?: number;
   failed?: boolean; errorType?: string; errorMessage?: string; events?: { name: string; at: number; attrs: Record<string, string> }[];
   children?: Node[]; parallel?: boolean;
+  /** GenAI span: summary + a fixed span id (the AI call's) */
+  llm?: TraceLlm; fixedId?: string;
 }
 
 const svcByName = (name: string) => services.find((s) => s.name === name || s.id === name);
@@ -328,13 +343,14 @@ function resourceFor(service: string, seedPod: Seed['pod'], seedService: string)
 }
 
 function layout(n: Node, start: number, dur: number, parentId: string, seed: Seed, r: () => number, out: TraceSpan[], idOf: () => string) {
-  const spanId = idOf();
+  const spanId = n.fixedId ?? idOf();
   const span: TraceSpan = {
     spanId, parentSpanId: parentId, service: n.service, name: n.name, kind: n.kind, category: n.category, start, dur,
     status: n.status ?? 0, failed: !!n.failed, ...(n.dep ? { dep: n.dep } : {}), ...(n.route ? { route: n.route } : {}),
     ...(n.errorType ? { errorType: n.errorType } : {}),
     attrs: { ...n.attrs }, resource: resourceFor(n.service, seed.pod, seed.service),
     events: (n.events ?? []).map((e) => ({ name: e.name, ts: start + dur * e.at, attrs: e.attrs })),
+    ...(n.llm ? { llm: n.llm } : {}),
   };
   out.push(span);
   const kids = n.children ?? [];
@@ -358,6 +374,17 @@ function bulkChildren(seed: Seed, r: () => number): Node[] {
     children: [dbNode(seed.service, 'postgres · orders-db', 1, r, i), cacheNode(seed.service, 'redis · cache-main', `item:${i}`, true),
       dbNode(seed.service, 'postgres · orders-db', 1, r, i + 1), ...Array.from({ length: 6 }, (_, j) => dbNode(seed.service, 'postgres · orders-db', 0.3, r, j))],
   }));
+}
+
+/** The GenAI client span of an AI monitoring mock call (`dep = "<provider> · <model>"`, contracts §25). */
+function llmNode(service: string, ai: NonNullable<ReturnType<typeof mockLlmCallForTrace>>): Node {
+  const c = ai.call;
+  const code = c.error ? Number.parseInt(c.error, 10) : 0;
+  return {
+    service, name: `${c.operation} ${c.model}`, kind: 'client', category: 'ai', weight: c.durationMs * 20, dep: `${c.provider} · ${c.model}`, // dominant: gets most of the entry span
+    attrs: ai.attrs, llm: ai.llm, fixedId: c.spanId, status: Number.isFinite(code) ? code : 0,
+    ...(c.error ? { failed: true, errorType: ai.attrs['error.type'] || 'LLMError', events: [exceptionEvent(ai.attrs['error.type'] || 'LLMError', c.error, `${c.error}\n    at callModel (src/llm/client.ts:57:11)`)] } : {}),
+  };
 }
 
 const mockCache = new Map<string, TraceDetail>();
@@ -387,10 +414,18 @@ function mockTrace(id: string): TraceDetail {
     children: [bffServer],
   };
   injectError(root, entry, seed, r);
+  const ai = mockLlmCallForTrace(id);
+  if (ai) entry.children?.splice(Math.min(1, entry.children.length), 0, llmNode(entrySeed.service, ai));
   const spans: TraceSpan[] = [];
   let n = 0;
   const idOf = () => hex(hash(`${id}-${n++}`), 8) + hex(hash(`${n}-${id}`), 8);
   layout(root, 0, Math.max(seed.dur, 1), '', seed, r, spans, idOf);
+  if (ai) {
+    // the GenAI span lasts exactly as long as the AI monitoring call (within its parent)
+    const sp = spans.find((x) => x.spanId === ai.call.spanId);
+    const parent = sp && spans.find((x) => x.spanId === sp.parentSpanId);
+    if (sp && parent) sp.dur = Math.min(ai.call.durationMs, parent.start + parent.dur - sp.start);
+  }
   if (seed.isError) {
     // the failure surfaces as a 5xx on every HTTP span above it; only the failing call itself is an error span
     const byId = new Map(spans.map((s) => [s.spanId, s]));

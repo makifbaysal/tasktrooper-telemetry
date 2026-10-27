@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import {
-  AlertOctagon, BookOpen, Boxes, Server, Building2, ChevronsUpDown, Code2, Database, Gauge, KeyRound, LayoutDashboard, LogOut, Moon, Waypoints,
+  AlertOctagon, BookOpen, BotMessageSquare, Boxes, Server, Building2, ChevronsUpDown, Code2, Database, Gauge, KeyRound, LayoutDashboard, LogOut, Moon, Waypoints,
   Layers, Plug, Search, Settings, Sparkles, SquareFunction, Sun, SunMoon, Target, UserRound, Users, Zap, type LucideIcon,
 } from 'lucide-react';
 import { Avatar, Badge, Menu, MenuDivider, MenuItem, MenuLabel, Segmented, Select } from '@/components/ui';
@@ -33,6 +33,10 @@ const NAV: { section: string | null; items: NavItem[] }[] = [
   ] },
   { section: 'Objectives', items: [
     { to: '/kpis', label: 'KPIs', icon: Target, badge: () => ({ count: kpis.filter((k) => k.status !== 'ok').length }) },
+  ] },
+  // customer LLM calls (ADR-023) — not "AI usage" (our own quota, user menu)
+  { section: 'AI', items: [
+    { to: '/ai', label: 'AI monitoring', icon: BotMessageSquare },
   ] },
   { section: 'Tools', items: [
     { to: '/load-tests', label: 'Load tests', icon: Gauge },

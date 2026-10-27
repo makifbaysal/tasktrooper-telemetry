@@ -258,3 +258,66 @@ New Relic bunu Pixie (eBPF) ile yapıyor.
 - Maliyet tahmini api'de: GB-saniye + istek fiyatı (sabitler config'te), UI'da "tahmini" etiketiyle.
 - Metadata Postgres `serverless_functions`, metrikler ClickHouse `faas_1m`; alert için monitor kind `faas`.
 **Sonuç:** Google Cloud Functions/Run, Vercel Functions ileride aynı tabloya eklenebilir.
+
+## ADR-021 — Session replay: web için rrweb, mobil için wireframe
+**Bağlam:** RUM oturumları sayı ve olay listesi olarak görünüyor; kullanıcının ekranda ne yaşadığı görünmüyor. New Relic web
+ve mobil session replay sunuyor. "Kapsam dışı (v1)" listesindeydi.
+**Karar:**
+- **Web:** kayıt `rrweb` (`@rrweb/record` 2.2.0) ile DOM snapshot + mutation; ayrı paket `@trooper/replay` (browser
+  SDK'yı şişirmemek için, `@trooper/browser`'a integration olarak takılır). Oynatma UI'da `@rrweb/replay` 2.2.0.
+- **Mobil (Android, iOS):** piksel/ekran görüntüsü **toplanmaz**. View hiyerarşisinden **wireframe** (dikdörtgen, tür, renk,
+  maskeli metin) kare kare çıkarılır, sadece değişince ve en fazla 2 kare/sn; dokunmalar ayrı event. Oynatıcı bizim (SVG).
+  Böylece görüntü içinde PII sızması yapısal olarak imkânsız. Flutter / React Native replay sonraki iş.
+- **Gizlilik default:** web'de tüm metin ve input maskeli (`maskAllText`, `maskAllInputs` true), password her zaman,
+  `data-trooper-block` öğesi yer tutucu, canvas / cross-origin iframe / network gövdesi kaydedilmez. Mobilde metin maskeli,
+  görseller sadece kutu, input her zaman maskeli. Unmask açıkça (`data-trooper-unmask` / `trooperUnmask()`).
+- **Örnekleme:** oturum başına karar: `sampleRate` (default 0.1) kaydeder; `onErrorSampleRate` (default 1.0) bellekte son 60 sn'yi
+  tutar, hata olunca flush edip kayda devam eder. Karar oturum boyunca sabit (web: localStorage, sekmeler arası ortak).
+- **Taşıma:** segment'ler (≤ 5 sn veya ≤ 256 KB) `POST /v1/replay` → `tt.replay` → writer blob'u **S3**'e (`tt-replays` bucket),
+  indeksi ClickHouse `replay_segments`'e yazar. Retention 30 gün. Oturum meta verisi (kullanıcı, cihaz, hatalar, view'lar)
+  `rum_events`'ten gelir; replay ayrı bir oturum kavramı getirmez (`session_id` ortak).
+- **Korelasyon:** oynatıcının zaman çizelgesi `rum_events`'ten (view, action, error, resource); resource event'lerindeki
+  `trace_id` ile replay'den backend trace'ine (`/traces/:id`) geçilir. Hata detayından "Watch replay" ilgili saniyeye atlar.
+**Sonuç:** Mobilde gerçek görüntü yok (bilinçli); web'de canvas/WebGL içerik boş görünür. Detay: contracts.md §23.
+
+## ADR-022 — Continuous profiling: pprof + folded stack, ClickHouse'ta stack satırları
+**Bağlam:** Endpoint yavaşladığında "where time goes" bağımlılık kırılımı veriyor ama kendi kodumuzun (`app` kategorisi) içinde
+hangi fonksiyonun CPU/bellek yaktığı görünmüyor. New Relic thread profiler ve flame graph sunuyor.
+**Karar:**
+- SDK'lar sürekli, düşük overhead'li profil alır (varsayılan: her 60 sn'de 10 sn CPU, 60 sn'de bir heap/goroutine) ve
+  `POST /v1/profiles`'a yollar. İki wire formatı: **pprof** (Go'nun yerel formatı) ve **folded stack** (`a;b;c 123`, JVM/Node
+  için basit; bağımlılık gerektirmez). OTLP profiles sinyali henüz stabil değil — stabil olunca gw'de kabul edilir.
+- **Go:** `runtime/pprof`; istek goroutine'ine pprof label `trooper.route` / `trooper.method` konur → flame graph endpoint
+  bazında filtrelenebilir. **JVM:** JFR (`jdk.ExecutionSample`, `jdk.ObjectAllocationSample`, `jdk.JavaMonitorEnter`), native
+  agent yok. **Node:** `node:inspector` CPU profiler + sampling heap profiler. **.NET / Python:** sonraki iş.
+- Writer profilleri stack satırlarına açar: ClickHouse `profile_stacks` (stack = frame dizisi, root önce; değer) ve
+  `profiles` (profil başına özet). Flame graph, top functions ve diff api'de `GROUP BY stack` ile hesaplanır.
+- **Diff:** iki pencere/versiyon karşılaştırması pay (değer / toplam) üzerinden — deploy öncesi/sonrası "hangi fonksiyon
+  büyüdü" sorusu. Retention 14 gün.
+- Kardinalite: frame adı = fonksiyon (dosya/satır yok, Node'da `fn (file)`), stack derinliği ≤ 128, profil başına ≤ 10k benzersiz
+  stack (küçükler `[other]`'a birleşir).
+**Sonuç:** Thread dump / anlık "thread profiler" yok; sürekli profil zaten aynı soruyu cevaplar. Detay: contracts.md §24.
+
+## ADR-023 — AI / LLM monitoring: OTel GenAI semantic conventions
+**Bağlam:** Müşteriler uygulamalarında LLM çağırıyor (OpenAI, Anthropic, Gemini, Bedrock, Azure OpenAI…). Bugün bu çağrılar
+sadece `HTTP · api.openai.com` bağımlılığı olarak görünüyor: model, token, maliyet ve prompt yok. New Relic "AI monitoring"
+sunuyor. (Not: ADR-018 bizim kendi LLM kotamızdır; bu ADR müşterinin LLM kullanımını izler — UI'da "AI monitoring".)
+**Karar:**
+- Wire = normal OTLP span'ı, **OTel GenAI semantic conventions** (`gen_ai.provider.name`, `gen_ai.operation.name`,
+  `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens|output_tokens`, …). Yeni endpoint yok;
+  OTel'in kendi GenAI instrumentation'larından (Spring AI, Microsoft.Extensions.AI, OpenLLMetry, Vercel AI SDK) gelen span'lar
+  da aynen çalışır.
+- SDK'lar sıfır-kod sarmalayıcı verir: **Node** `instrumentOpenAI(client)` / `instrumentAnthropic(client)` + Vercel AI SDK
+  telemetry'si; **Go** `llm.Start(ctx, …)` yardımcıları + OpenAI/Anthropic HTTP `RoundTripper`'ı (stream dahil token'ları
+  cevaptan okur); **JVM** Spring AI / LangChain4j span'larını OTel'den alır + Anthropic/OpenAI Java client sarmalayıcısı;
+  **.NET** `Microsoft.Extensions.AI` ActivitySource'u varsayılan açık.
+- **Prompt / completion içeriği varsayılan toplanmaz** (PII). `captureContent: true` ile açılır; writer içeriği span
+  attribute'larından ayırıp `llm_content` tablosuna yazar (alan başına ≤ 32 KB, retention 7 gün), span'da sadece token/meta kalır.
+- Writer: GenAI client span'ı bağımlılık kategorisi **`ai`** (`dep = "<provider> · <model>"`) olur → "Time spent" ve RCA'da
+  görünür; ayrıca `llm_1m` rollup'ı (provider, model, operation, servis, entry route; çağrı, hata, token'lar, süre digest'i).
+- **Maliyet** api'de hesaplanır: model başına fiyat tablosu (1M token başına input/output/cache read) kod içi varsayılan +
+  org override (Postgres `llm_prices`). Fiyatlar değişir → UI'da "est." etiketi, fiyat bilinmeyen modelde maliyet boş.
+- UI: sidebar'da **AI monitoring** (provider/model/servis/endpoint bazında çağrı, token, maliyet, hata, p95; son çağrılar +
+  prompt çekmecesi), servis detayında **AI** sekmesi (LLM çağrısı varsa), trace detayında GenAI span paneli.
+**Sonuç:** Python SDK yok → Python LLM uygulamaları OpenLLMetry / OTel GenAI instrumentation'ı ile OTLP göndermeli. LLM alert'leri
+(maliyet/saat, token, hata) sonraki iş. Detay: contracts.md §25.

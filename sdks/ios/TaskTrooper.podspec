@@ -28,6 +28,14 @@ Pod::Spec.new do |s|
     core.ios.weak_frameworks = 'MetricKit'
   end
 
+  # Wireframe session replay (contracts.md §23). `.trooperUnmask()` for SwiftUI is included. Not extension-safe
+  # (uses UIApplication); install is a no-op in app extensions and on tvOS.
+  s.subspec 'Replay' do |replay|
+    replay.dependency   'TaskTrooper/Core'
+    replay.source_files = "#{root}/Sources/TaskTrooperReplay/**/*.swift"
+    replay.frameworks   = 'UIKit', 'SwiftUI'
+  end
+
   s.subspec 'SwiftUI' do |ui|
     ui.dependency   'TaskTrooper/Core'
     ui.source_files = "#{root}/Sources/TaskTrooperSwiftUI/**/*.swift"

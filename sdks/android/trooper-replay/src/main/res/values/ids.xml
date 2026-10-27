@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- View tag: true = record this subtree's text unmasked in session replay, false = force masking. -->
+    <item name="trooper_unmask" type="id" />
+</resources>

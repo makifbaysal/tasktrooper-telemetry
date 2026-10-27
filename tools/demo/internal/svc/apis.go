@@ -182,6 +182,9 @@ func runCatalog(ctx context.Context, a *App, port int) error {
 	mux.HandleFunc("GET /v1/search", func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		term := Pick([]string{"red", "sneaker", "lamp", "black jacket", "mug", "watch"})
+		if a.RT.LLM && !a.embed(ctx, int64(len(strings.Fields(term))+ID(2, 7)), 1) { // semantic re-rank: query embedding
+			a.Log.WarnContext(ctx, "query embedding rate limited, falling back to keyword search provider=openai")
+		}
 		rows, err := db.Query(ctx, `SELECT id, name, price FROM items WHERE name ILIKE $1 ORDER BY price LIMIT $2`, "%"+term+"%", 20)
 		if err != nil {
 			a.Fail(w, r, 500, err, "search failed")
@@ -201,6 +204,9 @@ func runCatalog(ctx context.Context, a *App, port int) error {
 			sku, "new item", "home", 19.9, 10); err != nil {
 			a.Fail(w, r, 500, err, "create item failed")
 			return
+		}
+		if a.RT.LLM { // title + description + attributes → item embedding (name, description chunks)
+			a.embed(ctx, int64(ID(180, 620)), 3)
 		}
 		a.Produce(ctx, kc, "catalog.events", sku, []byte(`{"type":"item.created"}`))
 		JSON(w, 201, `{"ok":true}`)
@@ -346,6 +352,10 @@ func runBFF(ctx context.Context, a *App, port int) error {
 		Work(ctx, 10, 0.4)
 		JSON(w, 200, `{}`)
 	})
+	if a.RT.LLM {
+		// support assistant (anthropic, streaming, tool use, content capture) — llm.go
+		mux.HandleFunc("POST /v1/assistant/messages", a.handleAssistant)
+	}
 	return a.Serve(ctx, port, mux)
 }
 

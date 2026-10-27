@@ -50,6 +50,8 @@ func main() {
 | `ExportTimeout` | — | `30s` | per export, including retries |
 | `MaxQueueSize` | — | `2048` | bounded span/log queues; overflow is dropped, never blocks |
 | `HTTPClient` | — | — | custom client for exporters (proxy, TLS) |
+| `Profiling` / `trooper.WithProfiling(...)` | `TROOPER_PROFILING`, `TROOPER_PROFILING_TYPES`, `TROOPER_PROFILING_PERIOD`, `TROOPER_PROFILING_CPU_DURATION` | off | continuous profiling, see [below](#continuous-profiling) |
+| — (`llm.SetCaptureContent`) | `TROOPER_LLM_CAPTURE_CONTENT` | `false` | record LLM prompts/completions, see [below](#ai--llm-monitoring) |
 
 Explicit fields win; then explicitly set `OTEL_*` variables; then `TROOPER_*` (contract §2).
 
@@ -58,7 +60,7 @@ Explicit fields win; then explicitly set `OTEL_*` variables; then `TROOPER_*` (c
 - **Export:** `POST {endpoint}/v1/traces|metrics|logs`, protobuf + gzip, header `x-trooper-key`. Batch processors with bounded
   queues. Retries 429/5xx with exponential backoff (1s → 60s, jitter, honours `Retry-After`) within `ExportTimeout`; other 4xx
   drop the batch. Swallowed errors are counted in `trooper.sdk.errors` (meter `TaskTrooper.Telemetry`, attr `component`:
-  `exporter.traces|metrics|logs`, `processor`, `capture`, `resolver`), lost items in `trooper.sdk.dropped`; see also
+  `exporter.traces|metrics|logs|profiles`, `processor`, `capture`, `resolver`, `profiler`, `profiler.cpu`, `llm`), lost items in `trooper.sdk.dropped`; see also
   `trooper.DroppedBatches()` / `trooper.SDKErrors()`.
 - **Resource:** `service.name/version`, `deployment.environment.name`, `telemetry.distro.name=trooper-go`, `telemetry.sdk.*`,
   host, OS, container id, process pid/executable/runtime (no command line or owner — they may contain secrets).
@@ -228,6 +230,7 @@ logger.Info("order created", trooperzap.Context(ctx))
   started in middleware *before* the route handler get none. Fiber v2 uses `otelfiber` v2.2.3, which emits older HTTP semconv
   names. Response trace header injection is disabled (no baggage leak to clients).
 - **net/http, chi:** the route is resolved lazily from `r.Pattern` / chi's route context while the request runs.
+- **Profile labels:** see [Continuous profiling](#continuous-profiling) — Fiber requests are labelled with `trooper.method` only.
 - **gRPC:** `trooper.route` = full method (`/pkg.Svc/Method`); there is no `trooper.entry.method`. Unknown methods produce no span.
 - **sarama `ProducerInterceptor`:** has no context, so it only propagates `tt.svc`; use `SendMessage`/`InjectContext` for traces.
 - **mongo:** no released contrib `otelmongo` exists for driver v2, so a small monitor is included; command text is off by
@@ -235,6 +238,122 @@ logger.Info("order created", trooperzap.Context(ctx))
 - **redis:** command arguments (`db.statement`) are not recorded.
 
 Runnable examples: [`examples/gin`](examples/gin/main.go), [`examples/franzgo`](examples/franzgo/main.go).
+
+## Continuous profiling
+
+Off by default (ADR-022, contract §24). Enable in code or with `TROOPER_PROFILING=true`:
+
+```go
+shutdown, err := trooper.Start(ctx, trooper.Config{Service: "orders-api"}, trooper.WithProfiling())
+
+// or choose types / timing:
+trooper.Start(ctx, cfg, trooper.WithProfiling(
+	trooper.WithProfileTypes("cpu", "alloc_space", "inuse_space", "goroutines", "lock", "block"),
+	trooper.WithProfilePeriod(60*time.Second),
+	trooper.WithProfileCPUDuration(10*time.Second),
+))
+```
+
+| Env | Default | |
+|---|---|---|
+| `TROOPER_PROFILING` | `false` | `true` turns profiling on (code option wins) |
+| `TROOPER_PROFILING_TYPES` | `cpu,alloc_space,inuse_space,goroutines` | also `alloc_objects`, `inuse_objects`, `lock` (mutex), `block` |
+| `TROOPER_PROFILING_PERIOD` | `60` | seconds between collections |
+| `TROOPER_PROFILING_CPU_DURATION` | `10` | seconds of CPU profiling per period (≤ period) |
+
+How it works:
+
+- A background goroutine runs `runtime/pprof` CPU profiling for `CPU_DURATION` every `PERIOD` (default 10 s / 60 s — well
+  under the 2% CPU budget) and then snapshots the other profiles. Each profile is one `POST {endpoint}/v1/profiles` with
+  `service, env, version, host, runtime=go, start, end, format` query parameters and the DSN key header.
+- `cpu` and `goroutines` are sent as gzipped **pprof** (as written by `runtime/pprof`, labels included). Heap, mutex and block
+  profiles are cumulative since process start in Go, so the SDK decodes them and sends the **delta per period** as
+  **folded** stacks (`type`/`unit` parameters; `inuse_*` are point-in-time snapshots). The first period only records the
+  baseline for `alloc_*`, `lock` and `block`.
+- `lock` / `block` set `runtime.SetMutexProfileFraction(10)` (unless the application already set a fraction) and
+  `runtime.SetBlockProfileRate(100µs)` only when requested; both are reset on shutdown.
+- If CPU profiling is already active (your own `pprof.StartCPUProfile`, `net/http/pprof`'s `/debug/pprof/profile`), that
+  round is skipped and counted in `trooper.sdk.errors{component="profiler.cpu"}`. Conversely, `/debug/pprof/profile` fails
+  while the SDK's 10 s CPU window is running.
+- Upload failures drop the profile (no queue). 429/5xx/network errors start an exponential backoff (1 s → 60 s, jitter,
+  `Retry-After` honoured) during which profiles are dropped (`trooper.sdk.dropped{component="profiler"}`); other 4xx drop.
+- Shutdown stops the loop; an in-flight CPU window is stopped and discarded.
+
+**Endpoint labels.** While profiling runs, entry points label their goroutine with pprof labels `trooper.route` and
+`trooper.method` (HTTP method, `GRPC`, `CONSUME`), so the flame graph can be filtered per endpoint. The returned context
+carries the labels too; goroutines started from the request goroutine inherit them, and workers that receive the context
+can use `pprof.SetGoroutineLabels(ctx)` / `pprof.Do`. Labels are restored when the request ends. When profiling is off no
+labels are set (zero cost). `trooper.EnableProfileLabels(true)` turns them on for an external profiler.
+
+| Integration | Route label |
+|---|---|
+| gin, echo, gRPC, consumers (`ProcessMessage`) | known when the middleware runs |
+| net/http with `*http.ServeMux` | pre-resolved via `ServeMux.Handler(r)` (one extra match per request, only while profiling) |
+| chi | pre-resolved via the router's `Match` on the chi route context |
+| net/http with another router | `trooperhttp.WithProfileRouteResolver(func(*http.Request) string)`; otherwise method only |
+| fiber | method only (the route is known only after the handler ran) |
+
+Custom entry points: `trooper.BeginEntry` labels the goroutine when the route is passed; `entry.LabelRoute(ctx, route)` adds
+it later. `Finish` must run on the same goroutine as `BeginEntry`. `trooper.StartConsumer` leaves the labels on the goroutine
+until the next entry; `ProcessMessage` restores them.
+
+## AI / LLM monitoring
+
+Package `github.com/tasktrooper/telemetry-go/llm` (no extra dependencies) records LLM calls as OTel GenAI client spans
+(ADR-023, contract §25): `gen_ai.operation.name`, `gen_ai.provider.name`, request/response model, `max_tokens`,
+`temperature`, input/output and cache read/write tokens, `finish_reasons`, response id, `trooper.llm.ttft_ms` for streams.
+
+**Zero-code: wrap the SDK's HTTP client.**
+
+```go
+import "github.com/tasktrooper/telemetry-go/llm"
+
+oa := openai.NewClient(option.WithHTTPClient(llm.HTTPClient(nil)))            // openai-go
+an := anthropic.NewClient(aoption.WithHTTPClient(llm.HTTPClient(nil)))        // anthropic-sdk-go
+genai.NewClient(ctx, &genai.ClientConfig{HTTPClient: llm.HTTPClient(nil)})    // google.golang.org/genai
+
+// existing client / transport, extra OpenAI-compatible hosts:
+client := llm.HTTPClient(myClient, llm.WithProvider("localhost:11434", "ollama"))
+rt := llm.Transport(otelhttp.NewTransport(http.DefaultTransport))             // LLM span becomes the parent of the HTTP span
+```
+
+| Host | `gen_ai.provider.name` | APIs |
+|---|---|---|
+| `api.openai.com` | `openai` | `/chat/completions`, `/completions`, `/embeddings`, `/responses` |
+| `*.openai.azure.com`, `*.cognitiveservices.azure.com`, `*.services.ai.azure.com` | `azure.ai.openai` | same; model falls back to the deployment name |
+| `api.anthropic.com` | `anthropic` | `/v1/messages` |
+| `generativelanguage.googleapis.com`, `*aiplatform.googleapis.com` | `gcp.gemini`, `gcp.vertex_ai` | `:generateContent`, `:streamGenerateContent`, `:embedContent` |
+| `api.mistral.ai`, `api.groq.com`, `api.deepseek.com`, `api.x.ai`, `openrouter.ai`, `api.together.xyz`, `api.fireworks.ai`, `api.perplexity.ai`, `api.cerebras.ai` | `mistral_ai`, `groq`, `deepseek`, `x_ai`, `openrouter`, … | OpenAI-compatible |
+| `llm.WithProvider(host, name)` | `name` | OpenAI-compatible (Anthropic / Gemini dialect for `anthropic` / `gcp.gemini`) |
+
+- The request body is buffered (≤ 8 MB) to read `model`, `max_tokens` / `max_completion_tokens` / `maxOutputTokens`,
+  `temperature`, and replayed byte-for-byte. The response body is passed through unchanged while a copy is parsed: JSON
+  `usage` (OpenAI `prompt_tokens`/`completion_tokens`/`prompt_tokens_details.cached_tokens`; Anthropic
+  `input_tokens`/`output_tokens`/`cache_read_input_tokens`/`cache_creation_input_tokens`; Gemini `usageMetadata`), and
+  SSE streams event by event — TTFT at the first content delta, the span ends at EOF or `Close`.
+- `gen_ai.usage.input_tokens` includes cached tokens (OTel convention): for Anthropic it is
+  `input_tokens + cache_read_input_tokens + cache_creation_input_tokens`. Gemini output tokens include thinking tokens.
+- OpenAI chat streams report usage only with `stream_options: {"include_usage": true}` (the transport never changes your
+  request); without it the span has TTFT and model but no tokens.
+- Non-2xx responses: span status Error, `error.type` = status code. Network errors: `error.type` = error type.
+- Unknown hosts, other paths and non-POST requests pass through untouched; a parsing failure only loses telemetry.
+
+**Manual instrumentation** (other SDKs, Bedrock, agents, tools):
+
+```go
+ctx, call := llm.Start(ctx, llm.Request{Provider: "aws.bedrock", Model: modelID, Operation: "chat", MaxTokens: 1024})
+for chunk := range stream(ctx) {
+	call.FirstToken() // TTFT: only the first call counts
+	...
+}
+call.End(llm.Usage{InputTokens: in, OutputTokens: out, FinishReasons: []string{"end_turn"}, Err: err})
+```
+
+**Content capture** is off by default (PII). `TROOPER_LLM_CAPTURE_CONTENT=true`, `llm.SetCaptureContent(true)` or
+`llm.WithCaptureContent(true)` (per transport) record `gen_ai.system_instructions`, `gen_ai.input.messages` and
+`gen_ai.output.messages` as JSON in the GenAI message format (`[{"role":"user","parts":[{"type":"text","content":"…"}]}]`);
+with `llm.Start` pass `Request.SystemInstructions` / `InputMessages` and `Usage.OutputMessages`. Parts longer than 16 KB
+are truncated; the backend stores content separately for 7 days.
 
 ## Development
 
