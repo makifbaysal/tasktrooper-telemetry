@@ -97,6 +97,7 @@ Backend: `docker compose -f deploy/docker-compose.yml up -d` (altyapı), `make m
 - [x] Symbolication servisi + `trooper-cli`; canlı demo (`make demo`)
 - [x] OIDC auth + takım yönetimi (ADR-016), code intelligence (Faz 4, ADR-014), load test runner (Faz 5, ADR-015)
 - [x] Slack App (alert + kök neden/confidence, ack/mute) ve GitHub App (repo ekleme, push webhook → incremental analiz) — ADR-017
+- [x] AI kullanım kotası (ADR-018), host/K8s/container izleme + opsiyonel eBPF (ADR-019), AWS Lambda + Azure Functions (ADR-020)
 - [ ] Paket yayınlama
 
 Sıradaki işler: [`.ai/roadmap.md`](.ai/roadmap.md).

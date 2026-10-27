@@ -60,11 +60,16 @@ Durum: servisler (`ingest`, `api`, `alerting`, `collector`, `integrations` = `tr
 - [x] Domain doğrulama, limitler
 - [x] Envanter/trafikten senaryo üretimi, canlı run ekranı
 
-## Faz 6 — AI kotası, altyapı ve serverless
-- [ ] AI kullanım kotası: kredi defteri, paket varsayılanları, org + üye limiti, %80/%100 bildirimi, Usage ekranı (ADR-018)
-- [ ] trooper-agent `host` / `cluster` modları: host, container, process, K8s node/pod/workload, Warning event'leri (ADR-019)
-- [ ] Helm chart (DaemonSet + Deployment + RBAC) + opsiyonel eBPF (OBI)
-- [ ] Monitor kind `infra`, RCA'da pod/host sinyalleri
-- [ ] AWS Lambda keşif + CloudWatch metrikleri, Azure Functions sağlayıcısı, `faas` monitor'ları, maliyet tahmini (ADR-020)
-- [ ] `@trooper/node` `wrapLambda`
-- [ ] UI: Hosts, Kubernetes, Serverless ekranları; servis detayında altyapı sekmesi
+## Faz 6 — AI kotası, altyapı ve serverless ✅
+- [x] AI kullanım kotası: kredi defteri, paket varsayılanları, org + üye limiti, %80/%100 bildirimi, Usage ekranı (ADR-018)
+- [x] trooper-agent `host` / `cluster` modları: host, container, process, K8s node/pod/workload, Warning event'leri (ADR-019)
+- [x] Helm chart (DaemonSet + Deployment + RBAC) + opsiyonel eBPF (OBI)
+- [x] Monitor kind `infra`, RCA'da pod/host sinyalleri
+- [x] AWS Lambda keşif + CloudWatch metrikleri, Azure Functions sağlayıcısı, `faas` monitor'ları, maliyet tahmini (ADR-020)
+- [x] `@trooper/node` `wrapLambda`
+- [x] UI: Hosts, Kubernetes, Serverless ekranları; servis detayında altyapı sekmesi
+- [ ] K8s cluster modunda list yerine watch (binlerce pod üstü için)
+- [ ] containerd/Podman host'ları, GPU ve Windows node metrikleri
+- [ ] Azure: fonksiyon bazında metrik (App Insights), app setting'den servis eşlemesi
+- [ ] Pod bazında trace filtresi; iki Helm chart'ın birleştirilmesi (`services/collector/deploy/helm` eski DB chart'ı)
+- [ ] Gerçek EKS/AKS/Lambda hesaplarıyla doğrulama (şu an fake sunucu + demo simülasyonu)
