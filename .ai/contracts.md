@@ -36,7 +36,7 @@ Her modül/klasör tek bir sahibe (agent/geliştirici) aittir; başka modülün 
 gerekirse küçük tutulur (tek harici bağımlılık `google.golang.org/protobuf`) ve bu dosyaya not düşülür.
 
 `services/pkg` içeriği: `topics` (topic/header adları), `tenant` (Tenant + context), `config` (TT_* env okuma),
-`logx` (JSON slog), `secrets` (AES-GCM + credentials ref çözümü), `rumpb` (`proto/rum/v1`'den buf ile üretilir: `cd proto && go run github.com/bufbuild/buf/cmd/buf@v1.57.0 generate`).
+`logx` (JSON slog), `secrets` (AES-GCM + credentials ref çözümü), `llmprice` (LLM fiyat tablosu + maliyet, gömülü default'lar, org override cache'i; §25), `rumpb` (`proto/rum/v1`'den buf ile üretilir: `cd proto && go run github.com/bufbuild/buf/cmd/buf@v1.57.0 generate`).
 
 **Ortam değişkenleri** (default'lar host'tan docker-compose'a göre): `TT_POSTGRES_URL`, `TT_CLICKHOUSE_URL`
 (`clickhouse://trooper:trooper@localhost:9000/telemetry`), `TT_KAFKA_BROKERS` (`localhost:19092`; container içinden `redpanda:9092`),
@@ -228,9 +228,13 @@ MetricKit'ten gelen crash/hang'ler `attributes.metrickit=true` taşır; aynı cr
 
 **Hibrit uygulamalar (Flutter / React Native + native SDK):** native SDK varsa oturum ve crash'ler ortak olur. Kanal adı
 `dev.tasktrooper.telemetry/rum` (Flutter MethodChannel — `trooper_flutter` plugin'i, iOS'ta native SDK için `trooper_flutter/Native` subspec; RN'de native module adı `TrooperRum` (TurboModule + eski mimari), JS önce `TrooperRum`, sonra bu kanal adını arar; RN ≥ 0.74, iOS'ta native SDK için `TROOPER_RN_NATIVE_SDK=1 pod install`):
-- `setContext({session_id, anonymous_id, view_id, view_name, user_id})` — JS/Dart → native; native crash raporu bu bağlamla gönderilir.
+- `setContext({session_id, anonymous_id, view_id, view_name, user_id, sampled})` — JS/Dart → native; native crash raporu bu bağlamla
+  gönderilir. `sampled` (bool, opsiyonel) JS/Dart'ın RUM örnekleme kararıdır; native bunu kullanır (yoksa eski davranış). Benimsenen
+  (adopted) oturum native tarafta **dış oturumdur**: native inaktivite/4 saat kuralıyla döndürmez, sahibi JS/Dart'tır.
 - `getContext()` → aynı alanlar — native → JS/Dart (native önce başladıysa onun oturumu kullanılır).
 - `getProcessStartTime()` → unix ms — APP_START `start_reference=process` için.
+- `isNativeReplayActive()` → bool — Flutter, native replay kuruluysa Dart wireframe kaydını başlatmaz (Android reflection; iOS şimdilik
+  hep `false` → "ikisini birden açma" doküman kuralı).
 Native handler yoksa çağrılar sessizce başarısız olur. Oturumun sahibi Dart/JS katmanıdır: native SDK `setContext` ile
 oturumu devraldığında kendi SESSION_START'ını göndermez.
 
@@ -740,7 +744,12 @@ açılmış ≤ 10 MB → aşarsa 413. gw JSON'u parse edip doğrular (`session_
   - `{"type":"frame","ts":…,"nodes":[Node…]}` — her zaman tam kare (diff yok), sadece hiyerarşi değişince, ≤ 2 kare/sn.
     `Node = {"id":int,"x","y","w","h" (dp/pt, ekran koordinatı),"kind":"view|text|image|button|input|switch|webview|list|icon",
     "bg"?:"#rrggbb[aa]","fg"?:"#rrggbb","radius"?:num,"border"?:"#rrggbb","text"?:string,"masked"?:bool,"alpha"?:0..1,
-    "clip"?:[x,y,w,h]}`. Liste çizim sırasıdır (arkadan öne). Maskeli metin uzunluğu korunur (`"•••• •••"`).
+    "clip"?:[x,y,w,h],"checked"?:bool}`. Liste çizim sırasıdır (arkadan öne). Maskeli metin uzunluğu korunur (`"•••• •••"`).
+    `checked` sadece `switch` (toggle/checkbox/radio) için. Etiketli toggle = `text` + `switch` (toggle alanı) iki node. Dialog karartması
+    yarı saydam tam ekran `view` node'u. `bg`'siz `button` oynatıcıda nötr dolgu ile çizilir. Compose ve SwiftUI node'larında renk yok;
+    SwiftUI metni yalnız erişilebilirlik ağacı açıkken okunur (aksi halde içerik katmanları — metin unmask edilemez).
+    Yakalama bütçesi: Android main thread CPU süresi (~12 ms), bütçe aşan kare atılır ve bir kez yeniden denenir; iOS tam kare varken
+    yarım kareyi atar. `TrooperReplay.stop()` her iki platformda (idempotent, açık segmenti mühürleyip gönderir).
   - `{"type":"touch","ts":…,"x":…,"y":…,"phase":"down|move|up"}` (move ≤ 10/sn), `{"type":"keyboard","ts":…,"visible":bool}`.
 - **Gizlilik (SDK default):** web `maskAllText`, `maskAllInputs` true; `input[type=password]` her zaman maskeli; seçiciler
   `data-trooper-block` (öğe boyutunda boş kutu), `data-trooper-mask`, `data-trooper-unmask`; canvas, cross-origin iframe, network
@@ -781,7 +790,9 @@ ayrı producer kullanır (kayıt ≤ 8 MiB). gw doğrulaması: `session_id` ≤ 
 - Mevcut uçlara ek: `GET /apps/{app}/sessions` satırlarında `hasReplay: boolean`; `GET /apps/{app}/errors/{fingerprint}` ve
   `GET /errors/{fingerprint}` cevabında üst seviye `replay?: { sessionId, offsetMs }` (replay'in kapsadığı en yeni oluşum; backend hatasında trace id taşıyan RUM resource event'i üzerinden).
 
-**Hibrit uygulamalar:** React Native → native SDK replay'i (`TrooperRum.startReplay(options)` / `stopReplay()`; native SDK yoksa
+**Hibrit uygulamalar:** React Native → native SDK replay'i (`TrooperRum.startReplay(options)`, `stopReplay()`, `isReplayRecording()`
+— hepsi `Promise<boolean>` —, `notifyReplayError()` JS hatasında on-error buffer'ı tetikler; native API `TrooperReplay.notifyError()` /
+`TrooperReplay.stop()`; iOS'ta `TROOPER_RN_NATIVE_SDK=1` `TaskTrooper/Replay` subspec'ini de çeker, `TROOPER_RN_REPLAY=0` kapatır; native SDK yoksa
 no-op + uyarı), `resource.platform` = `android|ios`, `sdk_name` native SDK'nınki. Flutter → `trooper_flutter` Dart tarafı wireframe
 (`sdk_name` = `trooper_flutter`, `platform` = `android|ios`), native SDK varsa native replay **başlatılmaz** (çift kayıt olmasın).
 **Web sekmeleri:** buffer modundaki sekme localStorage `storage` event'inde karar `session` olursa buffer'ını flush edip kayda geçer.
@@ -823,8 +834,12 @@ no-op + uyarı), `resource.platform` = `android|ios`, `sdk_name` native SDK'nın
 Writer her `ResourceProfiles` → `ScopeProfiles` → `Profile` için: `service.name` / `deployment.environment.name` / `service.version` /
 `host.name` / `process.runtime.name` resource attribute'larından, `time_unix_nano` + `duration_nano` pencere, sample type'lar §24 pprof
 eşlemesiyle (nanosecond tipi yoksa `samples`/`count` × period → `cpu`), stack = location → function adı (inline frame'ler açılır),
-sample attribute `trooper.route`/`trooper.method` → endpoint. Proto: `go.opentelemetry.io/proto/otlp` (v1development) — kırıcı
-değişiklikte gw sürümü pinler.
+sample attribute `trooper.route`/`trooper.method` → endpoint. Proto: ayrı modüller `go.opentelemetry.io/proto/otlp/profiles/v1development`
+ve `.../collector/profiles/v1development` **v0.4.1** (Collector 0.164 pdata ile aynı; request seviyesinde `ProfilesDictionary`) —
+kırıcı değişiklikte gw sürümü pinler. Writer kuralları: attribute'lar inline veya `key_strindex`/`string_value_strindex` ile gelebilir
+(ikisi de çözülür); tabloların 0. indeksi gerçek veri olabilir (Collector böyle yazar) → normal indeks gibi okunur. `service.name` yoksa
+`unknown_service:<process.executable.name>` (eBPF profiler servis yazmaz). Sample değeri = `values` toplamı, yoksa timestamp sayısı.
+Aynı zamanda `cpu/nanoseconds` varsa `samples/count` profili atlanır. Metrik: `tt_ingest_writer_otlp_profiles_total{outcome}`.
 
 **Writer** (`deploy/clickhouse/005_replay_profiles_llm.sql`):
 - `profile_stacks(org_id, project_id, ts DateTime (profil start'ı), service, env, version, host, runtime, type, unit, route,
@@ -848,14 +863,19 @@ değişiklikte gw sürümü pinler.
   { baseValue, baseSelf }` (iki ağaç birleşik; olmayan tarafta 0). UI pay farkını (`value/total − baseValue/baseTotal`) çizer.
 - `GET /api/v1/profiles/top?service=&type=&range=&env=&version=&host=&route=&method=&limit=50` → `{ unit, total, functions:
   [{ name, self, total }] }` (`total` = fonksiyonu içeren stack'lerin toplamı, recursion bir kez sayılır).
-- `GET /api/v1/profiles/series?service=&type=&range=&env=&version=` → Seri (§8): `cpu`/`wall` için ortalama core, diğerlerinde
-  dakika başına ortalama değer; host başına seri (≤ 8, fazlası "Other").
+- `GET /api/v1/profiles/series?service=&type=&range=&env=&version=` → Seri (§8): `cpu`/`wall` için ortalama core; `alloc_*`/`lock`/`block` profil
+  penceresine göre normalize edilmiş dakika başına oran (pencereli SDK'lar düşük okunmasın); anlık tipler (`inuse_*`, `goroutines`) dakika
+  başına ortalama değer; host başına seri (≤ 8, fazlası "Other").
 - Endpoint sayfası route/method'u servis endpoint'inden alır; profil yoksa UI "Enable profiling" talimatını gösterir.
 
 **.NET:** `TaskTrooper.Telemetry.Profiling` paketi (`services.AddTaskTrooperProfiling()` veya `TROOPER_PROFILING=true` + paket
-referansı), default tipler `cpu,alloc_space,lock`, runtime `dotnet`, folded format + route bölümleri. **Python:** `tasktrooper`
+referansı), default tipler `cpu,alloc_space,lock`, runtime `dotnet`, folded format + route bölümleri. EventPipe ~1 kHz'de
+sabit örneklediği için pencereli (default 10 sn / 60 sn; `Duration = Period` sürekli); ortalama ek yük ~%2 (pencere içinde %10–13).
+Route etiketi `AsyncLocal` ile `await`'ler boyunca izlenir (sadece örneklenmiş istekler). `cpu` = managed kod çalışırken alınan örnekler. **Python:** `tasktrooper`
 `init(profiling=True)`, default `cpu`, opsiyonel `wall`, `inuse_space` (tracemalloc, overhead uyarısı), runtime `python`, route etiketi
-entry span'ının thread'i üzerinden (asyncio'da task başına değil, thread başına — not edilir).
+entry span'ının thread'i üzerinden (asyncio'da task başına değil, thread başına — not edilir). Python ek env'leri: `TROOPER_PROFILING_HZ`,
+`TROOPER_DISABLE_INSTRUMENTATIONS`, `TROOPER_DEBUG`; CPU Linux'ta thread CPU saatinden, diğerlerinde idle sezgisiyle; Python < 3.11'de
+frame adı sadece fonksiyon adı.
 
 **SDK config:** `TROOPER_PROFILING` (`true|false`, default false), `TROOPER_PROFILING_TYPES` (virgüllü; default
 `cpu,alloc_space,inuse_space` + Go'da `goroutines`), `TROOPER_PROFILING_PERIOD` (sn, default 60), `TROOPER_PROFILING_CPU_DURATION`
@@ -877,6 +897,9 @@ entry span'ının thread'i üzerinden (asyncio'da task başına değil, thread b
 | `gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions` (JSON string) | **sadece `captureContent`** — writer bunları attrs'tan çıkarıp `llm_content`'e yazar |
 
 Vercel AI SDK provider span'ları (`ai.*.doGenerate|doStream|doEmbed`) `gen_ai.operation.name` taşımaz: writer `ai.operationId` / `gen_ai.system`'dan tamamlar (`anthropic.messages` → `anthropic`, TTFT `ai.response.msToFirstChunk`); `@trooper/node` bunu SDK'da da yapar.
+Provider SDK'larının kendi GenAI span'ları (ör. Anthropic Python SDK 2.x, .NET): `gen_ai.usage.cache_write.input_tokens` →
+cache_creation, `gen_ai.response.time_to_first_chunk` (saniye) → `trooper.llm.ttft_ms`. Böyle SDK'larda `instrument_anthropic` ikinci
+span üretmez (çift sayım olmasın).
 Eski OpenLLMetry adları da kabul: `gen_ai.prompt.N.*` / `gen_ai.completion.N.*` → içerik; `llm.usage.*` → token'lar.
 OTel log event'i `gen_ai.client.inference.operation.details` gelirse içerik oradan alınır.
 
@@ -907,7 +930,7 @@ OTel log event'i `gen_ai.client.inference.operation.details` gelirse içerik ora
 - `GET /api/v1/ai/prices` → `{ updated (default tablonun tarihi), prices: [{ provider, model, inputPerMTok, outputPerMTok, cacheReadPerMTok?, cacheWritePerMTok?,
   source: 'default'|'org' }] }`; `PUT /api/v1/ai/prices` (admin+) `{ provider, model, inputPerMTok, outputPerMTok, … }` org
   override; `DELETE /api/v1/ai/prices?provider=&model=` default'a döner. Fiyat anahtarı **aile** + model: provider aileye indirgenir (`gcp.gemini`/`gcp.vertex_ai` → `google`, `azure.ai.openai` → `openai`, `aws.bedrock` → modelin üreticisi, ör. `anthropic.claude-…` → `anthropic`). Model eşleşmesi: tam ad, yoksa alfanümerik olmayan sınırda en uzun önek
-  (ör. `claude-sonnet-4-5-20250929` → `claude-sonnet-4-5`). Varsayılan fiyatlar `services/api/internal/llmprice/defaults.json`.
+  (ör. `claude-sonnet-4-5-20250929` → `claude-sonnet-4-5`). Varsayılan fiyatlar `services/pkg/llmprice/defaults.json`.
   Postgres `llm_prices(org_id, provider, model, input_per_mtok, output_per_mtok, cache_read_per_mtok, cache_write_per_mtok,
   updated_by, updated_at)` (`deploy/postgres/012_llm_prices.sql`).
 - `GET /api/v1/services/{id}` cevabına `hasAi: boolean`; servis kapsamı `ai/overview?service=`.

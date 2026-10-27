@@ -108,7 +108,7 @@ init({ dsn, service: 'shop-web', integrations: [
 `window.TrooperReplay`. Oturum ve hata bilgisini `@trooper/browser`'ın integration kancalarından alır.
 
 React Native: `import { startReplay } from '@trooper/react-native'; startReplay({ sampleRate: 0.1 })` (native SDK gerekir).
-Flutter: `TrooperFlutter.init(..., replay: TrooperReplayOptions(sampleRate: 0.1))` — Dart tarafı wireframe; unmask `TrooperUnmask(child: …)`.
+Flutter: `TaskTrooper.init(config, appRunner: …, replay: const TrooperReplayOptions(sampleRate: 0.1))` — Dart tarafı wireframe; unmask `TrooperUnmask(child: …)`.
 
 Mobil (wireframe, ekran görüntüsü yok):
 - Android: `TrooperReplay.install(context, ReplayOptions(sampleRate = 0.1, onErrorSampleRate = 1.0))` (`trooper-replay` modülü; offline kuyruk ≤ 2 MB, dolunca yeni segment düşer);

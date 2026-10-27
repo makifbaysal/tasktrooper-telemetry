@@ -87,10 +87,10 @@ Durum: servisler (`ingest`, `api`, `alerting`, `collector`, `integrations` = `tr
 - [ ] Gerçek cihazda mobil replay doğrulaması (main thread maliyeti, Compose/SwiftUI çıktısı)
 
 ## Faz 7b — Tamamlayıcılar
-- [ ] Flutter (Dart Element ağacı) ve React Native (native SDK köprüsü) replay
-- [ ] .NET (`TaskTrooper.Telemetry.Profiling`, EventPipe) ve Python profiling
-- [ ] Python SDK `tasktrooper` (ADR-024): OTel dağıtımı + profiling + LLM
-- [ ] LLM alert'leri (monitor kind `llm`, şablonlar, editör), fiyat tablosu `services/pkg/llmprice`
-- [ ] OTLP profiles sinyali (`/v1development/profiles`, gRPC)
-- [ ] Web replay: buffer sekmesi `storage` event'i
-- [ ] Mobil replay emülatör/simulator doğrulaması
+- [x] Flutter (Dart Element ağacı) ve React Native (native SDK köprüsü) replay
+- [x] .NET (`TaskTrooper.Telemetry.Profiling`, EventPipe) ve Python profiling
+- [x] Python SDK `tasktrooper` (ADR-024): OTel dağıtımı + profiling + LLM
+- [x] LLM alert'leri (monitor kind `llm`, şablonlar, editör), fiyat tablosu `services/pkg/llmprice`
+- [x] OTLP profiles sinyali (`/v1development/profiles`, gRPC)
+- [x] Web replay: buffer sekmesi `storage` event'i
+- [x] Mobil replay emülatör/simulator doğrulaması
