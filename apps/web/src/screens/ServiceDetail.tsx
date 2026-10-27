@@ -23,9 +23,11 @@ import { AlertCount, AlertsBody, OpenIncidents } from './Alerts';
 import { KpiCount, KpisAtRisk, ServiceKpis } from './Kpis';
 import { FrontendApp } from './FrontendApp';
 import { DeployList } from './Integrations';
+import { ServiceInfraTab } from './ServiceInfra';
+import { EbpfBadge } from './k8sShared';
 
-type Tab = 'endpoints' | 'lag' | 'traffic' | 'time' | 'deploys' | 'loadtests' | 'kpis' | 'alerts' | 'logs';
-const TABS: Tab[] = ['endpoints', 'lag', 'traffic', 'time', 'deploys', 'loadtests', 'kpis', 'alerts', 'logs'];
+type Tab = 'endpoints' | 'lag' | 'traffic' | 'time' | 'deploys' | 'loadtests' | 'kpis' | 'alerts' | 'logs' | 'infra';
+const TABS: Tab[] = ['endpoints', 'lag', 'traffic', 'time', 'deploys', 'loadtests', 'kpis', 'alerts', 'logs', 'infra'];
 
 /** Color slot = entity's fixed position in its list, not its rank, so it matches across charts. */
 const slotAt = (i: number) => LINE_SLOTS[i % LINE_SLOTS.length];
@@ -65,7 +67,7 @@ export function ServiceDetail() {
     <>
       <PageHeader title={svc.name}
         crumbs={[{ label: categoryOf(svc.type).label, to: `/services?type=${categoryOf(svc.type).id}` }, { label: svc.name }]}
-        subtitle={<span className="row" style={{ gap: 12 }}><StatusBadge status={svc.status} /><ServiceType type={svc.type} /><span className="muted">{svc.language} · {svc.version} · {svc.instances} instances</span></span>}
+        subtitle={<span className="row" style={{ gap: 12 }}><StatusBadge status={svc.status} /><ServiceType type={svc.type} /><span className="muted">{svc.language} · {svc.version} · {svc.instances} instances</span>{svc.source === 'ebpf' && <EbpfBadge />}</span>}
         actions={<>
           <Button icon={<Play size={14} />} onClick={() => nav('/load-tests')}>Load test</Button>
         </>} />
@@ -87,6 +89,7 @@ export function ServiceDetail() {
           { id: 'kpis', label: <>KPIs <KpiCount serviceId={svc.id} /></> },
           { id: 'alerts', label: <>Alerts <AlertCount serviceId={svc.id} /></> },
           { id: 'logs', label: 'Logs' },
+          { id: 'infra', label: 'Infrastructure' },
         ]} />
         {tab === 'endpoints' && <EndpointsTab eps={eps} unit={unit} isConsumer={isConsumer} onOpen={(e) => nav(`/services/${svc.id}/endpoints/${e.id}`)} />}
         {tab === 'lag' && <ServiceLag serviceId={svc.id} />}
@@ -97,6 +100,7 @@ export function ServiceDetail() {
         {tab === 'kpis' && <ServiceKpis serviceId={svc.id} />}
         {tab === 'alerts' && <AlertsBody key={svc.id} serviceId={svc.id} />}
         {tab === 'logs' && <LogExplorer key={svc.id} serviceId={svc.id} />}
+        {tab === 'infra' && <ServiceInfraTab key={svc.id} serviceId={svc.id} />}
       </Section>
     </>
   );

@@ -16,6 +16,13 @@ import { LoadTestDomains } from './screens/LoadTestDomains';
 import { CodeInsights } from './screens/CodeInsights';
 import { DatabaseDetail, Databases } from './screens/Databases';
 import { ClusterDetail, Queues } from './screens/Queues';
+import { Hosts } from './screens/Hosts';
+import { HostDetail } from './screens/HostDetail';
+import { Kubernetes } from './screens/Kubernetes';
+import { K8sClusterDetail } from './screens/ClusterDetail';
+import { PodDetail } from './screens/PodDetail';
+import { Serverless } from './screens/Serverless';
+import { FunctionDetail } from './screens/FunctionDetail';
 import { SettingsScreen } from './screens/Settings';
 import { Integrations } from './screens/Integrations';
 import { DesignSystem } from './screens/DesignSystem';
@@ -46,6 +53,14 @@ export const router = createBrowserRouter([
       { path: '/infrastructure/databases/:databaseId', element: <DatabaseDetail /> },
       { path: '/infrastructure/queues', element: <Queues /> },
       { path: '/infrastructure/queues/:clusterId', element: <ClusterDetail /> },
+      { path: '/infrastructure/hosts', element: <Hosts /> },
+      { path: '/infrastructure/hosts/:hostId', element: <HostDetail /> },
+      { path: '/infrastructure/kubernetes', element: <Kubernetes /> },
+      { path: '/infrastructure/kubernetes/:cluster', element: <K8sClusterDetail /> },
+      { path: '/infrastructure/kubernetes/:cluster/pods/:uid', element: <PodDetail /> },
+      { path: '/infrastructure/serverless', element: <Serverless /> },
+      { path: '/infrastructure/serverless/:functionId', element: <FunctionDetail /> },
+      { path: '/settings/usage', element: <SettingsScreen /> },
       { path: '/code', element: <CodeInsights /> },
       { path: '/settings', element: <SettingsScreen /> },
       { path: '/settings/integrations', element: <Integrations /> },

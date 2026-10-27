@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { TimeSeries } from '@/components/charts';
 import {
-  Badge, Button, Card, CodeBlock, Drawer, DrawerSection, EmptyState, KeyValues, Meter, MetricCard, PageHeader, Section, Segmented, Select,
+  Badge, Button, Callout, Card, CodeBlock, Drawer, DrawerSection, EmptyState, KeyValues, Meter, MetricCard, PageHeader, Section, Segmented, Select,
   StatusBadge, Table, useDrawer,
 } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
@@ -24,6 +24,35 @@ type Filter = 'all' | 'monitored' | 'unmonitored' | 'dead' | 'shadow';
 const KIND_LABEL: Record<InventoryItem['kind'], string> = {
   endpoint: 'Endpoint', consumer: 'Consumer', cron: 'Scheduled job', view: 'View', dependency: 'Dependency',
 };
+
+/** The AI quota (ADR-018) stopped the LLM step of the last analysis: the rest kept static criticality. */
+type LlmInfo = { status?: string; reason?: string; skipped?: number };
+const REASON_TEXT: Record<string, string> = {
+  user_limit: 'your personal monthly AI limit was reached', org_limit: 'your team’s monthly AI credits are used up', check_failed: 'the AI quota check was unavailable',
+};
+function AiQuotaNotice({ repos, inventory }: { repos: RepoInfo[]; inventory: InventoryRow[] }) {
+  const nav = useNavigate();
+  // repo summary (repositories.analysis.llm) and/or per item (inventory.analysis.llm)
+  const fromRepos = repos.filter((r) => r.llm?.status === 'quota_exceeded').map((r) => ({ name: r.name, llm: r.llm as LlmInfo }));
+  const itemLlm = inventory.map((i) => (i as InventoryRow & { analysis?: { llm?: LlmInfo | null } | null }).analysis?.llm).filter((l): l is LlmInfo => l?.status === 'quota_exceeded');
+  if (fromRepos.length === 0 && itemLlm.length === 0) return null;
+  const all = [...fromRepos.map((h) => h.llm), ...itemLlm];
+  const skipped = fromRepos.length ? fromRepos.reduce((a, h) => a + (h.llm.skipped ?? 0), 0) : itemLlm.length;
+  const reason = (['user_limit', 'org_limit', 'check_failed'] as const).find((r) => all.some((l) => l.reason === r)) ?? 'org_limit';
+  const hit = fromRepos;
+  return (
+    <Callout icon={<AlertTriangle size={16} color="var(--status-warning)" />}>
+      <div className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+        <Badge tone="warning" icon={<AlertTriangle />}>{reason === 'check_failed' ? 'AI quota check unavailable' : 'AI quota reached'}</Badge>
+        <span>
+          {hit.length ? <>The last analysis of {hit.map((r) => r.name).join(', ')}</> : 'The last analysis'} ran without AI because {REASON_TEXT[reason]}
+          {skipped > 0 && <> — {skipped} code path{skipped === 1 ? '' : 's'} kept rule-based criticality and no failure modes</>}.
+        </span>
+        <Button size="sm" variant="ghost" onClick={() => nav('/settings/usage')}>View AI usage</Button>
+      </div>
+    </Callout>
+  );
+}
 
 const monitorFor = (i: InventoryItem) => monitors.find((m) => m.target.includes(i.key));
 const suggestionFor = (i: InventoryItem) => suggestionRows().find((s) => s.target.endsWith(i.key));
@@ -141,6 +170,7 @@ export function CodeInsights() {
   return (
     <>
       {header}
+      <AiQuotaNotice repos={repos} inventory={inventory} />
 
       {/* 1 — the headline: how much of what matters is protected */}
       <div className="grid grid-3">

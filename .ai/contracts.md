@@ -464,7 +464,8 @@ used, limit}`). Notifier Slack/e-posta metni: "AI usage at 80% of this month's c
   `{ period, resetsAt, plan, org: {limit: number|null, used, remaining: number|null}, me: {limit: number|null, used},
      byUser: [{userId, email, name, limit: number|null, used}] (sadece admin+; diğerlerine []),
      byFeature: [{feature, credits, calls}], byProject: [{projectId, name, credits}],
-     daily: SeriesSet (id 'credits') }` — `limit: null` = sınırsız. Krediler 2 ondalık.
+     daily: SeriesSet (id 'credits'), aiQuota?: {monthlyCredits: number|null, notify: string[]} (sadece admin+) }` —
+  `limit: null` = sınırsız. Krediler 2 ondalık.
 - `PUT /orgs/{org}/ai-quota {monthlyCredits: number|null, notify: string[]}` (admin+, audit `ai_quota.update`).
 - `PUT /orgs/{org}/members/{user}/ai-quota {monthlyCredits: number|null}` (admin+, audit `ai_quota.member`).
 - `GET /me` → ek alan `ai: {period, limit, used, userLimit, userUsed}`; `GET /orgs/{org}/members` satırları `aiCredits: {limit, used}`.
@@ -539,23 +540,23 @@ artışı → aday "Pod <pod> restarted (OOMKilled)" (confidence 0.6–0.85); po
 **API** (`?range=` her yerde; değerler seçili aralığın son tam dakikası, seriler aralık bucket'ları):
 - `GET /infra/hosts?cluster=&q=` → `[{id (host.name), hostId, os, arch, cluster, node, cpu, cpuCores, memory, memoryBytes,
   disk, netIn, netOut, load1, uptimeS, containers, lastSeen, status, spark: {cpu: number[], memory: number[]}}]`.
-- `GET /infra/hosts/{host}` → host alanları + `cpu`, `memory`, `disk` (SeriesSet, 0..1), `network` (SeriesSet: `in`, `out`
-  byte/sn), `containers: Container[]`, `processes: [{pid, exe, command, containerId, cpu, memoryBytes, threads, fds}]` (son
+- `GET /infra/hosts/{host}` → host alanları (anlık değerler, liste ile aynı) + `series: {cpu, memory, disk (SeriesSet, 0..1),
+  network (SeriesSet: `in`, `out` byte/sn)}`, `containerList: Container[]`, `processes: [{pid, exe, command, containerId, cpu, memoryBytes, threads, fds}]` (son
   dakika, cpu'ya göre), `services: string[]`.
 - `GET /infra/containers?host=&service=` → `Container[] = [{id, name, image, host, cluster, namespace, pod, podUid, service,
   cpu, cpuLimit, memoryBytes, memoryLimit, restarts, netIn, netOut, throttled, status}]`.
 - `GET /infra/k8s/clusters` → `[{name, nodes, nodesReady, pods, podsRunning, podsFailing, namespaces, workloads,
   cpuUsed, cpuAllocatable, memoryUsed, memoryAllocatable, warningEvents, lastSeen, status}]`.
-- `GET /infra/k8s/clusters/{cluster}` → cluster alanları + `nodes: [{name, ready, cpu, cpuAllocatable, memoryBytes,
-  memoryAllocatable, pods, host}]`, `namespaces: [{name, pods, workloads, failing}]`, `cpu` (SeriesSet core: `used`,
-  `requested`, `allocatable`), `memory` (SeriesSet byte, aynı id'ler).
+- `GET /infra/k8s/clusters/{cluster}` → cluster alanları (sayılar, liste ile aynı) + `nodeList: [{name, ready, status, cpu,
+  cpuAllocatable, memoryBytes, memoryAllocatable, pods, host}]`, `namespaceList: [{name, pods, workloads, failing}]`,
+  `series: {cpu (SeriesSet core: `used`, `requested`, `allocatable`), memory (SeriesSet byte, aynı id'ler)}`.
 - `GET /infra/k8s/workloads?cluster=&namespace=` → `[{cluster, namespace, kind, name, desired, ready, available, updated,
   restarts (aralıkta artış), cpu, memoryBytes, service, status}]`.
 - `GET /infra/k8s/pods?cluster=&namespace=&workload=&node=&service=` → `Pod[] = [{uid, name, namespace, cluster, node, phase,
   reason, ready, restarts, restartsInRange, cpu, cpuRequest, cpuLimit, memoryBytes, memoryRequest, memoryLimit, workloadKind,
   workload, service, status, containers: [{name, image, cpu, memoryBytes, restarts}]}]`.
-- `GET /infra/k8s/pods/{uid}` → Pod + `cpu` (SeriesSet core: `usage`, `request`, `limit`), `memory` (byte, aynı id'ler),
-  `restarts` (SeriesSet), `events: K8sEvent[]`.
+- `GET /infra/k8s/pods/{uid}` → Pod (anlık değerler) + `series: {cpu (SeriesSet core: `usage`, `request`, `limit`), memory
+  (byte, aynı id'ler), restarts (SeriesSet, bucket başına restart artışı)}`, `events: K8sEvent[]`.
 - `GET /infra/k8s/events?cluster=&namespace=&kind=&name=&limit=` → `K8sEvent[] = [{ts, type, reason, message, objectKind,
   objectName, namespace, cluster, count}]` (logs tablosu, `service='k8s'`).
 - `GET /services/{svc}/infra` → `{pods: Pod[], hosts: [{id, cpu, memory}], containers: Container[], functions:
@@ -564,6 +565,8 @@ artışı → aday "Pod <pod> restarted (OOMKilled)" (confidence 0.6–0.85); po
   `warning` > 0.85, `stale` son veri > 5 dk. Pod `critical`: phase Failed, reason ∈ {CrashLoopBackOff, OOMKilled,
   ImagePullBackOff, ErrImagePull} veya Running+ready=0; `warning`: restartsInRange > 0 veya Pending. Workload `critical`
   available=0 & desired>0, `warning` available < desired. Cluster: en kötü node/pod durumu.
+  Kural: detay uçları liste satırının alanlarını **aynen** taşır; seriler `series` altında, listeler `*List` adıyla (alan adı
+  çakışması olmaz).
 
 ## 21. Serverless (ADR-020)
 
@@ -631,7 +634,13 @@ GB-s = Σ(invocations × duration_avg ms / 1000) × memory_mb / 1024. Azure Cons
   triggers, service, invocations, errors, errorRate, throttles, p95Ms, p99Ms, coldStarts, coldStartRate, concurrencyMax, costUsd,
   status: 'ok'|'warning'|'critical'|'idle'|'missing', spark: number[]}]` (spark = invocations bucket'ları). `idle` =
   aralıkta çağrı yok; `critical` errorRate > 0.05 veya throttles > 0; `warning` errorRate > 0.01 veya p95 > timeout × 0.8.
-- `GET /serverless/functions/{id}` → function + `invocations` (SeriesSet: `invocations`, `errors`, `throttles`), `duration`
-  (SeriesSet ms: `avg`, `p95`, `p99`), `concurrency` (SeriesSet), `coldStarts` (SeriesSet), `recentErrors: [{ts, traceId,
+- `GET /serverless/functions/{id}` → function (anlık/aralık değerleri, liste ile aynı) + `series: {invocations (SeriesSet:
+  `invocations`, `errors`, `throttles`), duration (SeriesSet ms: `avg`, `p95`, `p99`), concurrency (SeriesSet), coldStarts
+  (SeriesSet)}`, `recentErrors: [{ts, traceId,
   message}]` (span'lardan), `functions?: string[]` (Azure), `integration: {id, name}`.
-- `POST /integrations` `provider:'azure'` → `config` yukarıdaki gibi, `credentials: {clientSecret}` (aws/gcp ile aynı akış).
+- `POST /integrations` `provider:'azure'` → `config` yukarıdaki gibi, client secret aws/gcp ile aynı `secret` alanında.
+
+**Monitor şablonları:** kaynak `services/alerting/internal/eval/templates.go` (`eval.Templates`); api aynı listeyi
+`GET /monitor-templates` → `[{id, name, description, kind, severity, query, condition}]` ile döner. `faas` "p95 > timeout × 0.8"
+şablonu `query.relativeToTimeout: true` + eşik 0.8. Incident `rootCause` ek alanları: `infra: [{kind: pod|host, entity,
+cluster?, node?, reason, restarts?, value?, title, confidence}]`, `treeSummary`, `treeConfidence`.

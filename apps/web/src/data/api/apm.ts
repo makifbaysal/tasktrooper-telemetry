@@ -83,6 +83,7 @@ export function mapService(r: RawService): Service {
     status: oneOf<Health>(r.status, HEALTH, 'ok'), instances: num(r.instances),
   };
   if (typeof r.lag === 'number') s.lag = r.lag;
+  if (r.source === 'ebpf') s.source = 'ebpf';
   return s;
 }
 export const mapServices = (raw: RawService[] | null) => arr(raw).map(mapService);

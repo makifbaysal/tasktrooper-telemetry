@@ -1,18 +1,20 @@
 import { useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import {
-  AlertOctagon, BookOpen, Building2, ChevronsUpDown, Code2, Database, Gauge, KeyRound, LayoutDashboard, LogOut, Moon, Waypoints,
-  Layers, Plug, Search, Settings, Sun, SunMoon, Target, UserRound, Users, Zap, type LucideIcon,
+  AlertOctagon, BookOpen, Boxes, Server, Building2, ChevronsUpDown, Code2, Database, Gauge, KeyRound, LayoutDashboard, LogOut, Moon, Waypoints,
+  Layers, Plug, Search, Settings, Sparkles, SquareFunction, Sun, SunMoon, Target, UserRound, Users, Zap, type LucideIcon,
 } from 'lucide-react';
 import { Avatar, Badge, Menu, MenuDivider, MenuItem, MenuLabel, Segmented, Select } from '@/components/ui';
 import { logout, switchProject, useAuth } from '@/data/auth';
-import { PROVIDERS, clusterHealth, clusters, databases, incidents, integrations, kpis, services, useData, worst, type Health, type TimeRange } from '@/data';
+import { PROVIDERS, clusterHealth, clusters, databases, hosts, incidents, integrations, k8sClusters, kpis, services, useData, worst, type Health, type TimeRange } from '@/data';
 import { useAcks } from '@/screens/Alerts';
 import { SERVICE_CATEGORIES } from '@/screens/shared';
+import { AiQuotaBanner } from '@/screens/Usage';
 import { useApp } from './context';
 import { Logo } from './Logo';
 
-interface NavItem { to: string; label: string; icon: LucideIcon; end?: boolean; count?: number; countTone?: Health; liveCount?: 'firing' }
+/** `badge` is evaluated on every render so counts follow data changes (api hydrate, mutations). */
+interface NavItem { to: string; label: string; icon: LucideIcon; end?: boolean; badge?: () => { count: number; tone?: Health }; liveCount?: 'firing' }
 const NAV: { section: string | null; items: NavItem[] }[] = [
   { section: null, items: [
     { to: '/', label: 'Overview', icon: LayoutDashboard, end: true },
@@ -20,12 +22,17 @@ const NAV: { section: string | null; items: NavItem[] }[] = [
   ] },
   { section: 'Infrastructure', items: [
     { to: '/infrastructure/databases', label: 'Databases', icon: Database,
-      count: databases.filter((d) => d.status !== 'ok').length, countTone: worst(databases.map((d) => d.status)) },
+      badge: () => ({ count: databases.filter((d) => d.status !== 'ok').length, tone: worst(databases.map((d) => d.status)) }) },
     { to: '/infrastructure/queues', label: 'Message queues', icon: Waypoints,
-      count: clusters.filter((c) => clusterHealth(c) !== 'ok').length, countTone: worst(clusters.map(clusterHealth)) },
+      badge: () => ({ count: clusters.filter((c) => clusterHealth(c) !== 'ok').length, tone: worst(clusters.map(clusterHealth)) }) },
+    { to: '/infrastructure/hosts', label: 'Hosts', icon: Server,
+      badge: () => ({ count: hosts.filter((h) => h.status === 'critical' || h.status === 'warning').length, tone: hosts.some((h) => h.status === 'critical') ? 'critical' : 'warning' }) },
+    { to: '/infrastructure/kubernetes', label: 'Kubernetes', icon: Boxes,
+      badge: () => ({ count: k8sClusters.filter((c) => c.status === 'critical' || c.status === 'warning').length, tone: k8sClusters.some((c) => c.status === 'critical') ? 'critical' : 'warning' }) },
+    { to: '/infrastructure/serverless', label: 'Serverless', icon: SquareFunction },
   ] },
   { section: 'Objectives', items: [
-    { to: '/kpis', label: 'KPIs', icon: Target, count: kpis.filter((k) => k.status !== 'ok').length },
+    { to: '/kpis', label: 'KPIs', icon: Target, badge: () => ({ count: kpis.filter((k) => k.status !== 'ok').length }) },
   ] },
   { section: 'Tools', items: [
     { to: '/load-tests', label: 'Load tests', icon: Gauge },
@@ -77,6 +84,7 @@ export function AppShell() {
           <UserMenu />
         </header>
         <main className="content">
+          <AiQuotaBanner />
           <Outlet />
         </main>
       </div>
@@ -85,6 +93,7 @@ export function AppShell() {
 }
 
 function NavGroup({ g }: { g: (typeof NAV)[number] }) {
+  useData();
   return (
     <nav aria-label={g.section ?? 'Main'}>
       {g.section && <div className="sidebar__section">{g.section}</div>}
@@ -92,11 +101,16 @@ function NavGroup({ g }: { g: (typeof NAV)[number] }) {
         <NavLink key={it.to} to={it.to} end={it.end ?? false} className="sidebar__link">
           <it.icon size={16} aria-hidden />
           {it.label}
-          {it.liveCount ? <FiringCount /> : it.count ? <span className="sidebar__count"><Badge tone={it.countTone === 'warning' ? 'warning' : 'critical'}>{it.count}</Badge></span> : null}
+          {it.liveCount ? <FiringCount /> : <NavCount badge={it.badge} />}
         </NavLink>
       ))}
     </nav>
   );
+}
+
+function NavCount({ badge }: { badge?: NavItem['badge'] }) {
+  const b = badge?.();
+  return b?.count ? <span className="sidebar__count"><Badge tone={b.tone === 'warning' ? 'warning' : 'critical'}>{b.count}</Badge></span> : null;
 }
 
 /** Firing incidents; drops as soon as one is acknowledged anywhere in the app. */
@@ -212,6 +226,7 @@ function UserMenu() {
           <MenuItem icon={<UserRound size={14} />} onSelect={() => { close(); nav('/settings'); }}>Settings &amp; SDK</MenuItem>
           <MenuItem icon={<Users size={14} />} onSelect={() => { close(); nav('/settings?tab=members'); }}>Members</MenuItem>
           <MenuItem icon={<KeyRound size={14} />} onSelect={() => { close(); nav('/settings?tab=keys'); }}>API keys</MenuItem>
+          <MenuItem icon={<Sparkles size={14} />} onSelect={() => { close(); nav('/settings/usage'); }}>AI usage</MenuItem>
           {mode === 'session' && <>
             <MenuDivider />
             <MenuItem icon={<LogOut size={14} />} onSelect={() => { close(); void logout(); }}>Sign out</MenuItem>

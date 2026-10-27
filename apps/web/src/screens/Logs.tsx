@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { Bell, ExternalLink, ListTree } from 'lucide-react';
 import { Columns, TimeSeries } from '@/components/charts';
 import {
@@ -81,7 +81,9 @@ export function LogExplorer({ serviceId }: { serviceId?: string }) {
   const { range, dataVersion } = useApp();
   // allLogs is hydrated in place, so the data version is part of the key.
   const logs = useMemo(() => (serviceId ? logsFor(serviceId) : [...allLogs]), [serviceId, dataVersion]);
-  const [q, setQ] = useState('');
+  // ?q= pre-fills the search (pod page → "Logs" link)
+  const [initialQ] = useSearchParams();
+  const [q, setQ] = useState(() => initialQ.get('q') ?? '');
   const [levels, setLevels] = useState<Set<Level>>(new Set(['info', 'warn', 'error']));
   const [svc, setSvc] = useState<string | null>(null);
   const [src, setSrc] = useState<string | null>(null);
