@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { Bell, ExternalLink, ListTree } from 'lucide-react';
 import { Columns, TimeSeries } from '@/components/charts';
 import {
@@ -10,6 +10,7 @@ import { useApp } from '@/components/layout/context';
 import { allLogs, logsFor, searchLogs, series, services, timestamps, type LogLine, type TimeRange } from '@/data';
 import { can } from '@/data/auth';
 import { ago, clock, compact, dateTime, int } from '@/lib/format';
+import { traceUrl } from './shared';
 
 type Level = LogLine['level'];
 type View = 'lines' | 'patterns';
@@ -131,7 +132,7 @@ export function LogExplorer({ serviceId }: { serviceId?: string }) {
               <span className="muted">Filtered to</span>
               {pod && <Badge>pod {namespace ? `${namespace}/` : ''}{pod}</Badge>}
               {!pod && namespace && <Badge>namespace {namespace}</Badge>}
-              {traceId && <Badge>trace <span className="mono">{traceId.slice(0, 12)}</span></Badge>}
+              {traceId && <Link to={traceUrl(traceId)} title="Open the trace"><Badge>trace <span className="mono">{traceId.slice(0, 12)}</span></Badge></Link>}
               <Button size="sm" onClick={clearScope}>Clear</Button>
             </div>
           )}
@@ -240,6 +241,7 @@ function LineDrawer({ line, pattern, onClose, ts, range, onSurrounding, onPatter
   line: LogLine | null; pattern: Pattern | null; onClose: () => void; ts: number[]; range: TimeRange;
   onSurrounding: (l: LogLine) => void; onPattern: (p: Pattern) => void;
 }) {
+  const nav = useNavigate();
   if (!line) return null;
   const ctx = lineContext(line);
   return (
@@ -247,7 +249,7 @@ function LineDrawer({ line, pattern, onClose, ts, range, onSurrounding, onPatter
       title={<span className="row" style={{ gap: 8 }}><Badge tone={LEVEL_TONE[line.level]}>{line.level}</Badge>{line.service}</span>}
       subtitle={<>{dateTime(line.ts)} · {ago(line.ts)}</>}
       actions={<>
-        {line.traceId && <Button size="sm" icon={<ExternalLink size={14} />} onClick={(e) => e.preventDefault()}>View trace</Button>}
+        {line.traceId && <Button size="sm" icon={<ExternalLink size={14} />} onClick={() => nav(traceUrl(line.traceId!))}>View trace</Button>}
         <Button size="sm" variant="ghost" onClick={() => onSurrounding(line)}>Show surrounding logs</Button>
       </>}>
       <DrawerSection title="Message">
@@ -259,7 +261,7 @@ function LineDrawer({ line, pattern, onClose, ts, range, onSurrounding, onPatter
           ['Level', <Badge tone={LEVEL_TONE[line.level]}>{line.level}</Badge>],
           ['Service', line.service],
           ...(line.source ? [['Source', <Badge>{line.source}</Badge>] as [string, ReactNode]] : []),
-          ['Trace id', line.traceId ? <span className="mono">{line.traceId}</span> : <span className="muted">—</span>],
+          ['Trace id', line.traceId ? <Link to={traceUrl(line.traceId)} className="mono">{line.traceId}</Link> : <span className="muted">—</span>],
           ['Span id', ctx.spanId ? <span className="mono">{ctx.spanId}</span> : <span className="muted">—</span>],
           ['Host', <span className="mono">{ctx.host}</span>],
           ['Environment', ctx.env],

@@ -104,7 +104,6 @@ export function PodDetail() {
           actions={<Segmented label="Traces" value={traceFilter} onChange={setTraceFilter} options={[{ id: 'all', label: 'All' }, { id: 'errors', label: 'Errors only' }]} />}>
           <Card flush>
             <TraceTable rows={traces} endpointUrl={endpointUrl}
-              onRowClick={svc ? (t) => nav(logsUrl({ traceId: t.id })!) : undefined}
               actions={svc ? (t) => <Link to={logsUrl({ traceId: t.id })!} onClick={(e) => e.stopPropagation()} style={{ fontSize: 'var(--text-sm)', whiteSpace: 'nowrap' }}>Logs</Link> : undefined}
               empty={<p className="muted" style={{ padding: 'var(--space-4)' }}>
                 {traceFilter === 'errors' ? 'No failed requests on this pod in the selected range.'

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useNavigate, useParams } from 'react-router';
+import { Link, useNavigate, useParams } from 'react-router';
 import { AlertOctagon, Bell, Gauge, SquareFunction } from 'lucide-react';
 import { Columns, TimeSeries } from '@/components/charts';
 import { Badge, Button, Callout, Card, EmptyState, KeyValues, PageHeader, Section, StatTile, Table } from '@/components/ui';
@@ -8,6 +8,7 @@ import { integrationOf, isApi, services, timestamps, useData } from '@/data';
 import { pick } from '@/data/api/apm';
 import { FAAS_PROVIDER_LABEL, faasRank, serverlessFunction, serverlessFunctions, type FaasFunction, type FaasRecentError } from '@/data/serverless';
 import { ago, compact, dateTime, ms, pct } from '@/lib/format';
+import { traceUrl } from './shared';
 import { AppInsightsBadge, FaasStatusBadge, TriggerBadge, Triggers, usd } from './Serverless';
 
 export function FunctionDetail() {
@@ -131,13 +132,13 @@ export function FunctionDetail() {
 
       <Section title="Recent errors" subtitle="From the function's traces">
         <Card flush>
-          <Table<FaasRecentError> rows={d.recentErrors} rowKey={(e) => `${e.ts}-${e.traceId}`} defaultSort={{ key: 'ts', dir: 'desc' }}
+          <Table<FaasRecentError> rows={d.recentErrors} rowKey={(e) => `${e.ts}-${e.traceId}`} defaultSort={{ key: 'ts', dir: 'desc' }} onRowClick={(e) => nav(traceUrl(e.traceId))}
             empty={<EmptyState icon={<AlertOctagon />} title="No errors in this range" />} columns={[
               { key: 'ts', header: 'When', width: 140, sortValue: (e) => e.ts, render: (e) => <span className="muted" title={dateTime(e.ts)}>{ago(e.ts)}</span> },
               { key: 'msg', header: 'Message', render: (e) => <span className="mono" style={{ fontSize: 'var(--text-sm)', overflowWrap: 'anywhere' }}>{e.message}</span> },
-              { key: 'trace', header: 'Trace', width: 220, render: (e) => svc
-                ? <a href={`/services/${svc.id}?tab=logs`} onClick={(ev) => { ev.preventDefault(); nav(`/services/${svc.id}?tab=logs`); }} className="mono" style={{ fontSize: 'var(--text-xs)' }} title="Open the service's logs">{e.traceId.slice(0, 16)}…</a>
-                : <span className="mono muted" style={{ fontSize: 'var(--text-xs)' }} title={e.traceId}>{e.traceId.slice(0, 16)}…</span> },
+              { key: 'trace', header: 'Trace', width: 220, render: (e) => (
+                <Link to={traceUrl(e.traceId)} className="mono" style={{ fontSize: 'var(--text-xs)' }} title={`Open trace ${e.traceId}`}>{e.traceId.slice(0, 16)}…</Link>
+              ) },
             ]} />
         </Card>
       </Section>

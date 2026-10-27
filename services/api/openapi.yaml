@@ -3035,6 +3035,15 @@ components:
         route: { type: string }
         errorType: { type: string }
         attrs: { type: object, additionalProperties: { type: string } }
+        resource: { type: object, description: 'Resource attributes (k8s.pod.name, k8s.namespace.name, k8s.node.name, host.name …)', additionalProperties: { type: string } }
+        events: { type: array, items: { $ref: '#/components/schemas/SpanEvent' } }
+    SpanEvent:
+      type: object
+      required: [name, ts]
+      properties:
+        name: { type: string }
+        ts: { type: number, description: 'ms from trace start' }
+        attrs: { type: object, additionalProperties: { type: string } }
     Trace:
       type: object
       required: [id, ts, dur, services, errors, spans]

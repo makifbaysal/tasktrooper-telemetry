@@ -146,6 +146,15 @@ type Span struct {
 	Route        string            `json:"route,omitempty"`
 	ErrorType    string            `json:"errorType,omitempty"`
 	Attrs        map[string]string `json:"attrs,omitempty"`
+	Resource     map[string]string `json:"resource,omitempty"` // resource attributes (k8s.pod.name, host.name …)
+	Events       []SpanEvent       `json:"events,omitempty"`
+}
+
+// SpanEvent is a span event (exception, retry, log …); Ts is ms from trace start.
+type SpanEvent struct {
+	Name  string            `json:"name"`
+	Ts    float64           `json:"ts"`
+	Attrs map[string]string `json:"attrs,omitempty"`
 }
 
 type Trace struct {

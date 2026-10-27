@@ -68,8 +68,10 @@ Durum: servisler (`ingest`, `api`, `alerting`, `collector`, `integrations` = `tr
 - [x] AWS Lambda keşif + CloudWatch metrikleri, Azure Functions sağlayıcısı, `faas` monitor'ları, maliyet tahmini (ADR-020)
 - [x] `@trooper/node` `wrapLambda`
 - [x] UI: Hosts, Kubernetes, Serverless ekranları; servis detayında altyapı sekmesi
-- [ ] K8s cluster modunda list yerine watch (binlerce pod üstü için)
-- [ ] containerd/Podman host'ları, GPU ve Windows node metrikleri
-- [ ] Azure: fonksiyon bazında metrik (App Insights), app setting'den servis eşlemesi
-- [ ] Pod bazında trace filtresi; iki Helm chart'ın birleştirilmesi (`services/collector/deploy/helm` eski DB chart'ı)
-- [ ] Gerçek EKS/AKS/Lambda hesaplarıyla doğrulama (şu an fake sunucu + demo simülasyonu)
+- [x] K8s cluster modunda list yerine watch (binlerce pod üstü için)
+- [x] containerd/Podman host'ları, GPU ve Windows node metrikleri
+- [x] Azure: fonksiyon bazında metrik (App Insights), app setting'den servis eşlemesi
+- [x] Pod bazında trace/log filtresi, trace detay sayfası; iki Helm chart'ın birleştirilmesi (`services/collector/deploy/helm` eski DB chart'ı)
+- [x] Gerçek K8s doğrulaması: kind cluster (host + cluster modu, OOMKilled pod, watch); Lambda keşfi LocalStack ile
+- [ ] Gerçek EKS/AKS, Lambda CloudWatch metrikleri ve Azure hesabıyla doğrulama (hesap gerektirir)
+- [ ] NVIDIA dışı GPU'lar, cgroup v1 host'larında Docker/Podman'sız container metrikleri, gerçek Windows node testi

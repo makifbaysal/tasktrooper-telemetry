@@ -10,3 +10,4 @@ export * from './infra';
 export * from './integrations';
 export * from './k8s';
 export * from './hosts';
+export * from './traces';

@@ -1,0 +1,71 @@
+/* Trace detail (screens/TraceDetail.tsx): span waterfall + span side panel. Tokens only. */
+
+.trace { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+.trace--panel { grid-template-columns: minmax(0, 1fr) minmax(0, calc(var(--sidebar-w) * 1.9)); }
+@media (max-width: 1100px) { .trace--panel { grid-template-columns: minmax(0, 1fr); } }
+
+.trace__title { gap: var(--space-2); flex-wrap: wrap; }
+.trace__meta { gap: var(--space-2); flex-wrap: wrap; }
+.trace__links { gap: var(--space-2) var(--space-4); flex-wrap: wrap; font-size: var(--text-sm); }
+.trace__links .row { gap: var(--space-1); }
+.trace__empty { font-size: var(--text-sm); margin: 0; }
+.trace__exception, .trace__event { gap: var(--space-2); font-size: var(--text-sm); }
+.trace__exception + .trace__exception, .trace__exception + .trace__event, .trace__event + .trace__event { padding-top: var(--space-3); border-top: 1px solid var(--divider); }
+
+.trace__panel {
+  position: sticky; top: calc(var(--topbar-h) + var(--space-4));
+  max-height: calc(100vh - var(--topbar-h) - var(--space-8));
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.trace__panel .drawer__head { border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+.trace__panel .drawer__title { font-size: var(--text-md); }
+@media (max-width: 1100px) { .trace__panel { position: static; max-height: none; } }
+
+/* ---- waterfall ---- */
+.wf__legend { padding: 0 var(--space-4) var(--space-2); }
+.wf__notice { padding: 0 var(--space-4) var(--space-3); }
+.wf__axis, .wf__row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); align-items: center; }
+.wf__axis {
+  border-top: 1px solid var(--divider); border-bottom: 1px solid var(--divider); background: var(--bg-sunken);
+  font-size: var(--text-xs); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em;
+}
+.wf__axis .wf__name { padding: var(--space-1) var(--space-4); }
+.wf__ticks { position: relative; height: calc(var(--space-6)); margin-right: var(--space-12); }
+.wf__tick { position: absolute; top: 50%; transform: translate(-50%, -50%); text-transform: none; letter-spacing: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wf__tick:first-child { transform: translate(0, -50%); }
+.wf__tick:last-child { transform: translate(-100%, -50%); }
+
+.wf { outline: none; }
+.wf__row { min-height: var(--control-h-sm); border-bottom: 1px solid var(--divider); cursor: pointer; font-size: var(--text-sm); }
+.wf__row:last-child { border-bottom: 0; }
+.wf__row:hover { background: var(--bg-hover); }
+.wf__row--selected, .wf__row--selected:hover { background: var(--accent-soft); }
+.wf__row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.wf__name { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding-right: var(--space-3); }
+.wf__toggle {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; width: var(--space-4); height: var(--space-4);
+  padding: 0; border: 0; background: none; color: var(--text-muted); border-radius: var(--radius-xs); cursor: pointer;
+}
+.wf__toggle:hover { color: var(--text-primary); background: var(--bg-active); }
+.wf__name .legend__swatch { flex: none; }
+.wf__svc { flex: none; color: var(--text-secondary); font-weight: var(--weight-medium); }
+.wf__count { flex: none; font-size: var(--text-xs); }
+.wf__name .badge { flex: none; }
+
+.wf__track {
+  position: relative; height: var(--control-h-sm); margin-right: var(--space-12);
+  background-image: linear-gradient(to right, var(--divider) 1px, transparent 1px);
+  background-size: 25% 100%;
+}
+.wf__bar { position: absolute; top: calc(50% - var(--space-1)); height: var(--space-2); border-radius: var(--radius-xs); min-width: 2px; }
+.wf__bar--error { box-shadow: 0 0 0 2px var(--status-critical); }
+.wf__dur { position: absolute; top: 50%; transform: translateY(-50%); font-size: var(--text-xs); color: var(--text-muted); white-space: nowrap; }
+
+/* ---- attribute list (key → value, long values wrap) ---- */
+.attrs { margin: 0; display: flex; flex-direction: column; font-size: var(--text-xs); border: 1px solid var(--divider); border-radius: var(--radius-sm); overflow: hidden; }
+.attrs__row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: var(--space-3); padding: var(--space-1) var(--space-2); border-top: 1px solid var(--divider); }
+.attrs__row:first-child { border-top: 0; }
+.attrs__row:nth-child(even) { background: var(--bg-sunken); }
+.attrs dt { color: var(--text-muted); overflow-wrap: anywhere; }
+.attrs dd { margin: 0; color: var(--text-primary); overflow-wrap: anywhere; white-space: pre-wrap; }

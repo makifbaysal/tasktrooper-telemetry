@@ -26,6 +26,7 @@ import { FunctionDetail } from './screens/FunctionDetail';
 import { SettingsScreen } from './screens/Settings';
 import { Integrations } from './screens/Integrations';
 import { DesignSystem } from './screens/DesignSystem';
+import { TraceDetail } from './screens/TraceDetail';
 
 export const router = createBrowserRouter([
   {
@@ -35,6 +36,7 @@ export const router = createBrowserRouter([
       { path: '/services', element: <Services /> },
       { path: '/services/:serviceId', element: <ServiceDetail /> },
       { path: '/services/:serviceId/endpoints/:endpointId', element: <EndpointDetail /> },
+      { path: '/traces/:traceId', element: <TraceDetail /> },
       { path: '/kpis', element: <Kpis /> },
       { path: '/kpis/new', element: <KpiEditor /> },
       { path: '/kpis/:kpiId', element: <KpiDetail /> },

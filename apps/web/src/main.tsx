@@ -6,6 +6,7 @@ import './styles/base.css';
 import './styles/components.css';
 import './styles/charts.css';
 import './styles/account.css';
+import './styles/trace.css';
 import { router } from './router';
 import { AppProvider } from './components/layout/context';
 import { API_URL, hydrate, isApi, startPolling } from './data/remote';

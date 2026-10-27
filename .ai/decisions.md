@@ -237,7 +237,9 @@ New Relic bunu Pixie (eBPF) ile yapıyor.
   `k8s_workloads_1m`) yazılır; servis ↔ pod bağı pod label'ından (`tasktrooper.io/service` > `app.kubernetes.io/name` > `app`).
 - Alert: yeni monitor kind `infra` (host/container/pod/node/workload); alert-engine RCA, servis incident'ında aynı servisin
   pod'larındaki OOMKilled/CrashLoop/restart ve host CPU doygunluğunu kök neden adayı yapar.
-- Dağıtım: `deploy/helm/trooper-agent` (DaemonSet + Deployment + RBAC + opsiyonel OBI); K8s dışı host için `docker run` / systemd.
+- Dağıtım: tek chart `deploy/helm/trooper-agent` (Linux DaemonSet + cluster Deployment + RBAC + opsiyonel OBI + opsiyonel
+  Windows HostProcess DaemonSet + `db.enabled` ile DB/broker collector); K8s dışı host için `docker run` / systemd.
+- Cluster modu list + watch kullanır; K8s dışı container'lar Docker → Podman → cgroup v2 sırasıyla, GPU `nvidia-smi` ile (§22).
 **Sonuç:** Pixie'deki tam protokol ayrıştırma (MySQL/Kafka payload, flame graph) kapsam dışı; OBI'nin verdiği kadar.
 
 ## ADR-020 — Serverless: AWS Lambda ve Azure Functions

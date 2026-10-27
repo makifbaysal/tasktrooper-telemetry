@@ -10,22 +10,24 @@ import {
   databaseFor, topicForDep, isApi, redSeries,
 } from '@/data';
 import { ago, compact, ms, pct } from '@/lib/format';
-import { CALLER_KIND_LABEL, DEP_KIND_LABEL, errorTone } from './shared';
+import { CALLER_KIND_LABEL, DEP_KIND_LABEL, errorTone, traceUrl } from './shared';
 
 /** A row of a trace list (GET /traces). */
 export interface TraceRow { id: string; ts: number; dur: number; status: number; service?: string; method?: string; route?: string; isError?: boolean }
 
 /**
- * The trace list used on endpoint and pod pages: trace id, status, duration, age. With `endpointUrl` it adds the
- * endpoint column (method + route, linked when the endpoint is known); `actions` renders a trailing per-row cell.
+ * The trace list used on endpoint and pod pages: trace id, status, duration, age. Rows open the trace page
+ * (`/traces/:traceId`) unless `onRowClick` overrides it. With `endpointUrl` it adds the endpoint column (method + route,
+ * linked when the endpoint is known); `actions` renders a trailing per-row cell.
  */
 export function TraceTable<T extends TraceRow>({ rows, onRowClick, endpointUrl, actions, empty }: {
   rows: T[]; onRowClick?: (t: T) => void; endpointUrl?: (t: T) => string | undefined; actions?: (t: T) => ReactNode; empty?: ReactNode;
 }) {
+  const nav = useNavigate();
   const failed = (t: T) => t.isError || t.status >= 500;
   return (
-    <Table<T> rowKey={(t) => t.id} rows={rows} onRowClick={onRowClick} empty={empty} columns={[
-      { key: 'id', header: 'Trace', render: (t) => <span className="mono">{t.id.slice(0, 12)}</span> },
+    <Table<T> rowKey={(t) => t.id} rows={rows} onRowClick={onRowClick ?? ((t) => nav(traceUrl(t.id)))} empty={empty} columns={[
+      { key: 'id', header: 'Trace', render: (t) => <Link to={traceUrl(t.id)} className="mono" onClick={(e) => e.stopPropagation()} title={t.id}>{t.id.slice(0, 12)}</Link> },
       ...(endpointUrl ? [{ key: 'ep', header: 'Endpoint', render: (t: T) => {
         const label = <><span className="mono muted">{t.method}</span> {t.route || '—'}</>;
         const url = endpointUrl(t);
