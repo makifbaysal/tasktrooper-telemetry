@@ -14,6 +14,13 @@ const (
 	HostLoad1       = "trooper.host.load1"        //
 	HostUptimeS     = "trooper.host.uptime_s"     // s
 
+	// GPU (contracts §22, nvidia-smi; table gpus_1m)
+	HostGPUUtilization = "trooper.host.gpu.utilization"   // 0..1
+	HostGPUMemory      = "trooper.host.gpu.memory"        // 0..1
+	HostGPUMemoryBytes = "trooper.host.gpu.memory_bytes"  // byte (used)
+	HostGPUTemperature = "trooper.host.gpu.temperature_c" // °C
+	HostGPUPower       = "trooper.host.gpu.power_w"       // W
+
 	ContainerCPU              = "trooper.container.cpu"                // core
 	ContainerCPULimit         = "trooper.container.cpu_limit"          // core
 	ContainerMemoryBytes      = "trooper.container.memory_bytes"       // byte
@@ -74,6 +81,10 @@ const (
 	AttrProcessExe     = "process.executable.name"
 	AttrProcessCommand = "process.command"
 
+	AttrGPUIndex = "gpu.index"
+	AttrGPUModel = "gpu.model"
+	AttrGPUUUID  = "gpu.uuid"
+
 	// Warning event log attributes (cluster mode).
 	AttrEventReason = "k8s.event.reason"
 	AttrEventType   = "k8s.event.type"
@@ -81,6 +92,9 @@ const (
 	AttrObjectName  = "k8s.object.name"
 	AttrEventCount  = "k8s.event.count"
 )
+
+// GPUGaugeNames lists the §22 GPU gauges.
+var GPUGaugeNames = []string{HostGPUUtilization, HostGPUMemory, HostGPUMemoryBytes, HostGPUTemperature, HostGPUPower}
 
 // InfraGaugeNames lists the §20 gauges (registered by every emitter, like GaugeNames).
 var InfraGaugeNames = []string{
@@ -96,7 +110,9 @@ var InfraGaugeNames = []string{
 
 func init() {
 	GaugeNames = append(GaugeNames, InfraGaugeNames...)
+	GaugeNames = append(GaugeNames, GPUGaugeNames...)
 	for k, v := range map[string]string{
+		HostGPUUtilization: "1", HostGPUMemory: "1", HostGPUMemoryBytes: "By", HostGPUTemperature: "Cel", HostGPUPower: "W",
 		HostCPU: "1", HostCPUCores: "{cpu}", HostMemory: "1", HostMemoryBytes: "By", HostDisk: "1",
 		HostDiskRead: "By/s", HostDiskWrite: "By/s", HostNetIn: "By/s", HostNetOut: "By/s", HostUptimeS: "s",
 		ContainerCPU: "{cpu}", ContainerCPULimit: "{cpu}", ContainerMemoryBytes: "By", ContainerMemoryLimitBytes: "By",

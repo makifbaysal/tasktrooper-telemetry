@@ -1,4 +1,5 @@
 {{- if include "trooper-agent.hasStatic" . }}
+# Static database / broker targets (mode db), same format as services/collector/examples/agent.yaml.
 apiVersion: v1
 kind: ConfigMap
 metadata:

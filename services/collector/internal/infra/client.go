@@ -30,6 +30,8 @@ type KubeClient struct {
 	Token     string
 	TokenFile string
 	HC        *http.Client
+	// Stream is HC without the overall request timeout (watch streams); nil = derived from HC.
+	Stream *http.Client
 }
 
 // KubeEnv is the environment the clients are built from (injectable for tests).
@@ -110,7 +112,8 @@ func (e KubeEnv) client(base string, insecure bool) *KubeClient {
 		IdleConnTimeout:     90 * time.Second,
 		DialContext:         (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
 	}
-	kc := &KubeClient{BaseURL: strings.TrimSuffix(base, "/"), Token: e.Token, HC: &http.Client{Transport: tr, Timeout: 60 * time.Second}}
+	kc := &KubeClient{BaseURL: strings.TrimSuffix(base, "/"), Token: e.Token,
+		HC: &http.Client{Transport: tr, Timeout: 60 * time.Second}, Stream: &http.Client{Transport: tr}}
 	if kc.Token == "" {
 		kc.TokenFile = e.TokenFile
 	}
@@ -150,6 +153,21 @@ func (e *HTTPError) Error() string {
 
 // Open performs a GET and returns the body (caller closes).
 func (c *KubeClient) Open(ctx context.Context, path string) (io.ReadCloser, error) {
+	return c.open(ctx, c.HC, path)
+}
+
+// OpenStream is Open for long-running watch streams: no overall client timeout (ctx bounds it).
+func (c *KubeClient) OpenStream(ctx context.Context, path string) (io.ReadCloser, error) {
+	hc := c.Stream
+	if hc == nil {
+		cp := *c.HC
+		cp.Timeout = 0
+		hc = &cp
+	}
+	return c.open(ctx, hc, path)
+}
+
+func (c *KubeClient) open(ctx context.Context, hc *http.Client, path string) (io.ReadCloser, error) {
 	u := c.BaseURL + path
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
@@ -165,7 +183,7 @@ func (c *KubeClient) Open(ctx context.Context, path string) (io.ReadCloser, erro
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 	req.Header.Set("Accept", "application/json")
-	resp, err := c.HC.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, err
 	}

@@ -49,6 +49,10 @@ spec:
               value: {{ .Values.host.topProcesses | quote }}
             - name: TT_KUBELET_INSECURE
               value: {{ .Values.host.kubelet.insecureSkipVerify | quote }}
+            {{- with .Values.host.gpu.nvidiaSmi }}
+            - name: TT_AGENT_NVIDIA_SMI
+              value: {{ . | quote }}
+            {{- end }}
             {{- with .Values.host.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -74,9 +78,7 @@ spec:
       {{- with .Values.host.tolerations }}
       tolerations: {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.host.nodeSelector }}
-      nodeSelector: {{- toYaml . | nindent 8 }}
-      {{- end }}
+      nodeSelector: {{- include "trooper-agent.nodeSelector" (dict "user" .Values.host.nodeSelector "os" "linux") | nindent 8 }}
       {{- with .Values.host.affinity }}
       affinity: {{- toYaml . | nindent 8 }}
       {{- end }}

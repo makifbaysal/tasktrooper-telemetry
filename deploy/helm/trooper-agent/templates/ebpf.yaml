@@ -106,7 +106,5 @@ spec:
       {{- with .Values.ebpf.tolerations }}
       tolerations: {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.ebpf.nodeSelector }}
-      nodeSelector: {{- toYaml . | nindent 8 }}
-      {{- end }}
+      nodeSelector: {{- include "trooper-agent.nodeSelector" (dict "user" .Values.ebpf.nodeSelector "os" "linux") | nindent 8 }}
 {{- end }}

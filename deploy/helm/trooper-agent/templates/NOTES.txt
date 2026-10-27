@@ -1,14 +1,30 @@
-trooper-agent for cluster "{{ .Values.clusterName }}":
+trooper-agent{{ with .Values.clusterName }} for cluster "{{ . }}"{{ end }}:
 {{- if .Values.host.enabled }}
-  • {{ include "trooper-agent.fullname" . }}-host (DaemonSet, mode host): node, container and process metrics every 15 s
+  • {{ include "trooper-agent.fullname" . }}-host (Linux DaemonSet, mode host): node, container, process and GPU metrics every 15 s
+{{- end }}
+{{- if .Values.windows.enabled }}
+  • {{ include "trooper-agent.fullname" . }}-host-windows (Windows HostProcess DaemonSet, mode host): {{ include "trooper-agent.windowsImage" . }}
 {{- end }}
 {{- if or .Values.cluster.enabled .Values.db.enabled }}
-  • {{ include "trooper-agent.fullname" . }}-cluster (Deployment): {{ if .Values.cluster.enabled }}nodes / pods / workloads every 30 s + Warning events{{ end }}{{ if .Values.db.enabled }} + databases / brokers from {{ .Values.db.apiUrl }}{{ end }}
+  • {{ include "trooper-agent.fullname" . }}-cluster (Deployment, mode {{ include "trooper-agent.clusterModes" . }}):
+{{- if .Values.cluster.enabled }} nodes / pods / workloads + Warning events{{ end }}
+{{- if .Values.db.enabled }}{{ if .Values.cluster.enabled }};{{ end }} databases / brokers
+{{- if include "trooper-agent.hasStatic" . }} from config.yaml (ConfigMap {{ include "trooper-agent.fullname" . }}){{ end }}
+{{- with .Values.db.fromApi.apiUrl }}{{ if include "trooper-agent.hasStatic" $ }} +{{ end }} from {{ . }}{{ end }}
+{{- end }}
 {{- end }}
 {{- if .Values.ebpf.enabled }}
   • {{ include "trooper-agent.fullname" . }}-ebpf (DaemonSet, OBI {{ .Values.ebpf.image.tag }}): spans for services without an SDK → {{ include "trooper-agent.ingestEndpoint" . }}
 {{- end }}
 
-Check:  kubectl -n {{ .Release.Namespace }} logs ds/{{ include "trooper-agent.fullname" . }}-host
-A source that cannot be read (kubelet TLS, RBAC) shows trooper.collector.up=0 with kind kubelet|k8s.
+Check:
+{{- if .Values.host.enabled }}
+  kubectl -n {{ .Release.Namespace }} logs ds/{{ include "trooper-agent.fullname" . }}-host
+{{- end }}
+{{- if or .Values.cluster.enabled .Values.db.enabled }}
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "trooper-agent.fullname" . }}-cluster
+{{- end }}
+A source that cannot be read (kubelet TLS, RBAC, database) shows trooper.collector.up=0.
+{{- if .Values.host.enabled }}
 Self-signed kubelet certificates (kind, minikube): --set host.kubelet.insecureSkipVerify=true
+{{- end }}

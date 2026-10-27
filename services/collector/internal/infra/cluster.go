@@ -2,8 +2,10 @@ package infra
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -152,46 +154,136 @@ type LogSink interface {
 	Warn(ctx context.Context, r emit.LogRecord)
 }
 
-// ClusterScraper reports trooper.k8s.node|pod|workload.* from the API server and ships Warning
-// events as logs. Read-only: list calls only.
+// ClusterScraper reports trooper.k8s.node|pod|workload.* from an in-memory copy of the cluster
+// kept current by list + watch (one Reflector per kind, contracts §22) and ships Warning events
+// (watched too) as logs. Snapshot metrics are built from that state on every Scrape (30 s).
+// Read-only: list and watch GETs only.
 type ClusterScraper struct {
 	C      *KubeClient
 	Events LogSink
-	// EventLookback: on the first scrape only events newer than this are sent (no replay of the
+	// EventLookback: on the first list only events newer than this are sent (no replay of the
 	// cluster's whole event history after a restart).
 	EventLookback time.Duration
-	sent          map[string]int // event uid → last count sent
-	first         bool
-	now           func() time.Time
+	// MinBackoff / MaxBackoff / WatchTimeout tune the reflectors (tests); zero = defaults.
+	MinBackoff, MaxBackoff, WatchTimeout time.Duration
+	now                                  func() time.Time
+
+	startOnce sync.Once
+	cancel    context.CancelFunc
+	done      chan struct{}
+
+	nodes *Reflector[Node]
+	pods  *Reflector[Pod]
+	rss   *Reflector[replicaSet]
+	deps  *Reflector[deployment]
+	sts   *Reflector[statefulSet]
+	dss   *Reflector[daemonSet]
+	jobs  *Reflector[job]
+	cjs   *Reflector[cronJob]
+	evs   *Reflector[Event]
+
+	evMu       sync.Mutex
+	sent       map[string]int // event uid → last count sent
+	lastActive time.Time      // last successful event list / watch event (relist cutoff)
 }
 
-// NewClusterScraper builds the scraper.
+// NewClusterScraper builds the scraper; the watches start on the first Scrape.
 func NewClusterScraper(c *KubeClient, events LogSink) *ClusterScraper {
-	return &ClusterScraper{C: c, Events: events, EventLookback: 5 * time.Minute, sent: map[string]int{}, first: true, now: time.Now}
+	return &ClusterScraper{C: c, Events: events, EventLookback: 5 * time.Minute, sent: map[string]int{}, now: time.Now}
 }
 
-// Close implements scrape.Scraper.
-func (s *ClusterScraper) Close() error { return nil }
+func newReflector[T any](s *ClusterScraper, path string, meta func(*T) *ObjectMeta) *Reflector[T] {
+	return &Reflector[T]{C: s.C, Path: path, Meta: meta, MinBackoff: s.MinBackoff, MaxBackoff: s.MaxBackoff, WatchTimeout: s.WatchTimeout}
+}
 
-// Scrape implements scrape.Scraper.
+func (s *ClusterScraper) start() {
+	s.nodes = newReflector(s, "/api/v1/nodes", func(o *Node) *ObjectMeta { return &o.Metadata })
+	s.pods = newReflector(s, "/api/v1/pods", func(o *Pod) *ObjectMeta { return &o.Metadata })
+	s.rss = newReflector(s, "/apis/apps/v1/replicasets", func(o *replicaSet) *ObjectMeta { return &o.Metadata })
+	s.deps = newReflector(s, "/apis/apps/v1/deployments", func(o *deployment) *ObjectMeta { return &o.Metadata })
+	s.sts = newReflector(s, "/apis/apps/v1/statefulsets", func(o *statefulSet) *ObjectMeta { return &o.Metadata })
+	s.dss = newReflector(s, "/apis/apps/v1/daemonsets", func(o *daemonSet) *ObjectMeta { return &o.Metadata })
+	s.jobs = newReflector(s, "/apis/batch/v1/jobs", func(o *job) *ObjectMeta { return &o.Metadata })
+	s.cjs = newReflector(s, "/apis/batch/v1/cronjobs", func(o *cronJob) *ObjectMeta { return &o.Metadata })
+	ctx, cancel := context.WithCancel(context.Background())
+	s.cancel = cancel
+	s.done = make(chan struct{})
+	var wg sync.WaitGroup
+	run := func(f func(context.Context)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			f(ctx)
+		}()
+	}
+	run(s.nodes.Run)
+	run(s.pods.Run)
+	run(s.rss.Run)
+	run(s.deps.Run)
+	run(s.sts.Run)
+	run(s.dss.Run)
+	run(s.jobs.Run)
+	run(s.cjs.Run)
+	if s.Events != nil {
+		s.evs = newReflector(s, "/api/v1/events", func(o *Event) *ObjectMeta { return &o.Metadata })
+		s.evs.Extra = url.Values{"fieldSelector": {"type=Warning"}}
+		s.evs.NoStore = true
+		s.evs.OnList = s.onEventList
+		s.evs.OnEvent = s.onEvent
+		run(s.evs.Run)
+	}
+	go func() {
+		wg.Wait()
+		close(s.done)
+	}()
+}
+
+// Close stops the watches.
+func (s *ClusterScraper) Close() error {
+	if s.cancel != nil {
+		s.cancel()
+		<-s.done
+	}
+	return nil
+}
+
+// syncState is implemented by every *Reflector.
+type syncState interface {
+	Ready() <-chan struct{}
+	Synced() (bool, error)
+}
+
+// Scrape implements scrape.Scraper: starts the watches on the first call, waits (bounded by ctx)
+// until every kind has finished its first list, then reports from memory. Nodes and pods are
+// required; a kind that cannot be listed (RBAC, API group missing) only drops that kind.
 func (s *ClusterScraper) Scrape(ctx context.Context) (emit.Result, error) {
 	var r emit.Result
+	s.startOnce.Do(s.start)
+	wait := []syncState{s.nodes, s.pods, s.rss, s.deps, s.sts, s.dss, s.jobs, s.cjs}
+	if s.evs != nil {
+		wait = append(wait, s.evs)
+	}
+	for _, x := range wait {
+		select {
+		case <-x.Ready():
+		case <-ctx.Done():
+		}
+	}
+	for _, req := range []struct {
+		name string
+		x    syncState
+	}{{"nodes", s.nodes}, {"pods", s.pods}} {
+		if ok, err := req.x.Synced(); !ok {
+			if err == nil {
+				err = errors.New("initial list not finished")
+			}
+			return r, fmt.Errorf("%s: %w", req.name, err)
+		}
+	}
 	now := s.now()
-	nodes, err := ListAll[Node](ctx, s.C, "/api/v1/nodes", nil)
-	if err != nil {
-		return r, fmt.Errorf("nodes: %w", err)
-	}
-	pods, err := ListAll[Pod](ctx, s.C, "/api/v1/pods", nil)
-	if err != nil {
-		return r, fmt.Errorf("pods: %w", err)
-	}
-	// Workload objects: a missing permission or API group only drops that kind.
-	rss, _ := ListAll[replicaSet](ctx, s.C, "/apis/apps/v1/replicasets", nil)
-	deps, _ := ListAll[deployment](ctx, s.C, "/apis/apps/v1/deployments", nil)
-	sts, _ := ListAll[statefulSet](ctx, s.C, "/apis/apps/v1/statefulsets", nil)
-	dss, _ := ListAll[daemonSet](ctx, s.C, "/apis/apps/v1/daemonsets", nil)
-	jobs, _ := ListAll[job](ctx, s.C, "/apis/batch/v1/jobs", nil)
-	cjs, _ := ListAll[cronJob](ctx, s.C, "/apis/batch/v1/cronjobs", nil)
+	nodes, pods := s.nodes.Items(), s.pods.Items()
+	rss, deps, sts, dss := s.rss.Items(), s.deps.Items(), s.sts.Items(), s.dss.Items()
+	jobs, cjs := s.jobs.Items(), s.cjs.Items()
 
 	owners := Owners{ReplicaSets: map[string]string{}, Jobs: map[string]string{}}
 	for _, rs := range rss {
@@ -324,7 +416,6 @@ func (s *ClusterScraper) Scrape(ctx context.Context) (emit.Result, error) {
 		wlGauges(c.Metadata, "CronJob", desired, len(c.Status.Active), avail, len(c.Status.Active))
 	}
 
-	s.events(ctx, now)
 	return r, nil
 }
 
@@ -343,39 +434,70 @@ func PodAttrs(p *Pod, kind, workload, reason string) []attribute.KeyValue {
 	}
 }
 
-// events ships new Warning events (uid + count not sent before) as warn logs.
-func (s *ClusterScraper) events(ctx context.Context, now time.Time) {
-	if s.Events == nil {
-		return
-	}
-	evs, err := ListAll[Event](ctx, s.C, "/api/v1/events", url.Values{"fieldSelector": {"type=Warning"}})
-	if err != nil {
-		return // events are best effort; the gauges above already went through
+// onEventList handles the (re)list of Warning events: unseen uid+count are sent, except on the
+// first list (and after a long disconnect) events older than the lookback.
+func (s *ClusterScraper) onEventList(ctx context.Context, evs []Event, relist bool) {
+	now := s.now()
+	s.evMu.Lock()
+	cutoff := now.Add(-s.EventLookback)
+	if relist && !s.lastActive.IsZero() && s.lastActive.Before(cutoff) {
+		cutoff = s.lastActive.Add(-time.Minute)
 	}
 	next := make(map[string]int, len(evs))
+	var out []emit.LogRecord
 	for i := range evs {
 		e := &evs[i]
 		if e.Type != "Warning" {
 			continue
 		}
-		uid := e.Metadata.UID
-		if uid == "" {
-			uid = e.Metadata.Namespace + "/" + e.Metadata.Name
-		}
-		count := e.Occurrences()
+		uid, count := eventUID(e), e.Occurrences()
 		next[uid] = count
 		if prev, ok := s.sent[uid]; ok && prev == count {
 			continue
 		}
-		if s.first && now.Sub(e.Time()) > s.EventLookback {
+		if e.Time().Before(cutoff) {
 			continue
 		}
-		// cluster-scoped objects (Node) have no namespace; their events live in "default"
-		ns := e.InvolvedObject.Namespace
-		s.Events.Warn(ctx, emit.LogRecord{Time: e.Time(), Body: e.Message, Attrs: EventAttrs(e, ns, count)})
+		out = append(out, eventRecord(e, count))
 	}
 	s.sent = next
-	s.first = false
+	s.lastActive = now
+	s.evMu.Unlock()
+	for _, rec := range out {
+		s.Events.Warn(ctx, rec)
+	}
+}
+
+// onEvent handles a watched event: ADDED / MODIFIED with a new count is sent once.
+func (s *ClusterScraper) onEvent(ctx context.Context, typ string, e *Event) {
+	uid := eventUID(e)
+	s.evMu.Lock()
+	s.lastActive = s.now()
+	if typ == "DELETED" {
+		delete(s.sent, uid)
+		s.evMu.Unlock()
+		return
+	}
+	count := e.Occurrences()
+	if e.Type != "Warning" || s.sent[uid] == count {
+		s.evMu.Unlock()
+		return
+	}
+	s.sent[uid] = count
+	s.evMu.Unlock()
+	s.Events.Warn(ctx, eventRecord(e, count))
+}
+
+func eventUID(e *Event) string {
+	if e.Metadata.UID != "" {
+		return e.Metadata.UID
+	}
+	return e.Metadata.Namespace + "/" + e.Metadata.Name
+}
+
+// eventRecord: cluster-scoped objects (Node) have no namespace (their events live in "default").
+func eventRecord(e *Event, count int) emit.LogRecord {
+	return emit.LogRecord{Time: e.Time(), Body: e.Message, Attrs: EventAttrs(e, e.InvolvedObject.Namespace, count)}
 }
 
 // EventAttrs are the log attributes of a Warning event.

@@ -46,6 +46,12 @@ func TestParseFlagsModes(t *testing.T) {
 func TestHostClusterOnce(t *testing.T) {
 	now := time.Now().UTC()
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("watch") == "1" { // cluster mode watches after the list: idle stream
+			w.WriteHeader(http.StatusOK)
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
+			return
+		}
 		switch r.URL.Path {
 		case "/api/v1/nodes":
 			fmt.Fprint(w, `{"items":[{"metadata":{"name":"node-a","labels":{"topology.kubernetes.io/region":"eu-central-1"}},"spec":{"providerID":"aws:///x/i-1"},

@@ -1,0 +1,57 @@
+{{- if .Values.windows.enabled }}
+# Windows nodes: HostProcess container (runs directly on the host as SYSTEM, host network), so the
+# agent sees the node's CPU / memory / disks / processes without hostPath mounts.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "trooper-agent.fullname" . }}-host-windows
+  labels:
+    {{- include "trooper-agent.labels" . | nindent 4 }}
+    app.kubernetes.io/component: host-windows
+spec:
+  selector:
+    matchLabels: {{- include "trooper-agent.selector" (dict "ctx" . "component" "host-windows") | nindent 6 }}
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 25% }
+  template:
+    metadata:
+      labels: {{- include "trooper-agent.selector" (dict "ctx" . "component" "host-windows") | nindent 8 }}
+      annotations:
+        checksum/secret: {{ printf "%s%s" .Values.dsn .Values.existingSecret | sha256sum }}
+        {{- with .Values.windows.podAnnotations }}{{ toYaml . | nindent 8 }}{{ end }}
+    spec:
+      serviceAccountName: {{ include "trooper-agent.serviceAccountName" . }}
+      hostNetwork: true
+      securityContext:
+        windowsOptions:
+          hostProcess: true
+          runAsUserName: "NT AUTHORITY\\SYSTEM"
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: trooper-agent
+          image: {{ include "trooper-agent.windowsImage" . | quote }}
+          imagePullPolicy: {{ .Values.windows.image.pullPolicy }}
+          env:
+            - name: TT_AGENT_MODES
+              value: host
+            {{- include "trooper-agent.commonEnv" . | nindent 12 }}
+            - name: NODE_NAME
+              valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+            - name: NODE_IP
+              valueFrom: { fieldRef: { fieldPath: status.hostIP } }
+            - name: TT_AGENT_TOP_PROCESSES
+              value: {{ .Values.windows.topProcesses | quote }}
+            - name: TT_KUBELET_INSECURE
+              value: {{ .Values.windows.kubelet.insecureSkipVerify | quote }}
+            {{- with .Values.windows.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources: {{- toYaml .Values.windows.resources | nindent 12 }}
+      {{- with .Values.windows.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      nodeSelector: {{- include "trooper-agent.nodeSelector" (dict "user" .Values.windows.nodeSelector "os" "windows") | nindent 8 }}
+{{- end }}

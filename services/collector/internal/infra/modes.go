@@ -55,6 +55,8 @@ func ParseModes(s string) ([]string, error) {
 type Config struct {
 	Cluster       string // TT_K8S_CLUSTER
 	DockerSocket  string // TT_AGENT_DOCKER_SOCKET
+	PodmanSocket  string // TT_AGENT_PODMAN_SOCKET (else rootful / rootless defaults)
+	NvidiaSMI     string // TT_AGENT_NVIDIA_SMI (else nvidia-smi from PATH)
 	TopProcesses  int    // TT_AGENT_TOP_PROCESSES
 	CloudProvider string // TT_CLOUD_PROVIDER (else from the node's providerID)
 	CloudRegion   string // TT_CLOUD_REGION (else topology.kubernetes.io/region)
@@ -67,6 +69,8 @@ func ConfigFromEnv() Config {
 	c := Config{
 		Cluster:       os.Getenv("TT_K8S_CLUSTER"),
 		DockerSocket:  os.Getenv("TT_AGENT_DOCKER_SOCKET"),
+		PodmanSocket:  os.Getenv("TT_AGENT_PODMAN_SOCKET"),
+		NvidiaSMI:     os.Getenv("TT_AGENT_NVIDIA_SMI"),
 		TopProcesses:  20,
 		CloudProvider: os.Getenv("TT_CLOUD_PROVIDER"),
 		CloudRegion:   os.Getenv("TT_CLOUD_REGION"),
@@ -91,7 +95,11 @@ func HostTargets(c Config, hostName string, log *slog.Logger) []agent.Target {
 	out := []agent.Target{{
 		ID: "host/" + hostName, Key: hostName, Kind: "host",
 		Interval: HostInterval, Timeout: 12 * time.Second, Spec: "host",
-		New: func() (scrape.Scraper, error) { return NewHostScraper(c.FS, c.TopProcesses), nil },
+		New: func() (scrape.Scraper, error) {
+			hs := NewHostScraper(c.FS, c.TopProcesses)
+			hs.GPU = NewGPUReader(c.NvidiaSMI)
+			return hs, nil
+		},
 	}}
 	switch {
 	case c.Kube.OnNode():
@@ -110,22 +118,57 @@ func HostTargets(c Config, hostName string, log *slog.Logger) []agent.Target {
 				return NewKubeletScraper(kc), nil
 			},
 		})
-	case socketExists(c.DockerSocket):
-		out = append(out, agent.Target{
-			ID: "docker/" + hostName, Key: hostName, Kind: "docker",
-			Interval: HostInterval, Timeout: 12 * time.Second, Spec: "docker",
-			New: func() (scrape.Scraper, error) { return NewDockerScraper(c.DockerSocket), nil },
-		})
 	default:
-		log.Info("no kubelet (NODE_IP) and no docker socket: container metrics off", "socket", c.DockerSocket)
+		srcs := ContainerSources(c)
+		if len(srcs) == 0 {
+			log.Info("no kubelet (NODE_IP), no docker / podman socket and no cgroup v2: container metrics off", "docker", c.DockerSocket)
+			break
+		}
+		names := make([]string, len(srcs))
+		for i, s := range srcs {
+			names[i] = s.Name + "=" + s.addr
+		}
+		out = append(out, agent.Target{
+			ID: "containers/" + hostName, Key: hostName, Kind: "containers",
+			Interval: HostInterval, Timeout: 12 * time.Second, Spec: strings.Join(names, ","),
+			New: func() (scrape.Scraper, error) {
+				ch := &ContainerChain{}
+				for _, s := range srcs {
+					ch.Sources = append(ch.Sources, ContainerSource{Name: s.Name, Scraper: s.new()})
+				}
+				return ch, nil
+			},
+		})
 	}
 	return out
 }
 
-func socketExists(p string) bool {
-	st, err := os.Stat(p)
-	return err == nil && st.Mode()&os.ModeSocket != 0
+type containerSourceSpec struct {
+	Name, addr string
+	new        func() scrape.Scraper
 }
+
+// ContainerSources detects the container sources outside Kubernetes, in priority order: the Docker
+// Engine API, Podman's Docker-compatible socket, the cgroup v2 tree (Linux).
+func ContainerSources(c Config) []containerSourceSpec {
+	var out []containerSourceSpec
+	if engineAvailable(c.DockerSocket) {
+		sock := c.DockerSocket
+		out = append(out, containerSourceSpec{"docker", sock, func() scrape.Scraper { return NewDockerScraper(sock) }})
+	}
+	for _, sock := range PodmanSockets(c.PodmanSocket, c.FS) {
+		if sock != c.DockerSocket && engineAvailable(sock) {
+			out = append(out, containerSourceSpec{"podman", sock, func() scrape.Scraper { return NewDockerScraper(sock) }})
+			break
+		}
+	}
+	if root := c.FS.CgroupRoot(); runtime.GOOS == "linux" && CgroupV2(root) {
+		out = append(out, containerSourceSpec{"cgroup", root, func() scrape.Scraper { return NewCgroupScraper(root) }})
+	}
+	return out
+}
+
+func socketExists(p string) bool { return engineAvailable(p) }
 
 // ClusterTarget is the cluster-mode target.
 func ClusterTarget(c Config, events LogSink) agent.Target {

@@ -51,3 +51,20 @@ func TestInfraAttrKeysMatchContract(t *testing.T) {
 		}
 	}
 }
+
+// Golden list from .ai/contracts.md §22 (GPU → gpus_1m).
+func TestGPUNamesMatchContract(t *testing.T) {
+	want := []string{"trooper.host.gpu.utilization", "trooper.host.gpu.memory", "trooper.host.gpu.memory_bytes",
+		"trooper.host.gpu.temperature_c", "trooper.host.gpu.power_w"}
+	if !slices.Equal(GPUGaugeNames, want) {
+		t.Fatalf("GPU names drifted: %v", GPUGaugeNames)
+	}
+	for _, n := range want {
+		if !slices.Contains(GaugeNames, n) {
+			t.Errorf("%s is not registered as a gauge", n)
+		}
+	}
+	if AttrGPUIndex != "gpu.index" || AttrGPUModel != "gpu.model" || AttrGPUUUID != "gpu.uuid" {
+		t.Fatal("GPU attr keys drifted")
+	}
+}

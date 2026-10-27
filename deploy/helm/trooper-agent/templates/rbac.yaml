@@ -9,6 +9,7 @@ metadata:
   {{- end }}
 ---
 {{- end }}
+{{- if or .Values.host.enabled .Values.cluster.enabled .Values.windows.enabled }}
 # Read-only: host mode reads the kubelet (nodes/stats, nodes/proxy), cluster mode lists objects.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -39,3 +40,4 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "trooper-agent.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
+{{- end }}

@@ -83,22 +83,31 @@ deploy/
 ```
 
 Servis ↔ binary: `ingest` → `ingest-gw`, `ingest-writer`; `alerting` → `alert-engine`, `notifier`; `collector` →
-`trooper-agent` (DB + broker metrikleri, OTLP ile ingest'e yollar).
+`trooper-agent` (DB/broker, host, container, process, GPU ve Kubernetes metrikleri; OTLP ile ingest'e yollar).
 
-### trooper-agent modları (ADR-019)
+### trooper-agent modları (ADR-019, contracts §20 + §22)
 
 Tek binary, `TT_AGENT_MODES` ile birleştirilebilen üç mod (varsayılan `db` = eski davranış). Her mod kendi OTLP
 resource'u ile ayrı bir emitter kullanır; bir kaynak okunamazsa ajan durmaz, `trooper.collector.up=0`
-(`kind` = `host|kubelet|docker|k8s`) yazılır.
+(`kind` = `host|kubelet|containers|k8s`) yazılır.
 
 | Mod | Nerede | Kaynak | Aralık | Çıktı |
 |---|---|---|---|---|
-| `db` | Deployment / VM | SQL, Kafka/RabbitMQ API | config `interval` | §5 metrikleri |
-| `host` | K8s'te DaemonSet (hostPID, `/proc` `/sys` `/` salt-okunur), K8s dışında `docker run` / systemd | gopsutil; container'lar K8s'te kubelet `/stats/summary` + `/pods` (+ `/metrics/cadvisor` throttling), dışında Docker Engine socket | 15 sn | `trooper.host.*`, `trooper.container.*`, `trooper.process.*` |
-| `cluster` | Tek replika Deployment | K8s API (salt-okunur list, client-go yok) | 30 sn | `trooper.k8s.*` + Warning event → OTLP log (`service.name=k8s`) |
+| `db` | Helm'de cluster Deployment'ı (`db.enabled`), VM / `docker run` | SQL, Kafka/RabbitMQ API; hedefler statik YAML (`db.targets` → ConfigMap) ve/veya api (`db.fromApi`) | config `interval` | §5 metrikleri |
+| `host` | K8s'te Linux DaemonSet (hostPID, `/proc` `/sys` `/` salt-okunur) + opsiyonel Windows DaemonSet (HostProcess), K8s dışında `docker run` / systemd / Windows servisi | gopsutil; container'lar K8s'te kubelet `/stats/summary` + `/pods` (+ `/metrics/cadvisor` throttling), dışında sırayla Docker Engine API (Linux socket, Windows `//./pipe/docker_engine`) → Podman (Docker uyumlu socket) → cgroup v2 ağacı (Linux; containerd/nerdctl/diğerleri); aynı container id'de ilk kaynak kazanır. GPU: `nvidia-smi` varsa | 15 sn | `trooper.host.*`, `trooper.host.gpu.*`, `trooper.container.*`, `trooper.process.*` |
+| `cluster` | Tek replika Deployment | K8s API: her kind için `list` + `watch` (resourceVersion, bookmark; 410 Gone → yeniden list; backoff ile yeniden bağlanma), bellekteki durum; client-go yok | 30 sn snapshot | `trooper.k8s.*` + Warning event (watch) → OTLP log (`service.name=k8s`) |
 
-Dağıtım: `deploy/helm/trooper-agent` (DaemonSet + Deployment + RBAC + Secret, opsiyonel OBI eBPF DaemonSet).
-Sözleşme: contracts.md §20; detay ve env listesi `services/collector/README.md`. Demo (`make demo`) aynı metrikleri
+Cluster modu watch akışını düz `net/http` + streaming JSON ile okur; her kind (nodes, pods, replicasets, deployments,
+statefulsets, daemonsets, jobs, cronjobs, Warning events) bir `Reflector`'dır. Nodes/pods ilk list'i bitmeden scrape
+`up=0` döner; okunamayan (RBAC / API grubu yok) diğer kind'lar sadece kendi metriklerini düşürür (5 dk'da bir yeniden
+denenir). GPU metrikleri `gpus_1m` tablosuna gider (writer yönlendirir, `deploy/clickhouse/004_gpu.sql`); `nvidia-smi`
+yoksa sessizce atlanır. Windows build'i: `GOOS=windows` (process `fds` yok, `os.type=windows`).
+
+Dağıtım: tek chart `deploy/helm/trooper-agent` — Linux host DaemonSet (`kubernetes.io/os: linux`), cluster Deployment
+(`cluster` ve/veya `db`), `windows.enabled` → `kubernetes.io/os: windows` nodeSelector'lı HostProcess DaemonSet
+(`services/collector/Dockerfile.windows`), RBAC, Secret, opsiyonel OBI eBPF DaemonSet. Eski
+`services/collector/deploy/helm/trooper-agent` chart'ı kaldırıldı.
+Sözleşme: contracts.md §20 + §22; detay ve env listesi `services/collector/README.md`. Demo (`make demo`) aynı metrikleri
 `demo-eks` cluster'ı ve 4 Lambda fonksiyonu için simüle eder (`--infra-sim`).
 
 ## Lokal geliştirme (hedef)

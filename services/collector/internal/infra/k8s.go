@@ -26,6 +26,7 @@ type ObjectMeta struct {
 	Name              string            `json:"name"`
 	Namespace         string            `json:"namespace"`
 	UID               string            `json:"uid"`
+	ResourceVersion   string            `json:"resourceVersion,omitempty"`
 	Labels            map[string]string `json:"labels"`
 	OwnerReferences   []OwnerRef        `json:"ownerReferences"`
 	CreationTimestamp time.Time         `json:"creationTimestamp"`

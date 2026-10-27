@@ -1,7 +1,6 @@
 {{- if or .Values.cluster.enabled .Values.db.enabled }}
-{{- $modes := list }}
-{{- if .Values.cluster.enabled }}{{ $modes = append $modes "cluster" }}{{ end }}
-{{- if .Values.db.enabled }}{{ $modes = append $modes "db" }}{{ end }}
+{{- $static := include "trooper-agent.hasStatic" . }}
+{{- $api := and .Values.db.enabled .Values.db.fromApi.apiUrl }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -10,7 +9,7 @@ metadata:
     {{- include "trooper-agent.labels" . | nindent 4 }}
     app.kubernetes.io/component: cluster
 spec:
-  # exactly one replica: two would ship every Warning event twice
+  # exactly one replica: two would ship every Warning event / db scrape twice
   replicas: 1
   strategy: { type: Recreate }
   selector:
@@ -19,7 +18,10 @@ spec:
     metadata:
       labels: {{- include "trooper-agent.selector" (dict "ctx" . "component" "cluster") | nindent 8 }}
       annotations:
-        checksum/secret: {{ printf "%s%s%s" .Values.dsn .Values.existingSecret .Values.db.apiKey | sha256sum }}
+        checksum/secret: {{ printf "%s%s%s" .Values.dsn .Values.existingSecret .Values.db.fromApi.apiKey | sha256sum }}
+        {{- if $static }}
+        checksum/config: {{ include "trooper-agent.config" . | sha256sum }}
+        {{- end }}
         {{- with .Values.cluster.podAnnotations }}{{ toYaml . | nindent 8 }}{{ end }}
     spec:
       serviceAccountName: {{ include "trooper-agent.serviceAccountName" . }}
@@ -28,6 +30,8 @@ spec:
       {{- end }}
       securityContext:
         runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: trooper-agent
@@ -35,13 +39,33 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
             - name: TT_AGENT_MODES
-              value: {{ join "," $modes | quote }}
+              value: {{ include "trooper-agent.clusterModes" . | quote }}
             {{- include "trooper-agent.commonEnv" . | nindent 12 }}
             {{- if .Values.db.enabled }}
+            {{- if $static }}
+            - name: TT_COLLECTOR_CONFIG
+              value: /etc/trooper-agent/config.yaml
+            {{- end }}
+            {{- if $api }}
             - name: TT_API_URL
-              value: {{ .Values.db.apiUrl | quote }}
+              value: {{ .Values.db.fromApi.apiUrl | quote }}
             - name: TT_API_KEY
               valueFrom: { secretKeyRef: { name: {{ include "trooper-agent.secretName" . }}, key: apiKey } }
+            {{- end }}
+            {{- with .Values.db.modes }}
+            - name: TT_COLLECTOR_MODES
+              value: {{ join "," . | quote }}
+            {{- end }}
+            {{- range $engine := list "postgres" "mysql" "redis" "mongodb" }}
+            {{- $i := index $.Values.db.integrations $engine }}
+            {{- if and $i.enabled $i.passwordSecret.name }}
+            - name: TT_{{ upper $engine }}_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ $i.passwordSecret.name }}, key: {{ default "password" $i.passwordSecret.key }} } }
+            {{- end }}
+            {{- end }}
+            {{- with .Values.db.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
             {{- end }}
             {{- with .Values.cluster.extraEnv }}
             {{- toYaml . | nindent 12 }}
@@ -51,12 +75,30 @@ spec:
             readOnlyRootFilesystem: true
             capabilities: { drop: [ALL] }
           resources: {{- toYaml .Values.cluster.resources | nindent 12 }}
+          {{- if and .Values.db.enabled (or $static .Values.db.extraSecretMounts) }}
+          volumeMounts:
+            {{- if $static }}
+            - { name: config, mountPath: /etc/trooper-agent, readOnly: true }
+            {{- end }}
+            {{- range .Values.db.extraSecretMounts }}
+            - { name: {{ .name }}, mountPath: {{ .mountPath }}, readOnly: true }
+            {{- end }}
+          {{- end }}
+      {{- if and .Values.db.enabled (or $static .Values.db.extraSecretMounts) }}
+      volumes:
+        {{- if $static }}
+        - name: config
+          configMap: { name: {{ include "trooper-agent.fullname" . }} }
+        {{- end }}
+        {{- range .Values.db.extraSecretMounts }}
+        - name: {{ .name }}
+          secret: { secretName: {{ .secretName }} }
+        {{- end }}
+      {{- end }}
       {{- with .Values.cluster.tolerations }}
       tolerations: {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.cluster.nodeSelector }}
-      nodeSelector: {{- toYaml . | nindent 8 }}
-      {{- end }}
+      nodeSelector: {{- include "trooper-agent.nodeSelector" (dict "user" .Values.cluster.nodeSelector "os" "linux") | nindent 8 }}
       {{- with .Values.cluster.affinity }}
       affinity: {{- toYaml . | nindent 8 }}
       {{- end }}

@@ -119,6 +119,7 @@ func (fs HostFS) HostID() string {
 type HostScraper struct {
 	FS       HostFS
 	TopN     int
+	GPU      *GPUReader // nil = no NVIDIA GPU / nvidia-smi
 	counters *rate.Counters
 	procs    *processTracker
 	prevCPU  *cpu.TimesStat
@@ -195,6 +196,7 @@ func (h *HostScraper) Scrape(ctx context.Context) (emit.Result, error) {
 	if h.TopN > 0 {
 		r.Merge(h.procs.scrape(ctx, h.TopN, now))
 	}
+	h.GPU.Scrape(ctx, &r)
 	return r, nil
 }
 

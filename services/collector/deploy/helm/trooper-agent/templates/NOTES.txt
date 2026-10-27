@@ -1,4 +1,0 @@
-trooper-agent is running as a {{ .Values.kind }}.
-Check it with:
-  kubectl logs -l app.kubernetes.io/instance={{ .Release.Name }} --tail=50
-Every target reports trooper.collector.up (1 = last scrape OK); failures are logged with the target id.

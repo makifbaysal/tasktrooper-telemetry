@@ -294,11 +294,17 @@ func TestDockerScraperNoSocket(t *testing.T) {
 }
 
 // ---------------------------------------------------------------- cluster (API server)
-
+// fakeAPI serves paged lists (with metadata.resourceVersion) and watch streams: a watch request
+// (watch=1) blocks and writes every line pushed with push(path, …); "CLOSE" ends the stream.
 type fakeAPI struct {
-	mu      sync.Mutex
-	objects map[string]string // path → items JSON array
-	paths   []string
+	mu          sync.Mutex
+	objects     map[string]string // path → items JSON array
+	paths       []string
+	rv          string
+	lists       map[string]int
+	watchRVs    map[string][]string
+	watchStatus map[string]int // next watch request on path answers this status
+	streams     map[string]chan string
 }
 
 func (f *fakeAPI) set(path, items string) {
@@ -307,40 +313,111 @@ func (f *fakeAPI) set(path, items string) {
 	f.mu.Unlock()
 }
 
-func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (f *fakeAPI) stream(path string) chan string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.streams == nil {
+		f.streams = map[string]chan string{}
+	}
+	if f.streams[path] == nil {
+		f.streams[path] = make(chan string, 64)
+	}
+	return f.streams[path]
+}
+
+// push sends one watch event line on path's stream.
+func (f *fakeAPI) push(path, line string) { f.stream(path) <- line }
+
+func (f *fakeAPI) listCount(path string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lists[path]
+}
+
+func (f *fakeAPI) watchRV(path string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.watchRVs[path]...)
+}
+
+func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
 	f.paths = append(f.paths, r.Method+" "+r.URL.Path)
+	if f.lists == nil {
+		f.lists, f.watchRVs, f.watchStatus = map[string]int{}, map[string][]string{}, map[string]int{}
+	}
 	if r.Header.Get("Authorization") != "Bearer test-token" {
+		f.mu.Unlock()
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 	items, ok := f.objects[r.URL.Path]
 	if !ok {
+		f.mu.Unlock()
 		http.Error(w, `{"kind":"Status","code":403}`, http.StatusForbidden)
 		return
 	}
 	if r.URL.Path == "/api/v1/events" && r.URL.Query().Get("fieldSelector") != "type=Warning" {
+		f.mu.Unlock()
 		http.Error(w, "want fieldSelector", http.StatusBadRequest)
 		return
 	}
+	rv := f.rv
+	if rv == "" {
+		rv = "100"
+	}
+	if r.URL.Query().Get("watch") == "1" {
+		if r.URL.Query().Get("allowWatchBookmarks") != "true" {
+			f.mu.Unlock()
+			http.Error(w, "want bookmarks", http.StatusBadRequest)
+			return
+		}
+		f.watchRVs[r.URL.Path] = append(f.watchRVs[r.URL.Path], r.URL.Query().Get("resourceVersion"))
+		if st := f.watchStatus[r.URL.Path]; st != 0 {
+			delete(f.watchStatus, r.URL.Path)
+			f.mu.Unlock()
+			http.Error(w, `{"kind":"Status","code":`+fmt.Sprint(st)+`}`, st)
+			return
+		}
+		f.mu.Unlock()
+		ch := f.stream(r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case line := <-ch:
+				if line == "CLOSE" {
+					return
+				}
+				fmt.Fprintln(w, line)
+				w.(http.Flusher).Flush()
+			}
+		}
+	}
+	if r.URL.Query().Get("continue") == "" {
+		f.lists[r.URL.Path]++
+	}
+	f.mu.Unlock()
 	// two pages for pods to exercise continue
 	if r.URL.Path == "/api/v1/pods" {
 		var all []json.RawMessage
 		_ = json.Unmarshal([]byte(items), &all)
 		if r.URL.Query().Get("continue") == "" && len(all) > 1 {
-			b, _ := json.Marshal(map[string]any{"metadata": map[string]any{"continue": "p2"}, "items": all[:1]})
+			b, _ := json.Marshal(map[string]any{"metadata": map[string]any{"continue": "p2", "resourceVersion": rv}, "items": all[:1]})
 			w.Write(b)
 			return
 		}
 		if r.URL.Query().Get("continue") == "p2" {
 			all = all[1:]
 		}
-		b, _ := json.Marshal(map[string]any{"metadata": map[string]any{}, "items": all})
+		b, _ := json.Marshal(map[string]any{"metadata": map[string]any{"resourceVersion": rv}, "items": all})
 		w.Write(b)
 		return
 	}
-	fmt.Fprintf(w, `{"metadata":{},"items":%s}`, items)
+	fmt.Fprintf(w, `{"metadata":{"resourceVersion":%q},"items":%s}`, rv, items)
 }
 
 type logRec struct {
@@ -352,6 +429,29 @@ func (l *logRec) Warn(_ context.Context, r emit.LogRecord) {
 	l.mu.Lock()
 	l.recs = append(l.recs, r)
 	l.mu.Unlock()
+}
+
+func (l *logRec) reset() {
+	l.mu.Lock()
+	l.recs = nil
+	l.mu.Unlock()
+}
+
+func (l *logRec) count() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.recs)
+}
+
+func (l *logRec) has(body string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, r := range l.recs {
+		if r.Body == body {
+			return true
+		}
+	}
+	return false
 }
 
 func newFakeCluster(now time.Time) *fakeAPI {
@@ -406,6 +506,8 @@ func TestClusterScraper(t *testing.T) {
 	logs := &logRec{}
 	s := NewClusterScraper(kc, logs)
 	s.now = func() time.Time { return now }
+	s.MinBackoff, s.MaxBackoff = 5*time.Millisecond, 20*time.Millisecond
+	defer s.Close()
 	r, err := s.Scrape(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -465,7 +567,10 @@ func TestClusterScraper(t *testing.T) {
 			t.Errorf("%s %v = %v (found %v), want %v", tt.metric, tt.match, v, ok, tt.want)
 		}
 	}
-	for _, p := range f.paths {
+	f.mu.Lock()
+	paths := append([]string(nil), f.paths...)
+	f.mu.Unlock()
+	for _, p := range paths {
 		if !strings.HasPrefix(p, "GET ") {
 			t.Errorf("cluster mode must be read-only: %s", p)
 		}
@@ -494,29 +599,58 @@ func TestClusterScraper(t *testing.T) {
 		t.Errorf("node event: ns=%q count=%q (series.count)", got2[4].Value.Emit(), got2[5].Value.Emit())
 	}
 
-	// second scrape: same uid+count → nothing; count bumped → once more; the old event bumped → sent now
+	// watched events: same uid+count → nothing; count bumped → once more; the old event bumped →
+	// sent now; a non-Warning event is ignored
+	ev := func(typ, uid, msg string, count int) string {
+		return fmt.Sprintf(`{"type":%q,"object":{"metadata":{"uid":%q,"namespace":"shop","name":%q,"resourceVersion":"%d"},
+		 "involvedObject":{"kind":"Pod","name":"x","namespace":"shop"},"reason":"BackOff","message":%q,"type":"Warning","count":%d,
+		 "lastTimestamp":%q}}`, typ, uid, uid, 200+count, msg, count, now.Format(time.RFC3339))
+	}
 	steps := []struct {
-		name   string
-		mutate func()
-		want   int
+		name string
+		line string
+		want int
 	}{
-		{"unchanged", func() {}, 0},
-		{"count bump", func() {
-			f.set("/api/v1/events", strings.Replace(f.objects["/api/v1/events"], `"count":4`, `"count":5`, 1))
-		}, 1},
-		{"old event recurs", func() {
-			f.set("/api/v1/events", strings.Replace(f.objects["/api/v1/events"], `"message":"old","type":"Warning","count":1`, `"message":"old","type":"Warning","count":2`, 1))
-		}, 1},
+		{"unchanged", ev("MODIFIED", "e1", "Back-off restarting failed container app", 4), 0},
+		{"count bump", ev("MODIFIED", "e1", "Back-off restarting failed container app", 5), 1},
+		{"old event recurs", ev("MODIFIED", "e-old", "old", 2), 1},
+		{"new event", ev("ADDED", "e9", "Liveness probe failed", 1), 1},
+		{"normal event", `{"type":"ADDED","object":{"metadata":{"uid":"n1","resourceVersion":"300"},"type":"Normal","reason":"Pulled","count":1}}`, 0},
 	}
 	for _, st := range steps {
-		logs.recs = nil
-		st.mutate()
-		if _, err := s.Scrape(context.Background()); err != nil {
-			t.Fatal(err)
+		logs.reset()
+		f.push("/api/v1/events", st.line)
+		// a marker event proves the line above was processed
+		f.push("/api/v1/events", ev("ADDED", "marker-"+st.name, "marker", 1))
+		waitFor(t, func() bool { return logs.has("marker") })
+		if n := logs.count() - 1; n != st.want {
+			t.Errorf("%s: events = %d want %d", st.name, n, st.want)
 		}
-		if len(logs.recs) != st.want {
-			t.Errorf("%s: events = %d want %d", st.name, len(logs.recs), st.want)
+	}
+
+	// watched pod change shows up in the next snapshot
+	f.push("/api/v1/pods", `{"type":"DELETED","object":{"metadata":{"name":"payments-api-6b8d9c7f4-abcde","namespace":"shop","uid":"u-pay","resourceVersion":"400"}}}`)
+	waitFor(t, func() bool { return s.pods.ResourceVersion() == "400" })
+	r, err = s.Scrape(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := find(t, r, emit.K8sPodReady, pay); ok {
+		t.Error("deleted pod still reported")
+	}
+	if v, _ := find(t, r, emit.K8sNodePods, map[string]string{"k8s.node.name": "node-a"}); v != 0 {
+		t.Errorf("node-a pods after delete = %v", v)
+	}
+}
+
+func waitFor(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for condition")
 		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 
@@ -524,7 +658,9 @@ func TestClusterScraperAuthError(t *testing.T) {
 	srv := httptest.NewServer(&fakeAPI{objects: map[string]string{}})
 	defer srv.Close()
 	kc, _ := KubeEnv{APIURL: srv.URL, Token: "wrong"}.API()
-	_, err := NewClusterScraper(kc, nil).Scrape(context.Background())
+	s := NewClusterScraper(kc, nil)
+	defer s.Close()
+	_, err := s.Scrape(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "401") {
 		t.Fatalf("err = %v", err)
 	}

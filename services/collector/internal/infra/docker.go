@@ -16,9 +16,6 @@ import (
 	"github.com/tasktrooper/telemetry/services/collector/internal/rate"
 )
 
-// DefaultDockerSocket is TT_AGENT_DOCKER_SOCKET's default.
-const DefaultDockerSocket = "/var/run/docker.sock"
-
 // DockerScraper reports trooper.container.* from the Docker Engine API over its unix socket
 // (read-only GETs: /containers/json, /containers/{id}/json, /containers/{id}/stats). Used
 // outside Kubernetes.
@@ -34,10 +31,7 @@ type DockerScraper struct {
 // NewDockerScraper talks to the engine on socket.
 func NewDockerScraper(socket string) *DockerScraper {
 	tr := &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, "unix", socket)
-		},
+		DialContext:         func(ctx context.Context, _, _ string) (net.Conn, error) { return dialEngine(ctx, socket) },
 		MaxIdleConnsPerHost: 8,
 	}
 	return &DockerScraper{hc: &http.Client{Transport: tr, Timeout: 30 * time.Second}, base: "http://docker", counters: rate.NewCounters(), now: time.Now, Parallel: 8}
