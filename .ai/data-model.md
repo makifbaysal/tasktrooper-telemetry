@@ -117,7 +117,9 @@ kpis(id, project_id, name, description, owner, target jsonb, sli enum(latency|av
 kpi_alert_rules(id, kpi_id, kind enum(burn_rate|below_target), long_window, short_window, threshold real,
                 severity, channels text[])
 notification_channels(id, project_id, type, config jsonb)
-repositories(id, project_id, provider, full_name, default_branch, last_analyzed_sha, status)
+repositories(id, project_id, provider github|gitlab|bitbucket|local, full_name, default_branch, last_analyzed_sha, status,
+             base_url null /*sadece gitlab self-managed*/, credentials_ref, webhook_secret_ref, webhook_received_at)
+             -- tüm kolonlar: contracts §13, §18, §18a
 inventory_items(id, repository_id, kind endpoint|consumer|cron|view|dependency, key, source, file, line, meta jsonb)
 -- consumer/cron: key = process adı, source = topic/queue ya da schedule
 alert_suggestions(id, inventory_item_id, monitor_draft jsonb, rationale text, confidence real, state proposed|accepted|rejected)

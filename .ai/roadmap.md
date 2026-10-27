@@ -51,8 +51,8 @@ Durum: servisler (`ingest`, `api`, `alerting`, `collector`, `integrations` = `tr
 - [x] TS/JS + Go extractor'ları
 - [x] LLM zenginleştirme (opsiyonel), kritiklik skoru, alert önerileri, kapsama metriği
 - [x] Webhook path'leriyle incremental analiz
-- [ ] `last_analyzed_sha` git-diff tabanlı incremental (manuel istek şu an full scan)
-- [ ] GitLab / Bitbucket kaynakları
+- [x] `last_analyzed_sha` git-diff tabanlı incremental (manuel istek ve webhook taşması dahil; fallback: full scan)
+- [x] GitLab (cloud + self-managed) / Bitbucket Cloud kaynakları (clone, webhook, api, UI)
 
 ## Faz 5 — Load testing ✅
 - [x] Senaryo/run CRUD (api + UI)
