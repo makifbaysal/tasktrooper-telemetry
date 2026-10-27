@@ -11,10 +11,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tasktrooper/telemetry/services/api/internal/blob"
-	"github.com/tasktrooper/telemetry/services/api/internal/llmprice"
 	"github.com/tasktrooper/telemetry/services/api/internal/model"
 	"github.com/tasktrooper/telemetry/services/api/internal/store"
 	"github.com/tasktrooper/telemetry/services/api/internal/timerange"
+	"github.com/tasktrooper/telemetry/services/pkg/llmprice"
 )
 
 // ObsStore: session replay (ADR-021, contracts §23), continuous profiling (ADR-022, §24), AI monitoring (ADR-023, §25).

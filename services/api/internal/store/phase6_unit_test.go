@@ -143,6 +143,14 @@ func TestMonitorQueryValidation(t *testing.T) {
 		bad("faas", `{"metric":"memory"}`),
 		bad("faas", `{"functionId":"x","filter":{"provider":"aws"},"metric":"errors"}`),
 		bad("faas", `{"filter":{"provider":"gcp"},"metric":"errors"}`),
+		ok("llm", `{"metric":"cost_usd_per_hour","filter":{}}`),
+		ok("llm", `{"metric":"error_rate","filter":{"service":"bff","provider":"openai","model":"gpt-5","route":"/chat","method":"POST","operation":"chat"}}`),
+		ok("llm", `{"metric":"ttft_p95_ms"}`),
+		bad("llm", `{"metric":"gb_seconds"}`),
+		bad("llm", `{}`),
+		bad("llm", `{"metric":"tokens","filter":{"region":"eu"}}`),
+		bad("llm", `{"metric":"tokens","filter":{"model":5}}`),
+		bad("llm", `{"metric":"tokens","service":"bff"}`),
 	} {
 		in := model.MonitorInput{Name: "m", Kind: c.kind, Severity: "warning", Query: json.RawMessage(c.q)}
 		_, _, _, _, err := normalizeMonitor(&in)

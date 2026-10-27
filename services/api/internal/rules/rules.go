@@ -219,6 +219,14 @@ func DescribeCondition(kind string, metric string, c model.MonitorCondition) str
 	}
 	val := trim(c.Threshold)
 	what := metric
+	if kind == "llm" {
+		what, val = describeLLM(metric, c)
+		s := fmt.Sprintf("%s %s %s", what, op, val)
+		if c.ForMin > 0 {
+			s += fmt.Sprintf(" for %sm", trim(c.ForMin))
+		}
+		return s
+	}
 	switch {
 	case kind == "latency" || metric == "p95" || metric == "p99" || metric == "p50":
 		if metric == "" || kind == "latency" && metric == "" {
@@ -237,4 +245,40 @@ func DescribeCondition(kind string, metric string, c model.MonitorCondition) str
 		s += fmt.Sprintf(" for %sm", trim(c.ForMin))
 	}
 	return s
+}
+
+// describeLLM names an llm monitor metric and its threshold: "LLM cost > $20/h", "LLM tokens in 1h > 5M".
+func describeLLM(metric string, c model.MonitorCondition) (what, val string) {
+	win := "5m"
+	switch w := c.Window.(type) {
+	case string:
+		if w != "" {
+			win = w
+		}
+	case float64:
+		if w > 0 {
+			win = trim(w) + "m"
+		}
+	}
+	money := func(v float64) string {
+		if v == math.Trunc(v) {
+			return "$" + strconv.FormatFloat(v, 'f', 0, 64)
+		}
+		return "$" + strconv.FormatFloat(v, 'f', 2, 64)
+	}
+	switch metric {
+	case "cost_usd":
+		return "LLM cost in " + win, money(c.Threshold)
+	case "cost_usd_per_hour":
+		return "LLM cost", money(c.Threshold) + "/h"
+	case "tokens", "input_tokens", "output_tokens", "calls", "errors":
+		return "LLM " + strings.ReplaceAll(metric, "_", " ") + " in " + win, Compact(c.Threshold)
+	case "error_rate":
+		return "LLM error rate", trim(c.Threshold*100) + "%"
+	case "p95_ms":
+		return "LLM p95", trim(c.Threshold) + " ms"
+	case "ttft_p95_ms":
+		return "LLM time to first token p95", trim(c.Threshold) + " ms"
+	}
+	return "LLM " + metric, trim(c.Threshold)
 }

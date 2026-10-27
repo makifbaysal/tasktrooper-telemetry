@@ -382,6 +382,38 @@ func TestIntegrationObs(t *testing.T) {
 			t.Errorf("it-orders hasAi true")
 		}
 
+		// llm monitors (contracts §25): create / validate / preview
+		llmMon := func(q map[string]any, cond map[string]any) map[string]any {
+			return map[string]any{"name": "it llm", "kind": "llm", "target": map[string]any{"service": "it-ai"}, "query": q,
+				"condition": cond, "severity": "warning", "channels": []string{}}
+		}
+		c.json("POST", "/monitors", llmMon(map[string]any{"metric": "cost_usd_per_hour", "filter": map[string]any{"service": "it-ai"}},
+			map[string]any{"op": ">", "threshold": 20, "window": "1h"}), 201, nil)
+		c.json("POST", "/monitors", llmMon(map[string]any{"metric": "gb_seconds"}, map[string]any{"op": ">", "threshold": 1}), 400, nil)
+		var pv model.Preview
+		maxOf := func(xs []float64) float64 {
+			m := 0.0
+			for _, x := range xs {
+				m = math.Max(m, x)
+			}
+			return m
+		}
+		c.json("POST", "/monitors/preview?range=1h", llmMon(map[string]any{"metric": "calls", "filter": map[string]any{}},
+			map[string]any{"op": ">", "threshold": 10, "window": "1h"}), 200, &pv)
+		if maxOf(pv.Data) != 15 || pv.Episodes != 1 {
+			t.Errorf("llm calls preview: max %v episodes %d %v", maxOf(pv.Data), pv.Episodes, pv.Data)
+		}
+		c.json("POST", "/monitors/preview?range=1h", llmMon(map[string]any{"metric": "cost_usd", "filter": map[string]any{}},
+			map[string]any{"op": ">", "threshold": 1, "window": "1h"}), 200, &pv)
+		if math.Abs(maxOf(pv.Data)-0.075) > 1e-9 || pv.Episodes != 0 {
+			t.Errorf("llm cost preview: max %v", maxOf(pv.Data))
+		}
+		c.json("POST", "/monitors/preview?range=1h", llmMon(map[string]any{"metric": "p95_ms", "filter": map[string]any{"provider": "openai"}},
+			map[string]any{"op": ">", "threshold": 1, "minRequests": 1000}), 200, &pv)
+		if maxOf(pv.Data) < 400 || pv.Episodes != 0 {
+			t.Errorf("llm p95 preview (minRequests): max %v episodes %d", maxOf(pv.Data), pv.Episodes)
+		}
+
 		// org price override → cost changes; delete → default again
 		c.json("PUT", "/ai/prices", map[string]any{"provider": "acme", "model": "mystery", "inputPerMTok": 1000, "outputPerMTok": 0}, 200, nil)
 		var prices model.AIPrices

@@ -814,6 +814,7 @@ paths:
       tags: [Alerting]
       operationId: postMonitorsPreview
       summary: 'Evaluate an unsaved monitor over the range'
+      description: 'Kinds consumer_lag, metric_threshold, latency, error_rate, throughput, log_count, log_match, log_pattern, log_pattern_new, dlq, consumer_failures, rum_vital, crash_rate and llm (llm_1m / llm_1h + org price table; window sums, errors / calls over the window, or the bucket p95).'
       parameters:
         - $ref: '#/components/parameters/range'
         - $ref: '#/components/parameters/env'
@@ -2694,7 +2695,7 @@ paths:
     get:
       tags: [Alerting]
       operationId: getMonitorTemplates
-      summary: 'Ready-made infra / faas monitors (kind + query + condition); create one with POST /monitors, source template'
+      summary: 'Ready-made infra / faas / llm monitors (kind + query + condition); create one with POST /monitors, source template'
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/MonitorTemplate' } } } } }
         '401': { $ref: '#/components/responses/E401' }
@@ -3622,7 +3623,7 @@ components:
       required: [name, kind, target, condition, severity, channels]
       properties:
         name: { type: string }
-        kind: { type: string, description: "infra query: {entity: host|container|pod|node|workload, metric, agg?: max|avg, filter?: {cluster, namespace, host, workload, service}}; faas query: {functionId? | filter?: {provider, region, service}, metric, relativeToTimeout?} (contracts §20, §21)" }
+        kind: { type: string, description: "infra query: {entity: host|container|pod|node|workload, metric, agg?: max|avg, filter?: {cluster, namespace, host, workload, service}}; faas query: {functionId? | filter?: {provider, region, service}, metric, relativeToTimeout?}; llm query: {filter?: {service, provider, model, route, method, operation}, metric: cost_usd|cost_usd_per_hour|tokens|input_tokens|output_tokens|calls|errors|error_rate|p95_ms|ttft_p95_ms} (minRequests applies to error_rate / p95_ms / ttft_p95_ms) (contracts §20, §21, §25)" }
         target: { $ref: '#/components/schemas/MonitorTarget' }
         query: {}
         condition: { $ref: '#/components/schemas/MonitorCondition' }
@@ -4644,7 +4645,7 @@ components:
         id: { type: string }
         name: { type: string }
         description: { type: string }
-        kind: { type: string, enum: [infra, faas] }
+        kind: { type: string, enum: [infra, faas, llm] }
         severity: { type: string }
         query: { type: object }
         condition: { type: object }

@@ -489,7 +489,7 @@ func (s *Server) preview(r *http.Request, q store.Q, in model.MonitorInput) (mod
 			}
 		}
 		ev = rules.EvaluateOp(data, in.Condition.Op, in.Condition.Threshold, in.Condition.ForMin, stepMin)
-	case "log_count", "log_match", "log_pattern", "log_pattern_new", "dlq", "consumer_failures", "rum_vital", "crash_rate":
+	case "log_count", "log_match", "log_pattern", "log_pattern_new", "dlq", "consumer_failures", "rum_vital", "crash_rate", "llm":
 		vals, volume, err := s.Store.PreviewSeries(r.Context(), q, in.Kind, in.Target, in.Query, in.Condition)
 		if err != nil {
 			return out, err
@@ -508,7 +508,7 @@ func (s *Server) preview(r *http.Request, q store.Q, in model.MonitorInput) (mod
 		ev.Now = data[len(data)-1]
 	default:
 		return out, store.Invalid("preview supports consumer_lag, metric_threshold, latency, error_rate, throughput, log_count, log_match, " +
-			"log_pattern, log_pattern_new, dlq, consumer_failures, rum_vital and crash_rate monitors")
+			"log_pattern, log_pattern_new, dlq, consumer_failures, rum_vital, crash_rate and llm monitors")
 	}
 	if data == nil {
 		data = make([]float64, q.W.Points)
