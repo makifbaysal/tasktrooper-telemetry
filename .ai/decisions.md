@@ -200,3 +200,59 @@ elle girmeyi gerektiriyor.
   (tek URL) codeintel'e gelir: `push` (default branch) → incremental analiz, `installation`/`installation_repositories` →
   repo ekle/kaldır senkronu, `pull_request` → ileride. Ortak GitHub App istemcisi `services/pkg/githubapp`.
 **Sonuç:** Kanal seçimi UI'da listeden yapılır; webhook URL'si kopyalamak gerekmez.
+
+## ADR-018 — AI kullanım kotası: kredi, org + üye limiti
+**Bağlam:** LLM çağrıları (bugün codeintel zenginleştirme; ileride RCA, öneri) tek bir Anthropic anahtarıyla yapılıyor ve
+tek sınır analiz başına öğe sayısı (`TT_CODEINTEL_LLM_MAX_ITEMS`). Paket bazında "bu ay şu kadar hakkın var" ve kişi bazında
+tavan gerekiyor.
+**Karar:**
+- Birim **kredi**: 1 kredi = 0,01 USD model maliyeti. Token → kredi dönüşümü model fiyat tablosuyla (config; model id sabit
+  kodlanmaz). Farklı modeller tek ölçüde toplanır.
+- Dönem UTC takvim ayı; ayın 1'inde sıfırlanır (sayaç değil, `ai_usage` defterinden SUM).
+- Limit katmanları: **paket varsayılanı** (`free` 100, `team` 5.000, `enterprise` sınırsız) → **org override**
+  (`orgs.ai_monthly_credits`) → **üye tavanı** (`memberships.ai_monthly_credits`, sadece o kişinin başlattığı işler).
+  Otomatik işler (webhook ile analiz) sadece org limitinden düşer.
+- Kontrol her LLM çağrısından **önce** (tahmini maliyetle), kayıt çağrıdan **sonra** (gerçek token). Org başına Postgres
+  advisory lock ile sıralanır; limit "soft": en fazla bir çağrı kadar aşılabilir.
+- Limit dolunca iş durmaz: LLM adımı atlanır, statik kurallarla devam edilir ve sonuçta `quota_exceeded` görünür.
+- %80 ve %100 eşiklerinde org'un seçtiği bildirim hedeflerine (Slack kanalı vb.) tek mesaj (ay+eşik başına dedupe).
+- Ortak mantık `services/pkg/aiquota` (bağımlılıksız; Postgres erişimi çağıranın verdiği arayüzle).
+**Sonuç:** Faturalama/ödeme yok; paket `orgs.plan`'dan okunur. Kullanım ekranı Settings → Usage.
+
+## ADR-019 — Host, Kubernetes ve container izleme (trooper-agent modları + opsiyonel eBPF)
+**Bağlam:** Altyapı tarafında sadece DB ve broker izleniyor. Host, K8s cluster, pod, container ve process görünürlüğü yok.
+New Relic bunu Pixie (eBPF) ile yapıyor.
+**Karar:**
+- Yeni ajan yazmıyoruz; `trooper-agent` (services/collector) **modlar** kazanır: `db` (bugünkü), `host` (host + container +
+  process; K8s'te DaemonSet), `cluster` (K8s API'den nesne durumu + Warning event'leri; tek replika Deployment).
+  `TT_AGENT_MODES=host,cluster` gibi birleştirilebilir.
+- Host metrikleri gopsutil, container metrikleri K8s'te kubelet `/stats/summary` (+ `/pods` metadata), K8s dışında Docker Engine
+  API (salt-okunur socket). Process'ler host başına CPU+bellek top 20; komut argümanları **toplanmaz** (PII).
+- Cluster modu salt-okunur RBAC (get/list/watch); metrikler 30 sn'de bir snapshot, Warning event'leri OTLP log
+  (`service.name=k8s`).
+- **eBPF**: kendi eBPF kodumuzu yazmıyoruz. Helm chart opsiyonel olarak OpenTelemetry eBPF Instrumentation (OBI) DaemonSet'i
+  kurar (`ebpf.enabled`, varsayılan kapalı); OBI enstrümante edilmemiş HTTP/gRPC/SQL servislerinden span + RED metriği üretip
+  OTLP ile ingest-gw'ye yollar → mevcut trace/servis haritası yolu. UI bu servisleri "eBPF" rozetiyle gösterir.
+- Veri tipli ClickHouse tablolarına (`hosts_1m`, `containers_1m`, `processes_1m`, `k8s_pods_1m`, `k8s_nodes_1m`,
+  `k8s_workloads_1m`) yazılır; servis ↔ pod bağı pod label'ından (`tasktrooper.io/service` > `app.kubernetes.io/name` > `app`).
+- Alert: yeni monitor kind `infra` (host/container/pod/node/workload); alert-engine RCA, servis incident'ında aynı servisin
+  pod'larındaki OOMKilled/CrashLoop/restart ve host CPU doygunluğunu kök neden adayı yapar.
+- Dağıtım: `deploy/helm/trooper-agent` (DaemonSet + Deployment + RBAC + opsiyonel OBI); K8s dışı host için `docker run` / systemd.
+**Sonuç:** Pixie'deki tam protokol ayrıştırma (MySQL/Kafka payload, flame graph) kapsam dışı; OBI'nin verdiği kadar.
+
+## ADR-020 — Serverless: AWS Lambda ve Azure Functions
+**Bağlam:** Serverless fonksiyonlar görünmüyor; AWS entegrasyonu sadece RDS/ElastiCache/MSK/SQS keşfediyor, Azure entegrasyonu yok.
+**Karar:**
+- **AWS Lambda** mevcut AWS entegrasyonunun yeni servisi (`config.services` içinde `lambda`): ListFunctions + tag + event source
+  mapping keşfi (10 dk), CloudWatch `AWS/Lambda` metrikleri (60 sn): Invocations, Errors, Throttles, Duration
+  (avg/max/p95/p99), ConcurrentExecutions, IteratorAge.
+- **Azure** yeni sağlayıcı (`provider='azure'`): service principal (tenant/client id + secret), abonelik listesi. Function App'ler
+  ARM'dan keşfedilir; Azure Monitor metrikleri **app** seviyesindedir (FunctionExecutionCount, FunctionExecutionUnits,
+  Requests, Http5xx, HttpResponseTime, MemoryWorkingSet) → Azure'da bir "fonksiyon" satırı = bir Function App; içindeki
+  fonksiyonlar `meta.functions`.
+- Trace/cold start: müşteri fonksiyonu OTel ile enstrümante eder (AWS: OTel/ADOT Lambda layer veya `@trooper/node`
+  `wrapLambda`; Azure: Functions OpenTelemetry modu) ve OTLP'yi ingest-gw'ye yollar. Cold start sayısı span'lardaki
+  `faas.coldstart=true`'dan hesaplanır (CloudWatch'ta yok).
+- Maliyet tahmini api'de: GB-saniye + istek fiyatı (sabitler config'te), UI'da "tahmini" etiketiyle.
+- Metadata Postgres `serverless_functions`, metrikler ClickHouse `faas_1m`; alert için monitor kind `faas`.
+**Sonuç:** Google Cloud Functions/Run, Vercel Functions ileride aynı tabloya eklenebilir.
