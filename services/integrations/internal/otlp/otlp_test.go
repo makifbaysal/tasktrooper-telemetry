@@ -3,6 +3,8 @@ package otlp
 import (
 	"compress/gzip"
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -96,5 +98,48 @@ func TestSendBuildsResourcePerRegionAndRetries(t *testing.T) {
 	}
 	if err := s.Send(context.Background(), Target{ProjectID: 8}, []model.Sample{{Name: "x"}}); err != ErrNoKey {
 		t.Fatalf("want ErrNoKey, got %v", err)
+	}
+}
+
+func TestSendInternalCredential(t *testing.T) {
+	type seen struct{ key, internal, project string }
+	tests := []struct {
+		name     string
+		token    string
+		keys     map[int64]string
+		gwToken  string // token ingest-gw accepts; "" = feature off on the gateway
+		project  int64
+		wantErr  bool
+		wantSeen []seen
+	}{
+		{"internal only", "tok", nil, "tok", 8, false, []seen{{"", "tok", "8"}}},
+		{"internal preferred over key", "tok", map[int64]string{8: "k8"}, "tok", 8, false, []seen{{"", "tok", "8"}}},
+		{"fallback to key on 401", "tok", map[int64]string{8: "k8"}, "", 8, false, []seen{{"", "tok", "8"}, {"k8", "", ""}}},
+		{"401 without key", "tok", nil, "", 8, true, []seen{{"", "tok", "8"}}},
+		{"keys only", "", map[int64]string{8: "k8"}, "tok", 8, false, []seen{{"k8", "", ""}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []seen
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				s := seen{r.Header.Get("x-trooper-key"), r.Header.Get("x-trooper-internal"), r.Header.Get("x-trooper-project")}
+				got = append(got, s)
+				switch {
+				case s.internal != "" && (tt.gwToken == "" || s.internal != tt.gwToken):
+					w.WriteHeader(http.StatusUnauthorized)
+				case s.internal == "" && s.key == "":
+					w.WriteHeader(http.StatusUnauthorized)
+				}
+			}))
+			defer srv.Close()
+			s := &Sender{MetricsURL: srv.URL + "/v1/metrics", InternalToken: tt.token, Keys: tt.keys, Version: "test", MaxAttempts: 1}
+			err := s.Send(context.Background(), Target{ProjectID: tt.project}, []model.Sample{{Name: "x", TS: time.Unix(1_700_000_000, 0)}})
+			if (err != nil) != tt.wantErr || errors.Is(err, ErrNoKey) {
+				t.Fatalf("err = %v", err)
+			}
+			if fmt.Sprint(got) != fmt.Sprint(tt.wantSeen) {
+				t.Fatalf("requests %v want %v", got, tt.wantSeen)
+			}
+		})
 	}
 }

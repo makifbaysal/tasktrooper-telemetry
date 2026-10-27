@@ -53,6 +53,9 @@ gerekirse küçük tutulur (tek harici bağımlılık `google.golang.org/protobu
 | ingest-gw metrics | 4318 (veya `TT_INGEST_METRICS_ADDR`) | Prometheus `GET /metrics` |
 | ingest-writer metrics | 9464 (`TT_INGEST_WRITER_METRICS_ADDR`) | Prometheus `GET /metrics` |
 
+**Internal credential:** servis içi gönderenler (trooper-cloud, loadtest-runner) `x-trooper-internal: <TT_INTERNAL_TOKEN>` +
+`x-trooper-project: <id>` gönderir (OTLP HTTP/gRPC metadata, `/v1/rum`); sabit zamanlı karşılaştırma, `Origin` varsa 403, token
+ayarlı değilse 401. Org Postgres'ten (60 sn cache).
 **Ingest auth:** `x-trooper-key: <ingest key>` header'ı, ya da `Authorization: Bearer <key>`. Browser `sendBeacon` header
 koyamadığı için `?key=` query parametresi de kabul edilir (sadece `/v1/rum`). Key Postgres `api_keys` tablosunda sha256 hash'i ile
 durur; ingest-gw 60 sn TTL'li in-memory cache tutar. Key → `(org_id, project_id)`. Browser key'lerinde `allowed_origins` kontrolü.
@@ -267,8 +270,8 @@ offline kuyruktan gelen ≤ 24 saatlik event'ler kendi zamanlarında kalır.
   Neon tüketim sayaçları custom metrik `trooper.cloud.neon.*` (`compute_time_seconds`, `active_time_seconds`,
   `cpu_used_seconds`, `written_data_bytes`, `data_transfer_bytes`, `synthetic_storage_bytes`, `logical_size_bytes`,
   `compute_active`, `compute_cu_max`) → generic `metrics` tablosu. Datapoint zamanı sağlayıcının kendi dakikasıdır.
-- **trooper-cloud ingest auth (geçici):** proje başına ingest key `TT_CLOUD_INGEST_KEYS=projectId:key,...`; `TT_DSN`'deki proje
-  otomatik. Hedef: ingest-gw'de proje header'ı kabul eden internal servis credential'ı (roadmap).
+- **trooper-cloud ingest auth:** `TT_INTERNAL_TOKEN` ayarlıysa internal credential (§2); değilse/401'de proje başına ingest key
+  `TT_CLOUD_INGEST_KEYS=projectId:key,...` (geri uyumlu). Vercel `createDrain` gerçek ingest key ister (drain URL'si public).
 - Bilinen boşluklar: Neon CPU/memory/connection metriği yok; RDS memory instance-class tablosundan (bilinmeyen sınıf →
   `config.instanceMemoryGb`); CloudWatch/GCP'den `max_connections` ve p95 yok; MSK Serverless'ta sadece lag.
 
@@ -387,6 +390,11 @@ offline kuyruktan gelen ≤ 24 saatlik event'ler kendi zamanlarında kalır.
 - api uçları: `GET /integrations/slack/install` → Slack OAuth'a yönlendirir (state imzalı); `GET /integrations/slack/callback`;
   `GET /integrations/slack/channels?q=` → `[{id, name, isPrivate, isMember}]` (cache 5 dk); `DELETE /integrations/slack`;
   `POST /slack/interactions` (Ack / Mute 1h butonları; imza doğrulaması; Slack kullanıcısını e-posta ile `users`'a eşler).
+- Bildirim kind'ları: `firing | resolved | reminder | acknowledged`; ack bildirimini **alert-engine** kuyruğa koyar (api koymaz;
+  dedupe `incident:<id>:acknowledged:<channel>`). Buton action id'leri: `tt_ack:<incidentId>`, `tt_mute1h:<monitorId>`.
+  `not_in_channel` → `conversations.join` (scope `channels:join`) + bir kez tekrar; private kanal → kalıcı "uygulamayı davet et"
+  hatası. Test için `TT_SLACK_API_URL`. Alert-engine çoklu shard: stream kuralı isabetleri `alert_stream_hits` (unlogged) +
+  `NOTIFY tt_stream_hit` ile monitor'ün sahibi shard'a devredilir.
 - Bildirim hedefi formatı: `slack:<channel_id>#<channel_name>` (örn. `slack:C0123ABCD#payments-alerts`). notifier: bot token ile
   `chat.postMessage`; ilk mesajın `ts`'i `notification_messages`'e; `resolved`/`reminder`/`acknowledged` → `thread_ts` ile
   thread'e cevap + ilk mesaj `chat.update` (renk/durum). `slack:https://hooks.slack.com/...` webhook hedefleri eskisi gibi.

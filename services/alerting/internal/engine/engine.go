@@ -84,11 +84,14 @@ type Engine struct {
 	warned   map[string]bool
 	locks    map[int64]*sync.Mutex
 	sup      store.Suppression
+	// streamOthers: other shards' stream rules (stream leader with N > 1; hits are handed off)
+	streamOthers []*model.Monitor
 }
 
 type ruleState struct {
 	snap       statemachine.Snapshot
 	incidentID int64
+	lastValue  *float64
 }
 
 // New builds an engine.
@@ -107,6 +110,7 @@ func New(cfg Config, log *slog.Logger, st *store.Store, ch kpi.CH, el *leader.El
 	reg.Describe("tt_alert_reminders_total", "counter", "reminder notifications enqueued")
 	reg.Describe("tt_alert_stream_records_total", "counter", "stream records processed by topic")
 	reg.Describe("tt_alert_stream_matches_total", "counter", "stream records matching a stream rule")
+	reg.Describe("tt_alert_stream_handoffs_total", "counter", "stream hits handed to / claimed from other shards by direction")
 	return &Engine{
 		cfg: cfg, log: log, st: st, ch: ch, ev: &eval.Evaluator{CH: ch}, elector: el, reg: reg, Now: time.Now,
 		clear: map[int64]time.Time{}, rules: map[int64]*ruleState{}, sliMark: map[int64]time.Time{}, warned: map[string]bool{},
@@ -167,6 +171,13 @@ func (e *Engine) Tick(ctx context.Context) error {
 	e.evalMonitors(ctx, now)
 	e.remindMonitors(ctx, now)
 	e.evalKpis(ctx, now)
+	if e.StreamLeader() { // one instance (shard 0): Slack App acks for every shard
+		if n, err := e.st.EnqueueAcks(ctx); err != nil {
+			e.log.Error("enqueue ack notifications", "err", err)
+		} else if n > 0 {
+			e.log.Info("ack notifications enqueued", "count", n)
+		}
+	}
 	e.reg.Set("tt_alert_cycle_seconds", time.Since(start).Seconds())
 	e.reg.Set("tt_alert_last_cycle_timestamp_seconds", float64(time.Now().Unix()))
 	return nil
@@ -181,6 +192,7 @@ func (e *Engine) reset(held []int) {
 	e.clear = map[int64]time.Time{}
 	e.rules = map[int64]*ruleState{}
 	e.sliMark = map[int64]time.Time{}
+	e.streamOthers = nil
 }
 
 func (e *Engine) shards() store.Shards { return store.Shards{N: e.elector.Shards, Held: e.held} }
@@ -210,6 +222,9 @@ func (e *Engine) refresh(ctx context.Context) error {
 	e.monitors = ms
 	e.mu.Unlock()
 	e.kpis = slices.DeleteFunc(ks, func(k *model.Kpi) bool { return !e.inScope(k.ProjectID) })
+	if err := e.loadStreamOthers(ctx); err != nil {
+		return err
+	}
 	e.fp, e.loadedAt = fp, time.Now()
 	e.reg.Set("tt_alert_monitors", float64(len(e.monitors)))
 	e.reg.Set("tt_alert_kpis", float64(len(e.kpis)))
@@ -447,9 +462,8 @@ func (e *Engine) remindMonitors(ctx context.Context, now time.Time) {
 			if m.LastValue != nil {
 				p["value"] = *m.LastValue
 			}
-			if d.Summary != "" {
-				p["summary"] = d.Summary
-			}
+			addCause(p, d.Summary, d.Confidence)
+			addMonitorRefs(p, m)
 			return p
 		})
 		if err != nil {
@@ -519,16 +533,19 @@ func (e *Engine) fire(ctx context.Context, m *model.Monitor, res eval.Result, co
 		Suppressed: e.suppressed(m, now),
 	}
 	if root != nil {
-		inc.RootCause = root
+		inc.RootCause = root // stored in incidents.root_cause in the same transaction that enqueues the notification
 	}
+	deploy := e.deployContext(ctx, m.ProjectID, service, now)
 	payload := func(id int64, started time.Time) map[string]any {
 		p := map[string]any{
 			"incidentId": id, "projectId": m.ProjectID, "monitorId": m.ID, "kind": m.Kind, "title": m.Name,
 			"severity": m.Severity, "state": "firing", "service": service, "endpoint": endpoint,
 			"value": res.Value, "op": cond.Op, "threshold": cond.Threshold, "startedAt": started.UnixMilli(), "link": e.link(id),
 		}
-		if root != nil {
-			p["summary"] = root.Summary
+		addRCA(p, root)
+		addMonitorRefs(p, m)
+		if deploy != nil {
+			p["deploy"] = deploy
 		}
 		return p
 	}
@@ -555,43 +572,16 @@ func (e *Engine) resolve(ctx context.Context, m *model.Monitor, res eval.Result,
 	service, route, method, _ := m.Scope()
 	endpoint := strings.TrimSpace(method + " " + route)
 	payload := func(r store.Resolved) map[string]any {
-		return map[string]any{
+		p := map[string]any{
 			"incidentId": r.ID, "projectId": m.ProjectID, "monitorId": m.ID, "kind": m.Kind, "title": m.Name,
 			"severity": m.Severity, "state": "resolved", "service": service, "endpoint": endpoint, "value": res.Value,
 			"peak": r.Peak, "startedAt": r.StartedAt.UnixMilli(), "resolvedAt": r.ResolvedAt.UnixMilli(),
-			"summary": r.Summary, "link": e.link(r.ID),
+			"link": e.link(r.ID),
 		}
+		addCause(p, r.Summary, r.Confidence)
+		addMonitorRefs(p, m)
+		return p
 	}
 	_, _, err := e.st.Resolve(ctx, m.ID, 0, ms, m.Channels, map[string]any{"value": res.Value}, e.suppressed(m, ms.At), payload)
 	return err
-}
-
-// ───────────────────────── stream hooks (internal/stream) ─────────────────────────
-
-// Leader reports whether this instance currently holds at least one shard.
-func (e *Engine) Leader() bool {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return len(e.held) > 0
-}
-
-// StreamMonitors returns the held monitors that run as stream rules.
-func (e *Engine) StreamMonitors() []*model.Monitor {
-	var out []*model.Monitor
-	for _, m := range e.snapshot() {
-		if m.Condition.Stream && eval.StreamKind(m.Kind) {
-			out = append(out, m)
-		}
-	}
-	return out
-}
-
-// ApplyStream feeds a stream-computed breach into the state machine (escalate only).
-func (e *Engine) ApplyStream(ctx context.Context, m *model.Monitor, res eval.Result) {
-	e.apply(ctx, m, res, e.Now(), true)
-}
-
-// EvalNow re-evaluates m against ClickHouse right away (stream trigger; escalate only).
-func (e *Engine) EvalNow(ctx context.Context, m *model.Monitor) {
-	e.evalMonitor(ctx, m, e.Now(), true)
 }

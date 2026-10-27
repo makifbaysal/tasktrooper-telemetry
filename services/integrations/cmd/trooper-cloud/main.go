@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -49,6 +50,8 @@ func run(once int64) error {
 	if _, ok := keys[dsnProject]; !ok && dsnKey != "" && dsnProject > 0 {
 		keys[dsnProject] = dsnKey
 	}
+	// TT_INTERNAL_TOKEN: internal service credential shared with ingest-gw (contracts §16); keys stay as fallback.
+	internalToken := strings.TrimSpace(os.Getenv("TT_INTERNAL_TOKEN"))
 	skey, err := secrets.Key()
 	if err != nil {
 		return err
@@ -68,14 +71,14 @@ func run(once int64) error {
 	}
 	r := runner.New(runner.Options{
 		Store:    st,
-		Sender:   &otlp.Sender{MetricsURL: metricsURL, Keys: keys, Version: version},
+		Sender:   &otlp.Sender{MetricsURL: metricsURL, InternalToken: internalToken, Keys: keys, Version: version},
 		Factory:  f.Build,
 		Log:      log,
 		Reload:   config.Duration("TT_CLOUD_RELOAD_INTERVAL", 30*time.Second),
 		Discover: config.Duration("TT_CLOUD_DISCOVERY_INTERVAL", 10*time.Minute),
 		Metrics:  config.Duration("TT_CLOUD_METRICS_INTERVAL", 60*time.Second),
 	})
-	log.Info("trooper-cloud starting", "version", version, "metrics_url", metricsURL, "projects_with_keys", len(keys))
+	log.Info("trooper-cloud starting", "version", version, "metrics_url", metricsURL, "projects_with_keys", len(keys), "internal_credential", internalToken != "")
 	if once > 0 {
 		list, err := st.Integrations(ctx)
 		if err != nil {

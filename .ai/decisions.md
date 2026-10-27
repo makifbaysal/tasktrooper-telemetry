@@ -185,7 +185,8 @@ RED metrikleri span'lardan gelir (OTel/Vercel trace drain); bulut metriklerinden
 **Bağlam:** Alert'ler bugün Slack'e sadece incoming webhook ile gidiyor (kanal webhook'a sabit). Repo bağlamak token/kurulum id
 elle girmeyi gerektiriyor.
 **Karar:**
-- **Slack App** (OAuth v2, bot scope'ları `chat:write`, `chat:write.public`, `channels:read`, `groups:read`): org başına bir
+- **Slack App** (OAuth v2, bot scope'ları `chat:write`, `chat:write.public`, `channels:read`, `groups:read`, `channels:join`,
+  `users:read.email`): org başına bir
   kurulum, bot token `secrets`'ta şifreli. Monitor/KPI kuralı bildirim hedefi `slack:<channel_id>` (görünen ad `#kanal`
   ayrıca saklanır); notifier `chat.postMessage` ile o kanala yazar, mesaj `ts`'ini saklar ve resolve/hatırlatma/ack aynı
   mesajın **thread**'ine gider (ilk mesaj `chat.update` ile durum rengini değiştirir). Eski `slack:` webhook kanalları çalışmaya

@@ -152,6 +152,12 @@ func (w *Worker) handle(ctx context.Context, r Row) {
 	if err == nil && w.Secrets != nil {
 		ch.Config, err = w.Secrets.ResolveConfig(ctx, r.ProjectID, ch.Config)
 	}
+	if r.Payload.ProjectID == 0 {
+		r.Payload.ProjectID = r.ProjectID
+	}
+	if r.Payload.IncidentID == 0 && r.Incident != nil {
+		r.Payload.IncidentID = *r.Incident
+	}
 	if err == nil {
 		dctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		err = w.D.Deliver(dctx, ch, r.Kind, r.Payload)
@@ -180,8 +186,15 @@ func (w *Worker) count(outcome, typ string) {
 
 // Resolve finds the channel by name within the project. Monitors store free text like "#orders-oncall" or
 // "slack:#payments-alerts"; an exact name match wins, else the "type:" prefix is stripped and must match the type.
+// Slack App targets (slack:<channel id>#<name>) and Slack webhook URLs (slack:https://hooks.slack.com/…) need no row.
 func (w *Worker) Resolve(ctx context.Context, projectID int64, name string) (Channel, error) {
 	name = strings.TrimSpace(name)
+	if id, chName, ok := ParseSlackTarget(name); ok {
+		return Channel{Name: name, Type: "slack_app", Config: map[string]any{"channelId": id, "channelName": chName}}, nil
+	}
+	if u := SlackWebhookTarget(name); u != "" {
+		return Channel{Name: name, Type: "slack", Config: map[string]any{"webhookUrl": u}}, nil
+	}
 	bare, typ := name, ""
 	if i := strings.IndexByte(name, ':'); i > 0 {
 		switch p := strings.ToLower(name[:i]); p {
@@ -234,6 +247,10 @@ func (w *Worker) markFailed(ctx context.Context, r Row, cause error, terminal bo
 		rnd = w.Rnd
 	}
 	delay := Backoff(r.Attempts+1, rnd())
+	var ra *RetryAfterError
+	if errors.As(cause, &ra) && ra.After > 0 {
+		delay = ra.After // Slack 429 Retry-After
+	}
 	_, err := w.DB.Exec(ctx, `UPDATE notifications SET attempts = attempts + 1, error = $2, next_at = now() + make_interval(secs => $3) WHERE id = $1`,
 		r.ID, fmt.Sprintf("attempt %d: %s", r.Attempts+1, msg), delay.Seconds())
 	return err

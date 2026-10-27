@@ -49,7 +49,8 @@ type Server struct {
 	sink         Sink
 	log          *slog.Logger
 	now          func() time.Time
-	integrations Integrations // Vercel drains; nil → /v1/drains/* answers 503
+	integrations Integrations   // Vercel drains; nil → /v1/drains/* answers 503
+	internal     *auth.Internal // internal service credential; nil = off
 }
 
 // New builds a Server.
@@ -183,17 +184,10 @@ func (s *Server) endpoint(sig signal) http.Handler {
 }
 
 func (s *Server) handle(r *http.Request, sig signal, origin string, jsonReq bool) error {
-	raw := requestKey(r, sig.rum)
-	key, err := s.keys.Lookup(r.Context(), raw)
+	key, err := s.authenticate(r.Context(), strings.TrimSpace(r.Header.Get(auth.HeaderInternal)), r.Header.Get(auth.HeaderProject),
+		origin, requestKey(r, sig.rum))
 	if err != nil {
-		if errors.Is(err, auth.ErrInvalidKey) {
-			return errUnauthorized
-		}
-		s.log.Error("key lookup failed", "err", err)
-		return &ingestError{status: http.StatusServiceUnavailable, msg: "auth backend unavailable", retryAfter: 5}
-	}
-	if origin != "" && !key.OriginAllowed(origin) {
-		return errForbidden
+		return err
 	}
 	if err := s.allow(r.Context(), key); err != nil {
 		return err

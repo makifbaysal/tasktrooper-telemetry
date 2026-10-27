@@ -35,7 +35,9 @@ func (e *Engine) evalKpis(ctx context.Context, now time.Time) {
 		for _, r := range k.Rules {
 			if err := e.evalRule(ctx, k, r, end, now); err != nil {
 				e.log.Error("kpi rule evaluation failed", "kpi", k.ID, "rule", r.ID, "err", err)
+				continue
 			}
+			e.remindRule(ctx, k, r, now)
 		}
 	}
 }
@@ -203,14 +205,16 @@ func (e *Engine) evalRule(ctx context.Context, k *model.Kpi, r model.KpiRule, en
 		if root != nil {
 			inc.RootCause = root
 		}
+		deploy := e.deployContext(ctx, k.ProjectID, service, now)
 		id, _, err := e.st.Open(ctx, inc, nil, func(id int64, started time.Time) map[string]any {
 			p := map[string]any{
 				"incidentId": id, "projectId": k.ProjectID, "kpiId": k.ID, "ruleId": r.ID, "kind": "kpi_" + r.Kind, "title": title,
 				"severity": r.Severity, "state": "firing", "service": service, "endpoint": endpoint, "value": value,
 				"threshold": r.Threshold, "objective": k.Objective, "startedAt": started.UnixMilli(), "link": e.link(id),
 			}
-			if root != nil {
-				p["summary"] = root.Summary
+			addRCA(p, root)
+			if deploy != nil {
+				p["deploy"] = deploy
 			}
 			return p
 		})
@@ -222,12 +226,14 @@ func (e *Engine) evalRule(ctx context.Context, k *model.Kpi, r model.KpiRule, en
 	case statemachine.Resolve:
 		if rs.incidentID != 0 {
 			_, _, err := e.st.Resolve(ctx, 0, rs.incidentID, nil, r.Channels, map[string]any{"value": value}, sup, func(res store.Resolved) map[string]any {
-				return map[string]any{
+				p := map[string]any{
 					"incidentId": res.ID, "projectId": k.ProjectID, "kpiId": k.ID, "ruleId": r.ID, "kind": "kpi_" + r.Kind,
 					"title": title, "severity": r.Severity, "state": "resolved", "service": service, "endpoint": endpoint,
 					"value": value, "peak": res.Peak, "startedAt": res.StartedAt.UnixMilli(), "resolvedAt": res.ResolvedAt.UnixMilli(),
-					"summary": res.Summary, "link": e.link(res.ID),
+					"link": e.link(res.ID),
 				}
+				addCause(p, res.Summary, res.Confidence)
+				return p
 			})
 			if err != nil {
 				return err
@@ -253,6 +259,7 @@ func (e *Engine) evalRule(ctx context.Context, k *model.Kpi, r model.KpiRule, en
 		return err
 	}
 	rs.snap = next
+	rs.lastValue = vp
 	return nil
 }
 
@@ -260,4 +267,39 @@ func (e *Engine) kpiSuppressed(k *model.Kpi, service string) string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.sup.Reason(int64(k.ProjectID), 0, service)
+}
+
+// remindRule re-sends a still-firing, unacknowledged KPI incident every condition.renotifyMin (mirrors
+// remindMonitors: reminder n once per incident, suppressed while muted / in maintenance).
+func (e *Engine) remindRule(ctx context.Context, k *model.Kpi, r model.KpiRule, now time.Time) {
+	rs := e.rules[r.ID]
+	if r.Renotify <= 0 || rs == nil || rs.snap.State != model.StateFiring || rs.incidentID == 0 {
+		return
+	}
+	title := RuleTitle(k, r)
+	service := k.Target.Svc()
+	endpoint := ""
+	if k.Target.Kind == "endpoint" {
+		endpoint = k.Target.Ref
+	}
+	due, sent, err := e.st.Remind(ctx, store.IncidentSel{KpiRuleID: r.ID}, r.Renotify, now, r.Channels, e.kpiSuppressed(k, service), func(d store.ReminderDue) map[string]any {
+		p := map[string]any{
+			"incidentId": d.IncidentID, "projectId": k.ProjectID, "kpiId": k.ID, "ruleId": r.ID, "kind": "kpi_" + r.Kind, "title": title,
+			"severity": r.Severity, "state": "firing", "reminder": d.N, "service": service, "endpoint": endpoint,
+			"threshold": r.Threshold, "objective": k.Objective, "peak": d.Peak, "startedAt": d.StartedAt.UnixMilli(), "link": e.link(d.IncidentID),
+		}
+		if rs.lastValue != nil {
+			p["value"] = *rs.lastValue
+		}
+		addCause(p, d.Summary, d.Confidence)
+		return p
+	})
+	if err != nil {
+		e.log.Error("kpi reminder failed", "kpi", k.ID, "rule", r.ID, "err", err)
+		return
+	}
+	if sent {
+		e.reg.Add("tt_alert_reminders_total", 1)
+		e.log.Info("kpi reminder enqueued", "incident", due.IncidentID, "kpi", k.ID, "rule", r.ID, "n", due.N)
+	}
 }

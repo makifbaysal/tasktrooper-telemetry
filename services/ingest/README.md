@@ -65,6 +65,7 @@ Common (`services/pkg/config`): `TT_POSTGRES_URL`, `TT_CLICKHOUSE_URL`, `TT_KAFK
 | `TT_TAIL_SLOW_MS` | `1000` | traces with an entry span ≥ this are always kept (`0` disables the rule) |
 | `TT_GEOIP_DB` | — | path to a MaxMind GeoLite2-Country / DB-IP Country Lite `.mmdb` (not bundled) |
 | `TT_SECRETS_KEY` | dev key | AES key for `secret:<id>` drain secrets (contracts §10) |
+| `TT_INTERNAL_TOKEN` | — | internal service credential (see *Behaviour notes*); unset disables it |
 
 ## Behaviour notes
 
@@ -72,6 +73,12 @@ Common (`services/pkg/config`): `TT_POSTGRES_URL`, `TT_CLICKHOUSE_URL`, `TT_KAFK
   (`kind='ingest'`, not revoked) with 60 s TTL cache, 10 s negative cache, singleflight, stale entry served if Postgres is
   down. `last_used_at` is written asynchronously, at most every 5 min per key. Browser `Origin` is checked against
   `allowed_origins` (exact origin, host, or `*.example.com`); CORS on `/v1/rum`, `/v1/traces`, `/v1/logs`.
+- **Internal service credential** (contracts §16; trooper-cloud, loadtest-runner): `x-trooper-internal: <TT_INTERNAL_TOKEN>`
+  and `x-trooper-project: <id>` on OTLP/HTTP, OTLP/gRPC metadata and `/v1/rum`. When the internal header is present the
+  ingest key is ignored; the token is compared in constant time (sha256 digests), the project must exist in Postgres
+  (org resolved via `projects.org_id`, 60 s cache, 10 s negative cache, stale on Postgres errors). Unset token → feature
+  off (401). Requests with an `Origin` header (HTTP, or `origin` gRPC metadata) are rejected with 403, and the CORS
+  preflight never allows the header. Rate limit as for keys (`TT_INGEST_RATE_LIMIT_RPS`).
 - **Rate limit:** GCRA in Redis (Lua, shared across replicas); if Redis fails the gw switches to an in-memory token bucket
   for 5 s at a time. 429 + `Retry-After` (gRPC: `ResourceExhausted` + `RetryInfo`).
 - **Produce:** franz-go, async, zstd, key = `project_id`, headers per contracts §3. Protobuf bodies ≤ record limit are
@@ -145,7 +152,7 @@ optional `speedInsightsUnit: "s"` if vitals arrive in seconds (default ms, web-v
 ## Prometheus metrics
 
 gw: `tt_ingest_gw_requests_total{endpoint,status}`, `_request_bytes_total`, `_request_duration_seconds`,
-`_auth_failures_total{reason=invalid_key|origin|integration|signature}`, `_rate_limited_total`, `_produced_records_total{topic}`,
+`_auth_failures_total{reason=invalid_key|origin|integration|signature|internal|internal_origin}`, `_rate_limited_total`, `_produced_records_total{topic}`,
 `_produce_errors_total{topic,reason=failed|buffer_full}`, `_produce_latency_seconds`, `_drain_events_total{provider,kind}`
 (gRPC endpoints are labelled `grpc:<topic>`). writer: `tt_ingest_writer_records_consumed_total`, `_decode_errors_total`,
 `_rows_inserted_total{table}`, `_clickhouse_errors_total{table}`, `_insert_duration_seconds{table}`,

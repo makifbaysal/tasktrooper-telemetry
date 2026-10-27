@@ -56,10 +56,12 @@ func (st *Store) Fingerprint(ctx context.Context) (string, error) {
 	var mc, kc int64
 	var mu, ku *time.Time
 	var mmax, kmax *int64
+	var kcond string
 	err := st.DB.QueryRow(ctx, `SELECT
 		(SELECT count(*) FROM monitors WHERE status = 'active'), (SELECT max(updated_at) FROM monitors), (SELECT max(id) FROM monitors),
-		(SELECT count(*) FROM kpis), (SELECT max(created_at) FROM kpis), (SELECT coalesce(max(id), 0) + coalesce(sum(threshold)::bigint, 0) + count(*) FROM kpi_alert_rules)`).
-		Scan(&mc, &mu, &mmax, &kc, &ku, &kmax)
+		(SELECT count(*) FROM kpis), (SELECT max(created_at) FROM kpis), (SELECT coalesce(max(id), 0) + coalesce(sum(threshold)::bigint, 0) + count(*) FROM kpi_alert_rules),
+		(SELECT md5(coalesce(string_agg(id || ':' || condition::text, ',' ORDER BY id), '')) FROM kpi_alert_rules)`).
+		Scan(&mc, &mu, &mmax, &kc, &ku, &kmax, &kcond)
 	if err != nil {
 		return "", err
 	}
@@ -75,15 +77,27 @@ func (st *Store) Fingerprint(ctx context.Context) (string, error) {
 		}
 		return *p
 	}
-	return fmt.Sprintf("%d/%d/%d/%d/%d/%d", mc, f(mu), g(mmax), kc, f(ku), g(kmax)), nil
+	return fmt.Sprintf("%d/%d/%d/%d/%d/%d/%s", mc, f(mu), g(mmax), kc, f(ku), g(kmax), kcond), nil
 }
 
 // LoadMonitors returns active monitors in the held shards. Rows whose JSON does not parse are returned
 // with Kind "invalid" so they surface as no_data instead of being skipped silently.
 func (st *Store) LoadMonitors(ctx context.Context, sh Shards) ([]*model.Monitor, error) {
 	cond, args := sh.filter("m.id", 1)
+	return st.loadMonitors(ctx, cond, args)
+}
+
+// LoadStreamMonitors returns every active stream rule (condition.stream = true, stream kinds) across all shards:
+// the stream consumer evaluates them all and hands hits on other shards' monitors to their owner.
+func (st *Store) LoadStreamMonitors(ctx context.Context) ([]*model.Monitor, error) {
+	return st.loadMonitors(ctx, `m.kind IN ('log_match', 'log_count', 'error_new') AND m.condition->>'stream' = 'true'`, nil)
+}
+
+func (st *Store) loadMonitors(ctx context.Context, cond string, args []any) ([]*model.Monitor, error) {
+	// source / code_ref via to_jsonb: works before and after the column migration (alert-as-code).
 	rows, err := st.DB.Query(ctx, `SELECT m.id, p.org_id, m.project_id, m.name, m.kind, m.target, m.query, m.condition,
-		m.severity, m.channels, m.state, m.state_since, m.last_value, m.updated_at, m.muted_until, coalesce(bc.kind, '')
+		m.severity, m.channels, m.state, m.state_since, m.last_value, m.updated_at, m.muted_until, coalesce(bc.kind, ''),
+		coalesce(to_jsonb(m)->>'source', ''), coalesce(to_jsonb(m)->>'code_ref', '')
 		FROM monitors m JOIN projects p ON p.id = m.project_id
 		LEFT JOIN broker_clusters bc ON bc.project_id = m.project_id AND bc.slug = m.query->>'clusterId'
 		WHERE m.status = 'active' AND `+cond+` ORDER BY m.id`, args...)
@@ -98,7 +112,7 @@ func (st *Store) LoadMonitors(ctx context.Context, sh Shards) ([]*model.Monitor,
 		var target, query, condition []byte
 		var state string
 		if err := rows.Scan(&m.ID, &org, &project, &m.Name, &m.Kind, &target, &query, &condition,
-			&m.Severity, &m.Channels, &state, &m.StateSince, &m.LastValue, &m.UpdatedAt, &m.MutedUntil, &m.ClusterKind); err != nil {
+			&m.Severity, &m.Channels, &state, &m.StateSince, &m.LastValue, &m.UpdatedAt, &m.MutedUntil, &m.ClusterKind, &m.Source, &m.CodeRef); err != nil {
 			return nil, err
 		}
 		m.OrgID, m.ProjectID, m.State = uint32(org), uint32(project), model.State(state)
@@ -165,7 +179,7 @@ func (st *Store) LoadKpis(ctx context.Context, sh Shards) ([]*model.Kpi, error) 
 		ids = append(ids, k.ID)
 	}
 	rr, err := st.DB.Query(ctx, `SELECT id, kpi_id, kind, coalesce(long_window, ''), coalesce(short_window, ''), threshold, severity, channels,
-		state, state_since FROM kpi_alert_rules WHERE kpi_id = ANY($1) ORDER BY id`, ids)
+		state, state_since, condition FROM kpi_alert_rules WHERE kpi_id = ANY($1) ORDER BY id`, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -176,13 +190,20 @@ func (st *Store) LoadKpis(ctx context.Context, sh Shards) ([]*model.Kpi, error) 
 		var lw, sw string
 		var th float32
 		var state string
-		if err := rr.Scan(&r.ID, &kpiID, &r.Kind, &lw, &sw, &th, &r.Severity, &r.Channels, &state, &r.StateSince); err != nil {
+		var cond []byte
+		if err := rr.Scan(&r.ID, &kpiID, &r.Kind, &lw, &sw, &th, &r.Severity, &r.Channels, &state, &r.StateSince, &cond); err != nil {
 			return nil, err
 		}
 		r.State = model.State(state)
 		r.Threshold = float64(th)
 		r.LongWindow, _ = model.ParseDuration(lw)
 		r.ShortWindow, _ = model.ParseDuration(sw)
+		if len(cond) > 0 {
+			var c model.Condition
+			if json.Unmarshal(cond, &c) == nil {
+				r.Renotify = c.Renotify
+			}
+		}
 		if k := byID[kpiID]; k != nil {
 			k.Rules = append(k.Rules, r)
 		}
@@ -363,7 +384,8 @@ type Resolved struct {
 	ResolvedAt time.Time
 	Peak       *float64
 	Summary    string
-	Quiet      bool // resolved from pending, never notified
+	Quiet      bool     // resolved from pending, never notified
+	Confidence *float64 // root_cause.confidence
 }
 
 // Resolve closes the open incident selected by monitor id or incident id, logs and enqueues resolved notifications.
@@ -385,8 +407,8 @@ func (st *Store) Resolve(ctx context.Context, monitorID, incidentID int64, ms *M
 		}
 		var summary *string
 		err := tx.QueryRow(ctx, `UPDATE incidents SET state = 'resolved', resolved_at = now(), quiet = (state = 'pending')
-			WHERE `+sel+` AND state <> 'resolved' RETURNING id, started_at, resolved_at, peak_value, root_cause->>'summary', quiet`, key).
-			Scan(&r.ID, &r.StartedAt, &r.ResolvedAt, &r.Peak, &summary, &r.Quiet)
+			WHERE `+sel+` AND state <> 'resolved' RETURNING id, started_at, resolved_at, peak_value, root_cause->>'summary', quiet, (root_cause->>'confidence')::float8`, key).
+			Scan(&r.ID, &r.StartedAt, &r.ResolvedAt, &r.Peak, &summary, &r.Quiet, &r.Confidence)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -604,6 +626,7 @@ type ReminderDue struct {
 	N          int // reminder number (1, 2, …)
 	Peak       *float64
 	Summary    string
+	Confidence *float64 // root_cause.confidence (0..1), nil without RCA
 }
 
 // Remind enqueues reminder number floor((now − fired)/every) for the monitor's open incident when it is still
@@ -621,9 +644,9 @@ func (st *Store) Remind(ctx context.Context, sel IncidentSel, every time.Duratio
 		var summary *string
 		err := tx.QueryRow(ctx, `SELECT i.id, i.state, i.started_at,
 				coalesce((SELECT max(ts) FROM incident_events e WHERE e.incident_id = i.id AND e.kind = 'fired'), i.started_at),
-				i.peak_value, i.root_cause->>'summary'
+				i.peak_value, i.root_cause->>'summary', (i.root_cause->>'confidence')::float8
 			FROM incidents i WHERE `+col+` = $1 AND i.state <> 'resolved' FOR UPDATE`, key).Scan(&due.IncidentID, &state, &due.StartedAt, &due.FiredAt,
-			&due.Peak, &summary)
+			&due.Peak, &summary, &due.Confidence)
 		if summary != nil {
 			due.Summary = *summary
 		}
@@ -715,3 +738,109 @@ func (e *RetryableError) Unwrap() error { return e.Err }
 
 // Transient marks the error as retryable for errors.As-based checks.
 func (e *RetryableError) Transient() bool { return true }
+
+// ───────────────────────── stream-rule hand-off between shards ─────────────────────────
+
+// StreamHitChannel is the NOTIFY channel announcing a new alert_stream_hits row (payload = monitor id).
+const StreamHitChannel = "tt_stream_hit"
+
+// StreamHit is one alert_stream_hits row: a stream match on a monitor owned by another shard.
+type StreamHit struct {
+	ID        int64
+	MonitorID int64
+	Kind      string // breach | eval
+	Value     float64
+	Detail    map[string]any
+	CreatedAt time.Time
+}
+
+// HandOffStreamHit records a stream hit for the monitor's owner and notifies it (NOTIFY is delivered on commit).
+func (st *Store) HandOffStreamHit(ctx context.Context, monitorID int64, kind string, value float64, detail map[string]any) error {
+	if detail == nil {
+		detail = map[string]any{}
+	}
+	b, err := json.Marshal(detail)
+	if err != nil {
+		return err
+	}
+	return pgx.BeginFunc(ctx, st.DB, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `INSERT INTO alert_stream_hits (monitor_id, kind, value, detail) VALUES ($1, $2, $3, $4)`, monitorID, kind, value, b); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `SELECT pg_notify($1, $2)`, StreamHitChannel, fmt.Sprint(monitorID))
+		return err
+	})
+}
+
+// ClaimStreamHits deletes and returns up to limit fresh hits on monitors of the held shards (oldest first).
+// Concurrent claimers never see the same row (SKIP LOCKED).
+func (st *Store) ClaimStreamHits(ctx context.Context, sh Shards, maxAge time.Duration, limit int) ([]StreamHit, error) {
+	cond, args := sh.filter("monitor_id", 3)
+	rows, err := st.DB.Query(ctx, `DELETE FROM alert_stream_hits WHERE id IN (
+			SELECT id FROM alert_stream_hits WHERE created_at > now() - make_interval(secs => $1) AND `+cond+`
+			ORDER BY id LIMIT $2 FOR UPDATE SKIP LOCKED)
+		RETURNING id, monitor_id, kind, coalesce(value, 0), detail, created_at`, append([]any{maxAge.Seconds(), limit}, args...)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []StreamHit
+	for rows.Next() {
+		var h StreamHit
+		var detail []byte
+		if err := rows.Scan(&h.ID, &h.MonitorID, &h.Kind, &h.Value, &detail, &h.CreatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(detail, &h.Detail)
+		out = append(out, h)
+	}
+	return out, rows.Err()
+}
+
+// PurgeStreamHits drops hits nobody claimed (owner down or monitor moved).
+func (st *Store) PurgeStreamHits(ctx context.Context, maxAge time.Duration) (int64, error) {
+	tag, err := st.DB.Exec(ctx, `DELETE FROM alert_stream_hits WHERE created_at <= now() - make_interval(secs => $1)`, maxAge.Seconds())
+	return tag.RowsAffected(), err
+}
+
+// Deploy is the latest deploy_markers row of a service (notification deploy context).
+type Deploy struct {
+	Version, Source, URL, CommitMessage, Author, Env string
+	TS                                               time.Time
+}
+
+// RecentDeploy returns the newest deploy of service in project within (now − window, now], or nil.
+func (st *Store) RecentDeploy(ctx context.Context, projectID int64, service string, now time.Time, window time.Duration) (*Deploy, error) {
+	if service == "" {
+		return nil, nil
+	}
+	var d Deploy
+	err := st.DB.QueryRow(ctx, `SELECT version, source, coalesce(url, ''), coalesce(commit_message, ''), coalesce(author, ''), env, ts
+		FROM deploy_markers WHERE project_id = $1 AND service = $2 AND ts > $3 AND ts <= $4 ORDER BY ts DESC LIMIT 1`,
+		projectID, service, now.Add(-window), now).Scan(&d.Version, &d.Source, &d.URL, &d.CommitMessage, &d.Author, &d.Env, &d.TS)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
+// EnqueueAcks writes an 'acknowledged' notification for every Slack App target (slack:<channel id>…) that received
+// the firing notification of an incident acknowledged within the last day. Idempotent
+// (dedupe incident:<id>:acknowledged:<channel>); the notifier answers in the firing message's thread.
+func (st *Store) EnqueueAcks(ctx context.Context) (int64, error) {
+	tag, err := st.DB.Exec(ctx, `INSERT INTO notifications (incident_id, channel, kind, payload, dedupe_key)
+		SELECT n.incident_id, n.channel, 'acknowledged',
+			n.payload || jsonb_build_object('state', 'acknowledged', 'ackedAt', (extract(epoch FROM i.acked_at) * 1000)::bigint,
+				'ackedBy', coalesce(u.name, u.email, '')),
+			'incident:' || n.incident_id || ':acknowledged:' || n.channel
+		FROM notifications n
+		JOIN incidents i ON i.id = n.incident_id
+		LEFT JOIN users u ON u.id = i.acked_by
+		WHERE n.kind = 'firing' AND i.state = 'acknowledged' AND i.acked_at > now() - interval '1 day'
+			AND n.channel ~ '^slack:[A-Z0-9]{6,}(#|$)'
+		ON CONFLICT (dedupe_key) DO NOTHING`)
+	return tag.RowsAffected(), err
+}

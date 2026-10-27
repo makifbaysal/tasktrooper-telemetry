@@ -21,7 +21,8 @@ import (
 
 // Engine is what the stream needs from the alert engine.
 type Engine interface {
-	Leader() bool
+	// StreamLeader: this instance consumes the stream (it holds shard 0; with one shard simply the leader).
+	StreamLeader() bool
 	StreamMonitors() []*model.Monitor
 	ApplyStream(ctx context.Context, m *model.Monitor, res eval.Result)
 	EvalNow(ctx context.Context, m *model.Monitor)
@@ -211,7 +212,7 @@ func Run(ctx context.Context, cfg Config, eng Engine, reg *obs.Registry, log *sl
 	defer evalWG.Wait()
 	sem := make(chan struct{}, 4)
 	for ctx.Err() == nil {
-		leader := eng.Leader()
+		leader := eng.StreamLeader()
 		switch {
 		case leader && cl == nil:
 			var err error
