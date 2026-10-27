@@ -98,6 +98,14 @@ Metrikler (invocations, errors, throttles, duration, concurrency …) SDK'sız g
 ile enstrümante edilir; span'ların `service.name`'i `serverless_functions.service` ile aynı olmalı (varsayılan fonksiyon /
 app adı; override: Lambda tag'i veya Function App tag'i `tasktrooper.service`).
 
+**Azure fonksiyon bazında metrik:** Function App'e bağlı bir Application Insights bileşeni varsa (`hidden-link` tag'i)
+entegrasyon her fonksiyonu ayrı satır (`azure-<app>-<function>`) olarak açar ve metriklerini App Insights `requests`
+tablosundan (ARM proxy, ek rol gerekmez) çeker; p95/p99 de gelir. `service` = fonksiyonun en sık `cloud_RoleName`'i — span
+eşlemesi için `OTEL_SERVICE_NAME` (veya App Insights'ta cloud role name) ile aynı tutulmalı. Opsiyonel
+`config.readAppSettings: true` (Website Contributor gerekir) `TASKTROOPER_SERVICE` / `OTEL_SERVICE_NAME` app setting'ini
+okuyup `service`'i ezer; yetki yoksa sessizce atlanır, başka hiçbir ayar saklanmaz. Detay: contracts §22,
+`services/integrations/README.md` § Azure.
+
 **Node.js Lambda — `@trooper/node`:**
 
 ```ts

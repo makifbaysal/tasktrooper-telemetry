@@ -1,6 +1,8 @@
 // Package azure discovers Azure Function Apps (ARM) and reads their Azure Monitor metrics (ADR-020,
-// contracts §21). One serverless_functions row per Function App (slug azure-<app>); the functions inside an
-// app go to meta.functions because Azure Monitor metrics are app-level.
+// contracts §21). One serverless_functions row per Function App (slug azure-<app>, app-level Azure Monitor
+// metrics; the functions are also listed in meta.functions). When the app has an Application Insights component,
+// every function also gets its own row (slug azure-<app>-<function>) with per-function metrics (contracts §22,
+// appinsights.go).
 package azure
 
 import (
@@ -8,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"slices"
@@ -44,6 +47,9 @@ type Config struct {
 	Env             string   `json:"env"`
 	// MaxApps caps Function Apps per integration (default 500).
 	MaxApps int `json:"maxApps"`
+	// ReadAppSettings reads TASKTROOPER_SERVICE / OTEL_SERVICE_NAME from the app settings (needs Website
+	// Contributor; skipped silently without it). No other setting is stored.
+	ReadAppSettings bool `json:"readAppSettings"`
 }
 
 // Options are runtime settings (tests).
@@ -53,6 +59,10 @@ type Options struct {
 	HTTP     *http.Client
 	// BaseDelay of the HTTP retry backoff (tests use a few ms).
 	BaseDelay time.Duration
+	// Log receives one-off notices (missing app settings permission). May be nil.
+	Log *slog.Logger
+	// Now is the clock of discovery (App Insights query throttling); default time.Now.
+	Now func() time.Time
 }
 
 // Provider implements model.Provider.
@@ -62,6 +72,15 @@ type Provider struct {
 	tokens *tokenSource
 	// unsupported metric names per app (Flex plans, Linux Consumption gaps).
 	unsupported unsupported
+	log         *slog.Logger
+	now         func() time.Time
+	// ai holds the last App Insights query per component (throttling, discovery → metrics hand-over).
+	ai aiCache
+	// roles remembers the last cloud_RoleName per function slug (service stays stable in quiet periods).
+	rolesMu sync.Mutex
+	roles   map[string]string
+	// settingsLogged: apps whose app settings could not be read (logged once).
+	settingsLogged sync.Map
 }
 
 // ParseSecret accepts the client secret as plain text or as JSON {"clientSecret": "..."}.
@@ -120,7 +139,10 @@ func New(raw json.RawMessage, secret []byte, o Options) (*Provider, error) {
 		r.Header.Set("Authorization", "Bearer "+tok)
 		return nil
 	}}
-	return &Provider{cfg: cfg, arm: arm, tokens: ts}, nil
+	if o.Now == nil {
+		o.Now = time.Now
+	}
+	return &Provider{cfg: cfg, arm: arm, tokens: ts, log: o.Log, now: o.Now}, nil
 }
 
 // tokenSource is an OAuth2 client-credentials token, cached until shortly before it expires.
@@ -271,6 +293,9 @@ type function struct {
 // app is the discovery state the metrics step needs.
 type app struct {
 	ID, Name, Slug, Region, Plan string
+	// Component is the linked App Insights component id ("" = unavailable); Children its function rows.
+	Component string
+	Children  []child
 }
 
 type state struct{ apps []app }
@@ -324,6 +349,7 @@ func (p *Provider) Discover(ctx context.Context) (*model.Inventory, error) {
 		}
 	}
 	var sites []site
+	comps := &components{bySite: map[string]component{}, byName: map[string]component{}}
 	for _, sub := range subs {
 		paths := []string{"/subscriptions/" + url.PathEscape(sub) + "/providers/Microsoft.Web/sites"}
 		if len(p.cfg.ResourceGroups) > 0 {
@@ -344,11 +370,16 @@ func (p *Provider) Discover(ctx context.Context) (*model.Inventory, error) {
 				errs = errors.Join(errs, fmt.Errorf("subscription %s: list sites: %w", sub, err))
 			}
 		}
+		if err := p.listComponents(ctx, sub, comps); err != nil {
+			errs = errors.Join(errs, fmt.Errorf("subscription %s: %w", sub, err))
+		}
 	}
 	st := &state{}
 	inv := &model.Inventory{State: st}
-	fns := make([]model.Function, len(sites))
+	fns := make([][]model.Function, len(sites))
+	apps := make([]app, len(sites))
 	fnErrs := make([]error, len(sites))
+	now := p.now()
 	sem := make(chan struct{}, 6)
 	var wg sync.WaitGroup
 	for i, s := range sites {
@@ -356,7 +387,7 @@ func (p *Provider) Discover(ctx context.Context) (*model.Inventory, error) {
 		sem <- struct{}{}
 		go func() {
 			defer func() { <-sem; wg.Done() }()
-			fns[i], fnErrs[i] = p.describe(ctx, s)
+			fns[i], apps[i], fnErrs[i] = p.expand(ctx, s, comps, now)
 		}()
 	}
 	wg.Wait()
@@ -364,9 +395,9 @@ func (p *Provider) Discover(ctx context.Context) (*model.Inventory, error) {
 		if fnErrs[i] != nil {
 			errs = errors.Join(errs, fmt.Errorf("%s: %w", s.Name, fnErrs[i]))
 		}
-		st.apps = append(st.apps, app{ID: s.ID, Name: s.Name, Slug: fns[i].Slug, Region: fns[i].Region, Plan: Plan(s.Props.SKU)})
+		st.apps = append(st.apps, apps[i])
+		inv.Functions = append(inv.Functions, fns[i]...)
 	}
-	inv.Functions = fns
 	if len(sites) == 0 && errs != nil {
 		return nil, errs
 	}
@@ -374,7 +405,7 @@ func (p *Provider) Discover(ctx context.Context) (*model.Inventory, error) {
 }
 
 // describe builds the serverless_functions row of one Function App (functions list + runtime).
-func (p *Provider) describe(ctx context.Context, s site) (model.Function, error) {
+func (p *Provider) describe(ctx context.Context, s site) (model.Function, []fnInfo, error) {
 	rg := s.Props.ResourceGroup
 	if rg == "" {
 		rg = resourceGroupOf(s.ID)
@@ -422,6 +453,7 @@ func (p *Provider) describe(ctx context.Context, s site) (model.Function, error)
 	}
 	var triggers []string
 	var list []map[string]any
+	var infos []fnInfo
 	err := p.list(ctx, s.ID+"/functions", api(apiWeb), func(raw json.RawMessage) error {
 		var f function
 		if json.Unmarshal(raw, &f) != nil {
@@ -443,6 +475,7 @@ func (p *Provider) describe(ctx context.Context, s site) (model.Function, error)
 			fn.Runtime = strings.ToLower(f.Props.Language)
 		}
 		list = append(list, item)
+		infos = append(infos, fnInfo{Name: name, Trigger: t, Language: strings.ToLower(f.Props.Language), Disabled: f.Props.IsDisabled})
 		return nil
 	})
 	if err != nil && !httpx.IsStatus(err, http.StatusNotFound) {
@@ -458,7 +491,45 @@ func (p *Provider) describe(ctx context.Context, s site) (model.Function, error)
 	if fn.Triggers == nil {
 		fn.Triggers = []string{}
 	}
-	return fn, errs
+	sort.Slice(infos, func(i, j int) bool { return infos[i].Name < infos[j].Name })
+	return fn, infos, errs
+}
+
+// expand describes one Function App and, when it has an App Insights component, adds one row per function
+// (contracts §22). The app row gets meta.appInsights = connected | unavailable.
+func (p *Provider) expand(ctx context.Context, s site, comps *components, now time.Time) ([]model.Function, app, error) {
+	fn, infos, errs := p.describe(ctx, s)
+	a := app{ID: s.ID, Name: s.Name, Slug: fn.Slug, Region: fn.Region, Plan: Plan(s.Props.SKU)}
+	override := ""
+	if p.cfg.ReadAppSettings {
+		v, err := p.appSettingsService(ctx, s)
+		if err != nil {
+			errs = errors.Join(errs, fmt.Errorf("app settings: %w", err))
+		}
+		if override = v; v != "" {
+			fn.Service = v
+		}
+	}
+	c, ok := comps.find(s)
+	if !ok {
+		fn.Meta["appInsights"] = "unavailable"
+		return []model.Function{fn}, a, errs
+	}
+	rows, _, err := p.query(ctx, c.ID, now, false)
+	if httpx.IsStatus(err, http.StatusForbidden) || httpx.IsStatus(err, http.StatusNotFound) {
+		// The component exists but cannot be queried: behave as without App Insights.
+		fn.Meta["appInsights"] = "unavailable"
+		return []model.Function{fn}, a, errs
+	}
+	if err != nil {
+		// Transient (throttled, 5xx): the functions are still listed; metrics come with the next query.
+		errs = errors.Join(errs, fmt.Errorf("app insights query: %w", err))
+	}
+	fn.Meta["appInsights"] = "connected"
+	fn.Meta["appInsightsComponent"] = c.Name
+	kids, ch := p.children(fn, infos, rows, override)
+	a.Component, a.Children = c.ID, ch
+	return append([]model.Function{fn}, kids...), a, errs
 }
 
 // Runtime turns a site config into "python 3.11" / "node 20" / "dotnet-isolated 8.0" style strings.

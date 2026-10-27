@@ -8,7 +8,8 @@
   (contracts §5), so the writer, api and alerting treat cloud resources like any other DB / broker.
 - **Vercel deployments** become `deploy_markers`.
 - **Serverless functions** (AWS Lambda, Azure Function Apps) become `serverless_functions` rows; their metrics are
-  `trooper.faas.*` gauges (ClickHouse `faas_1m`, contracts §21).
+  `trooper.faas.*` gauges (ClickHouse `faas_1m`, contracts §21). Azure apps with Application Insights also get one row
+  per function with per-function metrics (contracts §22).
 
 ```
 Postgres integrations ──(30 s reload)──► runner ── per integration goroutine (isolated, panic-safe)
@@ -219,7 +220,7 @@ Metrics: Cloud Monitoring `timeSeries.list`, alignment 60 s over the last 5 min,
 ## Azure (Function Apps)
 
 `provider = 'azure'`. `config`: `{ "tenantId": "<directory id>", "clientId": "<app id>", "subscriptionIds": ["<sub>"],
-"resourceGroups": ["rg-a"], "env": "production", "maxApps": 500 }` — `subscriptionIds` empty = every enabled
+"resourceGroups": ["rg-a"], "env": "production", "maxApps": 500, "readAppSettings": false }` — `subscriptionIds` empty = every enabled
 subscription the principal can list; `resourceGroups` optional filter. Credentials: the service principal's **client
 secret** behind `credentials_ref` (plain sealed secret; JSON `{"clientSecret": "..."}` is accepted too).
 
@@ -248,9 +249,9 @@ Monitor metrics are app-level):
 | `runtime` | `functionAppConfig.runtime` (Flex), else `siteConfig.linuxFxVersion`, else `GET {site}/config/web` (`python 3.11`, `node 20`, `dotnet-isolated 8.0`, `container`) |
 | `memory_mb` | Flex `instanceMemoryMB` (else NULL); `timeout_s`, `arch` not available |
 | `triggers` | trigger bindings of the enabled functions: `http`, `schedule`, `queue:<q>`, `servicebus:<queue or topic>`, `eventhub:<hub>`, `blob`, `cosmosdb:<container>`, `eventgrid`, `kafka:<topic>`, `rabbitmq:<q>` (app-setting references `%X%` drop the name) |
-| `service` | tag `tasktrooper.service`, else the app name (app settings are not read: listing them needs a write-level permission) |
+| `service` | app setting `TASKTROOPER_SERVICE` / `OTEL_SERVICE_NAME` (only with `readAppSettings`), else tag `tasktrooper.service`, else the app name |
 | `url` | `https://<defaultHostName>` |
-| `meta` | `id`, `subscriptionId`, `resourceGroup`, `kind`, `state`, `os`, `plan` (`Consumption` = SKU Dynamic, `Flex` = FlexConsumption, `Premium` = ElasticPremium, else `Dedicated`), `tags`, `functions: [{name, trigger, disabled?}]` |
+| `meta` | `id`, `subscriptionId`, `resourceGroup`, `kind`, `state`, `os`, `plan` (`Consumption` = SKU Dynamic, `Flex` = FlexConsumption, `Premium` = ElasticPremium, else `Dedicated`), `tags`, `functions: [{name, trigger, disabled?}]`, `appInsights: "connected" \| "unavailable"`, `appInsightsComponent` (component name, when connected) |
 
 Metrics (every 60 s, one request per app): `GET {site}/providers/microsoft.insights/metrics` (api-version
 2023-10-01, `interval=PT1M`, last 10 min, every datapoint sent):
@@ -265,7 +266,60 @@ Metrics (every 60 s, one request per app): `GET {site}/providers/microsoft.insig
 
 No throttles, p95/p99, concurrency or iterator age on Azure. A metric the app rejects (HTTP 400, e.g. on Flex or Linux
 Consumption) is retried alone and then skipped for that app until restart. ARM read quota: ~12 000 requests/h per
-subscription and principal → roughly 150 apps at one metrics call per minute.
+subscription and principal → roughly 150 apps at one metrics call per minute (two with App Insights, see below).
+
+### Per-function metrics (Application Insights)
+
+Azure Monitor only has app-level metrics. When a Function App has an Application Insights component, every function
+also gets its own row and metrics (contracts §22). **No extra role:** Reader covers both the component listing and the
+query (`microsoft.insights/components/query/read`).
+
+- **Discovery:** `GET /subscriptions/{sub}[/resourceGroups/{rg}]/providers/Microsoft.Insights/components`
+  (api-version 2020-02-02). A component belongs to the app whose resource id is in its `hidden-link:<siteId>` tag
+  (compared case-insensitively — the portal writes `resourcegroups` lower-case); fallback: a component with the app's
+  name in the same subscription (portal default). A 403/404 on the listing is not an error. With a `resourceGroups`
+  filter only those groups are searched, so keep the component in a listed group.
+- **Query:** ARM proxy `POST {componentId}/query?api-version=2018-04-20`, body `{"query": KQL, "timespan": "PT15M"}`,
+  same ARM token. Answer: `{"tables": [{"name": "PrimaryResult", "columns": [{"name", "type"}], "rows": [[...]]}]}`
+  (columns are matched by name). KQL:
+
+  ```kusto
+  requests | where timestamp > ago(15m)
+  | summarize invocations=count(), errors=countif(success == false), avg=avg(duration),
+      p95=percentile(duration,95), p99=percentile(duration,99), max=max(duration)
+    by bin(timestamp, 1m), operation_Name, cloud_RoleName
+  ```
+
+  At most **one query per component per metrics tick** (≥ 50 s apart; a call still in flight or inside its interval is
+  skipped). Discovery's query is handed over to the next metrics step instead of querying twice. The 15-minute lookback
+  re-sends late App Insights data every minute (idempotent: `faas_1m` keeps the max per minute); the current, incomplete
+  minute is dropped. `operation_Name` is matched to the function name case-insensitively; other operations are ignored.
+- **Rows:** one per function listed by `{site}/functions` (also disabled ones and those without data, so the UI lists
+  every function): `slug = azure-<app>-<function>`, `name` = function, `app` = app name, `region` / `runtime` /
+  `memory_mb` from the app, `triggers` = `[<trigger of the function>]`, `url` = `https://<host>/api/<function>` for
+  HTTP triggers, `meta = {parent: <app slug>, source: "appinsights", trigger, disabled?, language?, plan, appId,
+  subscriptionId, resourceGroup}`. `service` = app setting (with `readAppSettings`) > most frequent `cloud_RoleName`
+  of the function (else of the app; remembered while the function is quiet; ignored if it only equals the app name —
+  the Functions default — and the app has a `tasktrooper.service` tag) > tag > app name.
+- **Metrics** (`trooper.faas.id` = function slug, `faas.name` = function; several role names of one minute are merged):
+
+  | KQL column | trooper metric |
+  |---|---|
+  | `invocations` | `trooper.faas.invocations` |
+  | `errors` (`success == false`) | `trooper.faas.errors` |
+  | `avg` / `max` / `p95` / `p99` (`duration`, ms) | `trooper.faas.duration.avg` / `.max` / `.p95` / `.p99` |
+
+  Cold starts are not derived from App Insights (they come from OTel spans, `faas.coldstart`).
+- **Without App Insights** (no component, or the query answers 403/404) only the app row is written with
+  `meta.appInsights = "unavailable"`; function rows written earlier get `missing = true`. A transient query error
+  (429/5xx) keeps the function rows and is reported in the integration status.
+
+### `readAppSettings` (optional)
+
+`"readAppSettings": true` → `POST {site}/config/appsettings/list?api-version=2023-12-01` at discovery; only
+`TASKTROOPER_SERVICE` (else `OTEL_SERVICE_NAME`) is read and overrides `service` of the app row and its function rows —
+no other setting is kept or logged. Listing settings is a write-level action (`Microsoft.Web/sites/config/list/action`,
+e.g. **Website Contributor** on the apps); without it the call answers 403 and is skipped silently (one info log per app).
 
 ## Neon
 
@@ -318,7 +372,9 @@ GOWORK=off go test -tags e2e -count=1 -v ./e2e/              # fake AWS+Vercel �
 - AWS fakes speak the real wire protocols (`internal/fakes`): awsquery XML (RDS, ElastiCache), awsJson (SQS), restJson
   (MSK, Lambda) and rpc-v2-CBOR (CloudWatch `GetMetricData` / `ListMetrics`); GCP / Neon / Vercel fakes serve recorded-shape JSON.
 - `fakes.NewAzure` is an Entra ID token endpoint + ARM (sites, functions, Azure Monitor metrics; one Flex app rejects
-  `MemoryWorkingSet` to exercise the per-metric fallback). Run trooper-cloud against it with `TT_AZURE_LOGIN_URL` /
+  `MemoryWorkingSet` to exercise the per-metric fallback; App Insights components with `hidden-link` tags and the
+  `/query` proxy answering `fakes.AIRows` — two role names, an incomplete minute, an unknown operation; `QueryStatus`
+  forces 403/429; `appsettings/list` answers one app and 403s the other). Run trooper-cloud against it with `TT_AZURE_LOGIN_URL` /
   `TT_AZURE_ARM_URL`.
 - The e2e test asserts `db_1m`, `broker_lag_1m` (incl. `oldest_age_s`), `broker_nodes_1m` rows and Postgres
   `deploy_markers` / `databases` / `broker_clusters` / `integrations.status`, then deletes project 9301 everywhere. Its AWS integration lists

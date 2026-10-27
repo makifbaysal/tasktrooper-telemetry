@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/tasktrooper/telemetry/services/pkg/secrets"
 
@@ -36,6 +37,8 @@ type Factory struct {
 	// IngestKeys / PublicIngestURL are used to create Vercel drains (config.createDrain).
 	IngestKeys      map[int64]string
 	PublicIngestURL string
+	// Log is handed to providers for one-off notices (may be nil).
+	Log *slog.Logger
 }
 
 func (f *Factory) resolve(ctx context.Context, ref string, project int64) ([]byte, error) {
@@ -60,7 +63,11 @@ func (f *Factory) Build(ctx context.Context, in model.Integration) (model.Provid
 	case "aws":
 		return aws.New(ctx, in.Config, cred, aws.Options{Endpoint: f.Endpoints.AWS})
 	case "azure":
-		return azure.New(in.Config, cred, azure.Options{LoginURL: f.Endpoints.AzureLogin, ARMURL: f.Endpoints.AzureARM})
+		o := azure.Options{LoginURL: f.Endpoints.AzureLogin, ARMURL: f.Endpoints.AzureARM}
+		if f.Log != nil {
+			o.Log = f.Log.With("integration", in.ID)
+		}
+		return azure.New(in.Config, cred, o)
 	case "gcp":
 		ep := gcp.Endpoints{}
 		if b := f.Endpoints.GCP; b != "" {

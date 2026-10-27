@@ -682,12 +682,15 @@ Faas `relativeToTimeout` sadece `duration_p95|duration_p99` ile geçerli.
 - Function App'e bağlı App Insights bileşeni ARM'dan bulunur: `Microsoft.Insights/components` kaynaklarının
   `hidden-link:<siteId>` tag'i (Reader yeterli). Sorgu ARM proxy'si üzerinden: `POST {componentId}/query?api-version=2018-04-20`
   (`{"query": KQL, "timespan": "PT15M"}`), aynı ARM token'ı.
-- KQL: `requests | where timestamp > ago(15m) | summarize invocations=count(), errors=countif(success == false),
+- KQL: `requests | where timestamp > ago(15m) | summarize invocations=sum(itemCount), errors=sumif(itemCount, success == false),
   avg=avg(duration), p95=percentile(duration,95), p99=percentile(duration,99), max=max(duration) by bin(timestamp, 1m),
   operation_Name, cloud_RoleName`. Cold start: `customMetrics`/trace yoksa boş.
 - Her fonksiyon ayrı `serverless_functions` satırı: slug `azure-<app>-<function>`, `name` = fonksiyon, `app` = app adı,
   `meta.parent` = app slug'ı, `meta.source = 'appinsights'`, `triggers` = fonksiyonun tetikleyicisi. App satırı kalır (app
   seviyesi metrikler). `service` = `cloud_RoleName` (yoksa tag, yoksa app). Metrik attr'ı `trooper.faas.id` = fonksiyon slug'ı.
+- Fonksiyon satırı `meta`: `parent, source, trigger, disabled?, language?, plan, appId, subscriptionId, resourceGroup`; HTTP
+  tetikleyicide `url`. App satırı `meta.appInsightsComponent`. `cloud_RoleName` app adına eşitse ve app'te tag varsa tag kazanır.
+  Özet/byProvider toplamları `meta.parent` olan satırları saymaz (çift sayım olmasın).
 - App Insights yoksa veya erişim yoksa sadece app satırı (bugünkü davranış), `meta.appInsights = 'unavailable'`.
 - Opsiyonel `config.readAppSettings: true` → `POST {site}/config/appsettings/list` (Website Contributor gerekir) ile
   `TASKTROOPER_SERVICE` / `OTEL_SERVICE_NAME` okunur; yetki yoksa sessizce atlanır.

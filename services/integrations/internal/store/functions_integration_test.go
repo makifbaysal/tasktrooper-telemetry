@@ -156,6 +156,9 @@ func TestServerlessRunOnce(t *testing.T) {
 		"aws-eu-central-1-orders-worker|aws|orders-worker|kinesis:clicks,sqs:orders|",
 		"azure-billing-flex|azure|billing-flex|eventhub:invoices|Flex",
 		"azure-orders-func|azure|orders|http,schedule|Consumption",
+		"azure-orders-func-cleanup|azure|orders-api|schedule|Consumption",
+		"azure-orders-func-consume|azure|orders-api|queue:orders|Consumption",
+		"azure-orders-func-orders-http|azure|orders-api|http|Consumption",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("rows\n got %v\nwant %v", got, want)
@@ -164,7 +167,95 @@ func TestServerlessRunOnce(t *testing.T) {
 	for _, x := range snd.samples {
 		ids[x.Attrs["trooper.faas.id"]] = true
 	}
-	if len(ids) != 5 {
+	if len(ids) != 7 { // 3 Lambda + 2 apps + orders-http + cleanup (consume has no App Insights data)
 		t.Errorf("samples for %v", ids)
+	}
+}
+
+// Fake Azure with App Insights → runner → Postgres (project 9711): per-function rows, meta shape, and missing=true
+// when App Insights becomes unavailable (query 403).
+func TestAzureAppInsightsRows(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	const project = 9711
+	_, _ = s.DB.Exec(ctx, `DELETE FROM projects WHERE id = $1`, project)
+	if _, err := s.DB.Exec(ctx, `INSERT INTO projects (id, org_id, name, slug) VALUES ($1, 1, 'faas-ai-it', 'faas-ai-it-9711')`, project); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = s.DB.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, project) })
+	ts := time.Now().UTC().Truncate(time.Minute).Add(-time.Minute)
+	azFake := fakes.NewAzure(t, ts)
+	defer azFake.Close()
+	t.Setenv("TT_TEST_AZ_SECRET", "s3cret-value")
+	fac := &factory.Factory{Endpoints: factory.Endpoints{AzureLogin: azFake.URL, AzureARM: azFake.URL}}
+	snd := &captureSender{}
+	r := runner.New(runner.Options{Store: s, Sender: snd, Factory: fac.Build, Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	cfg := `{"tenantId":"tenant-1","clientId":"client-1","subscriptionIds":["sub-1"],"readAppSettings":true}`
+	in := model.Integration{ProjectID: project, Provider: "azure", Name: "it-azure-ai", Config: []byte(cfg), CredentialsRef: "env:TT_TEST_AZ_SECRET"}
+	if err := s.DB.QueryRow(ctx, `INSERT INTO integrations (project_id, provider, name, config, credentials_ref) VALUES ($1, 'azure', $2, $3, $4) RETURNING id`,
+		project, in.Name, cfg, in.CredentialsRef).Scan(&in.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RunOnce(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	type row struct{ slug, name, app, service, triggers, parent, source, ai, url string }
+	read := func() map[string]row {
+		rows, err := s.DB.Query(ctx, `SELECT slug, name, coalesce(app, ''), service, array_to_string(triggers, ','), coalesce(meta->>'parent', ''),
+			coalesce(meta->>'source', ''), coalesce(meta->>'appInsights', ''), coalesce(url, '') || CASE WHEN missing THEN ' missing' ELSE '' END
+			FROM serverless_functions WHERE project_id = $1`, project)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		out := map[string]row{}
+		for rows.Next() {
+			var x row
+			if err := rows.Scan(&x.slug, &x.name, &x.app, &x.service, &x.triggers, &x.parent, &x.source, &x.ai, &x.url); err != nil {
+				t.Fatal(err)
+			}
+			out[x.slug] = x
+		}
+		return out
+	}
+	got := read()
+	want := map[string]row{
+		"azure-orders-func":             {"azure-orders-func", "orders-func", "orders-func", "orders-svc", "http,schedule", "", "", "connected", "https://orders-func.azurewebsites.net"},
+		"azure-orders-func-orders-http": {"azure-orders-func-orders-http", "orders-http", "orders-func", "orders-svc", "http", "azure-orders-func", "appinsights", "", "https://orders-func.azurewebsites.net/api/orders-http"},
+		"azure-orders-func-cleanup":     {"azure-orders-func-cleanup", "cleanup", "orders-func", "orders-svc", "schedule", "azure-orders-func", "appinsights", "", ""},
+		"azure-orders-func-consume":     {"azure-orders-func-consume", "consume", "orders-func", "orders-svc", "queue:orders", "azure-orders-func", "appinsights", "", ""},
+		"azure-billing-flex":            {"azure-billing-flex", "billing-flex", "billing-flex", "billing-flex", "eventhub:invoices", "", "", "unavailable", "https://billing-flex.azurewebsites.net"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("rows %v", got)
+	}
+	for k, w := range want {
+		if got[k] != w {
+			t.Errorf("%s\n got %+v\nwant %+v", k, got[k], w)
+		}
+	}
+	var leaked int
+	_ = s.DB.QueryRow(ctx, `SELECT count(*) FROM serverless_functions WHERE project_id = $1 AND meta::text LIKE '%hunter2%'`, project).Scan(&leaked)
+	if leaked != 0 {
+		t.Error("app setting value stored")
+	}
+	var http200 float64
+	for _, x := range snd.samples {
+		if x.Attrs["trooper.faas.id"] == "azure-orders-func-orders-http" && x.Name == model.FaaSInvocations && x.TS.Equal(ts) {
+			http200 = x.Value
+		}
+	}
+	if http200 != 200 {
+		t.Errorf("orders-http invocations at ts = %v", http200)
+	}
+	// App Insights no longer queryable → function rows missing, app row unavailable.
+	azFake.QueryStatus = 403
+	r2 := runner.New(runner.Options{Store: s, Sender: snd, Factory: fac.Build, Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	if err := r2.RunOnce(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	got = read()
+	if !strings.HasSuffix(got["azure-orders-func-cleanup"].url, "missing") || got["azure-orders-func"].ai != "unavailable" || strings.HasSuffix(got["azure-orders-func"].url, "missing") {
+		t.Errorf("after 403: %+v", got)
 	}
 }

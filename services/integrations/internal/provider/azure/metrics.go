@@ -103,6 +103,11 @@ func (p *Provider) Collect(ctx context.Context, inv *model.Inventory, now time.T
 		go func() {
 			defer func() { <-sem; wg.Done() }()
 			out[i], errs[i] = p.collectApp(ctx, a, start, end)
+			fs, ferr := p.collectFunctions(ctx, a, now, end)
+			out[i] = append(out[i], fs...)
+			if ferr != nil {
+				errs[i] = errors.Join(errs[i], fmt.Errorf("app insights: %w", ferr))
+			}
 		}()
 	}
 	wg.Wait()

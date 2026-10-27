@@ -60,7 +60,7 @@ func TestAzureProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	inv, err := p.Discover(context.Background())
-	if err != nil || len(inv.Functions) != 2 {
+	if err != nil || len(inv.Functions) != 5 { // 2 apps + 3 App Insights function rows
 		t.Fatalf("inv %v err %v", inv, err)
 	}
 }
