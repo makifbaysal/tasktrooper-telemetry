@@ -6,3 +6,4 @@ export * from './Legend';
 export * from './Flow';
 export { seriesColor } from './scale';
 export * from './PartitionBars';
+export * from './FlameGraph';

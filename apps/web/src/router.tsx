@@ -27,6 +27,8 @@ import { SettingsScreen } from './screens/Settings';
 import { Integrations } from './screens/Integrations';
 import { DesignSystem } from './screens/DesignSystem';
 import { TraceDetail } from './screens/TraceDetail';
+import { ReplayDetailScreen } from './screens/ReplayDetail';
+import { AiMonitoring } from './screens/AiMonitoring';
 
 export const router = createBrowserRouter([
   {
@@ -37,7 +39,9 @@ export const router = createBrowserRouter([
       { path: '/services/:serviceId', element: <ServiceDetail /> },
       { path: '/services/:serviceId/endpoints/:endpointId', element: <EndpointDetail /> },
       { path: '/traces/:traceId', element: <TraceDetail /> },
+      { path: '/replays/:sessionId', element: <ReplayDetailScreen /> },
       { path: '/kpis', element: <Kpis /> },
+      { path: '/ai', element: <AiMonitoring /> },
       { path: '/kpis/new', element: <KpiEditor /> },
       { path: '/kpis/:kpiId', element: <KpiDetail /> },
       // client apps live under Services now

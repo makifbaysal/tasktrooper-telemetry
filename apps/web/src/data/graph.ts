@@ -152,7 +152,7 @@ function window(values: number[], weights: number[]): { current: number; baselin
 function epWindow(ep: Endpoint, m: RcaMetric) {
   const red = redSeries(RCA_RANGE, ep.serviceId, ep.id);
   if (m === 'errors') return window(red.errorRate, red.rpm) ?? { current: ep.errorRate, baseline: ep.errorRate };
-  const b = breakdownSeries(`${ep.serviceId}-${ep.id}`, { avgMs: 0, parts: { app: 0, db: 0, cache: 0, http: 0, queue: 0 } }, RCA_RANGE, false);
+  const b = breakdownSeries(`${ep.serviceId}-${ep.id}`, { avgMs: 0, parts: { app: 0, db: 0, cache: 0, http: 0, queue: 0, ai: 0 } }, RCA_RANGE, false);
   const avg = red.rpm.map((_, i) => b.app[i] + b.db[i] + b.cache[i] + b.http[i] + b.queue[i]);
   const fallback = ep.p50 || ep.p95 / 2;
   return window(avg, red.rpm.map((r, i) => (avg[i] > 0 ? r : 0))) ?? { current: fallback, baseline: fallback };

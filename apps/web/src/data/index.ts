@@ -11,3 +11,5 @@ export * from './integrations';
 export * from './k8s';
 export * from './hosts';
 export * from './traces';
+export * from './replay';
+export * from './profiling';

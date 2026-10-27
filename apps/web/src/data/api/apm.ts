@@ -72,9 +72,9 @@ const SERVICE_TYPES = ['http', 'worker', 'consumer', 'web', 'mobile'] as const;
 const HEALTH = ['ok', 'warning', 'critical'] as const;
 const CRIT = ['critical', 'important', 'low'] as const;
 const SOURCES = ['kafka', 'rabbitmq', 'sqs', 'cron'] as const;
-const DEP_KINDS = ['db', 'cache', 'http', 'queue'] as const;
+const DEP_KINDS = ['db', 'cache', 'http', 'queue', 'ai'] as const;
 const CALLER_KINDS = ['service', 'web', 'mobile', 'partner', 'webhook', 'probe', 'unknown', 'topic', 'queue', 'schedule'] as const;
-export const TIME_PARTS: TimeCategory[] = ['app', 'db', 'cache', 'http', 'queue'];
+export const TIME_PARTS: TimeCategory[] = ['app', 'db', 'cache', 'http', 'queue', 'ai'];
 
 export function mapService(r: RawService): Service {
   const s: Service = {
@@ -168,7 +168,7 @@ export const mapRumPages = (raw: RumPage[] | null) => {
 
 export const mapSession = (r: Session): Session => ({
   id: r.id, user: r.user || 'anonymous', identified: !!r.identified, country: r.country || '—', device: r.device || '—',
-  startedAt: num(r.startedAt), duration: Math.round(num(r.duration)), pages: num(r.pages), errors: num(r.errors), entry: r.entry ?? '', exit: r.exit ?? '',
+  startedAt: num(r.startedAt), duration: Math.round(num(r.duration)), pages: num(r.pages), errors: num(r.errors), entry: r.entry ?? '', exit: r.exit ?? '', hasReplay: !!r.hasReplay,
 });
 export const mapSessions = (raw: Session[] | null) => arr(raw).map(mapSession);
 

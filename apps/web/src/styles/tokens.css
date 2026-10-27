@@ -119,6 +119,10 @@
   --viz-axis: oklch(0.85 0.012 265);
   --viz-area-opacity: 0.10;
 
+  /* diverging pair for diffs (profile diff flame graph) — never status colors */
+  --diff-increase: oklch(0.65 0.17 52);   /* grew: warm orange */
+  --diff-decrease: oklch(0.56 0.14 245);  /* shrank: blue */
+
   /* ---------- Scrollbar (TaskTrooper) ---------- */
   --scrollbar-thumb: oklch(0.72 0.02 265 / 0.45);
   --scrollbar-thumb-hover: oklch(0.55 0.03 265 / 0.65);
@@ -170,6 +174,8 @@
     --viz-grid: oklch(0.23 0.015 265);
     --viz-axis: oklch(0.32 0.015 265);
     --viz-area-opacity: 0.14;
+    --diff-increase: oklch(0.72 0.15 55);
+    --diff-decrease: oklch(0.68 0.12 245);
   --scrollbar-thumb: oklch(0.38 0.02 265 / 0.85);
   --scrollbar-thumb-hover: oklch(0.48 0.03 265 / 0.95);
     --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
@@ -216,6 +222,8 @@
   --viz-grid: oklch(0.23 0.015 265);
   --viz-axis: oklch(0.32 0.015 265);
   --viz-area-opacity: 0.14;
+  --diff-increase: oklch(0.72 0.15 55);
+  --diff-decrease: oklch(0.68 0.12 245);
   --scrollbar-thumb: oklch(0.38 0.02 265 / 0.85);
   --scrollbar-thumb-hover: oklch(0.48 0.03 265 / 0.95);
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);

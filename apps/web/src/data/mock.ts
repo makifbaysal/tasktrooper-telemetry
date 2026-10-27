@@ -338,6 +338,8 @@ export const TIME_CATEGORIES: { id: TimeCategory; label: string; slot: number }[
   { id: 'cache', label: 'Cache', slot: 3 },
   { id: 'http', label: 'External HTTP', slot: 7 },
   { id: 'queue', label: 'Queue publish', slot: 5 },
+  // LLM calls (dep_kind `ai`, ADR-023) — next fixed slot in LINE_SLOTS order
+  { id: 'ai', label: 'AI / LLM', slot: 6 },
 ];
 
 type DepDef = Omit<Dependency, 'serviceId' | 'callsPerMin'>;
@@ -446,9 +448,9 @@ function mockEndpointCalls(ep: Endpoint): EndpointCall[] {
 }
 
 function mockEndpointBreakdown(ep: Endpoint): TimeBreakdown {
-  const parts: Record<TimeCategory, number> = { app: 0, db: 0, cache: 0, http: 0, queue: 0 };
+  const parts: Record<TimeCategory, number> = { app: 0, db: 0, cache: 0, http: 0, queue: 0, ai: 0 };
   for (const c of mockEndpointCalls(ep)) parts[c.dep.kind] += c.msPerReq;
-  const depMs = parts.db + parts.cache + parts.http + parts.queue;
+  const depMs = parts.db + parts.cache + parts.http + parts.queue + parts.ai;
   // avg sits a bit above p50 (latency is right-skewed); own code takes at least 15%
   const avgMs = Math.max(ep.p50 * 1.2, depMs / 0.85);
   parts.app = avgMs - depMs;
@@ -459,7 +461,7 @@ function mockEndpointBreakdown(ep: Endpoint): TimeBreakdown {
 function mockServiceBreakdown(serviceId: string): TimeBreakdown {
   const eps = mockEndpointsFor(serviceId);
   const total = eps.reduce((a, e) => a + e.rpm, 0) || 1;
-  const parts: Record<TimeCategory, number> = { app: 0, db: 0, cache: 0, http: 0, queue: 0 };
+  const parts: Record<TimeCategory, number> = { app: 0, db: 0, cache: 0, http: 0, queue: 0, ai: 0 };
   for (const e of eps) {
     const b = mockEndpointBreakdown(e);
     for (const k of Object.keys(parts) as TimeCategory[]) parts[k] += (b.parts[k] * e.rpm) / total;
@@ -707,7 +709,7 @@ export function endpointCalls(ep: Endpoint): EndpointCall[] {
   if (!isApi) return mockEndpointCalls(ep);
   return A.list(`${A.epPath(ep.serviceId, ep.id)}/calls${H1}`, A.mapCalls);
 }
-const loadingBreakdown = (avg: number): TimeBreakdown => ({ avgMs: avg, parts: { app: avg, db: 0, cache: 0, http: 0, queue: 0 } });
+const loadingBreakdown = (avg: number): TimeBreakdown => ({ avgMs: avg, parts: { app: avg, db: 0, cache: 0, http: 0, queue: 0, ai: 0 } });
 export function endpointBreakdown(ep: Endpoint): TimeBreakdown {
   if (!isApi) return mockEndpointBreakdown(ep);
   return remote(`${A.epPath(ep.serviceId, ep.id)}/breakdown${H1}`, loadingBreakdown(ep.p50), A.mapBreakdown);

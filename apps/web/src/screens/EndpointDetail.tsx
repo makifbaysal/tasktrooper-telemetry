@@ -16,6 +16,7 @@ import { CallerDrawer, DependencyDrawer, ErrorCell, TraceTable, epLabel, epRef, 
 import { AlertCount, AlertsBody, OpenIncidents } from './Alerts';
 import { CALLER_KIND_LABEL, CriticalityBadge, DEP_KIND_LABEL, callerColorFor, categoryOf, traceUrl } from './shared';
 import { RootCauseCard, diagnose } from './rca';
+import { EndpointProfile } from './Profiling';
 
 const catColor = (k: TimeCategory) => seriesColor(TIME_CATEGORIES.find((c) => c.id === k)!.slot);
 
@@ -130,6 +131,8 @@ export function EndpointDetail() {
           </div>
         </Section>
       </div>
+
+      <EndpointProfile svc={svc} ep={ep} />
 
       <Section title={sub ? 'Reads from' : 'Where requests come from'}
         subtitle={sub ? (sharedWith.length ? `also read by ${sharedWith.map((x) => epLabel(x)).join(', ')} (own consumer group each)` : 'only this process reads it') : `${callers.length} caller${callers.length === 1 ? '' : 's'}`}>

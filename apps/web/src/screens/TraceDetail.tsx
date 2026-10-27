@@ -10,6 +10,7 @@ import {
 import { ago, clock, dateTime, int, ms, pct } from '@/lib/format';
 import { LINE_SLOTS } from './shared';
 import { clusterUrl, hostUrl, podUrl } from './k8sShared';
+import { LlmSpanSection } from './AiMonitoring';
 
 /** Rows rendered at most; larger traces show a notice (collapse subtrees to reach the rest). */
 const MAX_ROWS = 2000;
@@ -334,6 +335,8 @@ function SpanPanel({ node, trace, color, onClose, onSelect }: { node: TNode; tra
               : <span key="p" className="muted">root</span>],
           ] as [string, ReactNode][]).map(([k, v]) => <div key={k} className="kv__row"><dt>{k}</dt><dd>{v}</dd></div>)}
         </dl>
+
+        {s.llm && <LlmSpanSection key={s.spanId} traceId={trace.id} spanId={s.spanId} llm={s.llm} />}
 
         {(exceptions.length > 0 || others.length > 0) && (
           <PanelSection title={exceptions.length ? 'Exceptions & events' : 'Events'} aside={`${s.events.length}`}>
