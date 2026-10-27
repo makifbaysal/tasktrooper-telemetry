@@ -35,7 +35,8 @@ Then `cd apps/web && VITE_DATA=api pnpm dev`.
 Flags (`up`/`run`/`seed`): `--rps 20` (≈ client requests/s into the backend; internal fan-out, consumers and the
 collector add more), `--scenario all|none|a,b`, `--incident-after 15m` (start healthy, then switch the scenarios on —
 charts show the step like the mock's `DEGRADED_SINCE`), `--duration`, `--keep`, `--reco-trainer-every 10m`, `--api`,
-`--api-key`, `--dsn` (default `http://tt_dev_ingest_key@localhost:4318/1`), `--kafka`, `--postgres`, `--debug`.
+`--api-key`, `--dsn` (default `http://tt_dev_ingest_key@localhost:4318/1`), `--kafka`, `--postgres`, `--debug`,
+`--infra-sim` (default `true`, see below).
 
 ## What runs
 
@@ -65,6 +66,25 @@ with random-walk noise; think time is compressed (~9 s per view).
 **Collector**: `services/collector` `trooper-agent` (built, not modified) with `.run/collector.yaml` → db_1m / db_queries_1m
 (pg_stat_statements, MySQL digests, Redis INFO) and broker_* for `kafka-main` (shared Redpanda, filtered to the demo's
 topics/groups) and `rabbit-main` (vhost `/shop`).
+
+**Simulated infrastructure** (`internal/infrasim`, `--infra-sim`, default on; `--infra-sim=false` turns it off): what
+`trooper-agent --agent-modes host,cluster` and the AWS Lambda integration would send for a production-like setup, as
+OTLP to ingest-gw with the demo ingest key (contracts §20, §21) — nothing of it runs for real:
+- EKS cluster **`demo-eks`** (`eu-central-1`): 3 nodes `ip-10-0-{1-23,2-117,3-54}.eu-central-1.compute.internal`, every
+  demo service (+ `inventory-api`) as a Deployment in namespace `shop` (≥ 2 replicas, `trooper.service` = service name),
+  kube-system (`aws-node`, `kube-proxy` DaemonSets, `coredns`), `tasktrooper` (`trooper-agent-host` DaemonSet,
+  `trooper-agent-cluster`), CronJob `nightly-report`. Every 15 s host / container / top-process metrics per node
+  (resource `host.name` = node, `k8s.node.name`, `k8s.cluster.name`, `cloud.*`), every 30 s node / pod / workload state.
+- Docker host **`ci-runner-1`** (no cluster): `gitlab-runner`, `buildkitd` (CPU burst every ~6 min).
+- **Incident coupling:** while `reco-db-slow` is on, one `recommendation-api` pod leaks memory up to its 512 MiB limit and
+  is OOM-killed every ~3–4 min (restarts ↑, `trooper.k8s.pod.reason=OOMKilled`, ready=0 for 40 s, workload ready 1/2)
+  with Warning events `BackOff` (pod) + `OOMKilling` (node) → the RCA candidate "Pod … restarted (OOMKilled)".
+  `payments-provider-errors` adds `Unhealthy` readiness-probe events on payments-api and lifts the error rate / latency
+  of the `payment-webhook-handler` Lambda; a `FailedScheduling` event recurs every ~10 min.
+- **Lambda** (resource `service.name=trooper-cloud`, `cloud.provider=aws`, per provider minute): `image-resizer`,
+  `payment-webhook-handler`, `invoice-pdf-generator` (SQS, throttles at the afternoon peak), `catalog-search-indexer`
+  (Kinesis, iterator age) — `trooper.faas.id` = `aws-eu-central-1-<name>`. At start the 4 rows are upserted into
+  `serverless_functions` (project 1) **only when that table exists** (migration 011); otherwise only metrics are sent.
 
 **Seeded metadata** (project 1, via the api; channels + service language via Postgres — no api endpoint): 11 databases
 and 2 clusters pointing at the containers, monitors from `mock.ts` (charges error rate / p95, consumer lag rules incl.

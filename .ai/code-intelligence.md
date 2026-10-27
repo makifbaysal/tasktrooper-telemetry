@@ -80,6 +80,25 @@ normalize edilir (`{id}`, `<int:id>`, `[id]`, `:id(\d+)` → `:id`; wildcard →
   handler LLM'e gitmez. Analiz başına üst sınır `TT_CODEINTEL_LLM_MAX_ITEMS` (300; kritik olanlar önce). Dependency/view gönderilmez.
 - Batch hatası analizi düşürmez (uyarı + statik kritiklik).
 
+### AI kotası (ADR-018, contracts §19)
+
+- Her LLM batch'inden **önce** `services/pkg/aiquota` `Reserve` (org başına `pg_advisory_xact_lock(7140, org_id)`, kısa transaction):
+  tahmin = `ceil(promptKarakter/4) × in + min(16000, 600 × öğe) × out` kredi (çıktı tahmini öğe başına 600 token; `max_tokens`
+  ile tahmin limitin çok altında reddederdi). `used + tahmin > limit` → red. Çağrıdan **sonra** gerçek token'la `ai_usage` satırı
+  (`feature=codeintel.enrich`, `model` = `TT_CODEINTEL_MODEL`, `ref=repo:<id>`, `input_tokens` cache okuma/yazma dahil; kredi
+  cache yazma 1,25×, cache okuma 0,1× input fiyatıyla). Cevap gelip kullanılamasa da (decode hatası, max_tokens) kayıt yazılır.
+- Kullanıcı = `repositories.analyze_requested_by` (api manuel analizde doldurur). Webhook (push, installation) ve diğer
+  otomatik istekler bu kolonu `NULL`'lar → sadece org limiti uygulanır; üye tavanı (`memberships.ai_monthly_credits`) sadece
+  üyenin başlattığı analizde.
+- Red → kalan öğeler LLM'siz (statik kritiklik, önceki cache sonuçları korunur), analiz başarılı biter; red analiz boyunca
+  kalıcıdır (tekrar sorulmaz). Kota kontrolü hata verirse (DB) fail-closed: LLM atlanır, `reason: check_failed`.
+- Analiz özeti `repositories.analysis` (jsonb, `FinishOK`): `{sha, incremental, items, llmItems, llm: {status: ok|disabled|quota_exceeded,
+  reason?: org_limit|user_limit|check_failed, credits, skipped?}}`. `disabled` = LLM yapılandırılmamış; `credits` bu analizin
+  harcadığı kredi (4 ondalık). api bunu `inventory.analysis.llm` olarak geçirir.
+- Fiyatlar `TT_AI_PRICES` (`<model>=<in>/<out>`, USD / milyon token; tam id, yoksa en uzun prefix), `TT_AI_DEFAULT_PRICE` (`3/15`),
+  paketler `TT_AI_PLAN_CREDITS` (`free=100,team=5000,enterprise=-1`).
+- Öneri üretimi (`suggest`) LLM çağırmaz; `codeintel.suggest` feature'ı ileride LLM'li öneri için ayrılmıştır.
+
 ## Statik kritiklik kuralları
 
 `critical | high | medium | low`: ödeme/checkout/auth/order gibi kritik kelime + yazma → critical, kritik + okuma → high, yazma → medium,

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { ChevronRight, Copy, Hash, KeyRound, Lock, MessageSquare, Plug, ShieldAlert, Trash2, Unplug, UserPlus } from 'lucide-react';
 import { Columns } from '@/components/charts';
 import {
@@ -14,6 +14,7 @@ import {
 } from '@/data/auth';
 import { connectSlack, disconnectSlack, slackChannels, slackWorkspace } from '@/data/slack';
 import { IntegrationStatusBadge, ProviderMark } from './Integrations';
+import { MemberAiCell, UsageTab } from './Usage';
 import { ago, compact, dateTime } from '@/lib/format';
 
 type Lang = 'node' | 'browser' | 'react-native' | 'go';
@@ -73,8 +74,8 @@ const CHANNELS = [
   { id: 'hook', name: 'Webhook', detail: 'https://hooks.shop.com/trooper', monitors: 0 },
 ];
 
-type SettingsTab = 'project' | 'members' | 'keys' | 'audit';
-const TABS: SettingsTab[] = ['project', 'members', 'keys', 'audit'];
+type SettingsTab = 'project' | 'members' | 'usage' | 'keys' | 'audit';
+const TABS: SettingsTab[] = ['project', 'members', 'usage', 'keys', 'audit'];
 
 /** Error of a failed list read (e.g. 404 while the api has no such endpoint yet). */
 function readError(prefix: string): string | undefined {
@@ -85,9 +86,13 @@ export function SettingsScreen() {
   useData();
   const { project, org } = useAuth();
   const [params, setParams] = useSearchParams();
-  const raw = params.get('tab') as SettingsTab | null;
+  const { pathname } = useLocation();
+  const nav = useNavigate();
+  // /settings/usage is the Usage tab's own address (AI quota notifications link to it, contracts §19)
+  const onUsagePath = pathname.replace(/\/$/, '') === '/settings/usage';
+  const raw = (onUsagePath ? 'usage' : params.get('tab')) as SettingsTab | null;
   const tab: SettingsTab = raw && TABS.includes(raw) ? raw : 'project';
-  const setTab = (t: SettingsTab) => setParams((p) => { const n = new URLSearchParams(p); if (t === 'project') n.delete('tab'); else n.set('tab', t); return n; }, { replace: true });
+  const setTab = (t: SettingsTab) => t === 'usage' ? nav('/settings/usage', { replace: true }) : onUsagePath ? nav(t === 'project' ? '/settings' : `/settings?tab=${t}`, { replace: true }) : setParams((p) => { const n = new URLSearchParams(p); if (t === 'project') n.delete('tab'); else n.set('tab', t); return n; }, { replace: true });
 
   return (
     <>
@@ -95,11 +100,13 @@ export function SettingsScreen() {
       <Tabs value={tab} onChange={setTab} tabs={[
         { id: 'project', label: 'Project & SDK' },
         { id: 'members', label: 'Members' },
+        { id: 'usage', label: 'Usage' },
         { id: 'keys', label: 'API keys' },
         { id: 'audit', label: 'Audit log' },
       ]} />
       {tab === 'project' && <ProjectTab />}
       {tab === 'members' && <MembersTab />}
+      {tab === 'usage' && <UsageTab />}
       {tab === 'keys' && <KeysTab />}
       {tab === 'audit' && <AuditTab />}
     </>
@@ -281,6 +288,7 @@ function MembersTab() {
             { key: 'role', header: 'Role', width: 160, sortValue: (m) => ROLE_OPTIONS.findIndex((r) => r.value === m.role), render: (m) => manage && m.userId !== me?.user.id
               ? <Select aria-label={`Role of ${m.email}`} value={m.role} disabled={busy} onChange={(e) => void run(() => setMemberRole(org.id, m.userId, e.target.value as Role))} options={ROLE_OPTIONS} />
               : <Badge tone={m.role === 'owner' || m.role === 'admin' ? 'accent' : 'neutral'}>{m.role}</Badge> },
+            ...(manage ? [{ key: 'ai', header: 'AI credits this month', width: 240, render: (m: Member) => m.pending ? <span className="muted">—</span> : <MemberAiCell userId={m.userId} email={m.email} orgId={org.id} /> }] : []),
             { key: 'seen', header: 'Last seen', numeric: true, sortValue: (m) => m.lastSeenAt ?? 0, render: (m) => <span className="muted">{m.lastSeenAt ? ago(m.lastSeenAt) : '—'}</span> },
             { key: 'joined', header: 'Joined', numeric: true, sortValue: (m) => m.joinedAt ?? 0, render: (m) => <span className="muted">{m.joinedAt ? ago(m.joinedAt) : '—'}</span> },
             { key: 'rm', header: '', width: 48, render: (m) => manage && m.userId !== me?.user.id

@@ -210,6 +210,9 @@ func (w *Worker) Resolve(ctx context.Context, projectID int64, name string) (Cha
 		WHERE project_id = $1 AND (name = $2 OR (name = $3 AND ($4 = '' OR type = $4)))
 		ORDER BY (name = $2) DESC LIMIT 1`, projectID, name, bare, typ).Scan(&c.ID, &c.Name, &c.Type, &cfg)
 	if errors.Is(err, pgx.ErrNoRows) {
+		if c, ok := DirectTarget(name); ok { // email:<address> without a channel row (AI quota targets)
+			return c, nil
+		}
 		return Channel{}, permanent("unknown notification channel %q in project %d", name, projectID)
 	}
 	if err != nil {

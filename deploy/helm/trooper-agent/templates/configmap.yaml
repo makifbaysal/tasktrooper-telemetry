@@ -1,0 +1,11 @@
+{{- if include "trooper-agent.hasStatic" . }}
+# Static database / broker targets (mode db), same format as services/collector/examples/agent.yaml.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "trooper-agent.fullname" . }}
+  labels: {{- include "trooper-agent.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    {{- include "trooper-agent.config" . | nindent 4 }}
+{{- end }}

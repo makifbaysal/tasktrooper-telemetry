@@ -81,7 +81,7 @@ func TestLLMEnrichStructuredOutput(t *testing.T) {
 		{Kind: "endpoint", Key: "POST /v1/payments/:id/capture", Snippet: "func capture() {}", Criticality: model.Medium},
 		{Kind: "endpoint", Key: "GET /healthz", Criticality: model.Low},
 	}
-	if err := l.Enrich(context.Background(), RepoSummary{Name: "acme/shop", Inventory: []string{"endpoint shop GET /healthz"}}, items); err != nil {
+	if _, err := l.Enrich(context.Background(), RepoSummary{Name: "acme/shop", Inventory: []string{"endpoint shop GET /healthz"}}, items, nil); err != nil {
 		t.Fatal(err)
 	}
 	if items[0].Criticality != model.Critical || items[0].LLM == nil || items[0].Summary != "Captures a payment." ||

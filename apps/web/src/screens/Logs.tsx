@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { Bell, ExternalLink, ListTree } from 'lucide-react';
 import { Columns, TimeSeries } from '@/components/charts';
 import {
@@ -7,9 +7,10 @@ import {
   useDrawer, type Tone,
 } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
-import { allLogs, logsFor, series, services, timestamps, type LogLine, type TimeRange } from '@/data';
+import { allLogs, logsFor, searchLogs, series, services, timestamps, type LogLine, type TimeRange } from '@/data';
 import { can } from '@/data/auth';
 import { ago, clock, compact, dateTime, int } from '@/lib/format';
+import { traceUrl } from './shared';
 
 type Level = LogLine['level'];
 type View = 'lines' | 'patterns';
@@ -79,9 +80,18 @@ function lineContext(l: LogLine) {
 export function LogExplorer({ serviceId }: { serviceId?: string }) {
   const nav = useNavigate();
   const { range, dataVersion } = useApp();
+  // ?q= pre-fills the search; ?pod= / ?namespace= / ?traceId= (pod page) are server-side filters (GET /logs)
+  const [params, setParams] = useSearchParams();
+  const pod = params.get('pod') ?? '';
+  const namespace = params.get('namespace') ?? '';
+  const traceId = params.get('traceId') ?? '';
+  const scoped = !!(pod || namespace || traceId);
   // allLogs is hydrated in place, so the data version is part of the key.
-  const logs = useMemo(() => (serviceId ? logsFor(serviceId) : [...allLogs]), [serviceId, dataVersion]);
-  const [q, setQ] = useState('');
+  const logs = useMemo(() => (scoped
+    ? searchLogs(range, { serviceId, pod: pod || undefined, namespace: namespace || undefined, traceId: traceId || undefined, limit: 500 })
+    : serviceId ? logsFor(serviceId) : [...allLogs]), [serviceId, dataVersion, scoped, pod, namespace, traceId, range]);
+  const clearScope = () => setParams((p) => { const n = new URLSearchParams(p); ['pod', 'namespace', 'traceId'].forEach((k) => n.delete(k)); return n; }, { replace: true });
+  const [q, setQ] = useState(() => params.get('q') ?? '');
   const [levels, setLevels] = useState<Set<Level>>(new Set(['info', 'warn', 'error']));
   const [svc, setSvc] = useState<string | null>(null);
   const [src, setSrc] = useState<string | null>(null);
@@ -117,6 +127,15 @@ export function LogExplorer({ serviceId }: { serviceId?: string }) {
             </div>
             {serviceId && can('write') && <Button icon={<Bell size={14} />} onClick={() => nav('/alerts/new?kind=log_match')}>Alert on this query</Button>}
           </div>
+          {scoped && (
+            <div className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap', fontSize: 'var(--text-sm)' }}>
+              <span className="muted">Filtered to</span>
+              {pod && <Badge>pod {namespace ? `${namespace}/` : ''}{pod}</Badge>}
+              {!pod && namespace && <Badge>namespace {namespace}</Badge>}
+              {traceId && <Link to={traceUrl(traceId)} title="Open the trace"><Badge>trace <span className="mono">{traceId.slice(0, 12)}</span></Badge></Link>}
+              <Button size="sm" onClick={clearScope}>Clear</Button>
+            </div>
+          )}
           <Columns timestamps={ts} height={110} format={(v) => compact(v)} series={[
             { id: 'info', label: 'info', data: series(`log-info-${seed}`, range, { base: 1800 * scale }), color: 'var(--series-1)' },
             { id: 'warn', label: 'warn', data: series(`log-warn-${seed}`, range, { base: 160 * scale, noise: 0.3 }), color: 'var(--series-4)' },
@@ -222,6 +241,7 @@ function LineDrawer({ line, pattern, onClose, ts, range, onSurrounding, onPatter
   line: LogLine | null; pattern: Pattern | null; onClose: () => void; ts: number[]; range: TimeRange;
   onSurrounding: (l: LogLine) => void; onPattern: (p: Pattern) => void;
 }) {
+  const nav = useNavigate();
   if (!line) return null;
   const ctx = lineContext(line);
   return (
@@ -229,7 +249,7 @@ function LineDrawer({ line, pattern, onClose, ts, range, onSurrounding, onPatter
       title={<span className="row" style={{ gap: 8 }}><Badge tone={LEVEL_TONE[line.level]}>{line.level}</Badge>{line.service}</span>}
       subtitle={<>{dateTime(line.ts)} · {ago(line.ts)}</>}
       actions={<>
-        {line.traceId && <Button size="sm" icon={<ExternalLink size={14} />} onClick={(e) => e.preventDefault()}>View trace</Button>}
+        {line.traceId && <Button size="sm" icon={<ExternalLink size={14} />} onClick={() => nav(traceUrl(line.traceId!))}>View trace</Button>}
         <Button size="sm" variant="ghost" onClick={() => onSurrounding(line)}>Show surrounding logs</Button>
       </>}>
       <DrawerSection title="Message">
@@ -241,7 +261,7 @@ function LineDrawer({ line, pattern, onClose, ts, range, onSurrounding, onPatter
           ['Level', <Badge tone={LEVEL_TONE[line.level]}>{line.level}</Badge>],
           ['Service', line.service],
           ...(line.source ? [['Source', <Badge>{line.source}</Badge>] as [string, ReactNode]] : []),
-          ['Trace id', line.traceId ? <span className="mono">{line.traceId}</span> : <span className="muted">—</span>],
+          ['Trace id', line.traceId ? <Link to={traceUrl(line.traceId)} className="mono">{line.traceId}</Link> : <span className="muted">—</span>],
           ['Span id', ctx.spanId ? <span className="mono">{ctx.spanId}</span> : <span className="muted">—</span>],
           ['Host', <span className="mono">{ctx.host}</span>],
           ['Environment', ctx.env],

@@ -20,8 +20,11 @@ type LogFilter struct {
 	Route    string
 	// Source filters on attrs['vercel.source'] (Vercel log drains: build|static|external|edge|lambda|redirect|firewall).
 	Source string
-	Before int64 // unix ms cursor (exclusive)
-	Limit  int
+	// Pod / Namespace filter on attrs['k8s.pod.name'] / attrs['k8s.namespace.name'] (resource placement copied by the
+	// writer; contracts §22).
+	Pod, Namespace string
+	Before         int64 // unix ms cursor (exclusive)
+	Limit          int
 }
 
 // severities maps a UI level to ClickHouse severities.
@@ -91,6 +94,14 @@ func logWhere(f LogFilter, withLevels bool) (string, []any, error) {
 		}
 		b.WriteString(" AND attrs['vercel.source'] = ?")
 		args = append(args, f.Source)
+	}
+	if f.Pod != "" {
+		b.WriteString(" AND attrs['k8s.pod.name'] = ?")
+		args = append(args, f.Pod)
+	}
+	if f.Namespace != "" {
+		b.WriteString(" AND attrs['k8s.namespace.name'] = ?")
+		args = append(args, f.Namespace)
 	}
 	return b.String(), args, nil
 }

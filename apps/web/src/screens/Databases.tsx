@@ -387,7 +387,7 @@ function ConnectDatabase({ onClose, onDone }: { onClose: () => void; onDone: (id
         </Field>
         {collector === 'agent' && (
           <Field label="Agent config">
-            <CodeBlock>{`helm upgrade --install trooper-agent trooper/agent \\\n  --set integrations.${engine}.enabled=true \\\n  --set integrations.${engine}.address=${host || 'localhost'}:${port || defaultPort(engine)} \\\n  --set integrations.${engine}.user=trooper_monitor`}</CodeBlock>
+            <CodeBlock>{`helm upgrade --install trooper-agent deploy/helm/trooper-agent \\\n  --set dsn=<your DSN> \\\n  --set host.enabled=false --set cluster.enabled=false --set db.enabled=true \\\n  --set db.integrations.${engine}.enabled=true \\\n  --set db.integrations.${engine}.address=${host || 'localhost'}:${port || defaultPort(engine)} \\\n  --set db.integrations.${engine}.user=trooper_monitor \\\n  --set db.integrations.${engine}.passwordSecret.name=<secret>`}</CodeBlock>
           </Field>
         )}
         <div className="row" style={{ gap: 'var(--space-3)' }}>

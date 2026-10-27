@@ -108,6 +108,32 @@ type Query struct {
 	// job_missed: expected every intervalMin, tolerated graceMin late
 	IntervalMin float64 `json:"intervalMin"`
 	GraceMin    float64 `json:"graceMin"`
+
+	// infra (contracts §20): entity host|container|pod|node|workload, agg max|avg (default avg), filter.
+	// faas (contracts §21): functionId or filter {provider, region, service}; relativeToTimeout divides
+	// duration_p95/p99 by the function's timeout (template "p95 > timeout × 0.8").
+	Entity            string      `json:"entity"`
+	Agg               string      `json:"agg"`
+	Filter            InfraFilter `json:"filter"`
+	FunctionID        string      `json:"functionId"`
+	RelativeToTimeout bool        `json:"relativeToTimeout"`
+}
+
+// InfraFilter is query.filter of infra / faas monitors.
+type InfraFilter struct {
+	Cluster   string `json:"cluster"`
+	Namespace string `json:"namespace"`
+	Host      string `json:"host"`
+	Workload  string `json:"workload"`
+	Service   string `json:"service"`
+	Provider  string `json:"provider"`
+	Region    string `json:"region"`
+}
+
+// Function is one serverless_functions row (faas monitors: service mapping, timeout).
+type Function struct {
+	Slug, Service, Provider, Region string
+	TimeoutS                        float64 // 0 = unknown
 }
 
 // FlexInt64 decodes an id written as a JSON number or string (the UI uses string ids).

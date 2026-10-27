@@ -6,11 +6,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/tasktrooper/telemetry/services/pkg/secrets"
 
 	"github.com/tasktrooper/telemetry/services/integrations/internal/model"
 	"github.com/tasktrooper/telemetry/services/integrations/internal/provider/aws"
+	"github.com/tasktrooper/telemetry/services/integrations/internal/provider/azure"
 	"github.com/tasktrooper/telemetry/services/integrations/internal/provider/gcp"
 	"github.com/tasktrooper/telemetry/services/integrations/internal/provider/neon"
 	"github.com/tasktrooper/telemetry/services/integrations/internal/provider/vercel"
@@ -22,6 +24,9 @@ type Endpoints struct {
 	GCP    string // <base>/sql, /redis, /pubsub, /mon
 	Neon   string
 	Vercel string
+	// AzureLogin / AzureARM: TT_AZURE_LOGIN_URL / TT_AZURE_ARM_URL.
+	AzureLogin string
+	AzureARM   string
 }
 
 // Factory resolves credentials and builds providers.
@@ -32,6 +37,8 @@ type Factory struct {
 	// IngestKeys / PublicIngestURL are used to create Vercel drains (config.createDrain).
 	IngestKeys      map[int64]string
 	PublicIngestURL string
+	// Log is handed to providers for one-off notices (may be nil).
+	Log *slog.Logger
 }
 
 func (f *Factory) resolve(ctx context.Context, ref string, project int64) ([]byte, error) {
@@ -55,6 +62,12 @@ func (f *Factory) Build(ctx context.Context, in model.Integration) (model.Provid
 	switch in.Provider {
 	case "aws":
 		return aws.New(ctx, in.Config, cred, aws.Options{Endpoint: f.Endpoints.AWS})
+	case "azure":
+		o := azure.Options{LoginURL: f.Endpoints.AzureLogin, ARMURL: f.Endpoints.AzureARM}
+		if f.Log != nil {
+			o.Log = f.Log.With("integration", in.ID)
+		}
+		return azure.New(in.Config, cred, o)
 	case "gcp":
 		ep := gcp.Endpoints{}
 		if b := f.Endpoints.GCP; b != "" {

@@ -21,6 +21,8 @@ var MonitorKinds = map[string]bool{
 	// engine kinds (services/alerting/README.md)
 	"error_rate": true, "throughput": true, "apdex": true, "log_count": true, "log_pattern": true, "dlq": true,
 	"consumer_failures": true, "crash_rate": true,
+	// Faz 6 (contracts §20, §21)
+	"infra": true, "faas": true,
 }
 
 var severitiesOK = map[string]bool{"critical": true, "warning": true, "info": true}
@@ -221,6 +223,16 @@ func normalizeMonitor(in *model.MonitorInput) (target, query, cond []byte, sourc
 		}
 		if !json.Valid(query) || query[0] != '{' {
 			return nil, nil, nil, "", Invalid("query must be a JSON object")
+		}
+		switch in.Kind {
+		case "infra":
+			if err := validateInfraQuery(query); err != nil {
+				return nil, nil, nil, "", err
+			}
+		case "faas":
+			if err := validateFaasQuery(query); err != nil {
+				return nil, nil, nil, "", err
+			}
 		}
 	}
 	if in.Condition.Op == "" {

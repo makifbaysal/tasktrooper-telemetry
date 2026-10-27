@@ -1,6 +1,6 @@
 # trooper-agent (services/collector)
 
-Database and message-broker collector. It reads statistics from PostgreSQL, MySQL, Redis, MongoDB, Kafka and
+Database, message-broker, host and Kubernetes collector (modes below). In `db` mode it reads statistics from PostgreSQL, MySQL, Redis, MongoDB, Kafka and
 RabbitMQ with read-only monitoring users and ships them to TaskTrooper as **OTLP metrics** (contracts §5)
 via the OpenTelemetry Go SDK (`otlpmetrichttp`) to ingest-gw. It never consumes or publishes messages and
 never runs anything but catalog/statistics queries.
@@ -41,6 +41,7 @@ go run ./cmd/trooper-agent --config examples/agent.yaml --once            # TT_D
 | `--api-url`, `--api-key` | `TT_API_URL`, `TT_API_KEY` | | pull targets from the api every `--poll` |
 | `--poll` | `TT_COLLECTOR_POLL` | `60s` | remote config interval; on failure the current targets are kept |
 | `--dsn` | `TT_DSN` | | `<scheme>://<ingest key>@<host>[:port]/<project>` → endpoint `<scheme>://<host>/v1/metrics` + `x-trooper-key` |
+| `--agent-modes` | `TT_AGENT_MODES` | `db` | `db`, `host`, `cluster` (comma list) — see [Agent modes](#agent-modes-db-host-cluster-contracts-20-adr-019) |
 | `--modes` | `TT_COLLECTOR_MODES` | all | only targets whose `collector` is in the list (`agent,direct,cloud`) |
 | `--host-metrics` | `TT_COLLECTOR_HOST_METRICS` | `false` | report this machine's CPU/memory/disk for `collector: agent` databases |
 | `--host-disk-path` | `TT_COLLECTOR_HOST_DISK_PATH` | `/` | filesystem behind `trooper.db.disk` |
@@ -48,6 +49,206 @@ go run ./cmd/trooper-agent --config examples/agent.yaml --once            # TT_D
 | `--log-level` | `TT_LOG_LEVEL` | `info` | JSON logs (`services/pkg/logx`) |
 
 Resource: `service.name=trooper-agent`, `service.version`. Export interval = config `interval`.
+
+## Agent modes: `db`, `host`, `cluster` (contracts §20, ADR-019)
+
+`TT_AGENT_MODES` (`--agent-modes`, comma list, default `db`) selects what this process does; modes combine
+(`host,cluster`, `cluster,db`). `db` is the database / broker collector described in the rest of this file; without
+`db` no `--config` / `--api-url` is needed.
+Each mode has its own emitter (own OTLP resource, own export interval) to the same `TT_DSN`.
+
+| Mode | Interval | Source | Targets (`trooper.collector.up` kind / target) |
+|---|---|---|---|
+| `host` | 15 s | gopsutil (this host), top processes, NVIDIA GPUs (`nvidia-smi`); containers from the **kubelet** when `NODE_IP` / `TT_KUBELET_URL` is set, else the chain **Docker Engine API → Podman → cgroup v2** (see [Containers outside Kubernetes](#containers-outside-kubernetes-contracts-22)) | `host` / host name; `kubelet` / node name or `containers` / host name |
+| `cluster` | 30 s (snapshot of the watched state) | Kubernetes API server: **list + watch** per kind (read-only) + Warning events → OTLP **logs** | `k8s` / cluster name |
+
+A source that fails (kubelet TLS/RBAC, no API access, docker socket permission) never stops the agent: the error is
+logged once (repeats every 5 min), that target's gauges are dropped and `trooper.collector.up` = 0; other targets go on.
+No client-go and no docker SDK: both APIs are spoken with plain `net/http` (small binary, few dependencies; the only
+extra dependency is `go-winio` for the Docker named pipe on Windows).
+
+| Env | Default | |
+|---|---|---|
+| `TT_AGENT_MODES` | `db` | `db`, `host`, `cluster` |
+| `TT_K8S_CLUSTER` | | `k8s.cluster.name` (set it for the DaemonSet too) |
+| `NODE_NAME`, `NODE_IP` | | downward API (`spec.nodeName`, `status.hostIP`) → `k8s.node.name`, kubelet `https://$NODE_IP:10250` |
+| `TT_KUBELET_URL` | `https://$NODE_IP:10250` | kubelet override (tests) |
+| `TT_KUBELET_INSECURE` | `false` | skip kubelet serving-cert verification (self-signed kubelets: kind, minikube, kubeadm without `serverTLSBootstrap`); otherwise the SA `ca.crt` + system roots verify it |
+| `TT_K8S_API_URL`, `TT_K8S_TOKEN`, `TT_K8S_INSECURE` | in-cluster `KUBERNETES_SERVICE_HOST` + SA token (re-read every request) + SA CA | API server override (tests, out-of-cluster) |
+| `TT_AGENT_DOCKER_SOCKET` | `/var/run/docker.sock` (Windows: `//./pipe/docker_engine`) | Docker Engine socket / named pipe |
+| `TT_AGENT_PODMAN_SOCKET` | `/run/podman/podman.sock`, `$XDG_RUNTIME_DIR/podman/podman.sock`, the same under `TT_AGENT_ROOTFS` incl. `/run/user/*/podman/podman.sock` | Podman's Docker-compatible API socket (first existing candidate) |
+| `TT_AGENT_NVIDIA_SMI` | `nvidia-smi` from `PATH` | GPU metrics; no binary → GPU metrics silently off (no `collector.up` error) |
+| `TT_AGENT_PROCFS` | `/host/proc` if it exists, else `/proc` | host `/proc` (→ gopsutil `HOST_PROC`); `HOST_SYS` / `TT_AGENT_SYSFS` likewise `/host/sys` |
+| `TT_AGENT_ROOTFS` | `/host/root` if it exists | host `/` (→ `HOST_ROOT`, `HOST_ETC`): disk usage of host mounts, `/etc/hostname`, `/etc/machine-id` |
+| `TT_AGENT_TOP_PROCESSES` | `20` | processes per host (`0` = off) |
+| `TT_AGENT_HOSTNAME` | `NODE_NAME`, host `/etc/hostname`, `os.Hostname()` | `host.name` |
+| `TT_CLOUD_PROVIDER`, `TT_CLOUD_REGION` | from the node object (`spec.providerID` scheme, `topology.kubernetes.io/region`) | `cloud.provider` / `cloud.region` |
+
+**Resources.** host: `service.name=trooper-agent`, `host.name`, `host.id` (machine-id; else DMI uuid / IOPlatformUUID),
+`os.type`, `host.arch`, `k8s.cluster.name`, `k8s.node.name`, `cloud.provider`, `cloud.region` (when known).
+cluster: `service.name=trooper-agent`, `k8s.cluster.name`, `cloud.*`. Event logs: `service.name=k8s`, `k8s.cluster.name`.
+
+**host** (all gauges):
+
+| Metric | Source / rule |
+|---|---|
+| `trooper.host.cpu` (0..1) | 1 − Δ(idle+iowait)/Δtotal of `cpu.Times` between scrapes (first scrape: none) |
+| `trooper.host.cpu_cores` | logical CPUs |
+| `trooper.host.memory` / `.memory_bytes` | (total − available) / total, bytes |
+| `trooper.host.disk` (0..1) | fullest local filesystem ≥ 100 MB (`/host/proc/1/mountinfo`; tmpfs, overlay, squashfs, nfs, kubelet/docker/snap mounts skipped; statfs through `TT_AGENT_ROOTFS`) |
+| `trooper.host.disk_read` / `.disk_write` (byte/s) | Δ `diskstats` over whole disks (partitions, loop, ram, dm, md skipped) |
+| `trooper.host.net_in` / `.net_out` (byte/s) | Δ `/host/proc/1/net/dev` (the host's namespace, not the pod's) over physical interfaces (lo, veth, docker, cni, cali, flannel, … skipped) |
+| `trooper.host.load1`, `trooper.host.uptime_s` | `loadavg`, `uptime` |
+| `trooper.process.cpu` (core), `.memory_bytes` (RSS), `.threads`, `.fds` (Linux, needs `SYS_PTRACE`) | top `TT_AGENT_TOP_PROCESSES`: ⌈N/2⌉ busiest by Δ CPU time, the rest by RSS. Attrs `process.pid`, `process.executable.name`, `process.command` = **first token of argv[0] only** (`postgres: checkpointer` → `postgres`, ≤ 128 bytes; arguments are never read into a metric — PII), `container.id` (64-hex id from `/proc/<pid>/cgroup`, empty for host processes) |
+
+| `trooper.host.gpu.utilization` (0..1), `.memory` (0..1), `.memory_bytes`, `.temperature_c`, `.power_w` | NVIDIA only: `nvidia-smi --query-gpu=index,uuid,name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw --format=csv,noheader,nounits` every scrape (5 s timeout; memory MiB → bytes; `[N/A]` / `[Not Supported]` values skipped). Attrs `gpu.index` (int), `gpu.model`, `gpu.uuid`. Binary from `TT_AGENT_NVIDIA_SMI` or `PATH`; absent or failing → no GPU samples and **no** `collector.up` error. The ingest writer routes these to ClickHouse `gpus_1m` (`deploy/clickhouse/004_gpu.sql`, owned by ingest); the api adds `gpus: [...]` to the host row |
+
+**Containers** (attrs `container.id`, `container.name`, `container.image.name`, `k8s.namespace.name`, `k8s.pod.name`,
+`k8s.pod.uid`, `trooper.k8s.workload.kind`, `trooper.k8s.workload.name`, `trooper.service` — always all keys, empty
+outside K8s):
+
+| Metric | kubelet (K8s) | Docker Engine API / Podman | cgroup v2 |
+|---|---|---|---|
+| `trooper.container.cpu` (core) | `usageNanoCores` (else Δ `usageCoreNanoSeconds`) | Δ `cpu_usage.total_usage` / s | Δ `cpu.stat usage_usec` / s |
+| `.memory_bytes` | `workingSetBytes` | `usage − inactive_file` (cgroup v2; v1 `total_inactive_file`) | `memory.current − memory.stat inactive_file` |
+| `.cpu_limit` / `.memory_limit_bytes` | pod spec `limits` (absent = unlimited, no sample) | `NanoCpus` or `CpuQuota/CpuPeriod`, `HostConfig.Memory` (0 = none) | `cpu.max` quota/period, `memory.max` (`max` = none) |
+| `.restarts` (cumulative) | `containerStatuses[].restartCount` | `RestartCount` | — |
+| `.net_in` / `.net_out` (byte/s) | Δ pod `network.rxBytes/txBytes` — pod network is shared, so it is reported **on the first container only** | Δ Σ `networks.*.rx_bytes/tx_bytes` | — |
+| `.throttled` (0..1) | Δ`container_cpu_cfs_throttled_periods_total` / Δ`…_periods_total` from `/metrics/cadvisor` (optional: a 4xx disables it for 10 min) | Δ`throttling_data.throttled_periods` / Δ`periods` | Δ`nr_throttled` / Δ`nr_periods` |
+
+Workload in host mode: ReplicaSet → Deployment by stripping the `pod-template-hash` suffix, Job `<name>-<8+ digits>` →
+CronJob (cluster mode resolves via the objects' ownerReferences). `trooper.service`: pod label `tasktrooper.io/service` >
+`app.kubernetes.io/name` > `app` (else empty); Docker/Podman: label `tasktrooper.io/service`, else the container name.
+
+#### Containers outside Kubernetes (contracts §22)
+
+One target `containers/<host>` (kind `containers`) scrapes, in this order, every source found at start-up and keeps the
+**first** source's samples when the same container id shows up in several (Docker's containers also appear in the cgroup
+tree):
+
+1. **Docker Engine API** — `TT_AGENT_DOCKER_SOCKET` (Linux unix socket; Windows named pipe `//./pipe/docker_engine`).
+2. **Podman** — its Docker-compatible API socket (`TT_AGENT_PODMAN_SOCKET`, rootful `/run/podman/podman.sock`, rootless
+   `$XDG_RUNTIME_DIR/podman/podman.sock`; enable with `systemctl enable --now podman.socket` / `systemctl --user …`).
+   Same calls and fields as Docker.
+3. **cgroup v2** (Linux, `<TT_AGENT_SYSFS or /sys>/fs/cgroup` with `cgroup.controllers`) — any other runtime
+   (containerd/nerdctl, CRI-O, LXC, …): a directory named `docker-<id>.scope`, `cri-containerd-<id>.scope`,
+   `crio-<id>.scope`, `libpod-<id>.scope`, `nerdctl-<id>.scope` or a bare 64-hex `<id>` (containerd namespaces) is one
+   container (nested cgroups below it are folded in). Name and image are unknown: `container.name` = `trooper.service` =
+   the id's first 12 characters, `container.image.name` empty.
+
+The scrape fails (`collector.up=0`) only when every source failed.
+
+**cluster** — one **Reflector** per kind: `GET /api/v1/nodes`, `/api/v1/pods`,
+`/apis/apps/v1/{replicasets,deployments,statefulsets,daemonsets}`, `/apis/batch/v1/{jobs,cronjobs}`,
+`/api/v1/events?fieldSelector=type=Warning` are listed once (paged, `limit=500`; an expired `continue` token restarts
+the list), then **watched** from the list's `resourceVersion` (`watch=1&allowWatchBookmarks=true&timeoutSeconds=300–600`,
+plain `net/http` streaming JSON). ADDED / MODIFIED / DELETED update the in-memory store, BOOKMARK advances the
+resourceVersion; a stream the server ends is resumed from the last resourceVersion; **410 Gone** (HTTP status or an
+`ERROR` event with code 410 / reason Expired) → relist, replacing the store; other watch errors back off exponentially
+(1 s … 30 s with jitter, 5 consecutive failures → relist); 401/403/404 back off 5 min. Every 30 s the snapshot metrics
+are computed from memory. The first scrape waits (within the 25 s target timeout) for every kind's first list; nodes and
+pods are required (`collector.up=0` until they are listed); a forbidden/missing workload kind only drops that kind.
+Namespaces are not watched (no §20 metric needs them).
+
+| Metric | Rule |
+|---|---|
+| `trooper.k8s.node.ready` / `.allocatable_cpu` / `.allocatable_memory` / `.pods` | Ready condition; `status.allocatable`; non-terminated pods on the node |
+| `trooper.k8s.pod.ready` / `.restarts` | Ready condition; Σ `restartCount` |
+| `trooper.k8s.pod.cpu_request` / `.memory_request` | Σ container requests (request defaults to the limit) |
+| `trooper.k8s.pod.cpu_limit` / `.memory_limit` | Σ limits, only when **every** container has one |
+| `trooper.k8s.workload.desired/ready/available/updated` | Deployment/StatefulSet `spec.replicas` + status; DaemonSet `desiredNumberScheduled`, `numberReady`, `numberAvailable`, `updatedNumberScheduled`; **Job** (standalone, running or finished < 24 h): `completions`, ready (else active) pods, `succeeded`, `succeeded`; **CronJob**: 1 (0 suspended), active jobs, 0 when the newest finished run failed else 1, active jobs |
+
+Pod attrs: `k8s.namespace.name`, `k8s.pod.name`, `k8s.pod.uid`, `k8s.node.name`, `k8s.pod.phase`,
+`trooper.k8s.pod.reason`, `trooper.k8s.workload.kind`, `trooper.k8s.workload.name`, `trooper.service`.
+`trooper.k8s.pod.reason`: `status.reason` (Evicted) > a container's waiting reason > terminated reason > a
+`lastState.terminated` reason younger than 15 min (so a restarted pod still says *OOMKilled*; CrashLoopBackOff after an
+OOM kill reports `OOMKilled`). Bounded set: CrashLoopBackOff, OOMKilled, ImagePullBackOff, ErrImagePull,
+CreateContainerConfigError, CreateContainerError, InvalidImageName, RunContainerError, ContainerCannotRun, Evicted, Error,
+DeadlineExceeded, StartError; anything else (ContainerCreating, Completed) → empty.
+
+**Warning events** → OTLP logs (OTel Go SDK `otlploghttp`, batched, `{TT_DSN host}/v1/logs`, `x-trooper-key`): body =
+message, severity `warn` (SeverityNumber WARN), attrs `k8s.event.reason`, `k8s.event.type`, `k8s.object.kind`,
+`k8s.object.name`, `k8s.namespace.name` (empty for cluster-scoped objects such as Nodes), `k8s.event.count`
+(`series.count` for new-style events), timestamp = latest occurrence. Events are watched too and shipped as they
+arrive: each uid + count is sent once; on the first list only events from the last 5 min are sent (no replay of the
+cluster's history); a relist sends unseen uid+count back to the last activity before the disconnect. Run **one**
+cluster-mode replica.
+
+### Running outside Kubernetes (`docker run`)
+
+```bash
+docker run -d --name trooper-agent --restart unless-stopped \
+  --pid host --user 0 \
+  -v /proc:/host/proc:ro -v /sys:/host/sys:ro -v /:/host/root:ro,rslave \
+  -v /var/run/docker.sock:/var/run/docker.sock:ro \
+  -e TT_AGENT_MODES=host \
+  -e TT_DSN=https://<ingest key>@ingest.tasktrooper.io/<project> \
+  ghcr.io/tasktrooper/trooper-agent:0.3.0
+```
+
+`--pid host` + root (or `--cap-add SYS_PTRACE`) for other processes' `/proc` entries and fds; the docker socket is only
+used for `GET`s, but the socket itself is not read-only at the API level — mount it only on hosts you trust the agent
+with. Podman hosts: mount the Podman socket instead (`-v /run/podman/podman.sock:/run/podman/podman.sock:ro`); hosts with
+only containerd need no socket (cgroup v2 via `/host/sys`). `--network host` is not needed (host traffic is read from
+`/host/proc/1/net/dev`). GPUs: run on the host (systemd) or pass `--gpus all` (NVIDIA container toolkit, which puts
+`nvidia-smi` into the container). Without Docker: run the binary under systemd (`TT_AGENT_MODES=host`, no mounts
+needed). Locally on a laptop: `go run ./cmd/trooper-agent --agent-modes host --once` prints one JSON line per sample
+(plus the resource).
+
+### Windows
+
+`GOOS=windows GOARCH=amd64 go build ./cmd/trooper-agent` (CI-checked with `go vet`). Host mode works through gopsutil
+(CPU, memory, disk, network, processes — no `trooper.process.fds`), `os.type=windows`; containers from the kubelet in
+Kubernetes, else Docker Engine over the named pipe `//./pipe/docker_engine` (`go-winio`). Run it as a service
+(`sc.exe create trooper-agent binPath= "C:\trooper\trooper-agent.exe" start= auto` + `TT_AGENT_MODES=host`, `TT_DSN`
+as system environment variables) or, on Kubernetes, as the chart's HostProcess DaemonSet (image from
+[`Dockerfile.windows`](Dockerfile.windows)).
+
+### Kubernetes: Helm chart [`deploy/helm/trooper-agent`](../../deploy/helm/trooper-agent)
+
+The single chart for every mode (the old DB-only chart under `services/collector/deploy/helm` is gone).
+
+```bash
+helm upgrade --install trooper-agent deploy/helm/trooper-agent -n tasktrooper --create-namespace \
+  --set clusterName=prod-eks \
+  --set dsn=https://<ingest key>@ingest.tasktrooper.io/<project> \
+  --set ebpf.enabled=true --set windows.enabled=true   # optional: OBI DaemonSet, Windows HostProcess DaemonSet
+```
+
+Renders: `<release>-host` DaemonSet (`kubernetes.io/os: linux`, `TT_AGENT_MODES=host`, hostPID, `/proc` `/sys` `/`
+read-only, `NODE_NAME` / `NODE_IP`, tolerates every taint, root with only `SYS_PTRACE` + `DAC_READ_SEARCH`, read-only
+root fs; `host.gpu.nvidiaSmi` → `TT_AGENT_NVIDIA_SMI`), `<release>-cluster` Deployment (1 replica, `Recreate`, uid 65532,
+`TT_AGENT_MODES=cluster` and/or `db`), a ServiceAccount + ClusterRole (get/list/watch on nodes, nodes/stats, nodes/proxy,
+nodes/metrics, pods, namespaces, events, apps/*, batch/*), a Secret (`dsn`, `ingestKey`, `apiKey`; or `existingSecret`).
+`host.kubelet.insecureSkipVerify=true` for self-signed kubelets (kind, minikube). `cloud.provider` / `cloud.region`
+override detection.
+
+* `windows.enabled=true` → `<release>-host-windows` DaemonSet: `kubernetes.io/os: windows`, HostProcess
+  (`securityContext.windowsOptions.hostProcess: true`, `runAsUserName: NT AUTHORITY\SYSTEM`, `hostNetwork: true`),
+  image `windows.image.*` (default `<image.repository>:<appVersion>-windows`, built from `Dockerfile.windows`).
+* `ebpf.enabled=true` adds an **OpenTelemetry eBPF Instrumentation** DaemonSet (`otel/ebpf-instrument:v0.15.2`,
+  privileged, hostPID, own read-only RBAC) exporting OTLP/HTTP to `ebpf.endpoint` (default: scheme + host of `dsn`) with
+  `OTEL_EXPORTER_OTLP_HEADERS=x-trooper-key=<ingest key>`, `OTEL_EBPF_KUBE_CLUSTER_NAME`, and `ebpf.config` as its
+  config file (default: instrument every namespace except kube-system & co. and the release namespace; services already
+  using an OTel SDK are skipped by OBI).
+* **Databases / brokers** (`db.enabled=true`, mode `db` in the cluster Deployment): static targets in `db.targets`
+  (`interval`, `timeout`, `databases[]`, `brokerClusters[]` — the [config reference](#config-reference) format, rendered
+  into a ConfigMap mounted at `/etc/trooper-agent/config.yaml`), shorthand `db.integrations.<postgres|mysql|redis|mongodb>.*`
+  and/or targets from the api (`db.fromApi.apiUrl` / `db.fromApi.apiKey`), `db.modes` (`TT_COLLECTOR_MODES`),
+  `db.extraEnv`, `db.extraSecretMounts` (`credentialsRef: file:/secrets/<name>/<key>`). A database-only install:
+
+```bash
+helm upgrade --install trooper-agent deploy/helm/trooper-agent \
+  --set host.enabled=false --set cluster.enabled=false --set db.enabled=true \
+  --set dsn=https://<ingest key>@ingest.tasktrooper.io/<project> \
+  --set db.integrations.postgres.enabled=true \
+  --set db.integrations.postgres.address=orders-db:5432 \
+  --set db.integrations.postgres.user=trooper_monitor \
+  --set db.integrations.postgres.passwordSecret.name=orders-db-monitor   # Secret key "password"
+```
+
+`db.integrations.mongodb.*` renders a MongoDB target (`topQueriesSource` too). For MSK IAM with IRSA set
+`serviceAccount.annotations."eks\.amazonaws\.com/role-arn"`; broker `nodes[]` go into `db.targets.brokerClusters`.
 
 ## Config reference
 
@@ -242,6 +443,10 @@ Counter-based values need two scrapes. RabbitMQ: without `nodes`, `nodeMetrics: 
 
 ## Deferred / not covered
 
+* host/cluster: no per-container network in K8s (pod network is on the first container); GPUs other than NVIDIA
+  (AMD `rocm-smi`, Intel) and per-process GPU usage; cgroup v1 hosts without Docker/Podman; container sources are
+  detected at start-up (a Podman socket enabled later needs an agent restart); the Windows HostProcess image is built
+  but not exercised on a real Windows node yet.
 * Kafka share groups (KIP-932) and streams groups; Kerberos (GSSAPI).
 * MongoDB sharded clusters via `mongos` (point the agent at each shard's mongod instead); `$queryStats` on
   self-managed servers needs `internalQueryStatsRateLimit` set (0 = off by default).
@@ -249,27 +454,18 @@ Counter-based values need two scrapes. RabbitMQ: without `nodes`, `nodeMetrics: 
 
 ## Helm
 
-Chart: [`deploy/helm/trooper-agent`](deploy/helm/trooper-agent) (values `dsn`, `apiUrl`, `apiKey`, `targets`,
-`integrations.<engine>.*`, `hostMetrics`, `kind: Deployment|DaemonSet`). The UI snippet works as is plus the DSN:
-
-```bash
-helm upgrade --install trooper-agent trooper/agent \
-  --set dsn=https://<ingest key>@ingest.tasktrooper.io/<project> \
-  --set integrations.postgres.enabled=true \
-  --set integrations.postgres.address=localhost:5432 \
-  --set integrations.postgres.user=trooper_monitor \
-  --set integrations.postgres.passwordSecret.name=orders-db-monitor   # Secret key "password"
-```
-
-`integrations.mongodb.*` renders a MongoDB target (`topQueriesSource` too). For MSK IAM with IRSA set
-`serviceAccount.annotations."eks\.amazonaws\.com/role-arn"`; broker `nodes[]` go into `targets.brokerClusters`.
-
-`kind=DaemonSet` + `hostMetrics=true` mounts `/proc`, `/sys`, `/` read-only so CPU/memory/disk are the node's.
+One chart for every mode: [`deploy/helm/trooper-agent`](../../deploy/helm/trooper-agent) — see
+[Kubernetes: Helm chart](#kubernetes-helm-chart-deployhelmtrooper-agent) (host / cluster / Windows / eBPF, and
+`db.*` for databases and brokers). The former DB-only chart in this directory was merged into it: `targets` →
+`db.targets`, `integrations.*` → `db.integrations.*`, `apiUrl`/`apiKey` → `db.fromApi.*`, `modes` → `db.modes`,
+`extraEnv`/`extraSecretMounts` → `db.extraEnv`/`db.extraSecretMounts`; `kind: DaemonSet` + `hostMetrics` is replaced by
+the host DaemonSet (`host.enabled`).
 
 ## Docker
 
 ```bash
-docker build -f services/collector/Dockerfile -t trooper-agent services/   # context = services/ (needs ../pkg)
+docker build -f services/collector/Dockerfile -t trooper-agent services/                       # context = services/ (needs ../pkg)
+docker build -f services/collector/Dockerfile.windows -t trooper-agent:0.3.0-windows services/ # HostProcess image (Windows host)
 ```
 
 ## Tests
@@ -277,6 +473,11 @@ docker build -f services/collector/Dockerfile -t trooper-agent services/   # con
 ```bash
 make test                 # unit: rate/delta math, hit ratio, rebalance counting, DSN + config parsing,
                           # credentials, consumer-tag mapping, fake RabbitMQ API, agent → in-process OTLP receiver
+                          # host/cluster: fake kubelet (TLS), Docker socket, API server with watch streams (bookmarks,
+                          # ERROR 410 / HTTP 410 → relist, 500 → backoff + resume), fake cgroup v2 tree, source chain
+                          # dedupe, Podman socket discovery, fake nvidia-smi; §20 + §22 name golden lists;
+                          # `--agent-modes host,cluster --once` → in-process OTLP metrics + logs receiver
+GOOS=windows go build ./... && GOOS=windows go vet ./...   # Windows build
 make itest-up             # ttcol-postgres (pg_stat_statements), ttcol-mysql, ttcol-redis, ttcol-rabbitmq (+ :15692),
                           # ttcol-mongo (mongo:8 single-node replica set), ttcol-kafka4 (Apache Kafka 4.1, KIP-848)
 make itest                # -tags integration: every scraper against the real servers + Redpanda (localhost:19092,
@@ -286,3 +487,6 @@ make itest-down
 ```
 Integration addresses can be overridden with `TTCOL_PG_ADMIN`, `TTCOL_MYSQL_ADMIN`, `TTCOL_REDIS`, `TTCOL_RABBIT_MGMT`,
 `TTCOL_RABBIT_AMQP`, `TTCOL_RABBIT_PROM`, `TTCOL_KAFKA`, `TTCOL_KAFKA_METRICS`, `TTCOL_KAFKA4`, `TTCOL_MONGO` (see `internal/itest`).
+
+Live check on a local cluster (kind): build the image, `kind load docker-image`, install the chart with
+`host.kubelet.insecureSkipVerify=true`, `image.pullPolicy=Never` and a DSN pointing at `host.docker.internal:4318`.

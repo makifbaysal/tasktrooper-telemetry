@@ -84,7 +84,7 @@ export const services: Service[] = [
   { id: 'orders-api', name: 'orders-api', type: 'http', language: 'Node.js', version: 'v2.41.0', rpm: 18420, errorRate: 0.0042, p95: 182, prevRpm: 17100, prevErrorRate: 0.0031, prevP95: 171, status: 'warning', instances: 12 },
   { id: 'payments-api', name: 'payments-api', type: 'http', language: 'Go', version: 'v1.18.3', rpm: 6390, errorRate: 0.0213, p95: 640, prevRpm: 6580, prevErrorRate: 0.0040, prevP95: 410, status: 'critical', instances: 6 },
   { id: 'catalog-api', name: 'catalog-api', type: 'http', language: 'Go', version: 'v3.2.0', rpm: 42800, errorRate: 0.0006, p95: 48, prevRpm: 40100, prevErrorRate: 0.0007, prevP95: 51, status: 'ok', instances: 18 },
-  { id: 'auth-api', name: 'auth-api', type: 'http', language: 'Node.js', version: 'v5.0.2', rpm: 9100, errorRate: 0.0019, p95: 96, prevRpm: 9300, prevErrorRate: 0.0020, prevP95: 94, status: 'ok', instances: 4 },
+  { id: 'auth-api', name: 'auth-api', type: 'http', language: 'Node.js', version: 'v5.0.2', rpm: 9100, errorRate: 0.0019, p95: 96, prevRpm: 9300, prevErrorRate: 0.0020, prevP95: 94, status: 'ok', instances: 4, source: 'ebpf' },
   { id: 'order-events', name: 'order-events-consumer', type: 'consumer', language: 'Node.js', version: 'v2.41.0', rpm: 15200, errorRate: 0.0011, p95: 34, prevRpm: 14800, prevErrorRate: 0.0010, prevP95: 33, status: 'warning', instances: 8, lag: 18400 },
   { id: 'email-worker', name: 'email-worker', type: 'worker', language: 'Python', version: 'v0.9.12', rpm: 820, errorRate: 0.0090, p95: 1240, prevRpm: 790, prevErrorRate: 0.0085, prevP95: 1180, status: 'ok', instances: 2, lag: 120 },
   { id: 'shop-web', name: 'shop-web', type: 'web', language: 'React', version: '2026.10.24', rpm: 3900, errorRate: 0.0034, p95: 2140, prevRpm: 3600, prevErrorRate: 0.0031, prevP95: 2300, status: 'ok', instances: 0 },
@@ -789,6 +789,39 @@ export function tracesFor(serviceId: string, ep: Endpoint | undefined, range: Ti
     id: (0x9f3a12 + i * 7919).toString(16) + 'c0ffee' + i, ts: NOW - i * 47_000, dur: p95 * (0.6 + ((i * 37) % 10) / 6),
     status: hot && i % 2 === 0 ? 502 : 200, service: s?.name ?? serviceId, method: ep?.method ?? 'GET', route: ep?.route ?? '/', isError: hot && i % 2 === 0,
   }));
+}
+
+/**
+ * Recent traces served by one Kubernetes pod (contracts §22: GET /traces?service=&pod=&namespace=, span resource
+ * attributes k8s.pod.name / k8s.namespace.name). Mock: deterministic requests over the service's HTTP endpoints.
+ */
+export function podTraces(pod: { name: string; namespace: string; service: string }, range: TimeRange, opts: { errors?: boolean; limit?: number } = {}): TraceSummary[] {
+  const limit = opts.limit ?? 20;
+  if (isApi) {
+    return A.list(`/traces${A.rangeQs(range, {
+      service: pod.service || undefined, pod: pod.name, namespace: pod.namespace || undefined, errors: opts.errors ? 'true' : undefined, limit,
+    })}`, (raw: TraceSummary[] | null) => raw ?? []);
+  }
+  const s = services.find((x) => x.id === pod.service || x.name === pod.service);
+  if (!s) return [];
+  const eps = endpointsFor(s.id).filter((e) => !e.sub);
+  const rnd = mulberry32(hash(`pod-traces-${pod.namespace}/${pod.name}`));
+  const errEvery = s.errorRate > 0.02 ? 3 : s.errorRate > 0.005 ? 6 : 11;
+  const out: TraceSummary[] = [];
+  let t = NOW - Math.round(rnd() * 20_000);
+  for (let i = 0; i < 40 && out.length < limit; i++) {
+    const ep = eps.length ? eps[Math.floor(rnd() * eps.length)] : undefined;
+    const isError = i % errEvery === errEvery - 1;
+    const p95 = ep?.p95 ?? s.p95;
+    const tr: TraceSummary = {
+      id: (hash(`${pod.name}-${i}`).toString(16).padStart(8, '0') + hash(`${i}-${pod.namespace}`).toString(16).padStart(8, '0')).repeat(2).slice(0, 32),
+      ts: t, dur: +(p95 * (0.25 + rnd() * (isError ? 1.6 : 0.9))).toFixed(1), status: isError ? (rnd() < 0.7 ? 500 : 503) : 200,
+      service: s.name, method: ep?.method ?? 'GET', route: ep?.route ?? '/', isError,
+    };
+    t -= Math.round(5_000 + rnd() * 70_000);
+    if (!opts.errors || isError) out.push(tr);
+  }
+  return out;
 }
 
 /** The mock implementations, for modules that derive mock data from mock data (graph.ts). */

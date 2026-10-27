@@ -12,5 +12,6 @@ RUN cd collector && go build -trimpath -ldflags "-s -w -X main.version=${VERSION
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/trooper-agent /usr/local/bin/trooper-agent
-USER nonroot:nonroot
+# numeric (distroless nonroot = 65532) so runAsNonRoot can be verified by the kubelet
+USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/trooper-agent"]

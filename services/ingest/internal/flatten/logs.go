@@ -67,9 +67,21 @@ func logRow(t tenant.Tenant, res *resourceInfo, lr *logspb.LogRecord, received t
 		r.TS = received
 	}
 	r.PatternID = norm.PatternID(r.Body)
-	r.Attrs = attrMap(lr.GetAttributes(), 0)
+	r.Attrs = attrMap(lr.GetAttributes(), len(logResourceKeys))
+	// Kubernetes placement lives on the resource (trooper-agent Warning events: service.name=k8s + k8s.cluster.name;
+	// apps with OTEL_RESOURCE_ATTRIBUTES k8s.*); logs keep no resource map, so copy it unless the record sets it.
+	if len(res.attrs) > 0 {
+		for _, k := range logResourceKeys {
+			if _, ok := r.Attrs[k]; !ok {
+				putAttr(r.Attrs, k, res.attrs[k], MaxAttrValueLen)
+			}
+		}
+	}
 	return r
 }
+
+// logResourceKeys are resource attributes copied into logs.attrs (contracts §20).
+var logResourceKeys = []string{"k8s.cluster.name", "k8s.namespace.name", "k8s.pod.name", "k8s.node.name"}
 
 // Severity maps OTLP severity number (or text when the number is unset) to the logs.severity enum.
 func Severity(n logspb.SeverityNumber, text string) string {

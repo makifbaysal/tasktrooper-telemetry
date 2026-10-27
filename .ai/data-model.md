@@ -56,6 +56,36 @@ Fingerprint bazlı issue tablosu: `first_seen, last_seen, count, sample_event_id
 - Kafka: AdminClient ile topic end offset'leri ve group committed offset'leri 15 sn'de bir okunur; mesaj tüketilmez. Group ↔ servis eşleşmesi SDK'nın raporladığı `group.id` (RabbitMQ: consumer tag) ile.
 - `consumer_1m.max_lag` SDK'dan gelir; broker yoksa o kullanılır, broker bağlıysa broker değeri esastır.
 
+### Host, container, process, Kubernetes ve serverless (ADR-019/020, `deploy/clickhouse/003_infra_k8s_faas.sql`)
+Hepsi `AggregatingMergeTree`, `PARTITION BY toYYYYMM(minute)`, satır = varlık boyutları + dakika. Gauge'lar
+`SimpleAggregateFunction(max, Float64)`; raporlanmayan değer `-Inf` (contracts §5, okuyan `isFinite`). Boş `cluster` = K8s dışı.
+Yazan: ingest-writer (`trooper.host|container|process|k8s|faas.*` OTLP gauge'ları; metrik → kolon eşlemesi contracts §20/§21).
+
+| Tablo | Boyutlar (ORDER BY) | Değerler | TTL |
+|---|---|---|---|
+| `hosts_1m` | `cluster, host, host_id, os, arch, node` (`host, minute`) | `cpu, cpu_cores, memory, memory_bytes, disk, disk_read, disk_write, net_in, net_out, load1, uptime_s` | 30 gün |
+| `containers_1m` | `cluster, host, namespace, pod, pod_uid, container, container_id, image, workload_kind, workload, service` (`cluster, namespace, pod, container, host, minute`) | `cpu, cpu_limit, memory_bytes, memory_limit, restarts, net_in, net_out, throttled` | 30 gün |
+| `processes_1m` | `host, container_id, pid UInt32, exe, command` (`host, pid, exe, minute`) | `cpu, memory_bytes, threads, fds` | 7 gün |
+| `k8s_nodes_1m` | `cluster, node` | `ready, allocatable_cpu, allocatable_memory, pods` | 30 gün |
+| `k8s_pods_1m` | `cluster, namespace, pod, pod_uid, node, workload_kind, workload, service` (`cluster, namespace, pod, pod_uid, minute`) | `phase`, `reason` (`SimpleAggregateFunction(anyLast, String)`), `ready, restarts, cpu_request, cpu_limit, memory_request, memory_limit` | 30 gün |
+| `k8s_workloads_1m` | `cluster, namespace, kind, name` | `desired, ready, available, updated` | 30 gün |
+| `faas_1m` | `function_id, provider, region` (`function_id, minute`) | `invocations, errors, throttles, duration_avg, duration_max, duration_p95, duration_p99, concurrency, iterator_age_ms, memory_bytes, execution_units` | 30 gün |
+| `gpus_1m` (`004_gpu.sql`, contracts §22) | `cluster, host, gpu_index UInt8, gpu_uuid, model` (`host, gpu_index, gpu_uuid, minute`) | `utilization` (0..1), `memory` (0..1), `memory_bytes`, `temperature_c`, `power_w` | 30 gün |
+
+- `gpus_1m`: trooper-agent host modu `nvidia-smi` gauge'ları (`trooper.host.gpu.*`, attr `gpu.index|uuid|model`); `hosts_1m`
+  değişmez. api host satırına son dakikadaki GPU'ları (`gpus`), host detayına GPU başına utilization serisini (`series.gpu`,
+  id `gpu<index>`) ekler. Host'undan 3 dk önce susan GPU listelenmez.
+- Azure fonksiyon satırları (`serverless_functions.meta.parent` = app slug'ı, App Insights) kendi `faas_1m` satırlarını
+  (`function_id` = fonksiyon slug'ı) yazar; app satırı app seviyesi toplamdır. Özet toplamlarında fonksiyon satırları sayılmaz.
+- `containers_1m` sıralama anahtarında `host` da var (sözleşmeye ek): K8s dışı aynı adlı container'lar (pod/namespace boş)
+  farklı host'larda birleşmesin diye.
+- Sorgu kalıbı: önce `GROUP BY <anahtar>, minute` ile `max(...)` (aynı dakikanın parçalı satırları), sonra `isFinite` süzülüp
+  aralık toplaması. `restarts` kümülatif sayaçtır: aralıktaki artış = `max − min`. `faas_1m` aralık toplamı = dakikaların `sum`'ı.
+- K8s Warning event'leri ayrı tablo değil: `logs` (`service='k8s'`, `attrs['k8s.event.*']`, `attrs['k8s.cluster.name']` —
+  writer log satırına resource'taki `k8s.cluster.name|namespace.name|pod.name|node.name`'i kopyalar).
+- eBPF (OBI) span'ları normal `spans` yolundan gelir; kaynak `resource_attrs['telemetry.sdk.name'] IN
+  ('opentelemetry-ebpf-instrumentation', 'beyla')`.
+
 ## PostgreSQL (metadata)
 
 ```

@@ -5,7 +5,7 @@
 -- GitHub: one row per App installation and project.
 --   config = { "installationId": 123, "account": "acme", "accountType": "Organization" }
 ALTER TABLE integrations DROP CONSTRAINT IF EXISTS integrations_provider_check;
-ALTER TABLE integrations ADD CONSTRAINT integrations_provider_check CHECK (provider IN ('aws', 'gcp', 'vercel', 'neon', 'slack', 'github'));
+ALTER TABLE integrations ADD CONSTRAINT integrations_provider_check CHECK (provider IN ('aws', 'gcp', 'vercel', 'neon', 'slack', 'github', 'azure'));
 CREATE INDEX IF NOT EXISTS integrations_github_installation ON integrations ((config->>'installationId')) WHERE provider = 'github';
 
 -- Slack messages of an incident: the first message's ts; resolve / reminder / ack go to its thread (notifier).

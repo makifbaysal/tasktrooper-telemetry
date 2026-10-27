@@ -65,7 +65,7 @@ Font: `--font-sans` (Inter), `--font-mono` (JetBrains Mono — route, log, kod, 
 | `StatusBadge` | Durum için tek doğru yol — ikon + etiket |
 | `Card` | `title`, `subtitle`, `actions`, `flush` (tablo/list için padding'siz) |
 | `StatTile` | label · value(+unit) · delta (yön × `upIsGood`) · opsiyonel sparkline |
-| `Table` | Kolon tanımlı, `numeric` sağa hizalı tabular, `sortValue` ile sıralanabilir, `onRowClick` |
+| `Table` | Kolon tanımlı, `numeric` sağa hizalı tabular, `sortValue` ile sıralanabilir, `onRowClick`; `childRows` ile iç içe satırlar (ebeveynin hemen altında girintili, aynı sıralama — ör. Azure Function App'in fonksiyonları) |
 | `Tabs` / `Segmented` | Tabs = sayfa içi bölüm; Segmented = filtre/zaman aralığı |
 | `Field`, `Input`, `Textarea`, `SearchInput`, `Select`, `Toggle` | Form elemanları (`Textarea mono` JSON/header şablonları için) |
 | `PageHeader` | breadcrumb + başlık + alt başlık + aksiyonlar |
@@ -90,6 +90,10 @@ arama, Private/Added badge'leri, çoklu seçim; token / local path "Advanced" al
 run ekranı `TargetCard` (hedef servis RED: "All traffic" slot 1 vs "Load test" slot 2, ölçü başına ayrı grafik).
 
 Hesap / bildirim kalıpları: `Login` (`screens/Login.tsx`, router dışında, `.login__card`), `NotifyPicker` (`screens/NotifyPicker.tsx` — chip'li hedef girişi: Slack kanalı `#ad`, private kilit ikonu, serbest hedef mono; arama listesi `Menu` stilinde), `MonitorSourceBadge` (`code` → accent + kilit "Managed in repository", `suggestion` → accent + ✨), `LikelyCause` (özet + güven badge'i; < %30 warning tonunda "low confidence"). Rol gereği kapalı aksiyonlar gizlenir ya da `disabled` + `title` ile nedeni söylenir (`denied()`); salt okunur formlar `<fieldset disabled>`.
+
+Altyapı / K8s kalıpları (`screens/k8sShared.tsx`): `InfraStatusBadge` (ok/warning/critical + `stale` → nötr saat ikonu "Stale"), `PodPhaseBadge` (reason varsa onu gösterir — CrashLoopBackOff/OOMKilled/ImagePullBackOff critical, diğerleri warning; yoksa phase), `UsageCell` / `LimitCell` (0..1 meter; kullanılan / limit, limit yoksa "no limit"), `EventList` (K8s Warning event akışı), `AgentSetup` (veri yokken Helm + `docker run` talimatı, eBPF opsiyonel notu), `EbpfBadge` (accent, SDK'sız eBPF servisi). Kapasite grafikleri birim başına tek grafik: used / requested / allocatable (veya usage / request / limit) `LINE_SLOTS` 1-2-3.
+
+AI kullanım / serverless kalıpları: `AiQuotaBanner` (`screens/Usage.tsx` — sayfa üstü `Callout`, warning/critical ton badge + metin + View usage + kapat; ay ve eşik başına kapatılır), `AiCapEditor` (üye tavanı: `Meter` + "used / cap" veya "No cap", kalem → inline sayı input'u, Enter kaydeder / Esc vazgeçer; Usage ve Members tablosunda), kredi formatı `credits()` (100 altı 2 ondalık). `FaasStatusBadge` (`screens/Serverless.tsx` — ok/warning/critical `StatusBadge`, `idle` / `missing` nötr "Idle" / "Missing"), maliyet her yerde `usd()` + "est." etiketi; fonksiyon detayında birim başına ayrı grafik (sayılar, ms, concurrency, cold start kolonları), hata serisi `--series-8`.
 
 Ekran seviyesi kalıplar (`screens/rca.tsx`):
 

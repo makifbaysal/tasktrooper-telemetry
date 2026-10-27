@@ -15,10 +15,32 @@ import (
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/model"
 )
 
-// Enricher interprets items (never extracts them).
+// Enricher interprets items (never extracts them). budget (nil: unlimited) gates every request (AI quota, ADR-018).
 type Enricher interface {
-	Enrich(ctx context.Context, repo RepoSummary, items []*model.Item) error
+	Enrich(ctx context.Context, repo RepoSummary, items []*model.Item, budget Budget) (Outcome, error)
 	Model() string
+}
+
+// Budget is the AI quota of one analysis (implemented by internal/quota over services/pkg/aiquota).
+type Budget interface {
+	// Reserve is asked before every request with its estimated tokens; ok=false (reason org_limit | user_limit |
+	// check_failed) stops LLM calls for the remaining items, which keep their static criticality.
+	Reserve(ctx context.Context, model string, estInputTokens, estOutputTokens int64) (ok bool, reason string)
+	// Record stores the real usage of a billed request and returns its credits.
+	Record(ctx context.Context, model string, u Tokens) float64
+}
+
+// Tokens is the usage of one request (Anthropic semantics: Input excludes cache reads and writes).
+type Tokens struct {
+	Input, CacheWrite, CacheRead, Output int64
+}
+
+// Outcome is the LLM step result of one Enrich call.
+type Outcome struct {
+	Status  string  // model.LLMOK | model.LLMQuotaExceeded
+	Reason  string  // quota denial reason
+	Credits float64 // spent (recorded) credits
+	Skipped int     // items not sent because the quota denied a batch
 }
 
 // RepoSummary is the stable, cached prefix of every request for one analysis.
@@ -148,29 +170,53 @@ func summaryText(r RepoSummary) string {
 	return b.String()
 }
 
-// Enrich fills it.LLM for items in batches; a failed batch is logged and skipped (static rules stay).
-func (l *LLM) Enrich(ctx context.Context, repo RepoSummary, items []*model.Item) error {
+// maxTokens is the output cap of one request.
+const maxTokens = 16000
+
+// OutputPerItem is the expected output tokens per item used for the pre-call quota estimate (a batch of 15 items
+// answers with ~4–6k tokens; estimating with maxTokens would deny long before the limit).
+const OutputPerItem = 600
+
+// Enrich fills it.LLM for items in batches; a failed batch is logged and skipped (static rules stay). Before every
+// batch the budget is asked; a denial leaves the remaining items static and reports quota_exceeded.
+func (l *LLM) Enrich(ctx context.Context, repo RepoSummary, items []*model.Item, budget Budget) (Outcome, error) {
+	sum := summaryText(repo)
 	system := []anthropic.TextBlockParam{
 		{Text: systemPrompt},
-		{Text: summaryText(repo), CacheControl: anthropic.NewCacheControlEphemeralParam()},
+		{Text: sum, CacheControl: anthropic.NewCacheControlEphemeralParam()},
 	}
+	out := Outcome{Status: model.LLMOK}
 	var firstErr error
 	for start := 0; start < len(items); start += l.BatchSize {
 		batch := items[start:min(start+l.BatchSize, len(items))]
-		if err := l.batch(ctx, system, batch); err != nil {
+		payload := l.payload(batch)
+		if budget != nil {
+			chars := len(systemPrompt) + len(sum) + len(payload)
+			if ok, reason := budget.Reserve(ctx, l.model, int64((chars+3)/4), min(int64(maxTokens), int64(OutputPerItem*len(batch)))); !ok {
+				out.Status, out.Reason, out.Skipped = model.LLMQuotaExceeded, reason, len(items)-start
+				l.Log.Info("llm enrichment stopped by AI quota", "reason", reason, "skipped", out.Skipped)
+				break
+			}
+		}
+		usage, err := l.batch(ctx, system, batch, payload)
+		if usage != nil && budget != nil {
+			out.Credits += budget.Record(ctx, l.model, *usage)
+		}
+		if err != nil {
 			l.Log.Warn("llm enrichment batch failed", "err", err, "items", len(batch))
 			if firstErr == nil {
 				firstErr = err
 			}
 			if ctx.Err() != nil {
-				return ctx.Err()
+				return out, ctx.Err()
 			}
 		}
 	}
-	return firstErr
+	return out, firstErr
 }
 
-func (l *LLM) batch(ctx context.Context, system []anthropic.TextBlockParam, batch []*model.Item) error {
+// payload is the user message of one batch.
+func (l *LLM) payload(batch []*model.Item) string {
 	in := make([]llmInput, len(batch))
 	for i, it := range batch {
 		code := it.Snippet
@@ -183,13 +229,18 @@ func (l *LLM) batch(ctx context.Context, system []anthropic.TextBlockParam, batc
 			in[i].Traffic = fmt.Sprintf("%.1f rpm, error rate %.2f%%, p95 %.0f ms (7d)", s.RPM, s.ErrorRate*100, s.P95)
 		}
 	}
-	payload, _ := json.MarshalIndent(in, "", " ")
+	b, _ := json.MarshalIndent(in, "", " ")
+	return "Classify these inventory items:\n" + string(b)
+}
+
+// batch sends one request. usage is non-nil whenever the API answered (billed), even when the answer is unusable.
+func (l *LLM) batch(ctx context.Context, system []anthropic.TextBlockParam, batch []*model.Item, payload string) (*Tokens, error) {
 	resp, err := l.client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     anthropic.Model(l.model),
-		MaxTokens: 16000,
+		MaxTokens: maxTokens,
 		System:    system,
 		Messages: []anthropic.MessageParam{
-			anthropic.NewUserMessage(anthropic.NewTextBlock("Classify these inventory items:\n" + string(payload))),
+			anthropic.NewUserMessage(anthropic.NewTextBlock(payload)),
 		},
 		OutputConfig: anthropic.OutputConfigParam{
 			Effort: anthropic.OutputConfigEffortLow,
@@ -199,15 +250,17 @@ func (l *LLM) batch(ctx context.Context, system []anthropic.TextBlockParam, batc
 	if err != nil {
 		var apiErr *anthropic.Error
 		if errors.As(err, &apiErr) {
-			return fmt.Errorf("anthropic %d: %w", apiErr.StatusCode, err)
+			return nil, fmt.Errorf("anthropic %d: %w", apiErr.StatusCode, err)
 		}
-		return err
+		return nil, err
 	}
+	usage := &Tokens{Input: resp.Usage.InputTokens, CacheWrite: resp.Usage.CacheCreationInputTokens,
+		CacheRead: resp.Usage.CacheReadInputTokens, Output: resp.Usage.OutputTokens}
 	if resp.StopReason == anthropic.StopReasonRefusal {
-		return errors.New("anthropic: request refused")
+		return usage, errors.New("anthropic: request refused")
 	}
 	if resp.StopReason == anthropic.StopReasonMaxTokens {
-		return errors.New("anthropic: output truncated (max_tokens)")
+		return usage, errors.New("anthropic: output truncated (max_tokens)")
 	}
 	var text string
 	for _, b := range resp.Content {
@@ -219,7 +272,7 @@ func (l *LLM) batch(ctx context.Context, system []anthropic.TextBlockParam, batc
 		Items []llmItem `json:"items"`
 	}
 	if err := json.Unmarshal([]byte(text), &out); err != nil {
-		return fmt.Errorf("anthropic: decode structured output: %w", err)
+		return usage, fmt.Errorf("anthropic: decode structured output: %w", err)
 	}
 	l.Log.Debug("llm batch", "items", len(batch), "cache_read", resp.Usage.CacheReadInputTokens, "cache_write", resp.Usage.CacheCreationInputTokens)
 	for _, r := range out.Items {
@@ -234,7 +287,7 @@ func (l *LLM) batch(ctx context.Context, system []anthropic.TextBlockParam, batc
 		}
 		Apply(batch[r.ID], res)
 	}
-	return nil
+	return usage, nil
 }
 
 // Apply attaches an LLM result (fresh or cached by code hash) and lets it decide criticality.

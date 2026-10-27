@@ -10,7 +10,7 @@ import {
 } from '@/components/ui';
 import {
   ApiError, NOW, endpointNode, endpointsFor, isApi, kpis, incidents, logs, monitors, mutate, qs, remote, seg, series, serviceNode, services,
-  suggestions, timestamps, useData, type Incident, type Monitor, type RcaResult, type Suggestion, type TimeRange,
+  suggestions, timestamps, useData, type Incident, type Monitor, type RcaInfraCandidate, type RcaResult, type Suggestion, type TimeRange,
 } from '@/data';
 import {
   maintenanceAvailable, maintenanceWindows, monitorInput, resolvedIncidents, type ApiIncident, type ApiMonitor, type IncidentEvent, type MaintenanceWindow,
@@ -510,7 +510,8 @@ export function IncidentDrawer({ incident: i, state, onClose, onAck, onResolve, 
   const related = isApi ? [] : logs.filter((l) => l.service === i.service && (l.level === 'error' || l.level === 'warn')).slice(0, 6);
   const rca = past ? undefined : incidentRca(i);
   // the engine's stored RCA (api) or the mock drill-down: one-line summary + confidence
-  const stored = (i as ApiIncident).rootCause as { summary?: string; confidence?: number } | undefined;
+  const stored = (i as ApiIncident).rootCause as { summary?: string; confidence?: number; infra?: RcaInfraCandidate[] | null } | undefined;
+  const infraCauses = Array.isArray(stored?.infra) ? [...stored.infra].sort((a, b) => b.confidence - a.confidence) : [];
   const likely = stored?.summary ? { summary: stored.summary, confidence: typeof stored.confidence === 'number' ? stored.confidence : undefined }
     : rca ? { summary: rca.summary, confidence: rca.confidence } : undefined;
   const nav = useNavigate();
@@ -531,6 +532,21 @@ export function IncidentDrawer({ incident: i, state, onClose, onAck, onResolve, 
         </Callout>
       )}
       {likely && !rca && <Callout icon={<Sparkles size={16} color="var(--accent)" />}><LikelyCause summary={likely.summary} confidence={likely.confidence} /></Callout>}
+      {infraCauses.length > 0 && (
+        <DrawerSection title="Infrastructure candidates" aside="pods and hosts of this service">
+          <div className="list">
+            {infraCauses.map((c, k) => (
+              <div key={k} className="list__row">
+                <div className="list__main">
+                  <span className="list__title">{c.title}</span>
+                  <span className="list__meta">{c.kind === 'pod' ? 'Pod' : 'Host'} <span className="mono">{c.entity}</span>{c.cluster ? ` · ${c.cluster}` : ''}{c.node ? ` · node ${c.node}` : ''}{c.restarts ? ` · ${c.restarts} restarts` : ''}</span>
+                </div>
+                <Badge tone={c.confidence < 0.3 ? 'warning' : 'neutral'}>{Math.round(c.confidence * 100)}% confidence</Badge>
+              </div>
+            ))}
+          </div>
+        </DrawerSection>
+      )}
       {rca && (
         <DrawerSection title="Why it's happening" aside={<>{rca.root.service ? `root cause in ${rca.root.service}` : ''}{rca.confidence < 0.3 && <> <Badge tone="warning">low confidence</Badge></>}</>}>
           <WhyBlock result={rca} />

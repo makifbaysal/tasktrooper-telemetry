@@ -55,6 +55,8 @@ type Repo struct {
 	AnalyzeRequestedAt *time.Time
 	AnalyzedAt         *time.Time
 	AnalysisStartedAt  *time.Time
+	// AnalyzeRequestedBy is the member who asked for the pending analysis (nil: api key, webhook, automatic).
+	AnalyzeRequestedBy *int64
 }
 
 // Due reports whether the repo should be analyzed: never analyzed, or re-analysis requested after the last one.
@@ -144,4 +146,28 @@ type LoadtestHint struct {
 	PayloadExample json.RawMessage `json:"payloadExample,omitempty"` // JSON object example body
 	Idempotent     bool            `json:"idempotent"`
 	Notes          string          `json:"notes,omitempty"`
+}
+
+// LLM step statuses (repositories.analysis.llm.status, contracts §19).
+const (
+	LLMOK            = "ok"
+	LLMDisabled      = "disabled"       // no ANTHROPIC_API_KEY / TT_CODEINTEL_MODEL
+	LLMQuotaExceeded = "quota_exceeded" // AI quota denied a batch; the remaining items kept static criticality
+)
+
+// LLMStatus is the LLM step of one analysis.
+type LLMStatus struct {
+	Status  string  `json:"status"`            // ok | disabled | quota_exceeded
+	Reason  string  `json:"reason,omitempty"`  // org_limit | user_limit | check_failed (quota_exceeded)
+	Credits float64 `json:"credits"`           // credits spent by this analysis
+	Skipped int     `json:"skipped,omitempty"` // items left without LLM because of the quota
+}
+
+// Analysis is the summary of the last successful analysis (repositories.analysis jsonb; the api passes it through).
+type Analysis struct {
+	SHA         string    `json:"sha"`
+	Incremental bool      `json:"incremental"`
+	Items       int       `json:"items"`
+	LLMItems    int       `json:"llmItems"`
+	LLM         LLMStatus `json:"llm"`
 }

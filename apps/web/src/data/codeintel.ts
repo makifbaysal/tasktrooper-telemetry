@@ -29,7 +29,12 @@ export interface RepoInfo extends Omit<Repo, 'status'> {
   /** browse URL of the default branch, e.g. https://github.com/org/repo */
   url?: string;
   localPath?: string;
+  /** LLM step of the last analysis (api: `analysis.llm`, contracts §19) */
+  llm?: RepoLlm;
 }
+
+/** quota_exceeded: the AI quota stopped the LLM step; the rest of the inventory kept static criticality. */
+export interface RepoLlm { status: 'ok' | 'disabled' | 'quota_exceeded'; reason?: string; credits: number; skipped?: number }
 
 export interface FailureMode { title: string; impact?: string; mitigation?: string }
 
@@ -84,6 +89,7 @@ interface RawRepo {
   analyzedAt?: number | string | null; services?: string[] | null; language?: string; languages?: string[] | null;
   status?: string; error?: string | null; provider?: string; url?: string; localPath?: string;
   installationId?: number | string | null; pendingPaths?: string[] | null; pending_paths?: string[] | null; webhookActive?: boolean | null;
+  analysis?: { llm?: { status?: string; reason?: string | null; credits?: number | null; skipped?: number | null } | null } | null;
 }
 const STATUSES = new Set<RepoStatus>(['ready', 'analyzing', 'error', 'disconnected']);
 const mapRepo = (r: RawRepo): RepoInfo => ({
@@ -95,6 +101,9 @@ const mapRepo = (r: RawRepo): RepoInfo => ({
   installationId: r.installationId != null ? Number(r.installationId) : undefined,
   pendingPaths: r.pendingPaths ?? r.pending_paths ?? undefined,
   webhookActive: r.webhookActive ?? (r.installationId != null ? true : undefined),
+  llm: r.analysis?.llm?.status === 'ok' || r.analysis?.llm?.status === 'disabled' || r.analysis?.llm?.status === 'quota_exceeded'
+    ? { status: r.analysis.llm.status, reason: r.analysis.llm.reason ?? undefined, credits: r.analysis.llm.credits ?? 0, skipped: r.analysis.llm.skipped ?? undefined }
+    : undefined,
 });
 
 interface RawItem extends Omit<InventoryRow, 'criticality' | 'id' | 'line' | 'failureModes'> {
@@ -242,6 +251,8 @@ if (!isApi) {
   const rp = repoList();
   rp.forEach((r) => { r.provider = 'github'; r.url = `https://github.com/${r.name}`; r.installationId = MOCK_INSTALLATION.installationId; r.webhookActive = true; });
   const pay = rp.find((r) => r.id === 'rp2');
+  const ord = rp.find((r) => r.id === 'rp1');
+  if (ord) ord.llm = { status: 'quota_exceeded', reason: 'user_limit', credits: 212.4, skipped: 18 };
   if (pay) { pay.status = 'analyzing'; pay.pendingPaths = ['internal/refunds/handler.go', 'internal/webhooks/stripe.go']; }
   rp.push(
     { id: 'rp4', name: 'shopco/legacy-admin', branch: 'master', sha: '1f0e9d2', analyzedAt: NOW - 6 * 86400_000, services: [], language: 'PHP', status: 'disconnected', provider: 'github',

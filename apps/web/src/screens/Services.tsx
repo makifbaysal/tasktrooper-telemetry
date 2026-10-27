@@ -7,6 +7,7 @@ import { useApp } from '@/components/layout/context';
 import { appSummary, serviceErrorSeries, serviceTrafficSeries, services, timestamps, type Service, type ServiceType as SType } from '@/data';
 import { change, compact, ms, pct } from '@/lib/format';
 import { SERVICE_CATEGORIES, ServiceType, TYPE_META } from './shared';
+import { EbpfBadge } from './k8sShared';
 
 const GROUPS: { id: 'backend' | 'async' | 'client'; title: string; types: SType[] }[] = [
   { id: 'backend', title: 'HTTP services', types: ['http'] },
@@ -109,7 +110,7 @@ export function Services() {
                   { key: 'go', header: '', render: () => <ChevronRight size={14} className="muted" aria-hidden /> },
                 ] : [
                   { key: 'name', header: 'Service', sortValue: (s) => s.name, render: (s) => (
-                    <div><div style={{ fontWeight: 'var(--weight-medium)' }}>{s.name}</div><div className="muted" style={{ fontSize: 'var(--text-xs)' }}>{s.language} · {s.version}</div></div>) },
+                    <div><div style={{ fontWeight: 'var(--weight-medium)' }}>{s.name}{s.source === 'ebpf' && <> <EbpfBadge /></>}</div><div className="muted" style={{ fontSize: 'var(--text-xs)' }}>{s.language} · {s.version}</div></div>) },
                   { key: 'type', header: 'Type', render: (s) => <ServiceType type={s.type} /> },
                   { key: 'status', header: 'Health', sortValue: (s) => ['ok', 'warning', 'critical'].indexOf(s.status), render: (s) => <StatusBadge status={s.status} /> },
                   { key: 'rpm', header: 'Traffic', numeric: true, sortValue: (s) => s.rpm, render: (s) => <span>{compact(s.rpm)} <span className="muted">{unitOf(s)}</span></span> },

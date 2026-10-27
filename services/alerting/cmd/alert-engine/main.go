@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tasktrooper/telemetry/services/pkg/aiquota"
 	"github.com/tasktrooper/telemetry/services/pkg/config"
 	"github.com/tasktrooper/telemetry/services/pkg/logx"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/tasktrooper/telemetry/services/alerting/internal/engine"
 	"github.com/tasktrooper/telemetry/services/alerting/internal/leader"
 	"github.com/tasktrooper/telemetry/services/alerting/internal/obs"
+	"github.com/tasktrooper/telemetry/services/alerting/internal/quotacheck"
 	"github.com/tasktrooper/telemetry/services/alerting/internal/store"
 	"github.com/tasktrooper/telemetry/services/alerting/internal/stream"
 )
@@ -76,6 +78,16 @@ func main() {
 			// stream hits on monitors of this replica's shards arrive from the stream leader (shard 0)
 			go eng.RunStreamHandoff(ctx, pg)
 		}
+	}
+	// AI quota thresholds (ADR-018): every replica may run it, ai_quota_alerts dedupes.
+	if qcfg, err := aiquota.FromEnv(); err != nil {
+		log.Error("AI quota config", "err", err)
+		os.Exit(1)
+	} else {
+		go (&quotacheck.Checker{DB: pg, Plans: qcfg.Plans, Log: log,
+			Interval:  config.Duration("TT_AI_QUOTA_CHECK_INTERVAL", 5*time.Minute),
+			PublicURL: config.String("TT_PUBLIC_APP_URL", config.String("TT_PUBLIC_URL", "http://localhost:5173")),
+		}).Run(ctx)
 	}
 	log.Info("alert-engine started", "addr", addr, "shards", el.Shards, "stream", config.Bool("TT_ALERT_STREAM", false))
 	if err := eng.Run(ctx); err != nil {

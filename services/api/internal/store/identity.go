@@ -308,7 +308,19 @@ func (d *DB) ListMembers(ctx context.Context, orgID int64) ([]model.Member, erro
 		}
 		out = append(out, m)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	ai, err := d.memberAICredits(ctx, orgID, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if v, ok := ai[out[i].UserID]; ok {
+			out[i].AICredits = v
+		}
+	}
+	return out, nil
 }
 
 func (d *DB) getMember(ctx context.Context, orgID, userID int64) (*model.Member, error) {

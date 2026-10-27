@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import {
   AlertOctagon, ArrowRight, CheckCircle2, ChevronRight, Cloud, Database as DbIcon, ExternalLink, GitCommit, KeyRound, Loader2, Pause, Play, Plug,
-  RefreshCw, Trash2, Upload, Waypoints,
+  RefreshCw, SquareFunction, Trash2, Upload, Waypoints,
 } from 'lucide-react';
 import {
   Badge, Button, Callout, Card, ChoiceChips, CopyCode, Drawer, DrawerSection, EmptyState, Field, Input, KeyValues, PageHeader, Section, Segmented,
@@ -23,7 +23,7 @@ const TT_AWS_ACCOUNT = '811122233344';
 // =================================================================== small pieces
 /** Provider identity: neutral tile with initials — no brand colors or logos. */
 export function ProviderMark({ provider, size = 'md' }: { provider: IntegrationProvider; size?: 'sm' | 'md' }) {
-  const text = { aws: 'AWS', gcp: 'GC', vercel: 'V', neon: 'N' }[provider];
+  const text = { aws: 'AWS', gcp: 'GC', azure: 'AZ', vercel: 'V', neon: 'N' }[provider];
   const box = size === 'sm' ? 'var(--control-h-sm)' : 'var(--control-h-md)';
   return (
     <span aria-hidden style={{
@@ -48,6 +48,7 @@ export function IntegrationStatusBadge({ status }: { status: IntegrationStatus }
 function resourceLink(it: Integration, r: DiscoveredResource): string | undefined {
   if (r.refId && databases.some((d) => d.id === r.refId)) return `/infrastructure/databases/${r.refId}`;
   if (r.refId && clusters.some((c) => c.id === r.refId)) return `/infrastructure/queues/${r.refId}`;
+  if (r.kind === 'function' && r.refId) return `/infrastructure/serverless/${encodeURIComponent(r.refId)}`;
   if (r.kind === 'project') {
     const map = (it.config.projectMap ?? {}) as Record<string, string>;
     const svc = services.find((s) => s.name === (map[r.name] || r.name) || s.id === (map[r.name] || r.name));
@@ -55,7 +56,7 @@ function resourceLink(it: Integration, r: DiscoveredResource): string | undefine
   }
   return undefined;
 }
-const RESOURCE_ICON = { database: DbIcon, cluster: Waypoints, queue: Waypoints, subscription: Waypoints, project: Cloud } as const;
+const RESOURCE_ICON = { database: DbIcon, cluster: Waypoints, queue: Waypoints, subscription: Waypoints, project: Cloud, function: SquareFunction } as const;
 
 const drainUrl = (id: string) => `${INGEST_URL}/v1/drains/vercel?key=<backend ingest key>&integration=${id}`;
 
@@ -72,6 +73,7 @@ function configItems(it: Integration): [ReactNode, ReactNode][] {
       ['Services', list(c.services)],
     ];
     case 'gcp': return [['Service account', mono(c.clientEmail)], ['Projects', list(c.projectIds)], ['Services', list(c.services)]];
+    case 'azure': return [['Tenant id', mono(c.tenantId)], ['Client id', mono(c.clientId)], ['Subscriptions', list(c.subscriptionIds)], ['Resource groups', list(c.resourceGroups)], ['Environment', mono(c.env)]];
     case 'vercel': return [['Team', mono(c.teamId)], ['Drains', list(c.drains)]];
     case 'neon': return [['Organization', mono(c.orgId)], ['Projects', list(c.projectIds)]];
   }
@@ -279,12 +281,13 @@ export function DeployList({ deploys, onService, onOpen }: {
 
 // =================================================================== connect drawer
 const AWS_REGIONS = ['eu-central-1', 'eu-west-1', 'eu-north-1', 'us-east-1', 'us-west-2', 'ap-southeast-1'].map((r) => ({ id: r, label: r }));
-type AwsService = 'rds' | 'elasticache' | 'msk' | 'sqs';
+type AwsService = 'rds' | 'elasticache' | 'msk' | 'sqs' | 'lambda';
 const AWS_SERVICES: { id: AwsService; label: string; actions: string[] }[] = [
   { id: 'rds', label: 'RDS / Aurora', actions: ['rds:DescribeDBInstances', 'rds:DescribeDBClusters'] },
   { id: 'elasticache', label: 'ElastiCache', actions: ['elasticache:DescribeReplicationGroups', 'elasticache:DescribeCacheClusters'] },
   { id: 'msk', label: 'MSK', actions: ['kafka:ListClustersV2', 'kafka:DescribeClusterV2', 'kafka:ListNodes'] },
   { id: 'sqs', label: 'SQS', actions: ['sqs:ListQueues', 'sqs:GetQueueAttributes'] },
+  { id: 'lambda', label: 'Lambda', actions: ['lambda:ListFunctions', 'lambda:ListTags', 'lambda:ListEventSourceMappings', 'lambda:GetFunctionConcurrency'] },
 ];
 type GcpService = 'cloudsql' | 'memorystore' | 'pubsub';
 const GCP_SERVICES: { id: GcpService; label: string; role: string }[] = [
@@ -373,12 +376,19 @@ gcloud iam service-accounts keys create tasktrooper-key.json \\
 const randomId = (prefix: string, n = 10) => `${prefix}${Array.from({ length: n }, () => '0123456789abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 36)]).join('')}`;
 const splitList = (s: string) => s.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function azureCommands(subscription: string): string {
+  return `az ad sp create-for-rbac --name tasktrooper-readonly \\
+  --role Reader --scopes /subscriptions/${subscription}
+az role assignment create --assignee <appId> \\
+  --role "Monitoring Reader" --scope /subscriptions/${subscription}`;
+}
 interface MapRow { project: string; service: string }
 
 function ConnectIntegration({ provider, existing, onClose, onDone }: { provider: IntegrationProvider; existing?: Integration; onClose: () => void; onDone: (id: string) => void }) {
   const cfg = (existing?.config ?? {}) as Record<string, unknown>;
   const arr = (k: string, d: string[] = []) => (Array.isArray(cfg[k]) ? (cfg[k] as string[]) : d);
-  const [name, setName] = useState(existing?.name ?? { aws: 'aws-prod', gcp: 'gcp-prod', vercel: 'vercel', neon: 'neon' }[provider]);
+  const [name, setName] = useState(existing?.name ?? { aws: 'aws-prod', gcp: 'gcp-prod', azure: 'azure-prod', vercel: 'vercel', neon: 'neon' }[provider]);
   const [secret, setSecret] = useState('');
   const [test, setTest] = useState<'idle' | 'running' | IntegrationTestResult>('idle');
   const [saving, setSaving] = useState(false);
@@ -390,7 +400,7 @@ function ConnectIntegration({ provider, existing, onClose, onDone }: { provider:
   const [roleArn, setRoleArn] = useState((cfg.roleArn as string | undefined) ?? '');
   const [accessKeyId, setAccessKeyId] = useState((cfg.accessKeyId as string | undefined) ?? '');
   const [regions, setRegions] = useState<string[]>(arr('regions', ['eu-central-1']));
-  const [awsSvcs, setAwsSvcs] = useState<AwsService[]>(arr('services', ['rds', 'elasticache', 'msk', 'sqs']) as AwsService[]);
+  const [awsSvcs, setAwsSvcs] = useState<AwsService[]>(arr('services', ['rds', 'elasticache', 'msk', 'sqs', 'lambda']) as AwsService[]);
   const [snippet, setSnippet] = useState<'cfn' | 'tf' | 'policy'>('cfn');
   // gcp
   const [projectIds, setProjectIds] = useState(arr('projectIds').join(', '));
@@ -401,6 +411,12 @@ function ConnectIntegration({ provider, existing, onClose, onDone }: { provider:
   const [mapRows, setMapRows] = useState<MapRow[]>(Object.entries((cfg.projectMap ?? {}) as Record<string, string>).map(([project, service]) => ({ project, service })));
   const [drains, setDrains] = useState<string[]>(arr('drains', ['logs', 'speed_insights', 'web_analytics']));
   const [drainSecret, setDrainSecret] = useState('');
+  // azure
+  const [tenantId, setTenantId] = useState((cfg.tenantId as string | undefined) ?? '');
+  const [clientId, setClientId] = useState((cfg.clientId as string | undefined) ?? '');
+  const [subscriptionIds, setSubscriptionIds] = useState(arr('subscriptionIds').join(', '));
+  const [resourceGroups, setResourceGroups] = useState(arr('resourceGroups').join(', '));
+  const [azEnv, setAzEnv] = useState((cfg.env as string | undefined) ?? '');
   // neon
   const [orgId, setOrgId] = useState((cfg.orgId as string | undefined) ?? '');
   const [neonProjects, setNeonProjects] = useState<string[]>(arr('projectIds'));
@@ -411,18 +427,20 @@ function ConnectIntegration({ provider, existing, onClose, onDone }: { provider:
       case 'aws': return awsAuth === 'role' ? { roleArn: roleArn.trim(), externalId, regions, services: awsSvcs } : { accessKeyId: accessKeyId.trim(), regions, services: awsSvcs };
       case 'gcp': return { projectIds: splitList(projectIds), services: gcpSvcs, ...(keyInfo?.email ? { clientEmail: keyInfo.email } : {}) };
       case 'vercel': return { teamId: teamId.trim(), projectMap: Object.fromEntries(mapRows.filter((r) => r.project).map((r) => [r.project, r.service])), drains, ...(drainSecret ? { drainSecret: '(set)' } : {}) };
+      case 'azure': return { tenantId: tenantId.trim(), clientId: clientId.trim(), subscriptionIds: splitList(subscriptionIds), ...(splitList(resourceGroups).length ? { resourceGroups: splitList(resourceGroups) } : {}), ...(azEnv.trim() ? { env: azEnv.trim() } : {}) };
       case 'neon': return { orgId: orgId.trim(), projectIds: neonProjects };
     }
   };
   // vercel drain secret travels with the token; the api stores it as its own secret (drainSecretRef)
   const secretValue = provider === 'aws' && awsAuth === 'role' ? undefined
     : provider === 'vercel' && drainSecret ? JSON.stringify({ token: secret, drainSecret }) : secret || undefined;
-  const draft = (): IntegrationDraft => ({ provider, name: name.trim(), config: config(), secret: secretValue });
+  const draft = (): IntegrationDraft => ({ provider, name: name.trim(), config: config(), secret: secretValue, ...(provider === 'azure' && secretValue ? { credentials: { clientSecret: secretValue } } : {}) });
 
   const credsReady = provider === 'aws'
     ? (awsAuth === 'role' ? /^arn:aws:iam::\d{12}:role\/.+/.test(roleArn.trim()) : !!accessKeyId.trim() && !!secret)
     : !!secret || !!existing;
-  const scopeReady = provider === 'aws' ? regions.length > 0 && awsSvcs.length > 0 : provider === 'gcp' ? splitList(projectIds).length > 0 && gcpSvcs.length > 0 : true;
+  const scopeReady = provider === 'aws' ? regions.length > 0 && awsSvcs.length > 0 : provider === 'gcp' ? splitList(projectIds).length > 0 && gcpSvcs.length > 0
+    : provider === 'azure' ? UUID.test(tenantId.trim()) && UUID.test(clientId.trim()) : true;
   const ready = !!name.trim() && credsReady && scopeReady;
 
   const runTest = async () => {
@@ -465,6 +483,7 @@ function ConnectIntegration({ provider, existing, onClose, onDone }: { provider:
   const subtitle = {
     aws: 'Read-only: CloudWatch metrics and Describe calls. TaskTrooper never reads your data.',
     gcp: 'Read-only: Cloud Monitoring time series and resource metadata.',
+    azure: 'Read-only: Function Apps from Resource Manager and their Azure Monitor metrics.',
     vercel: 'Deploys become markers on your charts; drains stream logs, traces and Web Vitals.',
     neon: 'Projects, branches and computes become databases; compute state and storage every minute.',
   }[provider];
@@ -580,6 +599,34 @@ function ConnectIntegration({ provider, existing, onClose, onDone }: { provider:
           </Step>
         </>}
 
+        {provider === 'azure' && <>
+          <Step n={1} title="Create a service principal with read-only roles">
+            <CopyCode>{azureCommands(splitList(subscriptionIds)[0] ?? '<subscription id>')}</CopyCode>
+            <p className="muted" style={{ margin: 'var(--space-2) 0 0', fontSize: 'var(--text-sm)' }}>Reader + Monitoring Reader on each subscription (or only on the resource groups below). The output has the tenant id, client id (appId) and secret (password).</p>
+          </Step>
+          <Step n={2} title="Paste the credentials">
+            <div className="stack" style={{ gap: 'var(--space-3)' }}>
+              <div className="grid grid-2">
+                <Field label="Tenant id"><Input mono value={tenantId} onChange={(e) => { setTenantId(e.target.value); setTest('idle'); }} placeholder="00000000-0000-0000-0000-000000000000" /></Field>
+                <Field label="Client id (appId)"><Input mono value={clientId} onChange={(e) => { setClientId(e.target.value); setTest('idle'); }} placeholder="00000000-0000-0000-0000-000000000000" /></Field>
+              </div>
+              <Field label="Client secret" hint={existing ? 'Leave empty to keep the current one.' : 'Stored encrypted; never shown again.'}>
+                <Input mono type="password" autoComplete="new-password" value={secret} onChange={(e) => { setSecret(e.target.value); setTest('idle'); }} />
+              </Field>
+            </div>
+          </Step>
+          <Field label="Subscription ids · optional" hint="Comma-separated. Empty = every subscription the service principal can see.">
+            <Input mono value={subscriptionIds} onChange={(e) => setSubscriptionIds(e.target.value)} placeholder="3f2a9c4e-0d6b-4b7a-8e15-9c1d2f3a4b5c" />
+          </Field>
+          <Field label="Resource groups · optional" hint="Comma-separated. Empty = every resource group the principal can read.">
+            <Input mono value={resourceGroups} onChange={(e) => setResourceGroups(e.target.value)} placeholder="rg-shop-prod" />
+          </Field>
+          <Field label="Environment · optional" hint="Tag for the discovered functions, e.g. production.">
+            <Input mono value={azEnv} onChange={(e) => setAzEnv(e.target.value)} placeholder="production" />
+          </Field>
+          <Callout icon={<SquareFunction size={16} />}>Azure reports metrics per Function App, so each app is one row on the Serverless page with its functions listed inside. Cold starts and traces need the Functions OpenTelemetry mode sending to TaskTrooper.</Callout>
+        </>}
+
         {provider === 'neon' && <>
           <div className="grid grid-2">
             <Field label="API key" hint={existing ? 'Leave empty to keep the current one.' : 'Neon console → Account settings → API keys. Org keys see every project.'}>
@@ -633,7 +680,7 @@ export function IntegrationSourceBadge({ it, compact }: { it: Integration; compa
     <a href={`/settings/integrations?id=${encodeURIComponent(it.id)}`} onClick={(e) => { e.preventDefault(); e.stopPropagation(); nav(`/settings/integrations?id=${encodeURIComponent(it.id)}`); }}
       title={`Discovered by ${PROVIDER_LABEL[it.provider]} integration ${it.name}`} style={{ textDecoration: 'none' }}>
       <Badge tone={it.status === 'error' ? 'critical' : 'neutral'} icon={it.status === 'error' ? <AlertOctagon aria-hidden /> : <Cloud aria-hidden />}>
-        {{ aws: 'AWS', gcp: 'Google Cloud', vercel: 'Vercel', neon: 'Neon' }[it.provider]}{!compact && <> · {it.name}</>}{it.status === 'error' ? (compact ? ' · stale' : ' · sync failing') : ''}
+        {{ aws: 'AWS', gcp: 'Google Cloud', azure: 'Azure', vercel: 'Vercel', neon: 'Neon' }[it.provider]}{!compact && <> · {it.name}</>}{it.status === 'error' ? (compact ? ' · stale' : ' · sync failing') : ''}
       </Badge>
     </a>
   );

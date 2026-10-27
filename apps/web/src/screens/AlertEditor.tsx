@@ -1,17 +1,19 @@
 import { useData } from '@/data/remote';
 import { useState, type ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
-import { Activity, Bug, Clock, Code2, FileText, Gauge, GitMerge, Lock, Sparkles, TrendingUp } from 'lucide-react';
+import { Activity, Bug, Clock, Code2, FileText, Gauge, GitMerge, Lock, Server, Sparkles, SquareFunction, TrendingUp } from 'lucide-react';
 import { Columns, TimeSeries } from '@/components/charts';
 import { Badge, Button, Callout, Card, Field, Input, MetricCard, PageHeader, Segmented, Select, StatusBadge, Toggle } from '@/components/ui';
 import { clusters, endpointsFor, groupsOfService, isApi, monitors, mutate, qs, seg, series, services, timestamps, type Monitor } from '@/data';
 import { postRemote, type ApiMonitor } from '@/data/api/ops';
 import { can, denied } from '@/data/auth';
+import { serverlessFunctions } from '@/data/serverless';
+import { monitorTemplates, type MonitorTemplate } from '@/data/monitorTemplates';
 import { LagAlertEditor } from './LagAlerts';
 import { NotifyPicker } from './NotifyPicker';
 import { compact, ms, pct } from '@/lib/format';
 
-type Kind = 'metric_threshold' | 'anomaly' | 'composite' | 'log_match' | 'error_new' | 'consumer_lag' | 'job_missed';
+type Kind = 'metric_threshold' | 'anomaly' | 'composite' | 'log_match' | 'error_new' | 'consumer_lag' | 'job_missed' | 'infra' | 'faas';
 const KINDS: { id: Kind; label: string; desc: string; Icon: typeof Activity }[] = [
   { id: 'metric_threshold', label: 'Metric threshold', desc: 'Error rate, throughput, latency above/below a value', Icon: Activity },
   { id: 'anomaly', label: 'Anomaly', desc: 'Deviation from the seasonal baseline', Icon: TrendingUp },
@@ -20,9 +22,40 @@ const KINDS: { id: Kind; label: string; desc: string; Icon: typeof Activity }[] 
   { id: 'composite', label: 'Composite', desc: 'Several monitors firing together (and / or)', Icon: GitMerge },
   { id: 'log_match', label: 'Log query', desc: 'Count of matching log lines', Icon: FileText },
   { id: 'consumer_lag', label: 'Consumer lag', desc: 'Queue backlog and DLQ', Icon: Gauge },
+  { id: 'infra', label: 'Infrastructure', desc: 'Hosts, containers, pods, nodes and workloads', Icon: Server },
+  { id: 'faas', label: 'Serverless function', desc: 'Lambda / Azure Functions errors, throttles, duration', Icon: SquareFunction },
 ];
 /** Kinds the editor can save to the api (log_match: YAML only for now; consumer_lag: lag editor). */
-const SAVABLE = new Set<Kind>(['metric_threshold', 'anomaly', 'composite', 'job_missed', 'error_new']);
+const SAVABLE = new Set<Kind>(['metric_threshold', 'anomaly', 'composite', 'job_missed', 'error_new', 'infra', 'faas']);
+
+// ---- infra (contracts §20) and faas (§21) rule shapes
+type InfraEntity = 'host' | 'container' | 'pod' | 'node' | 'workload';
+type InfraMetric = 'cpu' | 'memory' | 'disk' | 'load1' | 'cpu_ratio' | 'memory_ratio' | 'restarts' | 'throttled' | 'not_ready' | 'unavailable';
+const INFRA_ENTITIES: { value: InfraEntity; label: string }[] = [
+  { value: 'host', label: 'Host' }, { value: 'container', label: 'Container' }, { value: 'pod', label: 'Pod' }, { value: 'node', label: 'Kubernetes node' }, { value: 'workload', label: 'Workload' },
+];
+const INFRA_METRIC_LABEL: Record<InfraMetric, string> = {
+  cpu: 'CPU', memory: 'Memory', disk: 'Disk (fullest filesystem)', load1: 'Load (1 min)', cpu_ratio: 'CPU / limit', memory_ratio: 'Memory / limit',
+  restarts: 'Restarts in window', throttled: 'CPU throttled', not_ready: 'Not ready (count)', unavailable: 'Unavailable replicas',
+};
+const INFRA_METRICS: Record<InfraEntity, InfraMetric[]> = {
+  host: ['cpu', 'memory', 'disk', 'load1'], container: ['cpu_ratio', 'memory_ratio', 'restarts', 'throttled'],
+  pod: ['cpu_ratio', 'memory_ratio', 'restarts', 'throttled', 'not_ready'], node: ['not_ready'], workload: ['unavailable'],
+};
+/** 0..1 metrics are typed as percentages */
+const INFRA_RATIO = new Set<InfraMetric>(['cpu', 'memory', 'disk', 'cpu_ratio', 'memory_ratio', 'throttled']);
+type FaasMetric = 'invocations' | 'errors' | 'error_rate' | 'throttles' | 'duration_p95' | 'duration_p99' | 'cold_starts' | 'concurrency' | 'iterator_age_ms';
+const FAAS_METRICS: { value: FaasMetric; label: string }[] = [
+  { value: 'error_rate', label: 'Error rate' }, { value: 'errors', label: 'Errors' }, { value: 'throttles', label: 'Throttles' },
+  { value: 'duration_p95', label: 'p95 duration' }, { value: 'duration_p99', label: 'p99 duration' }, { value: 'invocations', label: 'Invocations' },
+  { value: 'cold_starts', label: 'Cold starts' }, { value: 'concurrency', label: 'Concurrent executions' }, { value: 'iterator_age_ms', label: 'Iterator age (streams)' },
+];
+const faasUnit = (m: FaasMetric) => (m === 'error_rate' ? '%' : m === 'duration_p95' || m === 'duration_p99' || m === 'iterator_age_ms' ? 'ms' : 'count');
+const faasFmt = (m: FaasMetric) => (m === 'error_rate' ? (v: number) => pct(v) : faasUnit(m) === 'ms' ? ms : (v: number) => compact(v));
+const isDuration = (m: FaasMetric) => m === 'duration_p95' || m === 'duration_p99';
+const isFaasMetric = (v: unknown): v is FaasMetric => FAAS_METRICS.some((x) => x.value === v);
+const isInfraEntity = (v: unknown): v is InfraEntity => INFRA_ENTITIES.some((x) => x.value === v);
+const str = (v: unknown) => (typeof v === 'string' ? v : '');
 
 type Metric = 'error_rate' | 'p95' | 'rpm';
 const METRICS: { value: Metric; label: string }[] = [{ value: 'error_rate', label: 'Error rate' }, { value: 'p95', label: 'p95 latency' }, { value: 'rpm', label: 'Throughput' }];
@@ -95,6 +128,33 @@ export function AlertEditor() {
   const [graceMin, setGraceMin] = useState(String(num(q.graceMin, 10)));
   // error_new
   const [errScope, setErrScope] = useState<string>(kind === 'error_new' && editing && !editing.targetSpec?.service ? '*' : svcParam ?? '*');
+  // infra
+  const qf = (q.filter ?? {}) as Record<string, unknown>;
+  const [entity, setEntity] = useState<InfraEntity>(isInfraEntity(q.entity) ? q.entity : 'host');
+  const [infraMetric, setInfraMetric] = useState<InfraMetric>((INFRA_METRICS[isInfraEntity(q.entity) ? q.entity : 'host'] as string[]).includes(str(q.metric)) ? q.metric as InfraMetric : 'cpu');
+  const [agg, setAgg] = useState<'max' | 'avg'>(q.agg === 'avg' ? 'avg' : 'max');
+  const [fCluster, setFCluster] = useState(str(qf.cluster));
+  const [fNamespace, setFNamespace] = useState(str(qf.namespace));
+  const [fHost, setFHost] = useState(str(qf.host));
+  const [fWorkload, setFWorkload] = useState(str(qf.workload));
+  const [fService, setFService] = useState(str(qf.service) || (kind === 'infra' ? svcParam ?? '' : ''));
+  // faas
+  const fns = serverlessFunctions('1h');
+  const [fnId, setFnId] = useState(str(q.functionId) || params.get('function') || (kind === 'faas' && (qf.provider || qf.region || qf.service) ? '*' : fns[0]?.id ?? '*'));
+  const [faasMetric, setFaasMetric] = useState<FaasMetric>(isFaasMetric(q.metric) ? q.metric : isFaasMetric(params.get('metric')) ? params.get('metric') as FaasMetric : 'error_rate');
+  const [fProvider, setFProvider] = useState(str(qf.provider));
+  const [fRegion, setFRegion] = useState(str(qf.region));
+  const [op, setOp] = useState<'>' | '<'>(editing?.rule?.op === '<' ? '<' : '>');
+  // "p95 > timeout × 0.8" = relativeToTimeout + threshold 0.8 (contracts §21)
+  const [relTimeout, setRelTimeout] = useState(q.relativeToTimeout === true);
+  const [condWindow, setCondWindow] = useState<string | undefined>(str((editing?.rule as { window?: unknown } | undefined)?.window) || undefined);
+  const [templateId, setTemplateId] = useState<string>();
+  const [ruleTh, setRuleTh] = useState(() => {
+    const t = editing?.rule?.threshold;
+    if (kind === 'infra') return t === undefined ? '90' : String(INFRA_RATIO.has(infraMetric) ? +(t * 100).toFixed(2) : t);
+    if (kind === 'faas') return t === undefined ? (faasMetric === 'error_rate' ? '5' : '0') : String(faasMetric === 'error_rate' ? +(t * 100).toFixed(3) : t);
+    return '90';
+  });
 
   const [yaml, setYaml] = useState(false);
   const [lagOpen, setLagOpen] = useState(false);
@@ -108,6 +168,34 @@ export function AlertEditor() {
   const ep = eps.find((e) => `${e.method} ${e.route}` === endpoint);
   const svcLabel = services.find((s) => s.id === service)?.name ?? service;
   const below = metric === 'rpm';
+  const fn = fns.find((f) => f.id === fnId);
+  const ruleValue = (kind === 'infra' && INFRA_RATIO.has(infraMetric)) || (kind === 'faas' && faasMetric === 'error_rate') ? Number(ruleTh) / 100 : Number(ruleTh);
+  const relative = kind === 'faas' && relTimeout && isDuration(faasMetric);
+  const ruleUnit = kind === 'infra' ? (INFRA_RATIO.has(infraMetric) ? '%' : infraMetric === 'load1' ? 'load' : 'count') : relative ? '× timeout' : faasUnit(faasMetric);
+  const ruleLabel = ruleUnit === '%' ? `${ruleTh}%` : ruleUnit === 'ms' ? ms(Number(ruleTh) || 0) : relative ? `${ruleTh} × timeout` : ruleTh;
+  const infraFilter = Object.fromEntries(Object.entries({ cluster: fCluster, namespace: fNamespace, host: fHost, workload: fWorkload, service: fService }).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v));
+  const faasFilter = Object.fromEntries(Object.entries({ provider: fProvider, region: fRegion.trim(), service: fService.trim() }).filter(([, v]) => v));
+  const templates = kind === 'infra' || kind === 'faas' ? monitorTemplates(kind) : [];
+  /** Fill the form from a template (GET /monitor-templates); scope filters stay as picked. */
+  const applyTemplate = (t: MonitorTemplate) => {
+    const tq = t.query ?? {};
+    const c = t.condition ?? {};
+    const th = typeof c.threshold === 'number' ? c.threshold : 0;
+    setTemplateId(t.id); setName(t.name);
+    setOp(c.op === '<' ? '<' : '>'); setForMin(String(c.forMin ?? 0)); setCondWindow(typeof c.window === 'string' ? c.window : undefined);
+    if (typeof c.minRequests === 'number') setMinReq(String(c.minRequests));
+    if (t.severity === 'critical' || t.severity === 'warning' || t.severity === 'info') setSeverity(t.severity);
+    if (t.kind === 'infra' && isInfraEntity(tq.entity)) {
+      const m = (INFRA_METRICS[tq.entity] as string[]).includes(str(tq.metric)) ? tq.metric as InfraMetric : INFRA_METRICS[tq.entity][0];
+      setEntity(tq.entity); setInfraMetric(m); if (tq.agg === 'avg' || tq.agg === 'max') setAgg(tq.agg);
+      setRuleTh(String(INFRA_RATIO.has(m) ? +(th * 100).toFixed(2) : th));
+    }
+    if (t.kind === 'faas' && isFaasMetric(tq.metric)) {
+      const rel = tq.relativeToTimeout === true;
+      setFaasMetric(tq.metric); setRelTimeout(rel);
+      setRuleTh(String(tq.metric === 'error_rate' ? +(th * 100).toFixed(3) : th));
+    }
+  };
   const thValue = metric === 'error_rate' ? Number(threshold) / 100 : Number(threshold);
   const zValue = Number(z);
   const every = Math.max(1, Number(everyMin) || 0);
@@ -118,7 +206,8 @@ export function AlertEditor() {
   const otherMonitors = monitors.filter((m) => m.id !== editing?.id && m.kind !== 'composite' && !candidates.includes(m));
 
   const rule = { forMin: Number(forMin) || 0, ...(Number(renotify) ? { renotifyMin: Number(renotify) } : {}) };
-  const common = { severity, channels, source: editing?.source === 'suggestion' ? 'suggestion' : 'manual' };
+  const common = { severity, channels, source: editing?.source === 'suggestion' ? 'suggestion' : !editing && templateId && (kind === 'infra' || kind === 'faas') ? 'template' : 'manual' };
+  const ruleExtra = { ...(condWindow ? { window: condWindow } : {}) };
   const autoName: Record<Kind, string> = {
     metric_threshold: `${svcLabel} ${ep ? `${ep.method} ${ep.route}` : ''} ${METRICS.find((m) => m.value === metric)!.label.toLowerCase()}`,
     anomaly: `${svcLabel} ${ep ? `${ep.method} ${ep.route}` : ''} ${METRICS.find((m) => m.value === metric)!.label.toLowerCase()} anomaly`,
@@ -126,6 +215,8 @@ export function AlertEditor() {
     job_missed: `${process || svcLabel} missed run`,
     error_new: `New errors in ${errScope === '*' ? 'any service' : services.find((s) => s.id === errScope)?.name ?? errScope}`,
     log_match: `${svcLabel} log query`, consumer_lag: `${svcLabel} consumer lag`,
+    infra: `${INFRA_ENTITIES.find((e) => e.value === entity)!.label} ${INFRA_METRIC_LABEL[infraMetric].toLowerCase()}${fService || fCluster || fHost ? ` · ${fService || fCluster || fHost}` : ''}`,
+    faas: `${fn && fnId !== '*' ? fn.name : 'Functions'} ${FAAS_METRICS.find((m) => m.value === faasMetric)!.label.toLowerCase()}`,
   };
   const finalName = (name.trim() || autoName[kind]).replace(/\s+/g, ' ').trim();
   const target = { service, endpoint: ep ? `${ep.method} ${ep.route}` : undefined };
@@ -148,6 +239,16 @@ export function AlertEditor() {
       query: { expectedEveryMin: every, graceMin: grace },
       condition: { op: '>', threshold: every + grace, forMin: 0, ...(Number(renotify) ? { renotifyMin: Number(renotify) } : {}) }, ...common,
     },
+    infra: {
+      name: finalName, kind: 'infra', target: { service: infraFilter.service || undefined },
+      query: { entity, metric: infraMetric, filter: infraFilter, agg },
+      condition: { op, threshold: Number.isFinite(ruleValue) ? ruleValue : 0, ...ruleExtra, ...rule }, ...common,
+    },
+    faas: {
+      name: finalName, kind: 'faas', target: { service: fnId !== '*' ? fn?.service : faasFilter.service || undefined },
+      query: { ...(fnId !== '*' ? { functionId: fnId } : { filter: faasFilter }), metric: faasMetric, ...(relative ? { relativeToTimeout: true } : {}) },
+      condition: { op, threshold: Number.isFinite(ruleValue) ? ruleValue : 0, ...ruleExtra, ...(faasMetric === 'error_rate' && Number(minReq) ? { minRequests: Number(minReq) } : {}), ...rule }, ...common,
+    },
     error_new: {
       name: finalName, kind: 'error_new', target: { service: errScope === '*' ? undefined : errScope }, query: {},
       condition: { op: '>', threshold: 0, forMin: 0, ...(Number(renotify) ? { renotifyMin: Number(renotify) } : {}) }, ...common,
@@ -160,6 +261,8 @@ export function AlertEditor() {
     if (kind === 'anomaly' && !(zValue > 0)) return 'Sensitivity must be a positive number of standard deviations.';
     if (kind === 'composite' && picked.length < 2) return 'Pick at least two monitors.';
     if (kind === 'job_missed' && !process.trim()) return 'Name the job or process that should report.';
+    if ((kind === 'infra' || kind === 'faas') && !(Number.isFinite(ruleValue) && ruleTh.trim() !== '')) return 'Enter a numeric threshold.';
+    if (kind === 'faas' && fnId !== '*' && !fn) return 'Pick a function.';
     return undefined;
   };
 
@@ -338,8 +441,93 @@ export function AlertEditor() {
             </Card>
           )}
 
+          {kind === 'infra' && (
+            <Card title="2 · Scope" subtitle="The worst matching entity decides; the incident lists the worst five.">
+              <div className="stack" style={{ gap: 'var(--space-3)' }}>
+                {templates.length > 0 && (
+                  <Field label="Template" hint={templates.find((t) => t.id === templateId)?.description}>
+                    <div className="row" style={{ gap: 'var(--space-1)', flexWrap: 'wrap' }}>
+                      {templates.map((t) => <Button key={t.id} size="sm" variant={t.id === templateId ? 'primary' : 'secondary'} title={t.description} onClick={() => applyTemplate(t)}>{t.name}</Button>)}
+                    </div>
+                  </Field>
+                )}
+                <div className="grid grid-2" style={{ gap: 'var(--space-2)' }}>
+                  <Field label="Entity"><Select value={entity} onChange={(e) => { const v = e.target.value as InfraEntity; setEntity(v); setInfraMetric(INFRA_METRICS[v][0]); }} options={INFRA_ENTITIES} /></Field>
+                  <Field label="Metric"><Select value={infraMetric} onChange={(e) => setInfraMetric(e.target.value as InfraMetric)} options={INFRA_METRICS[entity].map((m) => ({ value: m, label: INFRA_METRIC_LABEL[m] }))} /></Field>
+                </div>
+                <div className="grid grid-2" style={{ gap: 'var(--space-2)' }}>
+                  <Field label="Service" hint="Pods / containers of this service.">
+                    <Select value={fService} onChange={(e) => setFService(e.target.value)} options={[{ value: '', label: 'Any service' }, ...backend.map((s) => ({ value: s.id, label: s.name }))]} />
+                  </Field>
+                  {entity === 'host'
+                    ? <Field label="Host"><Input mono value={fHost} placeholder="any" onChange={(e) => setFHost(e.target.value)} /></Field>
+                    : <Field label="Cluster"><Input mono value={fCluster} placeholder="any" onChange={(e) => setFCluster(e.target.value)} /></Field>}
+                </div>
+                {entity !== 'host' && entity !== 'node' && (
+                  <div className="grid grid-2" style={{ gap: 'var(--space-2)' }}>
+                    <Field label="Namespace"><Input mono value={fNamespace} placeholder="any" onChange={(e) => setFNamespace(e.target.value)} /></Field>
+                    <Field label="Workload"><Input mono value={fWorkload} placeholder="any" onChange={(e) => setFWorkload(e.target.value)} /></Field>
+                  </div>
+                )}
+                <Field label="Name"><Input value={name} placeholder={finalName} onChange={(e) => setName(e.target.value)} /></Field>
+              </div>
+            </Card>
+          )}
+
+          {kind === 'faas' && (
+            <Card title="2 · Scope">
+              <div className="stack" style={{ gap: 'var(--space-3)' }}>
+                {templates.length > 0 && (
+                  <Field label="Template" hint={templates.find((t) => t.id === templateId)?.description}>
+                    <div className="row" style={{ gap: 'var(--space-1)', flexWrap: 'wrap' }}>
+                      {templates.map((t) => <Button key={t.id} size="sm" variant={t.id === templateId ? 'primary' : 'secondary'} title={t.description} onClick={() => applyTemplate(t)}>{t.name}</Button>)}
+                    </div>
+                  </Field>
+                )}
+                <Field label="Function"><Select value={fnId} onChange={(e) => setFnId(e.target.value)}
+                  options={[...fns.map((f) => ({ value: f.id, label: `${f.name} · ${f.provider === 'aws' ? 'Lambda' : 'Azure'} · ${f.region}` })), { value: '*', label: 'Every function matching a filter' }]} /></Field>
+                {fnId === '*' && (
+                  <div className="grid grid-3" style={{ gap: 'var(--space-2)' }}>
+                    <Field label="Provider"><Select value={fProvider} onChange={(e) => setFProvider(e.target.value)} options={[{ value: '', label: 'Any' }, { value: 'aws', label: 'AWS' }, { value: 'azure', label: 'Azure' }]} /></Field>
+                    <Field label="Region"><Input mono value={fRegion} placeholder="any" onChange={(e) => setFRegion(e.target.value)} /></Field>
+                    <Field label="Service"><Input mono value={fService} placeholder="any" onChange={(e) => setFService(e.target.value)} /></Field>
+                  </div>
+                )}
+                <Field label="Metric"><Select value={faasMetric} onChange={(e) => { const m = e.target.value as FaasMetric; setFaasMetric(m); setRelTimeout(false); setRuleTh(m === 'error_rate' ? '5' : isDuration(m) ? String(Math.round((fn?.timeoutS ?? 30) * 800)) : '0'); }} options={FAAS_METRICS} /></Field>
+                <Field label="Name"><Input value={name} placeholder={finalName} onChange={(e) => setName(e.target.value)} /></Field>
+              </div>
+            </Card>
+          )}
+
+          {(kind === 'infra' || kind === 'faas') && (
+            <Card title="3 · Condition">
+              <div className="stack" style={{ gap: 'var(--space-3)' }}>
+                <div className="grid grid-2" style={{ gap: 'var(--space-2)' }}>
+                  <Field label={`Value (${ruleUnit})`}>
+                    <div className="row" style={{ gap: 'var(--space-1)' }}>
+                      <Segmented label="Operator" value={op} onChange={setOp} options={[{ id: '>', label: 'Above' }, { id: '<', label: 'Below' }]} />
+                      <Input mono aria-label="Threshold" value={ruleTh} onChange={(e) => setRuleTh(e.target.value)} inputMode="decimal" style={{ flex: 1, minWidth: 0 }} />
+                    </div>
+                  </Field>
+                  <ForField value={forMin} onChange={setForMin} />
+                </div>
+                {kind === 'infra' && <Field label="Across matching entities"><Segmented label="Aggregation" value={agg} onChange={setAgg} options={[{ id: 'max', label: 'Worst (max)' }, { id: 'avg', label: 'Average' }]} /></Field>}
+                {kind === 'faas' && isDuration(faasMetric) && (
+                  <Field label="Compare" hint={relative ? 'Each function against its own timeout, e.g. 0.8 = 80 % of it. Functions without a timeout (Azure) are skipped.' : undefined}>
+                    <Segmented label="Compare" value={relTimeout ? 'rel' : 'abs'} options={[{ id: 'abs', label: 'Milliseconds' }, { id: 'rel', label: 'Share of timeout' }]}
+                      onChange={(v) => { setRelTimeout(v === 'rel'); setRuleTh(v === 'rel' ? '0.8' : String(Math.round((fn?.timeoutS ?? 30) * 800))); }} />
+                  </Field>
+                )}
+                {kind === 'faas' && !relative && fn && fnId !== '*' && fn.timeoutS && isDuration(faasMetric) && (
+                  <span className="muted" style={{ fontSize: 'var(--text-sm)' }}>Timeout of {fn.name}: {fn.timeoutS} s · 80% = {ms(fn.timeoutS * 800)}</span>
+                )}
+                {condWindow && <span className="muted" style={{ fontSize: 'var(--text-sm)' }}>Evaluated over a {condWindow} window (from the template).</span>}
+              </div>
+            </Card>
+          )}
+
           {kind !== 'consumer_lag' && (
-            <Card title={kind === 'metric_threshold' || kind === 'anomaly' ? '4 · Notify' : '3 · Notify'}>
+            <Card title={kind === 'metric_threshold' || kind === 'anomaly' || kind === 'infra' || kind === 'faas' ? '4 · Notify' : '3 · Notify'}>
               <div className="stack" style={{ gap: 'var(--space-3)' }}>
                 <Field label="Severity"><Select value={severity} onChange={(e) => setSeverity(e.target.value)} options={[{ value: 'critical', label: 'Critical' }, { value: 'warning', label: 'Warning' }, { value: 'info', label: 'Info' }]} /></Field>
                 <div className="field"><span className="field__label">Notify</span><NotifyPicker value={channels} onChange={setChannels} disabled={readOnly} /></div>
@@ -356,6 +544,9 @@ export function AlertEditor() {
           {kind === 'composite' && <CompositePreview picked={monitors.filter((m) => picked.includes(m.id))} op={compOp} />}
           {kind === 'job_missed' && <JobPreview body={body!} every={every} grace={grace} seed={`${service}|${process}`} />}
           {kind === 'error_new' && <ErrorNewPreview body={body!} seed={errScope} />}
+          {(kind === 'infra' || kind === 'faas') && <RulePreview cap={(kind === 'infra' && INFRA_RATIO.has(infraMetric)) || (kind === 'faas' && faasMetric === 'error_rate') ? 1 : undefined} body={body!} seed={JSON.stringify(body)} threshold={ruleValue} below={op === '<'} thLabel={ruleLabel}
+            label={kind === 'infra' ? INFRA_METRIC_LABEL[infraMetric] : FAAS_METRICS.find((m) => m.value === faasMetric)!.label}
+            format={kind === 'infra' ? (INFRA_RATIO.has(infraMetric) ? (v: number) => pct(v, 0) : (v: number) => compact(v)) : relative ? (v: number) => `${v.toFixed(2)}×` : faasFmt(faasMetric)} />}
           {kind === 'metric_threshold' && !isApi && (
             <Card title={<span className="row"><Sparkles size={14} color="var(--accent)" />Recommendation</span>}>
               <p className="secondary">14-day p99 error rate for this endpoint is <strong>1.9%</strong>. A 2% threshold with a 5-minute window would have caught the 2 incidents on Oct 19 and Oct 22 with no false positives.</p>
@@ -502,6 +693,28 @@ function ErrorNewPreview({ body, seed }: { body: object; seed: string }) {
   return (
     <PreviewCard value={alerts(total)} hint="would have fired · one per new error group (first occurrence only)">
       <Columns timestamps={ts} height={220} format={(v) => compact(v)} series={[{ id: 'g', label: 'New error groups', data: groups, color: 'var(--series-8)' }]} />
+    </PreviewCard>
+  );
+}
+
+/** infra / faas: api replay when available, else a plausible curve around the threshold (mock). */
+function RulePreview({ body, seed, threshold, below, thLabel, label, format, cap }: {
+  body: object; seed: string; threshold: number; below: boolean; thLabel: string; label: string; format: (v: number) => string; cap?: number;
+}) {
+  const ts = timestamps('24h');
+  const p = useApiPreview(body);
+  if (isApi && !p) return <NoPreview />;
+  const th = Number.isFinite(threshold) ? threshold : 0;
+  const data = isApi ? fit(p!.data, ts.length)
+    : series(`rule-${seed}`, '24h', { base: th > 0 ? th * (below ? 1.4 : 0.62) : 0.3, noise: 0.3, spikeAt: 0.7, spikeMul: below ? 0.4 : th > 0 ? 1.9 : 9, spikeWidth: 2 })
+      .map((v) => (th === 0 || Number.isInteger(th) && th >= 1 && th < 50 ? Math.floor(v) : v))
+      .map((v) => (cap === undefined ? v : Math.min(cap, v)));
+  const hits = data.map((v) => (below ? v < th : v > th));
+  const episodes = isApi ? p!.episodes : episodesOf(hits);
+  return (
+    <PreviewCard value={alerts(episodes)} hint={<>would have fired · {hits.filter(Boolean).length} of {data.length} intervals {below ? 'below' : 'above'} {thLabel}</>}>
+      <TimeSeries timestamps={ts} height={280} area format={format} threshold={{ value: th, label: thLabel }}
+        series={[{ id: 'v', label, slot: 1, data }]} />
     </PreviewCard>
   );
 }

@@ -30,7 +30,9 @@ func (v Values) get(key, metric string) (Point, bool) {
 
 type cwQuery struct {
 	key, ns, metric, stat string
-	dims                  [][2]string
+	// as is the result label (default metric) — needed when one metric is read with several stats.
+	as   string
+	dims [][2]string
 }
 
 func q(key, ns, metric, stat string, dims ...[2]string) cwQuery {
@@ -93,10 +95,36 @@ func plan(rs *regionState) []cwQuery {
 	return qs
 }
 
-// fetch runs GetMetricData in batches of ≤500 queries over [end-10m, end) with 60 s periods and keeps the
-// newest datapoint of every series (end = start of the current minute → the last complete minute).
-func fetch(ctx context.Context, cw *cloudwatch.Client, qs []cwQuery, end time.Time) (Values, error) {
+// Series are all datapoints of the window: resource key → label → points, newest first.
+type Series map[string]map[string][]Point
+
+// newest keeps the newest datapoint of every series.
+func (s Series) newest() Values {
 	out := Values{}
+	for k, m := range s {
+		for label, pts := range m {
+			if len(pts) == 0 {
+				continue
+			}
+			if out[k] == nil {
+				out[k] = map[string]Point{}
+			}
+			out[k][label] = pts[0]
+		}
+	}
+	return out
+}
+
+// fetch runs GetMetricData and keeps the newest datapoint of every series (see fetchSeries).
+func fetch(ctx context.Context, cw *cloudwatch.Client, qs []cwQuery, end time.Time) (Values, error) {
+	s, err := fetchSeries(ctx, cw, qs, end)
+	return s.newest(), err
+}
+
+// fetchSeries runs GetMetricData in batches of ≤500 queries over [end-10m, end) with 60 s periods and keeps every
+// datapoint, newest first (end = start of the current minute → the last complete minute).
+func fetchSeries(ctx context.Context, cw *cloudwatch.Client, qs []cwQuery, end time.Time) (Series, error) {
+	out := Series{}
 	var errs error
 	for i := 0; i < len(qs); i += 500 {
 		batch := qs[i:min(i+500, len(qs))]
@@ -132,12 +160,16 @@ func fetch(ctx context.Context, cw *cloudwatch.Client, qs []cwQuery, end time.Ti
 				x := batch[j]
 				m := out[x.key]
 				if m == nil {
-					m = map[string]Point{}
+					m = map[string][]Point{}
 					out[x.key] = m
 				}
-				// Timestamps are descending; a later page never has a newer point for the same id.
-				if _, seen := m[x.metric]; !seen {
-					m[x.metric] = Point{Value: r.Values[0], TS: r.Timestamps[0]}
+				label := x.metric
+				if x.as != "" {
+					label = x.as
+				}
+				// Timestamps are descending; a later page only has older points for the same id.
+				for k := range min(len(r.Values), len(r.Timestamps)) {
+					m[label] = append(m[label], Point{Value: r.Values[k], TS: r.Timestamps[k]})
 				}
 			}
 		}
@@ -155,13 +187,14 @@ func (p *Provider) Collect(ctx context.Context, inv *model.Inventory, now time.T
 	end := now.Truncate(time.Minute)
 	var errs error
 	for i, rs := range st.regions {
-		qs := plan(rs)
+		qs := append(plan(rs), lambdaQueries(rs)...)
 		if len(qs) == 0 {
 			continue
 		}
-		v, err := fetch(ctx, p.regions[i].cw, qs, end)
+		s, err := fetchSeries(ctx, p.regions[i].cw, qs, end)
 		errs = errors.Join(errs, wrap(rs.region, "cloudwatch:GetMetricData", err))
-		res.Samples = append(res.Samples, Map(rs, v, p.cfg)...)
+		res.Samples = append(res.Samples, Map(rs, s.newest(), p.cfg)...)
+		res.Samples = append(res.Samples, MapLambda(rs, s)...)
 	}
 	return res, errs
 }

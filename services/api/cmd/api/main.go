@@ -21,6 +21,7 @@ import (
 	"github.com/tasktrooper/telemetry/services/api/internal/slack"
 	"github.com/tasktrooper/telemetry/services/api/internal/store"
 	"github.com/tasktrooper/telemetry/services/api/internal/symbolicate"
+	"github.com/tasktrooper/telemetry/services/pkg/aiquota"
 	"github.com/tasktrooper/telemetry/services/pkg/config"
 	"github.com/tasktrooper/telemetry/services/pkg/githubapp"
 	"github.com/tasktrooper/telemetry/services/pkg/logx"
@@ -63,6 +64,9 @@ func run(cfg config.Common, log *slog.Logger) error {
 	}
 	st := store.New(ch, pool)
 	st.SecretsKey = key
+	if st.AIQuota, err = aiquota.FromEnv(); err != nil {
+		return err
+	}
 	srv := &server.Server{
 		Store:        st,
 		CloudTest:    cloudcheck.Run,

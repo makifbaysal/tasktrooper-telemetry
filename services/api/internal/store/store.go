@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tasktrooper/telemetry/services/api/internal/timerange"
 	"github.com/tasktrooper/telemetry/services/api/internal/tq"
+	"github.com/tasktrooper/telemetry/services/pkg/aiquota"
 )
 
 // ErrNotFound is returned when an entity does not exist in the tenant.
@@ -42,6 +43,8 @@ type DB struct {
 	Pool *pgxpool.Pool
 	// SecretsKey seals UI-entered credentials (services/pkg/secrets); nil = secrets.Key() on first use.
 	SecretsKey []byte
+	// AIQuota is the AI quota config (plans, prices); nil = aiquota.FromEnv() on first use.
+	AIQuota *aiquota.Config
 }
 
 // New returns a store.

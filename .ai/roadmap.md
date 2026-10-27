@@ -59,3 +59,19 @@ Durum: servisler (`ingest`, `api`, `alerting`, `collector`, `integrations` = `tr
 - [x] `loadtest-ctl` + `loadtest-runner` (kendi Go motoru, ADR-015)
 - [x] Domain doğrulama, limitler
 - [x] Envanter/trafikten senaryo üretimi, canlı run ekranı
+
+## Faz 6 — AI kotası, altyapı ve serverless ✅
+- [x] AI kullanım kotası: kredi defteri, paket varsayılanları, org + üye limiti, %80/%100 bildirimi, Usage ekranı (ADR-018)
+- [x] trooper-agent `host` / `cluster` modları: host, container, process, K8s node/pod/workload, Warning event'leri (ADR-019)
+- [x] Helm chart (DaemonSet + Deployment + RBAC) + opsiyonel eBPF (OBI)
+- [x] Monitor kind `infra`, RCA'da pod/host sinyalleri
+- [x] AWS Lambda keşif + CloudWatch metrikleri, Azure Functions sağlayıcısı, `faas` monitor'ları, maliyet tahmini (ADR-020)
+- [x] `@trooper/node` `wrapLambda`
+- [x] UI: Hosts, Kubernetes, Serverless ekranları; servis detayında altyapı sekmesi
+- [x] K8s cluster modunda list yerine watch (binlerce pod üstü için)
+- [x] containerd/Podman host'ları, GPU ve Windows node metrikleri
+- [x] Azure: fonksiyon bazında metrik (App Insights), app setting'den servis eşlemesi
+- [x] Pod bazında trace/log filtresi, trace detay sayfası; iki Helm chart'ın birleştirilmesi (`services/collector/deploy/helm` eski DB chart'ı)
+- [x] Gerçek K8s doğrulaması: kind cluster (host + cluster modu, OOMKilled pod, watch); Lambda keşfi LocalStack ile
+- [ ] Gerçek EKS/AKS, Lambda CloudWatch metrikleri ve Azure hesabıyla doğrulama (hesap gerektirir)
+- [ ] NVIDIA dışı GPU'lar, cgroup v1 host'larında Docker/Podman'sız container metrikleri, gerçek Windows node testi

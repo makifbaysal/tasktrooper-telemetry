@@ -90,6 +90,9 @@ func secret(cfg map[string]any, keys ...string) string {
 
 // Deliver sends p (notification kind firing|resolved|reminder|acknowledged) to ch.
 func (d *Deliverer) Deliver(ctx context.Context, ch Channel, kind string, p Payload) error {
+	if kind == KindAIQuota {
+		return d.deliverAIQuota(ctx, ch, p)
+	}
 	switch kind {
 	case "resolved":
 		p.State, p.Reminder = "resolved", 0

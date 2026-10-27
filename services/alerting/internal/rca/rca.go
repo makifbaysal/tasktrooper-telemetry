@@ -75,6 +75,11 @@ type Result struct {
 	Confidence float64 `json:"confidence"`
 	Root       *Node   `json:"root"`
 	Summary    string  `json:"summary"`
+	// Infra: Kubernetes / host candidates of the service (infra.go); when one wins, Summary/Confidence are its and the
+	// call-tree answer moves to TreeSummary/TreeConfidence.
+	Infra          []InfraCandidate `json:"infra,omitempty"`
+	TreeSummary    string           `json:"treeSummary,omitempty"`
+	TreeConfidence *float64         `json:"treeConfidence,omitempty"`
 }
 
 type cand struct {

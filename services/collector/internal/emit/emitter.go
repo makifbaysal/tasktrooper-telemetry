@@ -28,6 +28,8 @@ type Options struct {
 	Logger   *slog.Logger
 	// Reader overrides the periodic OTLP reader (tests).
 	Reader sdkmetric.Reader
+	// Resource adds resource attributes (host / cluster modes: host.name, k8s.cluster.name, …).
+	Resource []attribute.KeyValue
 }
 
 // Emitter holds the latest gauge snapshot per target and the delta counters.
@@ -79,10 +81,10 @@ func New(ctx context.Context, o Options) (*Emitter, error) {
 		}
 		reader = sdkmetric.NewPeriodicReader(exp, sdkmetric.WithInterval(o.Interval), sdkmetric.WithTimeout(30*time.Second))
 	}
-	res, err := resource.Merge(resource.Default(), resource.NewSchemaless(
+	res, err := resource.Merge(resource.Default(), resource.NewSchemaless(append([]attribute.KeyValue{
 		semconv.ServiceName("trooper-agent"),
 		semconv.ServiceVersion(o.Version),
-	))
+	}, o.Resource...)...))
 	if err != nil {
 		return nil, err
 	}

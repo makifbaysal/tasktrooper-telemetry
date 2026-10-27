@@ -40,6 +40,12 @@ type Payload struct {
 	Deploy  *Deploy `json:"deploy,omitempty"`
 	AckedBy string  `json:"ackedBy,omitempty"`
 	AckedAt int64   `json:"ackedAt,omitempty"` // unix ms
+	// AI quota notifications (kind ai_quota, no incident; contracts §19): Threshold is the percent (80 | 100).
+	OrgID    int64    `json:"orgId,omitempty"`
+	Period   string   `json:"period,omitempty"` // YYYY-MM
+	Used     *float64 `json:"used,omitempty"`
+	Limit    *float64 `json:"limit,omitempty"`
+	ResetsAt int64    `json:"resetsAt,omitempty"` // unix ms
 }
 
 // Cause is payload.rootCause.

@@ -179,5 +179,9 @@ func (b *Batches) tables() []tableBatch {
 	add("broker_nodes_1m", flatten.BrokerNodeColumns, n, f)
 	n, f = mapRows(mb.BrokerTopics)
 	add("broker_topics_1m", flatten.BrokerTopicColumns, n, f)
+	for fam, rows := range mb.Infra {
+		n, f = mapRows(rows)
+		add(flatten.InfraTable(flatten.Family(fam)), flatten.InfraColumns(flatten.Family(fam)), n, f)
+	}
 	return out
 }

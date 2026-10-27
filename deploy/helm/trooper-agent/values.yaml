@@ -1,0 +1,217 @@
+# trooper-agent — the single TaskTrooper agent chart (contracts §20, §22, ADR-019).
+#
+# Kubernetes infrastructure (host + cluster):
+#   helm upgrade --install trooper-agent deploy/helm/trooper-agent -n tasktrooper --create-namespace \
+#     --set clusterName=prod-eks \
+#     --set dsn=https://<ingest key>@ingest.tasktrooper.io/<project>
+#
+# Databases / brokers only (no host / cluster monitoring):
+#   helm upgrade --install trooper-agent deploy/helm/trooper-agent -n tasktrooper --create-namespace \
+#     --set dsn=https://<ingest key>@ingest.tasktrooper.io/<project> \
+#     --set host.enabled=false --set cluster.enabled=false --set db.enabled=true \
+#     --set db.integrations.postgres.enabled=true \
+#     --set db.integrations.postgres.address=orders-db:5432 \
+#     --set db.integrations.postgres.passwordSecret.name=orders-db-monitor
+#
+# Renders: a Linux DaemonSet (mode host: node, containers via the kubelet, top processes, GPUs), a
+# 1-replica Deployment (mode cluster: nodes / pods / workloads + Warning events, and/or mode db:
+# databases / brokers from db.targets, db.integrations and/or db.fromApi), read-only RBAC, a Secret,
+# a ConfigMap with the static db targets, and optionally a Windows HostProcess DaemonSet
+# (windows.enabled) and an OpenTelemetry eBPF Instrumentation (OBI) DaemonSet (ebpf.enabled).
+
+# k8s.cluster.name on every metric / event. Required when host / cluster / windows / ebpf is enabled.
+clusterName: ""
+
+# Ingest DSN: <scheme>://<ingest key>@<host>[:port]/<project_id> (TT_DSN).
+dsn: ""
+# Use an existing Secret instead (keys: dsn, ingestKey; apiKey with db.fromApi).
+existingSecret: ""
+
+image:
+  repository: ghcr.io/tasktrooper/trooper-agent
+  tag: ""                # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+logLevel: info
+
+# cloud.provider / cloud.region resource attributes. Empty = detected from the node object
+# (spec.providerID, topology.kubernetes.io/region).
+cloud:
+  provider: ""
+  region: ""
+
+# Linux DaemonSet, TT_AGENT_MODES=host. hostPID + read-only /proc, /sys and / mounts so CPU, memory,
+# disk, network and processes are the node's. Always scheduled with kubernetes.io/os: linux.
+host:
+  enabled: true
+  topProcesses: 20          # TT_AGENT_TOP_PROCESSES (0 = off)
+  kubelet:
+    # TT_KUBELET_INSECURE: skip verification of the kubelet serving certificate. Needed on clusters
+    # whose kubelets use self-signed serving certs (kind, minikube, kubeadm without serverTLSBootstrap).
+    insecureSkipVerify: false
+  gpu:
+    # TT_AGENT_NVIDIA_SMI: path to nvidia-smi inside the container. Empty = look it up in PATH
+    # (GPU metrics are skipped when it is not found).
+    nvidiaSmi: ""
+  resources:
+    requests: { cpu: 30m, memory: 64Mi }
+    limits: { memory: 192Mi }
+  # run on every node, including tainted control-plane / GPU / spot nodes
+  tolerations:
+    - operator: Exists
+  nodeSelector: {}          # merged with kubernetes.io/os: linux
+  affinity: {}
+  priorityClassName: ""
+  podAnnotations: {}
+  extraEnv: []
+
+# Deployment (1 replica, Recreate), TT_AGENT_MODES=cluster: K8s API list + watch.
+# Also hosts mode db when db.enabled.
+cluster:
+  enabled: true
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+    limits: { memory: 256Mi }   # raise for clusters with many thousands of pods
+  tolerations: []
+  nodeSelector: {}          # merged with kubernetes.io/os: linux
+  affinity: {}
+  podAnnotations: {}
+  extraEnv: []
+
+# Database / message broker collector (TT_AGENT_MODES=db) in the cluster Deployment.
+# Needs at least one of: db.targets entries, an enabled db.integrations.*, or db.fromApi.apiUrl.
+db:
+  enabled: false
+  # Pull targets from the TaskTrooper api every 60 s (TT_API_URL / TT_API_KEY). Can be combined with
+  # static targets (static targets win on id clashes). apiKey goes into the chart Secret (key apiKey),
+  # or comes from existingSecret (key apiKey).
+  fromApi:
+    apiUrl: ""
+    apiKey: ""
+  # Only scrape targets whose `collector` is in this list (agent, direct, cloud). Empty = all.
+  # (TT_COLLECTOR_MODES)
+  modes: []
+  # Static targets, rendered into config.yaml (same schema as services/collector/examples/agent.yaml),
+  # mounted at /etc/trooper-agent and passed via TT_COLLECTOR_CONFIG.
+  targets:
+    interval: 15s
+    timeout: 10s
+    databases: []
+    #  - id: orders-db
+    #    engine: postgres
+    #    host: orders-db.internal
+    #    credentialsRef: env:ORDERS_DB_PASSWORD
+    brokerClusters: []
+    #  - id: kafka-main
+    #    kind: kafka
+    #    endpoint: b-1:9096,b-2:9096
+    #    auth: { mechanism: scram-sha-512, tls: true }
+    #    credentialsRef: env:KAFKA_MAIN_CREDS
+    #    nodes:                                   # optional Prometheus endpoints → trooper.broker.node.*
+    #      - { name: kafka-1, brokerId: 1, metricsUrl: "http://kafka-1:9100/metrics", diskMount: /var/lib/kafka }
+    #  - id: msk-orders                           # AWS MSK IAM: default AWS chain (IRSA → serviceAccount.annotations)
+    #    kind: kafka
+    #    endpoint: b-1.orders.abc.c2.kafka.eu-west-1.amazonaws.com:9098
+    #    auth: { mechanism: iam, awsRegion: eu-west-1 }   # optional roleArn / awsProfile
+    #  - id: confluent
+    #    kind: kafka
+    #    endpoint: pkc-xxx.confluent.cloud:9092
+    #    auth: { mechanism: oauthbearer, tls: true, tokenUrl: "https://idp/oauth2/token", scopes: [kafka] }
+    #    credentialsRef: env:KAFKA_OAUTH_CLIENT     # clientId:clientSecret (or a static token without tokenUrl)
+    #  - id: rabbit-jobs
+    #    kind: rabbitmq
+    #    endpoint: http://rabbit:15672               # rabbitmq_prometheus on :15692 is probed automatically
+    #    credentialsRef: env:RABBIT_JOBS_CREDS
+  # Shorthand integrations (one target per engine). Rendered as agent-mode databases.
+  # passwordSecret: the password is read from that Secret key into env TT_<ENGINE>_PASSWORD and
+  # referenced as credentialsRef env:TT_<ENGINE>_PASSWORD.
+  integrations:
+    postgres:
+      enabled: false
+      name: ""              # database id / name (default: postgres)
+      address: localhost:5432
+      user: trooper_monitor
+      database: postgres
+      tls: prefer
+      passwordSecret: { name: "", key: password }
+    mysql:
+      enabled: false
+      name: ""
+      address: localhost:3306
+      user: trooper_monitor
+      passwordSecret: { name: "", key: password }
+    redis:
+      enabled: false
+      name: ""
+      address: localhost:6379
+      user: ""
+      passwordSecret: { name: "", key: password }
+    mongodb:
+      enabled: false        # user needs the clusterMonitor role
+      name: ""
+      address: localhost:27017
+      user: trooper_monitor
+      topQueriesSource: auto   # auto ($queryStats, else profiler) | querystats | profiler | none
+      passwordSecret: { name: "", key: password }
+  # Extra env (e.g. secrets referenced by targets[].credentialsRef: env:NAME)
+  extraEnv: []
+  #  - name: ORDERS_DB_PASSWORD
+  #    valueFrom: { secretKeyRef: { name: orders-db-monitor, key: password } }
+  # Extra secret volumes (credentialsRef: file:/secrets/<name>/<key>)
+  extraSecretMounts: []
+  #  - name: kafka-main
+  #    secretName: kafka-main-creds
+  #    mountPath: /secrets/kafka-main
+
+# Windows nodes: a separate DaemonSet (TT_AGENT_MODES=host) running as a HostProcess container on
+# kubernetes.io/os: windows nodes (host metrics, containers via the kubelet, processes).
+windows:
+  enabled: false
+  image:
+    repository: ""          # default: image.repository
+    tag: ""                 # default: <appVersion>-windows
+    pullPolicy: IfNotPresent
+  topProcesses: 20
+  kubelet:
+    insecureSkipVerify: false
+  resources:
+    requests: { cpu: 30m, memory: 64Mi }
+    limits: { memory: 192Mi }
+  tolerations:
+    - operator: Exists
+  nodeSelector: {}          # merged with kubernetes.io/os: windows
+  podAnnotations: {}
+  extraEnv: []
+
+# OpenTelemetry eBPF Instrumentation (OBI): spans + RED metrics for services without an SDK,
+# sent over OTLP/HTTP to ingest-gw with the x-trooper-key header. Privileged DaemonSet (Linux only).
+ebpf:
+  enabled: false
+  image:
+    repository: otel/ebpf-instrument
+    tag: v0.15.2
+    pullPolicy: IfNotPresent
+  # OTLP endpoint (scheme://host[:port]); default: derived from dsn. Required with existingSecret.
+  endpoint: ""
+  # OBI config file (discovery, routes, …). Services already instrumented with an OTel SDK are
+  # skipped by OBI itself; kube-system & co. are excluded by default.
+  config:
+    discovery:
+      instrument:
+        - k8s_namespace: "*"
+    routes:
+      unmatched: heuristic
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+  tolerations:
+    - operator: Exists
+  nodeSelector: {}          # merged with kubernetes.io/os: linux
+  extraEnv: []
+
+serviceAccount:
+  create: true
+  name: ""
+  # e.g. IRSA for MSK IAM: eks.amazonaws.com/role-arn: arn:aws:iam::<account>:role/trooper-agent
+  annotations: {}

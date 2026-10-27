@@ -64,9 +64,11 @@ func run(once int64) error {
 
 	f := &factory.Factory{
 		Key: skey, Store: st, IngestKeys: keys, PublicIngestURL: os.Getenv("TT_PUBLIC_INGEST_URL"),
+		Log: log,
 		Endpoints: factory.Endpoints{
 			AWS: os.Getenv("TT_CLOUD_AWS_ENDPOINT"), GCP: os.Getenv("TT_CLOUD_GCP_ENDPOINT"),
 			Neon: os.Getenv("TT_CLOUD_NEON_URL"), Vercel: os.Getenv("TT_CLOUD_VERCEL_URL"),
+			AzureLogin: os.Getenv("TT_AZURE_LOGIN_URL"), AzureARM: os.Getenv("TT_AZURE_ARM_URL"),
 		},
 	}
 	r := runner.New(runner.Options{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -73,16 +74,20 @@ func UICriticality(c string) string {
 
 const repoSelect = `SELECT r.id, r.provider, r.full_name, r.default_branch, coalesce(r.last_analyzed_sha, ''), coalesce(r.status, ''),
   r.analyze_requested_at, r.analyzed_at, coalesce(r.error, ''), coalesce(r.languages, '{}'), coalesce(r.services, '{}'),
-  coalesce(r.installation_id, 0), coalesce(r.local_path, ''), coalesce(r.pending_paths, '{}') FROM repositories r`
+  coalesce(r.installation_id, 0), coalesce(r.local_path, ''), coalesce(r.pending_paths, '{}'), r.analysis FROM repositories r`
 
 func scanRepo(row pgx.Row) (model.Repo, error) {
 	var r model.Repo
 	var id, inst int64
 	var status string
 	var requested, analyzed *time.Time
+	var analysis []byte
 	if err := row.Scan(&id, &r.Provider, &r.Name, &r.Branch, &r.Sha, &status, &requested, &analyzed, &r.Error, &r.Languages,
-		&r.Services, &inst, &r.LocalPath, &r.PendingPaths); err != nil {
+		&r.Services, &inst, &r.LocalPath, &r.PendingPaths, &analysis); err != nil {
 		return r, err
+	}
+	if len(analysis) > 0 && string(analysis) != "null" {
+		r.Analysis = repoAnalysis(analysis) // codeintel's summary, incl. llm {status, reason?, credits} (contracts §19)
 	}
 	r.ID, r.InstallationID, r.LastAnalyzedSha = idStr(id), idStr(inst), r.Sha
 	r.WebhookActive = inst > 0 // GitHub App installations deliver push webhooks to codeintel
@@ -253,7 +258,8 @@ func (d *DB) AnalyzeRepo(ctx context.Context, id string) (*model.Repo, error) {
 	if err != nil {
 		return nil, err
 	}
-	tag, err := d.pg.Exec(ctx, `UPDATE repositories SET analyze_requested_at = now(), pending_paths = '{*}' WHERE {{tenant}} AND id = $1`, n)
+	tag, err := d.pg.Exec(ctx, `UPDATE repositories SET analyze_requested_at = now(), pending_paths = '{*}', analyze_requested_by = $2
+	  WHERE {{tenant}} AND id = $1`, n, nullID(ActorOf(ctx).UserID)) // session user; api keys / automation → NULL
 	if err != nil {
 		return nil, err
 	}
@@ -464,4 +470,22 @@ func (d *DB) RejectSuggestion(ctx context.Context, id string) (*model.CodeSugges
 		return nil, Conflict("suggestion is already " + s.State)
 	}
 	return s, nil
+}
+
+// repoAnalysis passes codeintel's analysis summary through, with llm.credits rounded to 2 decimals.
+func repoAnalysis(raw []byte) json.RawMessage {
+	var m map[string]any
+	if json.Unmarshal(raw, &m) != nil {
+		return json.RawMessage(raw)
+	}
+	if llm, ok := m["llm"].(map[string]any); ok {
+		if c, ok := llm["credits"].(float64); ok {
+			llm["credits"] = math.Round(c*100) / 100
+		}
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return json.RawMessage(raw)
+	}
+	return b
 }

@@ -147,6 +147,7 @@ type Store interface {
 
 	IdentityStore
 	ChatOpsStore
+	Phase6Store
 }
 
 var _ Store = (*store.DB)(nil)

@@ -1,0 +1,11 @@
+apiVersion: v2
+name: trooper-agent
+description: >-
+  TaskTrooper agent for Kubernetes — host / container / process / GPU metrics (Linux DaemonSet and optional
+  Windows HostProcess DaemonSet, mode host), cluster object state + Warning events (Deployment, mode cluster),
+  databases and message brokers (mode db, static targets and/or from the api) and optional eBPF
+  auto-instrumentation (OBI).
+type: application
+version: 0.3.0
+appVersion: "0.3.0"
+keywords: [tasktrooper, observability, kubernetes, host, containers, windows, ebpf, postgres, mysql, redis, mongodb, kafka, rabbitmq]
