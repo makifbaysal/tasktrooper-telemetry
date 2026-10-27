@@ -226,7 +226,7 @@ func (r *Runner) analyze(ctx context.Context, repo model.Repo) {
 	for _, w := range rep.Warnings {
 		log.Warn("analysis warning", "warning", w)
 	}
-	log.Info("analysis done", "sha", rep.SHA, "incremental", rep.Incremental, "changed", rep.Changed, "items", rep.Items,
+	log.Info("analysis done", "sha", rep.SHA, "incremental", rep.Incremental, "diff_source", rep.DiffSource, "changed", rep.Changed, "items", rep.Items,
 		"observed", rep.Observed, "shadows", rep.Shadows, "suggestions", rep.Suggestions, "scenarios", rep.Scenarios,
 		"llm_items", rep.LLMItems, "llm_status", rep.LLM.Status, "llm_credits", rep.LLM.Credits, "monitors_created", rep.Monitors.Created, "monitors_updated", rep.Monitors.Updated,
 		"monitors_deleted", rep.Monitors.Deleted, "dur", dur.Round(time.Millisecond))
