@@ -2,17 +2,30 @@ import Foundation
 #if canImport(TaskTrooper)
 import TaskTrooper
 #endif
+// Session replay: a separate module with SwiftPM; with CocoaPods the `TaskTrooper/Replay` subspec compiles into the
+// `TaskTrooper` module, and the podspec defines TROOPER_RN_REPLAY when it pulls that subspec in.
+#if canImport(TaskTrooperReplay)
+import TaskTrooperReplay
+#endif
+#if canImport(TaskTrooperReplay) || (TROOPER_RN_REPLAY && canImport(TaskTrooper))
+private let replayAvailable = true
+#else
+private let replayAvailable = false
+#endif
 
 /// Hybrid bridge logic (contracts.md §9) behind the `TrooperRum` module. Forwards to the TaskTrooper iOS SDK when it is
 /// compiled in (`canImport(TaskTrooper)`); otherwise context calls are no-ops and the process start comes from sysctl.
 @objc(TrooperRumBridge)
 public final class TrooperRumBridge: NSObject {
-    /// JS → native SDK. Only non-empty string values are forwarded.
+    /// JS → native SDK. Non-empty string values and the boolean `sampled` (JS RUM sampling decision, contracts.md §9)
+    /// are forwarded; `TrooperHybridContext(dictionary:)` reads `sampled` and native uses it for the adopted session.
     @objc public static func setContext(_ ctx: NSDictionary?) {
         #if canImport(TaskTrooper)
         var d: [String: Any] = [:]
         for (k, v) in ctx ?? [:] {
-            if let k = k as? String, let v = v as? String, !v.isEmpty { d[k] = v }
+            guard let k = k as? String else { continue }
+            if let v = v as? String, !v.isEmpty { d[k] = v }
+            else if k == "sampled", let v = v as? NSNumber { d[k] = v.boolValue }
         }
         guard let context = TrooperHybridContext(dictionary: d) else { return }
         TaskTrooper.setHybridContext(context)
@@ -25,6 +38,47 @@ public final class TrooperRumBridge: NSObject {
         if let ctx = TaskTrooper.hybridContext() { return ctx.dictionary as NSDictionary }
         #endif
         return nil
+    }
+
+    // MARK: - Session replay (contracts.md §23 "Hibrit uygulamalar")
+
+    /// Installs the native wireframe replay with the JS options (missing keys = native defaults). The RUM session is the
+    /// JS one (`setContext` → `TaskTrooper.setHybridContext`). False when the replay module is not compiled in.
+    @objc public static func startReplay(_ options: NSDictionary?) -> Bool {
+        guard replayAvailable else { return false }
+        #if canImport(TaskTrooperReplay) || (TROOPER_RN_REPLAY && canImport(TaskTrooper))
+        var o = TrooperReplayOptions()
+        if let v = options?["sampleRate"] as? NSNumber, (0...1).contains(v.doubleValue) { o.sampleRate = v.doubleValue }
+        if let v = options?["onErrorSampleRate"] as? NSNumber, (0...1).contains(v.doubleValue) { o.onErrorSampleRate = v.doubleValue }
+        if let v = options?["maskAllText"] as? NSNumber { o.maskAllText = v.boolValue }
+        TrooperReplay.install(o)
+        #endif
+        return true
+    }
+
+    /// Stops native replay (seals and sends the open segment); `startReplay` works again afterwards.
+    @objc public static func stopReplay() -> Bool {
+        #if canImport(TaskTrooperReplay) || (TROOPER_RN_REPLAY && canImport(TaskTrooper))
+        TrooperReplay.stop()
+        return true
+        #else
+        return false
+        #endif
+    }
+
+    @objc public static func isReplayRecording() -> Bool {
+        #if canImport(TaskTrooperReplay) || (TROOPER_RN_REPLAY && canImport(TaskTrooper))
+        return TrooperReplay.isRecording
+        #else
+        return false
+        #endif
+    }
+
+    /// A JS ERROR: the native error observer only sees native errors, so flush the on-error buffer explicitly.
+    @objc public static func notifyReplayError() {
+        #if canImport(TaskTrooperReplay) || (TROOPER_RN_REPLAY && canImport(TaskTrooper))
+        TrooperReplay.notifyError()
+        #endif
     }
 
     /// Unix epoch ms of process start (native SDK value if > 0, else sysctl), or nil if unknown.

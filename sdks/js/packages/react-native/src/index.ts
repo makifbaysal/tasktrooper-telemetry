@@ -1,6 +1,7 @@
 import { AppState, Dimensions, Platform } from 'react-native';
 import {
   Client,
+  hashToUnit,
   instrumentXhr,
   KeyValueOfflineStore,
   reportInternal,
@@ -12,7 +13,7 @@ import {
   type KeyValueStorage,
   type PropagationTarget,
 } from '@trooper/core';
-import { callBridge, defaultNativeBridge, type NativeBridge, type NativeContext } from './bridge';
+import { callBridge, defaultNativeBridge, type NativeBridge, type NativeContext, type NativeReplayOptions } from './bridge';
 import { toErrorPayload } from './errors';
 
 /** Captured as early as possible: import this package first in index.js for an accurate js_init app start. */
@@ -159,8 +160,12 @@ export class ReactNativeSdk {
     const b = this.bridge;
     if (!b?.setContext) return;
     const c = this.client;
+    const sessionId = c.sessions.peek()?.id;
+    const rate = this.options.sampleRate ?? 1;
     const ctx: NativeContext = {
-      session_id: c.sessions.peek()?.id,
+      session_id: sessionId,
+      // Same deterministic decision as the core client (hash of the session id), so native replay/crashes follow it.
+      sampled: sessionId ? rate >= 1 || hashToUnit(sessionId) < rate : undefined,
       anonymous_id: c.anonymousId,
       view_id: c.view?.id,
       view_name: c.view?.name,
@@ -200,11 +205,13 @@ export class ReactNativeSdk {
   }
 
   captureError(err: unknown, opts: CaptureErrorOptions = {}): void {
-    this.client.capture({
+    const ev = this.client.capture({
       type: 'ERROR',
       error: { ...toErrorPayload(err), source: opts.source ?? 'source', is_crash: !!opts.isCrash },
       attributes: toStringMap(opts.attributes, 4000),
     });
+    // The native replay only observes native errors: a JS ERROR must flush its on-error buffer too.
+    if (ev && replayStarted) notifyReplayError(this.bridge);
   }
 
   /** Screen change: VIEW_END for the previous screen, VIEW_START (with time to next frame) for the new one. */
@@ -387,5 +394,89 @@ export async function close(): Promise<void> {
   if (s) await s.close().catch((e) => reportInternal('close', e));
 }
 
-export { NATIVE_CHANNEL, NATIVE_MODULE_NAME, type NativeBridge, type NativeContext } from './bridge';
+// ---------------------------------------------------------------------------------------------
+// Session replay (ADR-021, contracts.md §23 "Hibrit uygulamalar"): React Native draws native views, so the native SDK's
+// wireframe replay records it as is. Started through the `TrooperRum` native module; the session is the JS one (setContext).
+// ---------------------------------------------------------------------------------------------
+
+export interface ReplayOptions {
+  /** Fraction of sessions recorded from the start (0..1). Native default 0.1. */
+  sampleRate?: number;
+  /** Fraction of the remaining sessions that keep the last 60 s in memory and upload them on an ERROR (0..1). Native default 1.0. */
+  onErrorSampleRate?: number;
+  /** Mask all text (length kept). Native default true; inputs are always masked. */
+  maskAllText?: boolean;
+}
+
+let replayStarted = false;
+let replayWarned = false;
+
+const replayBridge = (): NativeBridge | undefined => (sdk ? sdk.bridge : safe('replay.bridge', defaultNativeBridge));
+
+function warnOnce(message: string): void {
+  if (replayWarned) return;
+  replayWarned = true;
+  try {
+    console.warn(`[trooper] ${message}`);
+  } catch {
+    // no console
+  }
+}
+
+const rate = (v: unknown): number | undefined => (typeof v === 'number' && v >= 0 && v <= 1 ? v : undefined);
+
+function notifyReplayError(bridge: NativeBridge | undefined): void {
+  if (bridge?.notifyReplayError) void callBridge(() => bridge.notifyReplayError!());
+}
+
+/**
+ * Starts the native SDK's wireframe session replay (Android `trooper-replay`, iOS `TaskTrooperReplay`). Segments use the JS
+ * session id. Resolves true when native replay is installed; without the native SDK / replay module it is a no-op that
+ * resolves false and logs one console warning. Never rejects.
+ */
+export async function startReplay(options: ReplayOptions = {}): Promise<boolean> {
+  try {
+    const o: NativeReplayOptions = {};
+    const sr = rate(options?.sampleRate);
+    const er = rate(options?.onErrorSampleRate);
+    if (sr !== undefined) o.sampleRate = sr;
+    if (er !== undefined) o.onErrorSampleRate = er;
+    if (typeof options?.maskAllText === 'boolean') o.maskAllText = options.maskAllText;
+    const b = replayBridge();
+    const ok = (await callBridge(b?.startReplay ? () => b.startReplay!(o) : undefined)) === true;
+    if (ok) replayStarted = true;
+    else
+      warnOnce(
+        'session replay needs the TaskTrooper native SDK with its replay module (Android: trooper-replay; iOS: TROOPER_RN_NATIVE_SDK=1 pod install) — startReplay() is a no-op',
+      );
+    return ok;
+  } catch (e) {
+    reportInternal('startReplay', e);
+    return false;
+  }
+}
+
+/** Stops native replay for the rest of the process (open data is sent). Resolves true when the native SDK stopped it. */
+export async function stopReplay(): Promise<boolean> {
+  try {
+    replayStarted = false;
+    const b = replayBridge();
+    return (await callBridge(b?.stopReplay ? () => b.stopReplay!() : undefined)) === true;
+  } catch (e) {
+    reportInternal('stopReplay', e);
+    return false;
+  }
+}
+
+/** True while the native replay records the current session (false when only buffering for errors, stopped or absent). */
+export async function isReplayRecording(): Promise<boolean> {
+  try {
+    const b = replayBridge();
+    return (await callBridge(b?.isReplayRecording ? () => b.isReplayRecording!() : undefined)) === true;
+  } catch {
+    return false;
+  }
+}
+
+export { NATIVE_CHANNEL, NATIVE_MODULE_NAME, type NativeBridge, type NativeContext, type NativeReplayOptions } from './bridge';
 export type { KeyValueStorage, PropagationTarget, RumEvent } from '@trooper/core';
