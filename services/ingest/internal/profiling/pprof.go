@@ -20,8 +20,8 @@ const (
 var ErrNoSampleTypes = errors.New("pprof: no supported sample type (cpu, wall, alloc_*, inuse_*, goroutine, delay)")
 
 // mapSampleType maps a pprof sample type to a contracts §24 type ("" = skipped).
-func mapSampleType(st *profile.ValueType, blockHint bool) string {
-	switch strings.ToLower(st.Type) + "/" + strings.ToLower(st.Unit) {
+func mapSampleType(typ, unit string, blockHint bool) string {
+	switch strings.ToLower(typ) + "/" + strings.ToLower(unit) {
 	case "cpu/nanoseconds":
 		return "cpu"
 	case "wall/nanoseconds":
@@ -60,7 +60,7 @@ func parsePprof(raw []byte, o Options) ([]Series, error) {
 	var cols []col
 	seen := map[string]bool{}
 	for i, st := range p.SampleType {
-		if t := mapSampleType(st, blockHint); t != "" && !seen[t] {
+		if t := mapSampleType(st.Type, st.Unit, blockHint); t != "" && !seen[t] {
 			seen[t] = true
 			cols = append(cols, col{idx: i, agg: newAggregator(t, typeUnits[t]), scale: 1})
 		}
@@ -139,15 +139,19 @@ func (n frameNamer) function(f *profile.Function) string {
 	if f == nil {
 		return "[unknown]"
 	}
-	name := f.Name
+	return n.name(f.Name, f.SystemName, f.Filename)
+}
+
+// name builds a frame name from a function's name, system name and file (shared by pprof and OTLP).
+func (n frameNamer) name(name, systemName, filename string) string {
 	if name == "" {
-		name = f.SystemName
+		name = systemName
 	}
 	if n.node {
 		if name == "" {
 			name = "(anonymous)"
 		}
-		if file := strings.TrimPrefix(f.Filename, "file://"); file != "" {
+		if file := strings.TrimPrefix(filename, "file://"); file != "" {
 			name += " (" + file + ")"
 		}
 	} else if name == "" {

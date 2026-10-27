@@ -85,6 +85,10 @@ var (
 	WriterReplayDisabled = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "tt_writer_replay_disabled", Help: "1 when S3 is not configured / not reachable at start and tt.replay is not consumed (contracts §23).",
 	})
+	WriterOTLPProfiles = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "tt_ingest_writer_otlp_profiles_total",
+		Help: "OTLP Profile messages per outcome (written; skipped_type = no contracts §24 mapping; skipped_empty = no non-zero sample; no_service = resource without service.name, written as unknown_service).",
+	}, []string{"outcome"})
 	WriterSpansSampled = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "tt_ingest_writer_tail_sampling_spans_total", Help: "Tail sampling decisions per span (keep_forced = error/slow trace, keep_sampled, drop).",
 	}, []string{"decision"})

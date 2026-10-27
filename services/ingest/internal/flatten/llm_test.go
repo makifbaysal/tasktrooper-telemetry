@@ -47,6 +47,15 @@ func TestLLMSpans(t *testing.T) {
 			wantDep: "anthropic · claude-sonnet-4-5", wantKind: "ai", wantAttrs: map[string]string{"gen_ai.provider.name": "anthropic"},
 		},
 		{
+			name: "anthropic sdk native span aliases",
+			spans: []*tracepb.Span{span(1, 0, client, attrs("gen_ai.operation.name", "chat", "gen_ai.provider.name", "anthropic",
+				"gen_ai.request.model", "claude-sonnet-4-5", "gen_ai.usage.input_tokens", 2400, "gen_ai.usage.cache_write.input_tokens", 2300,
+				"gen_ai.response.time_to_first_chunk", 0.75))},
+			wantDep: "anthropic · claude-sonnet-4-5", wantKind: "ai",
+			wantAttrs: map[string]string{"gen_ai.usage.cache_creation.input_tokens": "2300", "gen_ai.usage.cache_write.input_tokens": "",
+				"trooper.llm.ttft_ms": "750"},
+		},
+		{
 			name:     "embeddings",
 			spans:    []*tracepb.Span{span(1, 0, client, attrs("gen_ai.operation.name", "embeddings", "gen_ai.provider.name", "openai", "gen_ai.request.model", "text-embedding-3-small"))},
 			wantDep:  "openai · text-embedding-3-small",

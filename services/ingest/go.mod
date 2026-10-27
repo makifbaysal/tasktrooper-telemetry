@@ -16,11 +16,14 @@ require (
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/tasktrooper/telemetry/services/pkg v0.0.0
 	github.com/twmb/franz-go v1.22.2
+	github.com/twmb/franz-go/pkg/kmsg v1.15.0
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.47.0
 	go.opentelemetry.io/otel/sdk v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
 	go.opentelemetry.io/proto/otlp v1.11.1
+	go.opentelemetry.io/proto/otlp/collector/profiles/v1development v0.4.1
+	go.opentelemetry.io/proto/otlp/profiles/v1development v0.4.1
 	golang.org/x/sync v0.24.0
 	golang.org/x/time v0.16.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261005182115-fad411399dd8
@@ -60,7 +63,6 @@ require (
 	github.com/prometheus/procfs v0.21.1 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
-	github.com/twmb/franz-go/pkg/kmsg v1.15.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.47.0 // indirect
 	go.opentelemetry.io/otel/log v1.47.0 // indirect
