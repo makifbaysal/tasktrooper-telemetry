@@ -34,6 +34,9 @@ VALUES (1, 'local', 'acme/shop', 'main', '/path/to/checkout');
 | `TT_GITHUB_WEBHOOK_SECRET` | — | App webhook secret (literal or `env:`/`file:` ref) |
 | `ANTHROPIC_API_KEY` + `TT_CODEINTEL_MODEL` | — | both set → LLM enrichment; otherwise static rules only. No model id is hard-coded |
 | `TT_CODEINTEL_LLM_MAX_ITEMS` | `300` | items sent to the LLM per analysis (most critical first) |
+| `TT_AI_PRICES` | — | AI quota price table `<model>=<in>/<out>,…` (USD per million tokens; exact id, else longest prefix) |
+| `TT_AI_DEFAULT_PRICE` | `3/15` | price of models missing from `TT_AI_PRICES` |
+| `TT_AI_PLAN_CREDITS` | `free=100,team=5000,enterprise=-1` | monthly credits per `orgs.plan` (1 credit = 0.01 USD; -1 unlimited) |
 | `TT_CODEINTEL_WORKDIR` | OS temp | where clones go (deleted after each analysis) |
 | `TT_CODEINTEL_INTERVAL` | `15s` | scheduler tick |
 | `TT_CODEINTEL_DEBOUNCE` | `30s` | quiet time after the last push before re-analyzing |
@@ -104,3 +107,11 @@ Service mapping: `.trooper/config.yaml` (`services: [{path, name}]`) → SDK ini
 
 Metrics: `codeintel_analyses_total{result}`, `codeintel_webhooks_total{event,result}`, `codeintel_repositories`,
 `codeintel_errors_total{stage}`, `codeintel_items_total`, `codeintel_llm_items_total`, `codeintel_analysis_seconds_total`.
+
+## AI quota
+
+Every LLM batch is checked against the org's monthly AI credits (ADR-018, `services/pkg/aiquota`, `.ai/code-intelligence.md`
+§ AI kotası) before it is sent and recorded in `ai_usage` (`feature=codeintel.enrich`, `ref=repo:<id>`) after it returns. The member
+cap applies when `repositories.analyze_requested_by` is set (manual analysis from the dashboard); webhook-queued analyses clear it.
+A denial keeps the remaining items on static criticality; the result lands in `repositories.analysis.llm`
+(`{status: ok|disabled|quota_exceeded, reason?, credits, skipped?}`).

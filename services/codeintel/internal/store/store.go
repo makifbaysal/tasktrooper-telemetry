@@ -51,12 +51,12 @@ func (s *Store) Ping(ctx context.Context) error { return s.DB.Ping(ctx) }
 
 const repoCols = `r.id, r.project_id, p.org_id, r.provider, r.full_name, r.default_branch, coalesce(r.last_analyzed_sha, ''), r.status,
 	coalesce(r.installation_id, 0), coalesce(r.credentials_ref, ''), coalesce(r.local_path, ''), coalesce(r.webhook_secret_ref, ''),
-	r.analyze_requested_at, r.analyzed_at, r.analysis_started_at`
+	r.analyze_requested_at, r.analyzed_at, r.analysis_started_at, r.analyze_requested_by`
 
 func scanRepo(r pgx.CollectableRow) (model.Repo, error) {
 	var x model.Repo
 	err := r.Scan(&x.ID, &x.ProjectID, &x.OrgID, &x.Provider, &x.FullName, &x.DefaultBranch, &x.LastAnalyzedSHA, &x.Status,
-		&x.InstallationID, &x.CredentialsRef, &x.LocalPath, &x.WebhookSecretRef, &x.AnalyzeRequestedAt, &x.AnalyzedAt, &x.AnalysisStartedAt)
+		&x.InstallationID, &x.CredentialsRef, &x.LocalPath, &x.WebhookSecretRef, &x.AnalyzeRequestedAt, &x.AnalyzedAt, &x.AnalysisStartedAt, &x.AnalyzeRequestedBy)
 	return x, err
 }
 
@@ -104,12 +104,17 @@ func (s *Store) Claim(ctx context.Context, id int64, staleAfter time.Duration) (
 }
 
 // FinishOK records a successful analysis. A re-analysis requested while this one ran keeps the repo due
-// (analyzed_at = start time). No-op when the claim was lost (stale retake or disconnect).
-func (s *Store) FinishOK(ctx context.Context, id int64, started time.Time, sha string, languages, services []string) error {
+// (analyzed_at = start time). No-op when the claim was lost (stale retake or disconnect). summary (nil: kept) is the
+// repositories.analysis jsonb the api passes through (LLM status, contracts §19).
+func (s *Store) FinishOK(ctx context.Context, id int64, started time.Time, sha string, languages, services []string, summary *model.Analysis) error {
+	var sum []byte
+	if summary != nil {
+		sum, _ = json.Marshal(summary)
+	}
 	_, err := s.DB.Exec(ctx, `UPDATE repositories SET status = 'ready', error = NULL, analysis_started_at = NULL,
 		analyzed_at = CASE WHEN analyze_requested_at > $2 THEN $2 ELSE now() END,
-		last_analyzed_sha = $3, languages = $4, services = $5
-		WHERE id = $1 AND status = 'analyzing' AND analysis_started_at = $2`, id, started, sha, nonNil(languages), nonNil(services))
+		last_analyzed_sha = $3, languages = $4, services = $5, analysis = coalesce($6::jsonb, analysis)
+		WHERE id = $1 AND status = 'analyzing' AND analysis_started_at = $2`, id, started, sha, nonNil(languages), nonNil(services), sum)
 	return err
 }
 
@@ -135,7 +140,7 @@ func (s *Store) RequestAnalysis(ctx context.Context, id int64, paths []string) e
 	if err := tx.QueryRow(ctx, `SELECT coalesce(pending_paths, '{}') FROM repositories WHERE id = $1 FOR UPDATE`, id).Scan(&cur); err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `UPDATE repositories SET analyze_requested_at = now(), pending_paths = $2 WHERE id = $1`, id, MergePaths(cur, paths))
+	_, err = tx.Exec(ctx, `UPDATE repositories SET analyze_requested_at = now(), analyze_requested_by = NULL, pending_paths = $2 WHERE id = $1`, id, MergePaths(cur, paths))
 	if err != nil {
 		return err
 	}
@@ -178,7 +183,7 @@ func (s *Store) SetInstallationRepos(ctx context.Context, installationID int64, 
 	}
 	var sql string
 	if connected {
-		sql = `UPDATE repositories SET status = 'pending', analyze_requested_at = now(), pending_paths = '{*}', installation_id = $1
+		sql = `UPDATE repositories SET status = 'pending', analyze_requested_at = now(), analyze_requested_by = NULL, pending_paths = '{*}', installation_id = $1
 			WHERE provider = 'github' AND lower(full_name) = ANY($2) AND status = 'disconnected'
 			  AND (installation_id = $1 OR installation_id IS NULL)`
 	} else {
@@ -218,7 +223,7 @@ func (s *Store) InstallationBack(ctx context.Context, installationID int64) erro
 		WHERE provider = 'github' AND config->>'installationId' = $1`, strconv.FormatInt(installationID, 10)); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE repositories SET status = 'pending', analyze_requested_at = now(), pending_paths = '{*}'
+	if _, err := tx.Exec(ctx, `UPDATE repositories SET status = 'pending', analyze_requested_at = now(), analyze_requested_by = NULL, pending_paths = '{*}'
 		WHERE installation_id = $1 AND status = 'disconnected'`, installationID); err != nil {
 		return err
 	}

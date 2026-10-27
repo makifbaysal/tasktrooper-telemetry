@@ -6,9 +6,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"path"
 	"sort"
 	"strings"
+
+	"github.com/tasktrooper/telemetry/services/pkg/aiquota"
 
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/ascode"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/enrich"
@@ -42,8 +45,14 @@ type Analyzer struct {
 	Fetcher     Fetcher
 	Traffic     observe.Source  // nil: ClickHouse not configured
 	LLM         enrich.Enricher // nil: ANTHROPIC_API_KEY / TT_CODEINTEL_MODEL not set
+	Quota       Budgets         // nil: no AI quota (unlimited)
 	MaxLLMItems int             // per analysis (default 300)
 	Log         *slog.Logger
+}
+
+// Budgets hands out the AI quota budget of one analysis (implemented by quota.Gate).
+type Budgets interface {
+	For(repo model.Repo, feature string) enrich.Budget
 }
 
 // Report summarizes one analysis.
@@ -59,6 +68,7 @@ type Report struct {
 	Suggestions int
 	Scenarios   int
 	LLMItems    int
+	LLM         model.LLMStatus // ok | disabled | quota_exceeded (+ credits spent)
 	Monitors    store.SyncResult
 	Warnings    []string
 }
@@ -176,7 +186,9 @@ func (a *Analyzer) Run(ctx context.Context, repo model.Repo, pending []string) (
 	rep.Shadows = len(shadows)
 
 	// LLM for new or changed code, most critical first.
+	rep.LLM.Status = model.LLMDisabled
 	if a.LLM != nil {
+		rep.LLM.Status = model.LLMOK
 		var todo []*model.Item
 		for _, it := range items {
 			if it.LLM == nil && it.Snippet != "" && it.Kind != model.KindDependency && it.Kind != model.KindView {
@@ -195,8 +207,17 @@ func (a *Analyzer) Run(ctx context.Context, repo model.Repo, pending []string) (
 			todo = todo[:limit]
 		}
 		if len(todo) > 0 {
-			if err := a.LLM.Enrich(ctx, repoSummary(repo, rep, items), todo); err != nil {
+			var budget enrich.Budget
+			if a.Quota != nil {
+				budget = a.Quota.For(repo, aiquota.FeatureCodeintelEnrich)
+			}
+			out, err := a.LLM.Enrich(ctx, repoSummary(repo, rep, items), todo, budget)
+			if err != nil {
 				rep.Warnings = append(rep.Warnings, "llm: "+err.Error())
+			}
+			rep.LLM = model.LLMStatus{Status: orDefault(out.Status, model.LLMOK), Reason: out.Reason, Credits: math.Round(out.Credits*1e4) / 1e4, Skipped: out.Skipped}
+			if out.Status == model.LLMQuotaExceeded {
+				rep.Warnings = append(rep.Warnings, fmt.Sprintf("llm: AI quota exceeded (%s); %d items kept static criticality", out.Reason, out.Skipped))
 			}
 			for _, it := range todo {
 				if it.LLM != nil {
@@ -256,4 +277,16 @@ func repoSummary(repo model.Repo, rep *Report, items []*model.Item) enrich.RepoS
 		s.Inventory = append(s.Inventory, strings.Join([]string{it.Kind, it.Service, it.Key}, " "))
 	}
 	return s
+}
+
+func orDefault(s, d string) string {
+	if s == "" {
+		return d
+	}
+	return s
+}
+
+// Summary is the repositories.analysis jsonb of a finished analysis.
+func (r *Report) Summary() *model.Analysis {
+	return &model.Analysis{SHA: r.SHA, Incremental: r.Incremental, Items: r.Items, LLMItems: r.LLMItems, LLM: r.LLM}
 }

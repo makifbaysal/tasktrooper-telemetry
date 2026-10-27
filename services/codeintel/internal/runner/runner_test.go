@@ -46,7 +46,7 @@ func (s *fakeStore) Claim(_ context.Context, id int64, _ time.Duration) (time.Ti
 	return time.Now(), p, true, nil
 }
 
-func (s *fakeStore) FinishOK(_ context.Context, id int64, _ time.Time, _ string, _, _ []string) error {
+func (s *fakeStore) FinishOK(_ context.Context, id int64, _ time.Time, _ string, _, _ []string, _ *model.Analysis) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.claimed[id] = false

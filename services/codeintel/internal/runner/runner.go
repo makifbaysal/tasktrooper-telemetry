@@ -21,7 +21,7 @@ import (
 type Store interface {
 	Repos(ctx context.Context) ([]model.Repo, error)
 	Claim(ctx context.Context, id int64, staleAfter time.Duration) (time.Time, []string, bool, error)
-	FinishOK(ctx context.Context, id int64, started time.Time, sha string, languages, services []string) error
+	FinishOK(ctx context.Context, id int64, started time.Time, sha string, languages, services []string, summary *model.Analysis) error
 	FinishError(ctx context.Context, id int64, started time.Time, msg string, pending []string) error
 }
 
@@ -216,7 +216,7 @@ func (r *Runner) analyze(ctx context.Context, repo model.Repo) {
 	r.mu.Lock()
 	delete(r.failed, repo.ID)
 	r.mu.Unlock()
-	if err := r.Store.FinishOK(fctx, repo.ID, started, rep.SHA, rep.Languages, rep.Services); err != nil {
+	if err := r.Store.FinishOK(fctx, repo.ID, started, rep.SHA, rep.Languages, rep.Services, rep.Summary()); err != nil {
 		log.Error("record analysis", "err", err)
 		return
 	}
@@ -228,7 +228,7 @@ func (r *Runner) analyze(ctx context.Context, repo model.Repo) {
 	}
 	log.Info("analysis done", "sha", rep.SHA, "incremental", rep.Incremental, "changed", rep.Changed, "items", rep.Items,
 		"observed", rep.Observed, "shadows", rep.Shadows, "suggestions", rep.Suggestions, "scenarios", rep.Scenarios,
-		"llm_items", rep.LLMItems, "monitors_created", rep.Monitors.Created, "monitors_updated", rep.Monitors.Updated,
+		"llm_items", rep.LLMItems, "llm_status", rep.LLM.Status, "llm_credits", rep.LLM.Credits, "monitors_created", rep.Monitors.Created, "monitors_updated", rep.Monitors.Updated,
 		"monitors_deleted", rep.Monitors.Deleted, "dur", dur.Round(time.Millisecond))
 }
 

@@ -44,7 +44,7 @@ type fakeLLM struct {
 }
 
 func (f *fakeLLM) Model() string { return "fake-model" }
-func (f *fakeLLM) Enrich(_ context.Context, _ enrich.RepoSummary, items []*model.Item) error {
+func (f *fakeLLM) Enrich(_ context.Context, _ enrich.RepoSummary, items []*model.Item, _ enrich.Budget) (enrich.Outcome, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, it := range items {
@@ -52,7 +52,7 @@ func (f *fakeLLM) Enrich(_ context.Context, _ enrich.RepoSummary, items []*model
 		enrich.Apply(it, &model.LLMResult{Criticality: it.Criticality, Summary: "llm: " + it.Key, Model: "fake-model",
 			LoadtestHint: &model.LoadtestHint{PayloadExample: json.RawMessage(`{"sku":"A-1","qty":1}`)}})
 	}
-	return nil
+	return enrich.Outcome{Status: model.LLMOK}, nil
 }
 func (f *fakeLLM) reset() []string {
 	f.mu.Lock()
@@ -191,7 +191,7 @@ func TestAnalyzeEndToEnd(t *testing.T) {
 		if rep.Incremental != wantIncremental {
 			t.Fatalf("incremental=%v pending=%v", rep.Incremental, pending)
 		}
-		if err := st.FinishOK(ctx, repoID, started, rep.SHA, rep.Languages, rep.Services); err != nil {
+		if err := st.FinishOK(ctx, repoID, started, rep.SHA, rep.Languages, rep.Services, rep.Summary()); err != nil {
 			t.Fatal(err)
 		}
 		return rep

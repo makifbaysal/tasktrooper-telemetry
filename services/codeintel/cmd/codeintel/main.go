@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tasktrooper/telemetry/services/pkg/aiquota"
 	"github.com/tasktrooper/telemetry/services/pkg/config"
 	"github.com/tasktrooper/telemetry/services/pkg/githubapp"
 	"github.com/tasktrooper/telemetry/services/pkg/logx"
@@ -26,6 +27,7 @@ import (
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/model"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/obs"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/observe"
+	"github.com/tasktrooper/telemetry/services/codeintel/internal/quota"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/runner"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/source"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/store"
@@ -82,6 +84,11 @@ func run(once int64) error {
 		log.Info("LLM enrichment disabled (set ANTHROPIC_API_KEY and TT_CODEINTEL_MODEL); static criticality rules only")
 	}
 
+	qcfg, err := aiquota.FromEnv()
+	if err != nil {
+		return err
+	}
+
 	an := &analyze.Analyzer{
 		Store: st,
 		Fetcher: &source.Fetcher{WorkDir: config.String("TT_CODEINTEL_WORKDIR", ""), App: app, Token: resolve,
@@ -89,6 +96,7 @@ func run(once int64) error {
 		Traffic:     &lazyClickHouse{url: common.ClickHouseURL},
 		LLM:         llm,
 		MaxLLMItems: config.Int("TT_CODEINTEL_LLM_MAX_ITEMS", 300),
+		Quota:       &quota.Gate{Store: quota.PGStore{Pool: st.DB}, Config: qcfg, Log: log},
 		Log:         log,
 	}
 	if once > 0 {
@@ -162,9 +170,10 @@ func analyzeOnce(ctx context.Context, st *store.Store, an *analyze.Analyzer, id 
 		_ = st.FinishError(context.WithoutCancel(ctx), id, started, err.Error(), []string{store.FullScan})
 		return err
 	}
-	if err := st.FinishOK(ctx, id, started, rep.SHA, rep.Languages, rep.Services); err != nil {
+	if err := st.FinishOK(ctx, id, started, rep.SHA, rep.Languages, rep.Services, rep.Summary()); err != nil {
 		return err
 	}
+	fmt.Printf("llm: %s %s (%.2f credits, %d skipped)\n", rep.LLM.Status, rep.LLM.Reason, rep.LLM.Credits, rep.LLM.Skipped)
 	fmt.Printf("%s @ %s: %d items (%d observed, %d shadow), %d suggestions, %d load test drafts, %d LLM; monitors +%d ~%d -%d\n",
 		repo.FullName, rep.SHA, rep.Items, rep.Observed, rep.Shadows, rep.Suggestions, rep.Scenarios, rep.LLMItems,
 		rep.Monitors.Created, rep.Monitors.Updated, rep.Monitors.Deleted)

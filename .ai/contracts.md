@@ -443,14 +443,16 @@ CREATE TABLE IF NOT EXISTS ai_quota_alerts (org_id bigint, period date, threshol
 - `TT_AI_PRICES="<model>=<in>/<out>,..."`, bilinmeyen model → `TT_AI_DEFAULT_PRICE` (varsayılan `3/15`).
 - `TT_AI_PLAN_CREDITS="free=100,team=5000,enterprise=-1"` (varsayılan bu). Bilinmeyen plan → `free`.
 - Etkin org limiti: `orgs.ai_monthly_credits` ?? plan varsayılanı; `-1` sınırsız. Üye limiti: `memberships.ai_monthly_credits`.
-- `Reserve(ctx, tx, Request{OrgID, ProjectID, UserID *int64, Feature, EstimateCredits})` → `Decision{Allowed, Reason
+- `(*Config).Reserve(ctx, tx, Request{OrgID, ProjectID, UserID *int64, Feature, EstimateCredits})` → `Decision{Allowed, Reason
   ("org_limit"|"user_limit"), OrgUsed, OrgLimit, UserUsed, UserLimit}`. Transaction içinde
   `pg_advisory_xact_lock(7140, org_id)`; kullanım = bu ayın `ai_usage` SUM'ı. `Record(ctx, db, Usage{...})` gerçek token ile yazar.
   Postgres erişimi küçük bir arayüzle (`Exec`, `QueryRow(...).Scan`); pgx adaptörünü çağıran yazar.
 - Tahmin: `ceil(promptChars/4) × in + maxTokens × out`.
 
 **codeintel:** her LLM batch'inden önce `Reserve`; red → kalan öğeler LLM'siz (statik), analiz özetine
-`llm: {status: "ok"|"disabled"|"quota_exceeded", reason?, credits}` yazılır (api `inventory.analysis.llm` olarak döner).
+`repositories.analysis` (jsonb, 010) yazılır: `{sha, incremental, items, llmItems, llm: {status: "ok"|"disabled"|
+"quota_exceeded", reason?: "org_limit"|"user_limit"|"check_failed", credits, skipped?}}` (api `inventory.analysis.llm` olarak
+döner; `check_failed` = kota kontrolü hata verdi, LLM fail-closed atlanır).
 `UserID` = `repositories.analyze_requested_by` (manuel analizde api doldurur; webhook/otomatik isteklerde codeintel NULL'lar).
 
 **Eşik bildirimi:** alert-engine 5 dk'da bir: org kullanımı ≥ %80 / ≥ %100 ve `ai_quota_alerts`'te o ay+eşik yoksa
