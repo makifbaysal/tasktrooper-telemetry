@@ -28,6 +28,7 @@ var Kinds = map[string]bool{
 	"log_pattern_new": true, "error_new": true, "consumer_lag": true, "job_missed": true, "rum_vital": true, "kpi_burn": true,
 	"error_rate": true, "throughput": true, "apdex": true, "log_count": true, "log_pattern": true, "dlq": true,
 	"consumer_failures": true, "crash_rate": true, "composite": true,
+	"infra": true, "faas": true, "llm": true,
 }
 
 var lagMetrics = map[string]bool{"lag": true, "time_behind": true, "partition_lag": true, "growing": true, "not_drained": true,

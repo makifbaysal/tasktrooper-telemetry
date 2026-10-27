@@ -99,6 +99,7 @@ and `min_requests` also accepted; `minRequests` suppresses breaches on low traff
 | `crash_rate` | `rum_views_1m` | `app`, `view`, `per: session \| view` | crashes / sessions |
 | `infra` | `hosts_1m`, `containers_1m`, `k8s_pods_1m`, `k8s_nodes_1m`, `k8s_workloads_1m` | `{entity: host \| container \| pod \| node \| workload, metric, agg: avg (default) \| max, filter: {cluster?, namespace?, host?, workload?, service?}}`; `filter.service` defaults to `target.service`. Metrics: host `cpu \| memory \| disk \| load1`; container/pod `cpu_ratio \| memory_ratio \| restarts \| throttled`; pod/node `not_ready`; workload `unavailable` | worst entity (max; min for `<`/`<=` ops), or the count of not-ready entities |
 | `faas` | `faas_1m`, `spans` (cold starts), Postgres `serverless_functions` | `{functionId? , filter: {provider?, region?, service?}, metric: invocations \| errors \| error_rate \| throttles \| duration_p95 \| duration_p99 \| cold_starts \| concurrency \| iterator_age_ms, relativeToTimeout?}` | worst function |
+| `llm` | `llm_1m` (windows ≥ 6 h: whole hours from `llm_1h`, edges from `llm_1m`), Postgres `llm_prices` | `{filter: {service?, provider?, model?, route?, method?, operation?}, metric: cost_usd \| cost_usd_per_hour \| tokens \| input_tokens \| output_tokens \| calls \| errors \| error_rate \| p95_ms \| ttft_p95_ms}`; `filter.service` defaults to `target.service` | USD, USD/h, tokens, count, ratio or ms over the window |
 
 **Infra.** Per entity: per-minute `max` over the AggregatingMergeTree rows (non-finite = not reported, skipped), then
 `agg` over the window. `cpu_ratio`/`memory_ratio` = Σ usage / Σ limit of the entity's containers that report both
@@ -122,10 +123,27 @@ window's newest — deleted pods, removed nodes — are ignored); value 0 when e
 `duration_*` breaches. A metric no function reports in the window (e.g. Azure throttles) → `no_data`.
 `detail`: `{metric, matched, entities: [{id, provider, region, service?, invocations, value}…]}`.
 
+**LLM** (ADR-023, contracts §25). One query grouped by service × provider × model over the window: sums of calls,
+errors, input / output / cache read / cache write tokens, and for `p95_ms` / `ttft_p95_ms` the merged
+`quantilesTDigestWeightedMerge(0.5, 0.95, 0.99)` digests (same levels as the rollup state; overall p95 from a second
+query over all groups). `tokens` = input + output (input already includes cache tokens). Cost per group comes from
+`services/pkg/llmprice` (embedded defaults + the org's `llm_prices` rows, cached 1 min per org; a failed load uses the
+defaults): (input − cache read − cache write) × input + cache read × cacheRead + cache write × cacheWrite + output × output.
+Groups without a price are excluded from `cost_*` (listed in `detail.unpricedModels`); calls but no priced group → `no_data`;
+no calls → $0. `cost_usd_per_hour` = window cost ÷ window hours. `error_rate` / `p95_ms` / `ttft_p95_ms` are `no_data`
+without calls (TTFT also without streaming calls); with `condition.minRequests` fewer calls never breach.
+`detail`: `{metric, window, source, calls, errors, contributors: [{service, provider, model, value, share, calls}…] (top 5),
+topModels, topServices, unpricedModels?, topShare, summary}`; share = part of the value (errors for `error_rate`, calls for
+latency). The firing incident's root cause is the summary ("LLM cost $34.20/h above $20/h — claude-sonnet-4-5 in
+storefront-bff 81%") with the top contributor as root node and its share as confidence (no call-tree RCA for `llm`); the
+notification carries the summary without a confidence suffix.
+
 **Templates** (`internal/eval/templates.go`, `eval.Templates`; kind + query + condition as stored, `source = 'template'`):
 `k8s-pod-crashloop` (pod restarts > 3, window 10m), `k8s-node-not-ready` (> 0, for 5m), `host-cpu-high` (avg > 0.9, for 10m),
 `host-disk-full` (max > 0.9), `k8s-workload-unavailable` (> 0, for 10m), `faas-error-rate` (> 0.05, for 5m, minRequests 20),
-`faas-throttles` (> 0, for 5m), `faas-near-timeout` (p95 / timeout > 0.8).
+`faas-throttles` (> 0, for 5m), `faas-near-timeout` (p95 / timeout > 0.8), `llm-cost-per-hour` (`cost_usd_per_hour` > 20,
+window 1h), `llm-error-rate` (> 0.05, window 15m, minRequests 20), `llm-p95-slow` (`p95_ms` > 20000, window 15m,
+minRequests 20), `llm-token-spike` (`tokens` > 5M, window 1h).
 
 **Anomaly.** The baseline is the same minute-of-week in each of the last `weeks` weeks, widened by ±1 h and cut into
 window-sized buckets aligned with the current window (5m window → 25 buckets/week, 100 over 4 weeks). z = (current −
@@ -344,8 +362,13 @@ GOWORK=off go test -tags integration -count=1 -v ./integration      # live Postg
   workloads / functions + cold-start spans; infra and faas monitors (worst entity, `detail.entities`, `no_data` for
   unreported gauges, `relativeToTimeout`, cold starts via `serverless_functions` when `011_serverless.sql` is applied) and
   an error-rate incident whose root cause is the OOMKilled pod (summary in `incidents.root_cause` and the firing payload).
+  `TestLLM` (org/project 9602): `llm_1m` rows (llm_1h via its MV) of priced / unpriced models; llm monitors on cost per hour
+  (top contributor in the root cause and payload, unpriced models listed), error rate with / without enough calls, p95,
+  tokens over 24 h (hourly + edge minutes) vs 1 h, TTFT `no_data`, an unpriced model `no_data`, and an org `llm_prices` row.
 - `eval` infra/faas: worst-entity selection, entity ids, filter → SQL (placeholder/arg count), unsupported shapes, faas
   minute aggregation, templates decode into supported monitors; `rca` infra: candidate confidences and merge rules.
+- `eval` llm: every metric's value / contributors / shares, unpriced → `no_data`, org override pricing, summary text,
+  `llm_1m` vs `llm_1h` + edges source (placeholders vs args, hour bounds); `engine` llm root cause.
 
 ## Not yet
 

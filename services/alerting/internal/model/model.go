@@ -119,7 +119,7 @@ type Query struct {
 	RelativeToTimeout bool        `json:"relativeToTimeout"`
 }
 
-// InfraFilter is query.filter of infra / faas monitors.
+// InfraFilter is query.filter of infra / faas / llm monitors (llm: service, provider, model, route, method, operation).
 type InfraFilter struct {
 	Cluster   string `json:"cluster"`
 	Namespace string `json:"namespace"`
@@ -128,6 +128,10 @@ type InfraFilter struct {
 	Service   string `json:"service"`
 	Provider  string `json:"provider"`
 	Region    string `json:"region"`
+	Model     string `json:"model"`
+	Route     string `json:"route"`
+	Method    string `json:"method"`
+	Operation string `json:"operation"`
 }
 
 // Function is one serverless_functions row (faas monitors: service mapping, timeout).
@@ -301,6 +305,9 @@ func (m *Monitor) Scope() (service, route, method, env string) {
 	service, route, method, env = q.Service, q.Route, q.Method, q.Env
 	if service == "" {
 		service = t.Service
+	}
+	if service == "" && m.Kind == "llm" {
+		service = q.Filter.Service
 	}
 	if env == "" {
 		env = t.Env
