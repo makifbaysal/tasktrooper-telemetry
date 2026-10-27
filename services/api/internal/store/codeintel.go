@@ -253,7 +253,7 @@ func (d *DB) AnalyzeRepo(ctx context.Context, id string) (*model.Repo, error) {
 	if err != nil {
 		return nil, err
 	}
-	tag, err := d.pg.Exec(ctx, `UPDATE repositories SET analyze_requested_at = now() WHERE {{tenant}} AND id = $1`, n)
+	tag, err := d.pg.Exec(ctx, `UPDATE repositories SET analyze_requested_at = now(), pending_paths = '{*}' WHERE {{tenant}} AND id = $1`, n)
 	if err != nil {
 		return nil, err
 	}

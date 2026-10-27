@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: unrelated
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: invoice-reminders
+spec:
+  schedule: "0 9 * * 1-5"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: job
+              image: shop/jobs
+              env:
+                - name: TROOPER_SERVICE
+                  value: billing-jobs
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Values.name }}-cleanup
+spec:
+  schedule: "{{ .Values.schedule }}"
