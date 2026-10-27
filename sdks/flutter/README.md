@@ -1,6 +1,6 @@
 # TaskTrooper Telemetry — Flutter SDK
 
-RUM for Flutter apps: sessions, screen views, errors, network requests, frame vitals and app start, sent as RUM JSON
+RUM for Flutter apps: sessions, screen views, errors, network requests, frame vitals, app start and wireframe session replay, sent as RUM JSON
 (`proto/rum/v1/rum.proto`) to `POST /v1/rum` (ADR-011, `.ai/contracts.md` §2, §9).
 
 | Package | What |
@@ -100,6 +100,62 @@ the duration is process start → first frame (`start_reference: process`). Othe
 **Device / OS** come from `device_info_plus` (model, manufacturer, OS version), screen size and locale from
 `PlatformDispatcher`. `connection` is reported as `unknown`.
 
+## Session replay
+
+```dart
+TaskTrooper.init(
+  const TrooperConfig(dsn: '...', app: 'courier-app'),
+  appRunner: () => runApp(const MyApp()),
+  replay: const TrooperReplayOptions(sampleRate: 0.1, onErrorSampleRate: 1.0),
+);
+```
+
+Wireframe replay (ADR-021, `.ai/contracts.md` §23), recorded in Dart from the **Element tree** — Flutter paints into a
+single `FlutterView`, so the native SDKs' view traversal cannot see it. **No screenshots or pixels are captured.**
+
+- **What a frame is:** a flat, back-to-front list of nodes (`kind`, logical-pixel rect, colors, radius, masked text).
+  Widget type → kind: `Text`/`RichText` → `text`, `TextField`/`CupertinoTextField`/`EditableText` → `input`, `Image` →
+  `image` (box only), `Icon` → `icon`, Material buttons / `IconButton` / FAB / `CupertinoButton` → `button`, `Switch` /
+  `Checkbox` / `Radio` (+ Cupertino) → `switch`, scroll views → `list`, platform views → `webview` (black box).
+  Backgrounds come from `Material`/`Card`/`AppBar`/`Scaffold` (physical shape), `Container`/`DecoratedBox`
+  (`BoxDecoration`/`ShapeDecoration`: color, gradient's first color, radius, border) and `ColoredBox`. Bounds come from
+  each `RenderBox` (paint transforms) clipped by scroll viewports / `ClipRect`…; `Offstage`, `Visibility`, opacity 0,
+  routes covered by an opaque route and fully clipped subtrees are skipped. Dialogs, sheets and menus (the `Overlay`) are
+  included.
+- **When:** only when a frame was drawn since the last capture (persistent frame callback → dirty flag), at most 2 fps;
+  the interval grows (≈ 1 % of main-isolate time, up to 5 s) when a capture is expensive. A capture stops at 1500 nodes or
+  8 ms (×4 in debug builds). Identical frames are not recorded twice. Touches (`down`/`move` ≤ 10/s/`up`) via the global
+  pointer route; keyboard visibility from the view insets.
+- **Privacy:** all text is masked by default, keeping its length (`Pay now` → `••• •••`); text field values and
+  `obscureText` are **always** masked; images are boxes. Show text of a subtree with `TrooperUnmask(child: …)`
+  (`TrooperUnmask(unmask: false, …)` masks a part again); `maskAllText: false` shows all non-input text.
+- **Sampling:** decided once per RUM session (and only for RUM-sampled sessions): `sampleRate` (default 0.1) records;
+  otherwise `onErrorSampleRate` (default 1.0) keeps the last 60 s in memory and, on the first ERROR (Flutter/Dart error
+  hooks, `captureError`), uploads it and keeps recording. The decision and the segment counter are persisted
+  (`state.json`, key `replay_state`), so a restarted app continues the same session's numbering.
+- **Delivery:** segments of ≤ 5 s or ≤ 256 KB (each starts with a `screen` event) are gzipped and POSTed to
+  `/v1/replay` with the ingest key; 429/5xx/network errors back off 1 s → 60 s, other 4xx drop. Unsent segments wait in
+  `<app support dir>/tasktrooper/replay/` (≤ 2 MB, `maxQueueBytes`; new segments are dropped when full). Going to
+  background seals and uploads the current segment. `resource.platform` is `android`/`ios`, `sdk_name` `trooper_flutter`.
+- **Platforms:** Android and iOS. Not started on web (use `@trooper/replay`) or desktop.
+- **Inspect:** `TrooperReplay.isRecording`, `TrooperReplay.stats` (captures, avg/max cost per capture, nodes),
+  `TrooperReplay.flush()`. With `debug: true` the stats are printed every 20 captures.
+
+**Hybrid apps:** the session belongs to the Dart SDK (shared with the native SDK via `setContext`). **Do not enable the
+native replay** (`TrooperReplay.install` from `trooper-replay` on Android, `TaskTrooper/Replay` on iOS) in a Flutter app:
+it would record the `FlutterView` as one box and write the same session's segment numbers. On Android the plugin detects
+an installed native replay (`isNativeReplayActive` on the channel) and the Dart recorder is then not started (warning in
+the log); on iOS this cannot be detected, so the rule is documentation-only.
+
+| Replay option | Default | |
+|---|---|---|
+| `sampleRate` | `0.1` | share of sessions recorded from the start |
+| `onErrorSampleRate` | `1.0` | share of the other sessions buffered and uploaded on error |
+| `maskAllText` | `true` | inputs are always masked |
+| `enabled` | `true` | |
+| `maxQueueBytes` | 2 MB | offline segment store |
+| `minCaptureInterval` / `maxNodes` / `captureBudget` | 500 ms / 1500 / 8 ms | |
+
 ## Delivery
 
 Events are batched (≤ 100 events or 5 s), gzip-compressed (not on web), POSTed with `x-trooper-key`. Batches are kept
@@ -134,8 +190,9 @@ in the same session, the Flutter SDK talks to them over `MethodChannel('dev.task
 
 | Direction | Method | Payload |
 |---|---|---|
-| Dart → native | `setContext` | `{session_id, anonymous_id, view_id, view_name, user_id}` — sent on every change |
+| Dart → native | `setContext` | `{session_id, anonymous_id, view_id, view_name, user_id, sampled}` — sent on every change; `sampled` is the Dart RUM sampling decision (the native SDK adopts the session as external and never rotates it) |
 | Dart → native | `getProcessStartTime` | returns process start, epoch ms (`int`) — improves APP_START |
+| Dart → native | `isNativeReplayActive` | `bool` — the native replay is installed (Android; iOS always `false`), see [Session replay](#session-replay) |
 | native → Dart | `getContext` | returns the same map |
 
 `trooper_flutter` is a Flutter plugin (Android + iOS) that implements the native side of this channel. Web and

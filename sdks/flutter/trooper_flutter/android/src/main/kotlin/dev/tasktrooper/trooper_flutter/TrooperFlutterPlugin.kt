@@ -37,6 +37,7 @@ class TrooperFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 }
                 "getContext" -> getContext()
                 "getProcessStartTime" -> processStartTimeMs()
+                "isNativeReplayActive" -> NativeReplay.isActive()
                 else -> {
                     result.notImplemented()
                     return
@@ -82,6 +83,30 @@ class TrooperFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             } catch (_: Throwable) {
                 null
             }
+        }
+    }
+
+    /**
+     * Native wireframe replay (`com.tasktrooper.android.replay.TrooperReplay`, module `trooper-replay`). In a Flutter
+     * app it would only see the FlutterView, and it would write the same session's segments as the Dart recorder
+     * (contracts.md §23): when it is installed, `trooper_flutter` does not start its own replay.
+     */
+    private object NativeReplay {
+        fun isActive(): Boolean = try {
+            val clazz = Class.forName("com.tasktrooper.android.replay.TrooperReplay")
+            val field = try {
+                clazz.getDeclaredField("installed").apply { isAccessible = true }
+            } catch (_: Throwable) {
+                null
+            }
+            if (field != null) {
+                field.get(null) != null
+            } else {
+                // Field renamed (minified): fall back to the public recording flag.
+                clazz.getMethod("isRecording").invoke(null) == true
+            }
+        } catch (_: Throwable) {
+            false
         }
     }
 

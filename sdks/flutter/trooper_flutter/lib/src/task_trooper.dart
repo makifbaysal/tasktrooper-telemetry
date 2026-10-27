@@ -16,6 +16,8 @@ import 'ids.dart';
 import 'native_bridge.dart';
 import 'pipeline.dart';
 import 'platform/platform.dart';
+import 'replay/options.dart';
+import 'replay/replay.dart';
 import 'storage.dart';
 import 'transport.dart';
 
@@ -47,17 +49,17 @@ abstract final class TaskTrooper {
   /// The returned future completes once the SDK is set up and [appRunner]
   /// has been called. An invalid config disables the SDK but still runs the
   /// app.
-  static Future<void> init(TrooperConfig config, {FutureOr<void> Function()? appRunner}) {
+  static Future<void> init(TrooperConfig config, {FutureOr<void> Function()? appRunner, TrooperReplayOptions? replay}) {
     final started = clock.now();
     final done = Completer<void>();
     if (appRunner == null) {
-      return _setup(config, started);
+      return _setup(config, started, replay);
     }
     runZonedGuarded(
       () async {
         try {
           WidgetsFlutterBinding.ensureInitialized();
-          await _setup(config, started);
+          await _setup(config, started, replay);
         } catch (_) {}
         try {
           await appRunner();
@@ -78,7 +80,7 @@ abstract final class TaskTrooper {
     return done.future;
   }
 
-  static Future<void> _setup(TrooperConfig config, DateTime started) async {
+  static Future<void> _setup(TrooperConfig config, DateTime started, TrooperReplayOptions? replay) async {
     if (_client != null) return;
     try {
       WidgetsFlutterBinding.ensureInitialized();
@@ -104,6 +106,17 @@ abstract final class TaskTrooper {
       _client = client;
       unawaited(pipeline.restore());
       _installHooks(config, client);
+      if (replay != null && replay.enabled) {
+        unawaited(
+          TrooperReplay.install(
+            client,
+            replay,
+            storage: storage,
+            checkNativeReplay: config.nativeBridge,
+            debug: config.debug,
+          ),
+        );
+      }
     } catch (e) {
       _client = null;
       if (config.debug) debugPrint('[trooper] init failed, SDK disabled: $e');
@@ -226,6 +239,9 @@ abstract final class TaskTrooper {
   static Future<void> close() async {
     final c = _client;
     _client = null;
+    try {
+      await TrooperReplay.close();
+    } catch (_) {}
     try {
       _uninstallErrors?.call();
       _uninstallErrors = null;

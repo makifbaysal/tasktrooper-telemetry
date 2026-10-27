@@ -38,6 +38,10 @@ public class TrooperFlutterPlugin: NSObject, FlutterPlugin {
         case "getProcessStartTime":
             let ms = Self.processStartTimeMs()
             result(ms > 0 ? NSNumber(value: ms) : nil)
+        case "isNativeReplayActive":
+            // The native replay (`TaskTrooper/Replay`) cannot be detected from here; Flutter apps must not install it
+            // (contracts.md §23). Unknown → false, so the Dart wireframe recorder runs.
+            result(NSNumber(value: false))
         default:
             result(FlutterMethodNotImplemented)
         }

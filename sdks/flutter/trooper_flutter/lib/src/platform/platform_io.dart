@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
 
+import '../replay/uploader.dart';
 import '../storage.dart';
 
 Future<TrooperStorage> createPlatformStorage() async {
@@ -100,4 +101,94 @@ class FileStorage implements TrooperStorage {
       await _atomicWrite(_stateFile, jsonEncode(state));
     } catch (_) {}
   }
+}
+
+Future<ReplaySegmentStore> createReplaySegmentStore(int maxBytes) async {
+  try {
+    final base = await getApplicationSupportDirectory();
+    final dir = Directory('${base.path}${Platform.pathSeparator}tasktrooper${Platform.pathSeparator}replay');
+    await dir.create(recursive: true);
+    return FileSegmentStore(dir, maxBytes);
+  } catch (_) {
+    return MemorySegmentStore(maxBytes: maxBytes);
+  }
+}
+
+/// One gzipped segment per file (`<ts>-<seq>.seg`, written as `.tmp` and renamed). Segments that would exceed
+/// [maxBytes] are dropped.
+class FileSegmentStore implements ReplaySegmentStore {
+  FileSegmentStore(this.dir, this.maxBytes) {
+    try {
+      for (final f in dir.listSync()) {
+        if (f is File && f.path.endsWith('.tmp')) f.deleteSync();
+      }
+    } catch (_) {}
+  }
+
+  final Directory dir;
+  final int maxBytes;
+  int _seq = 0;
+  int dropped = 0;
+
+  List<File> _files() {
+    try {
+      final files = dir.listSync().whereType<File>().where((f) => f.path.endsWith('.seg')).toList()
+        ..sort((a, b) => a.path.compareTo(b.path));
+      return files;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  int _total(List<File> files) {
+    var n = 0;
+    for (final f in files) {
+      try {
+        n += f.lengthSync();
+      } catch (_) {}
+    }
+    return n;
+  }
+
+  @override
+  Future<bool> add(List<int> bytes) async {
+    try {
+      if (_total(_files()) + bytes.length > maxBytes) {
+        dropped++;
+        return false;
+      }
+      final ts = DateTime.now().millisecondsSinceEpoch.toString().padLeft(15, '0');
+      final name = '$ts-${(_seq++ % 1000000).toString().padLeft(6, '0')}';
+      final tmp = File('${dir.path}${Platform.pathSeparator}$name.tmp');
+      await tmp.writeAsBytes(bytes, flush: true);
+      await tmp.rename('${dir.path}${Platform.pathSeparator}$name.seg');
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<StoredSegment?> oldest() async {
+    for (final f in _files()) {
+      try {
+        return StoredSegment(f.path, await f.readAsBytes());
+      } catch (_) {
+        try {
+          f.deleteSync();
+        } catch (_) {}
+      }
+    }
+    return null;
+  }
+
+  @override
+  Future<void> remove(StoredSegment segment) async {
+    try {
+      await File(segment.id).delete();
+    } catch (_) {}
+  }
+
+  @override
+  Future<int> count() async => _files().length;
 }

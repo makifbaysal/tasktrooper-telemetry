@@ -15,12 +15,22 @@ import 'trace.dart';
 
 /// Session/view/user context shared with native SDKs.
 class TrooperContext {
-  const TrooperContext({required this.sessionId, required this.anonymousId, this.viewId, this.viewName, this.userId});
+  const TrooperContext({
+    required this.sessionId,
+    required this.anonymousId,
+    this.viewId,
+    this.viewName,
+    this.userId,
+    this.sampled = true,
+  });
   final String sessionId;
   final String anonymousId;
   final String? viewId;
   final String? viewName;
   final String? userId;
+
+  /// RUM sampling decision of the session (contracts.md §9); the native SDK adopts it with the session.
+  final bool sampled;
 
   Map<String, Object?> toMap() => {
     'session_id': sessionId,
@@ -28,6 +38,7 @@ class TrooperContext {
     'view_id': viewId,
     'view_name': viewName,
     'user_id': userId,
+    'sampled': sampled,
   };
 }
 
@@ -78,6 +89,9 @@ class TrooperClient {
   /// Count of internal SDK errors swallowed (internal metric, AGENTS.md rule 5).
   int internalErrors = 0;
 
+  /// Called after each recorded ERROR with its timestamp (unix ms); used by session replay's on-error buffer.
+  final List<void Function(int tsMs)> errorListeners = [];
+
   /// Called whenever session, view or user changes (native bridge hook).
   void Function(TrooperContext context)? onContextChanged;
 
@@ -91,6 +105,7 @@ class TrooperClient {
     viewId: _view?.id,
     viewName: _view?.name,
     userId: _user?.id,
+    sampled: session.sampled,
   );
 
   void _internalError(Object e, [StackTrace? s]) {
@@ -103,6 +118,17 @@ class TrooperClient {
       body();
     } catch (e, s) {
       _internalError(e, s);
+    }
+  }
+
+  void _notifyError() {
+    final ts = clock.now().millisecondsSinceEpoch;
+    for (final l in List.of(errorListeners)) {
+      try {
+        l(ts);
+      } catch (e) {
+        _internalError(e);
+      }
     }
   }
 
@@ -354,6 +380,7 @@ class TrooperClient {
         ),
         attributes: attrs,
       );
+      if (session.sampled) _notifyError();
     });
   }
 
@@ -373,7 +400,9 @@ class TrooperClient {
 
   /// Requests to our own ingest endpoint are never instrumented.
   bool isIngestRequest(Uri url) =>
-      url.host == dsn.endpoint.host && url.port == dsn.endpoint.port && url.path.endsWith('/v1/rum');
+      url.host == dsn.endpoint.host &&
+      url.port == dsn.endpoint.port &&
+      (url.path.endsWith('/v1/rum') || url.path.endsWith('/v1/replay'));
 
   /// Records a RESOURCE (network request) event.
   void recordResource({

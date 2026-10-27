@@ -12,6 +12,10 @@ class Dsn {
   final String key;
   final String projectId;
 
+  /// Session replay ingest URL (`.../v1/replay`, contracts.md §23).
+  Uri get replayEndpoint =>
+      endpoint.replace(pathSegments: [...endpoint.pathSegments.sublist(0, endpoint.pathSegments.length - 1), 'replay']);
+
   /// Throws [FormatException] for an invalid DSN.
   static Dsn parse(String dsn) {
     final uri = Uri.parse(dsn.trim());
