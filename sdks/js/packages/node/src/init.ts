@@ -28,6 +28,7 @@ import { resolveConfig, type ResolvedConfig, type TrooperOptions } from './confi
 import { bindSelfMetrics, recordError, setDebug } from './errors';
 import { amqplibConsumeHook, kafkajsConsumerHook } from './messaging';
 import { TrooperSpanProcessor } from './processor';
+import { ContinuousProfiler, ProfileUploader } from './profiling';
 import { createPropagator } from './propagation';
 import { TrooperSampler } from './sampler';
 
@@ -189,6 +190,22 @@ export function init(options: TrooperOptions = {}): TrooperHandle {
     sdk.start();
     bindSelfMetrics(metrics.getMeter(SELF_METER, VERSION));
 
+    let profiler: ContinuousProfiler | undefined;
+    if (cfg.profiling && cfg.profilesUrl) {
+      try {
+        profiler = new ContinuousProfiler({
+          config: cfg.profiling,
+          uploader: new ProfileUploader(cfg.profilesUrl, cfg.headers, cfg.exportTimeoutMs),
+          service: cfg.service,
+          env: cfg.environment,
+          version: cfg.version,
+        });
+        void profiler.start();
+      } catch (err) {
+        recordError('profiler', err);
+      }
+    }
+
     const exporting = !!(cfg.tracesUrl || cfg.metricsUrl || cfg.logsUrl);
     let stopped = false;
     const handle: TrooperHandle = {
@@ -205,6 +222,7 @@ export function init(options: TrooperOptions = {}): TrooperHandle {
         if (stopped) return;
         stopped = true;
         try {
+          if (profiler) await profiler.stop(cfg.exportTimeoutMs);
           await sdk.shutdown();
         } catch (err) {
           recordError('shutdown', err);

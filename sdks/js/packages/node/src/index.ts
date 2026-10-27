@@ -1,5 +1,14 @@
 export { init, getHandle, type TrooperHandle } from './init';
-export { parseDsn, resolveConfig, type Dsn, type ResolvedConfig, type TrooperOptions } from './config';
+export {
+  parseDsn,
+  resolveConfig,
+  type Dsn,
+  type ResolvedConfig,
+  type TrooperOptions,
+  type ProfilingOptions,
+  type ProfileType,
+  type LlmOptions,
+} from './config';
 export {
   setRoute,
   setRouteResolver,
@@ -61,3 +70,15 @@ export {
 } from './lambda';
 export { trackedSpans } from './entry';
 export * from './attrs';
+export { instrumentOpenAI, instrumentAnthropic, openaiProvider, errorType as llmErrorType, type LlmInstrumentOptions } from './llm';
+export { normalizeGenAiSpan, vercelProvider } from './genai';
+export {
+  cpuProfileToStacks,
+  heapProfileToStacks,
+  foldedText,
+  frameName,
+  profileQuery,
+  type CpuProfile,
+  type HeapProfile,
+  type ProfileMeta,
+} from './profiling';

@@ -16,6 +16,8 @@ export const ATTR_CALLER = 'trooper.caller';
 export const ATTR_CONSUMER_ATTEMPT = 'trooper.consumer.attempt';
 export const ATTR_CONSUMER_DLQ = 'trooper.consumer.dlq';
 export const ATTR_SAMPLE_RATE = 'trooper.sample_rate';
+/** Time to first token of a streamed LLM call, ms (double; .ai/contracts.md §25). */
+export const ATTR_LLM_TTFT_MS = 'trooper.llm.ttft_ms';
 
 /** W3C baggage member carrying the calling service name. */
 export const BAGGAGE_SERVICE_KEY = 'tt.svc';
