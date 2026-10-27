@@ -1,0 +1,102 @@
+# trooper-agent — Kubernetes infrastructure monitoring (contracts §20, ADR-019).
+#
+#   helm upgrade --install trooper-agent deploy/helm/trooper-agent -n tasktrooper --create-namespace \
+#     --set clusterName=prod-eks \
+#     --set dsn=https://<ingest key>@ingest.tasktrooper.io/<project>
+#
+# Renders: a DaemonSet (mode host: node, containers via the kubelet, top processes), a 1-replica
+# Deployment (mode cluster: nodes / pods / workloads + Warning events), read-only RBAC, a Secret,
+# and — with ebpf.enabled — an OpenTelemetry eBPF Instrumentation (OBI) DaemonSet.
+
+# Required: k8s.cluster.name on every metric / event.
+clusterName: ""
+
+# Ingest DSN: <scheme>://<ingest key>@<host>[:port]/<project_id> (TT_DSN).
+dsn: ""
+# Use an existing Secret instead (keys: dsn, ingestKey; apiKey when db.enabled).
+existingSecret: ""
+
+image:
+  repository: ghcr.io/tasktrooper/trooper-agent
+  tag: ""                # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+logLevel: info
+
+# cloud.provider / cloud.region resource attributes. Empty = detected from the node object
+# (spec.providerID, topology.kubernetes.io/region).
+cloud:
+  provider: ""
+  region: ""
+
+# DaemonSet, TT_AGENT_MODES=host. hostPID + read-only /proc, /sys and / mounts so CPU, memory,
+# disk, network and processes are the node's.
+host:
+  enabled: true
+  topProcesses: 20          # TT_AGENT_TOP_PROCESSES (0 = off)
+  kubelet:
+    # TT_KUBELET_INSECURE: skip verification of the kubelet serving certificate. Needed on clusters
+    # whose kubelets use self-signed serving certs (kind, minikube, kubeadm without serverTLSBootstrap).
+    insecureSkipVerify: false
+  resources:
+    requests: { cpu: 30m, memory: 64Mi }
+    limits: { memory: 192Mi }
+  # run on every node, including tainted control-plane / GPU / spot nodes
+  tolerations:
+    - operator: Exists
+  nodeSelector: {}
+  affinity: {}
+  priorityClassName: ""
+  podAnnotations: {}
+  extraEnv: []
+
+# Deployment (1 replica, Recreate), TT_AGENT_MODES=cluster: K8s API list calls every 30 s.
+cluster:
+  enabled: true
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+    limits: { memory: 256Mi }   # raise for clusters with many thousands of pods
+  tolerations: []
+  nodeSelector: {}
+  affinity: {}
+  podAnnotations: {}
+  extraEnv: []
+
+# Optionally run the database / broker collector (mode db) in the cluster Deployment, pulling
+# targets from the api (TT_API_URL / TT_API_KEY).
+db:
+  enabled: false
+  apiUrl: ""
+  apiKey: ""
+
+# OpenTelemetry eBPF Instrumentation (OBI): spans + RED metrics for services without an SDK,
+# sent over OTLP/HTTP to ingest-gw with the x-trooper-key header. Privileged DaemonSet.
+ebpf:
+  enabled: false
+  image:
+    repository: otel/ebpf-instrument
+    tag: v0.15.2
+    pullPolicy: IfNotPresent
+  # OTLP endpoint (scheme://host[:port]); default: derived from dsn. Required with existingSecret.
+  endpoint: ""
+  # OBI config file (discovery, routes, …). Services already instrumented with an OTel SDK are
+  # skipped by OBI itself; kube-system & co. are excluded by default.
+  config:
+    discovery:
+      instrument:
+        - k8s_namespace: "*"
+    routes:
+      unmatched: heuristic
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+  tolerations:
+    - operator: Exists
+  nodeSelector: {}
+  extraEnv: []
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}

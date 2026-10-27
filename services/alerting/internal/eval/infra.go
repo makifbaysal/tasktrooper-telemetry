@@ -325,6 +325,9 @@ func (e *Evaluator) infraValues(ctx context.Context, m *model.Monitor, entity, m
 			continue
 		}
 		if metric == "unavailable" {
+			if sr.labels["kind"] == "Job" { // a running Job reports succeeded pods as available
+				continue
+			}
 			out = append(out, EntityValue{Labels: sr.labels, Value: math.Max(0, sr.a-sr.b)})
 			continue
 		}

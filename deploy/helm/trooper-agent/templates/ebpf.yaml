@@ -1,0 +1,112 @@
+{{- if .Values.ebpf.enabled }}
+{{- $name := printf "%s-ebpf" (include "trooper-agent.fullname" .) }}
+{{- $cfg := deepCopy .Values.ebpf.config }}
+{{- /* never instrument this release's own pods */}}
+{{- $disc := default (dict) $cfg.discovery }}
+{{- $excl := default (list) $disc.exclude_instrument }}
+{{- $excl = append $excl (dict "k8s_namespace" .Release.Namespace) }}
+{{- $_ := set $disc "exclude_instrument" $excl }}
+{{- $_ := set $cfg "discovery" $disc }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels: {{- include "trooper-agent.labels" . | nindent 4 }}
+---
+# OBI Kubernetes metadata decoration
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}
+  labels: {{- include "trooper-agent.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [apps]
+    resources: [replicasets]
+    verbs: [list, watch]
+  - apiGroups: [""]
+    resources: [pods, services, nodes]
+    verbs: [list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}
+  labels: {{- include "trooper-agent.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  labels: {{- include "trooper-agent.labels" . | nindent 4 }}
+data:
+  obi-config.yml: |
+    {{- toYaml $cfg | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "trooper-agent.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ebpf
+spec:
+  selector:
+    matchLabels: {{- include "trooper-agent.selector" (dict "ctx" . "component" "ebpf") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "trooper-agent.selector" (dict "ctx" . "component" "ebpf") | nindent 8 }}
+      annotations:
+        checksum/config: {{ toYaml $cfg | sha256sum }}
+    spec:
+      serviceAccountName: {{ $name }}
+      hostPID: true
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: obi
+          image: "{{ .Values.ebpf.image.repository }}:{{ .Values.ebpf.image.tag }}"
+          imagePullPolicy: {{ .Values.ebpf.image.pullPolicy }}
+          args: ["--config=/config/obi-config.yml"]
+          securityContext:
+            privileged: true
+            runAsUser: 0
+          env:
+            - name: TT_INGEST_KEY
+              valueFrom: { secretKeyRef: { name: {{ include "trooper-agent.secretName" . }}, key: ingestKey } }
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ include "trooper-agent.ingestEndpoint" . | quote }}
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: http/protobuf
+            - name: OTEL_EXPORTER_OTLP_HEADERS
+              value: "x-trooper-key=$(TT_INGEST_KEY)"
+            - name: OTEL_EBPF_KUBE_METADATA_ENABLE
+              value: "true"
+            - name: OTEL_EBPF_KUBE_CLUSTER_NAME
+              value: {{ .Values.clusterName | quote }}
+            - name: OTEL_EBPF_NAME_RESOLVER_SOURCES
+              value: "k8s,dns"
+            {{- with .Values.ebpf.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources: {{- toYaml .Values.ebpf.resources | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /config, readOnly: true }
+      volumes:
+        - name: config
+          configMap: { name: {{ $name }} }
+      {{- with .Values.ebpf.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.ebpf.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

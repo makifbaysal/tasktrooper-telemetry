@@ -85,6 +85,22 @@ deploy/
 Servis ↔ binary: `ingest` → `ingest-gw`, `ingest-writer`; `alerting` → `alert-engine`, `notifier`; `collector` →
 `trooper-agent` (DB + broker metrikleri, OTLP ile ingest'e yollar).
 
+### trooper-agent modları (ADR-019)
+
+Tek binary, `TT_AGENT_MODES` ile birleştirilebilen üç mod (varsayılan `db` = eski davranış). Her mod kendi OTLP
+resource'u ile ayrı bir emitter kullanır; bir kaynak okunamazsa ajan durmaz, `trooper.collector.up=0`
+(`kind` = `host|kubelet|docker|k8s`) yazılır.
+
+| Mod | Nerede | Kaynak | Aralık | Çıktı |
+|---|---|---|---|---|
+| `db` | Deployment / VM | SQL, Kafka/RabbitMQ API | config `interval` | §5 metrikleri |
+| `host` | K8s'te DaemonSet (hostPID, `/proc` `/sys` `/` salt-okunur), K8s dışında `docker run` / systemd | gopsutil; container'lar K8s'te kubelet `/stats/summary` + `/pods` (+ `/metrics/cadvisor` throttling), dışında Docker Engine socket | 15 sn | `trooper.host.*`, `trooper.container.*`, `trooper.process.*` |
+| `cluster` | Tek replika Deployment | K8s API (salt-okunur list, client-go yok) | 30 sn | `trooper.k8s.*` + Warning event → OTLP log (`service.name=k8s`) |
+
+Dağıtım: `deploy/helm/trooper-agent` (DaemonSet + Deployment + RBAC + Secret, opsiyonel OBI eBPF DaemonSet).
+Sözleşme: contracts.md §20; detay ve env listesi `services/collector/README.md`. Demo (`make demo`) aynı metrikleri
+`demo-eks` cluster'ı ve 4 Lambda fonksiyonu için simüle eder (`--infra-sim`).
+
 ## Lokal geliştirme (hedef)
 
 `make dev` → docker compose ile altyapı + servisler `air` ile hot reload + `apps/web` Vite dev server.

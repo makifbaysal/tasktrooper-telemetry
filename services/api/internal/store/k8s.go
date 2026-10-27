@@ -288,6 +288,10 @@ func (d *DB) workloadRows(ctx context.Context, q Q, f InfraFilter) ([]workloadRo
 		w := model.K8sWorkload{Cluster: r.keys[0], Namespace: r.keys[1], Kind: r.keys[2], Name: r.keys[3],
 			Desired: r.v[0], Ready: r.v[1], Available: r.v[2], Updated: r.v[3]}
 		w.Status = WorkloadStatus(w.Desired, w.Available, r.last, q.Now)
+		// A running Job counts succeeded pods as available, so desired > available is normal while it runs.
+		if w.Kind == "Job" && w.Status != model.InfraStale && w.Ready > 0 {
+			w.Status = model.InfraOK
+		}
 		out = append(out, workloadRow{w: w, last: r.last})
 	}
 	return out, nil

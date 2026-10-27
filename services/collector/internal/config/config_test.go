@@ -19,11 +19,11 @@ func TestParseIngestDSN(t *testing.T) {
 		wantErr string
 	}{
 		{"local dev", "http://tt_dev_ingest_key@localhost:4318/1",
-			IngestDSN{MetricsURL: "http://localhost:4318/v1/metrics", Key: "tt_dev_ingest_key", ProjectID: "1", Insecure: true}, ""},
+			IngestDSN{MetricsURL: "http://localhost:4318/v1/metrics", LogsURL: "http://localhost:4318/v1/logs", Key: "tt_dev_ingest_key", ProjectID: "1", Insecure: true}, ""},
 		{"https no port", "https://abc@ingest.tasktrooper.io/42",
-			IngestDSN{MetricsURL: "https://ingest.tasktrooper.io/v1/metrics", Key: "abc", ProjectID: "42"}, ""},
+			IngestDSN{MetricsURL: "https://ingest.tasktrooper.io/v1/metrics", LogsURL: "https://ingest.tasktrooper.io/v1/logs", Key: "abc", ProjectID: "42"}, ""},
 		{"no project", "https://abc@ingest.example.com",
-			IngestDSN{MetricsURL: "https://ingest.example.com/v1/metrics", Key: "abc"}, ""},
+			IngestDSN{MetricsURL: "https://ingest.example.com/v1/metrics", LogsURL: "https://ingest.example.com/v1/logs", Key: "abc"}, ""},
 		{"missing key", "http://localhost:4318/1", IngestDSN{}, "ingest key is missing"},
 		{"bad scheme", "grpc://k@localhost:4317/1", IngestDSN{}, "scheme"},
 		{"empty", "", IngestDSN{}, "empty"},

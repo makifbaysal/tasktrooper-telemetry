@@ -512,6 +512,13 @@ Ortak resource attr'ları: `service.name=trooper-agent`, `host.name`, `host.id` 
   OBI span'larının `telemetry.sdk.name` değeri `opentelemetry-ebpf-instrumentation` (veya `beyla`); api servis listesinde
   `source: 'ebpf'` döner.
 
+**trooper-agent uygulama notları:** `process.pid` ve `k8s.event.count` OTLP int. K8s'te pod ağı ortak olduğu için `net_in/out`
+sadece pod'un ilk container'ında. `trooper.k8s.pod.reason` son `lastState.terminated` sebebini 15 dk tutar (OOM sonrası
+CrashLoopBackOff → `OOMKilled`). Job: desired = completions, available = updated = succeeded (çalışan Job `unavailable`
+sayılmaz — alerting ve api Job'u hariç tutar); CronJob: desired 1 (askıdaysa 0), son run başarısızsa available 0. Ek env:
+`TT_KUBELET_INSECURE`, `TT_KUBELET_URL`, `TT_K8S_API_URL`, `TT_K8S_TOKEN`, `TT_K8S_INSECURE`, `TT_AGENT_ROOTFS`, `TT_AGENT_SYSFS`,
+`TT_AGENT_HOSTNAME`, `TT_CLOUD_PROVIDER`, `TT_CLOUD_REGION`.
+
 **ClickHouse `deploy/clickhouse/003_infra_k8s_faas.sql`** (AggregatingMergeTree, gauge'lar `SimpleAggregateFunction(max, Float64)`,
 string durum kolonları `SimpleAggregateFunction(anyLast, String)`; TTL 1m tablolar 30 gün, processes 7 gün; raporlanmayan değer
 §5 kuralı: max kolonu `-Inf`):

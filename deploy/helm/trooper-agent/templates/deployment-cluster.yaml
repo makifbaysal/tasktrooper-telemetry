@@ -1,0 +1,63 @@
+{{- if or .Values.cluster.enabled .Values.db.enabled }}
+{{- $modes := list }}
+{{- if .Values.cluster.enabled }}{{ $modes = append $modes "cluster" }}{{ end }}
+{{- if .Values.db.enabled }}{{ $modes = append $modes "db" }}{{ end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "trooper-agent.fullname" . }}-cluster
+  labels:
+    {{- include "trooper-agent.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cluster
+spec:
+  # exactly one replica: two would ship every Warning event twice
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: {{- include "trooper-agent.selector" (dict "ctx" . "component" "cluster") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "trooper-agent.selector" (dict "ctx" . "component" "cluster") | nindent 8 }}
+      annotations:
+        checksum/secret: {{ printf "%s%s%s" .Values.dsn .Values.existingSecret .Values.db.apiKey | sha256sum }}
+        {{- with .Values.cluster.podAnnotations }}{{ toYaml . | nindent 8 }}{{ end }}
+    spec:
+      serviceAccountName: {{ include "trooper-agent.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: trooper-agent
+          image: {{ include "trooper-agent.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: TT_AGENT_MODES
+              value: {{ join "," $modes | quote }}
+            {{- include "trooper-agent.commonEnv" . | nindent 12 }}
+            {{- if .Values.db.enabled }}
+            - name: TT_API_URL
+              value: {{ .Values.db.apiUrl | quote }}
+            - name: TT_API_KEY
+              valueFrom: { secretKeyRef: { name: {{ include "trooper-agent.secretName" . }}, key: apiKey } }
+            {{- end }}
+            {{- with .Values.cluster.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          resources: {{- toYaml .Values.cluster.resources | nindent 12 }}
+      {{- with .Values.cluster.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.cluster.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.cluster.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

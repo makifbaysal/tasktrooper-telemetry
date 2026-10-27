@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/tasktrooper/telemetry/tools/demo/internal/infra"
+	"github.com/tasktrooper/telemetry/tools/demo/internal/infrasim"
 	"github.com/tasktrooper/telemetry/tools/demo/internal/orch"
 	"github.com/tasktrooper/telemetry/tools/demo/internal/seed"
 	"github.com/tasktrooper/telemetry/tools/demo/internal/sim"
@@ -36,7 +37,7 @@ type opts struct {
 	rps                               float64
 	scenarios                         string
 	incidentAfter, duration, recoCyc  time.Duration
-	keep, debug                       bool
+	keep, debug, infraSim             bool
 }
 
 func main() {
@@ -79,6 +80,7 @@ func main() {
 	fs.DurationVar(&o.recoCyc, "reco-trainer-every", 10*time.Minute, "reco-trainer batch cycle (hourly in the mock)")
 	fs.BoolVar(&o.keep, "keep", false, "keep the ttdemo containers when stopping (up/run)")
 	fs.BoolVar(&o.debug, "debug", false, "SDK debug output")
+	fs.BoolVar(&o.infraSim, "infra-sim", true, "simulate the EKS cluster demo-eks, hosts, Warning events and 4 Lambda functions (trooper-agent host/cluster modes + AWS Lambda over OTLP)")
 	_ = fs.Parse(args)
 
 	var err error
@@ -330,6 +332,9 @@ func run(ctx context.Context, log *slog.Logger, o opts, sup *orch.Supervisor) er
 	}
 	tr := &sim.Traffic{RT: rt, Log: log, RPS: o.rps, IngestURL: base, IngestKey: key}
 	go tr.Run(runCtx)
+	if o.infraSim {
+		go infrasim.New(base, key, rt, o.postgres, log).Run(runCtx)
+	}
 
 	active := []string{}
 	for n := range scen {
