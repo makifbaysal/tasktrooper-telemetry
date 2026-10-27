@@ -1,5 +1,9 @@
 node_modules
 dist
+# ...except the symbolicator test fixtures, which are committed real build outputs
+# (services/symbolicator/README.md § Development)
+!services/symbolicator/testdata/js/dist/
+!services/symbolicator/testdata/js/dist/**
 .env*
 !.env.example
 .DS_Store
