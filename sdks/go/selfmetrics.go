@@ -15,11 +15,14 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+
+	"github.com/tasktrooper/telemetry-go/internal/sdkerr"
 )
 
 // Internal self-metrics (meter "TaskTrooper.Telemetry", .ai/contracts.md §4): every swallowed error is
 // counted in trooper.sdk.errors{component}; telemetry items lost with a failed export batch are counted
-// in trooper.sdk.dropped{component}. Components: exporter.traces|metrics|logs, processor, capture, resolver.
+// in trooper.sdk.dropped{component}. Components: exporter.traces|metrics|logs|profiles, processor, capture, resolver, profiler,
+// profiler.cpu (CPU profiling already active), llm.
 type selfMetrics struct {
 	failedBatches atomic.Int64
 	droppedItems  atomic.Int64
@@ -136,6 +139,17 @@ const MeterName = "TaskTrooper.Telemetry"
 // SDKErrors returns the number of errors swallowed by the SDK since process start.
 func SDKErrors() int64 { return self.errors.Load() }
 
+// countDropped records telemetry items dropped by component (e.g. a profile that could not be sent).
+func (s *selfMetrics) countDropped(component string, n int) {
+	s.droppedItems.Add(int64(n))
+	s.mu.Lock()
+	d := s.dropped
+	s.mu.Unlock()
+	if d != nil {
+		d.Add(context.Background(), int64(n), metric.WithAttributes(attribute.String("component", component)))
+	}
+}
+
 // countError records a swallowed internal error (e.g. a recovered panic) for component.
 func (s *selfMetrics) countError(component string) {
 	s.errors.Add(1)
@@ -146,3 +160,5 @@ func (s *selfMetrics) countError(component string) {
 		f.Add(context.Background(), 1, metric.WithAttributes(attribute.String("component", component)))
 	}
 }
+
+func init() { sdkerr.SetCounter(self.countError) }

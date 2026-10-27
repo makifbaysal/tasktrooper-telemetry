@@ -58,6 +58,8 @@ func tracer() trace.Tracer {
 // ("process <destination>") span as the entry span of the message: trooper.process,
 // trooper.entry.route (= process), trooper.consumer.attempt and trooper.caller are set, and
 // every span started from the returned context gets trooper.entry.route. End the span with EndSpan.
+// While profile labels are enabled the goroutine keeps the pprof labels of this message until the
+// next entry starts on it; prefer ProcessMessage, which restores them.
 func StartConsumer(ctx context.Context, carrier propagation.TextMapCarrier, m Message) (context.Context, trace.Span) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -121,6 +123,7 @@ func EndSpan(span trace.Span, err error) {
 func ProcessMessage(ctx context.Context, carrier propagation.TextMapCarrier, m Message, policy PanicPolicy, fn func(context.Context) error) (err error) {
 	ctx, span := StartConsumer(ctx, carrier, m)
 	defer func() {
+		EntryFromContext(ctx).restoreLabels()
 		if r := recover(); r != nil {
 			RecordPanic(ctx, r)
 			span.End()

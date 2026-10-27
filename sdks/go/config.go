@@ -51,7 +51,14 @@ type Config struct {
 
 	// HTTPClient overrides the HTTP client used by exporters (its Transport is wrapped).
 	HTTPClient *http.Client
+
+	// Profiling configures continuous profiling (off by default). See WithProfiling.
+	Profiling ProfilingConfig
 }
+
+// Option modifies the Config passed to Start (e.g. WithProfiling). Options are applied after the
+// Config fields, before environment defaults.
+type Option func(*Config)
 
 func (c Config) withDefaults() Config {
 	c.DSN = first(c.DSN, os.Getenv("TROOPER_DSN"))
@@ -88,6 +95,7 @@ func (c Config) withDefaults() Config {
 	if c.MaxQueueSize <= 0 {
 		c.MaxQueueSize = 2048
 	}
+	c.Profiling = c.Profiling.withDefaults()
 	return c
 }
 

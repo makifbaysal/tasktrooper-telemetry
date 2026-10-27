@@ -46,6 +46,15 @@ func (h serverHandler) TagRPC(ctx context.Context, info *stats.RPCTagInfo) conte
 	return ctx
 }
 
+// HandleRPC forwards to otelgrpc and, at the end of the RPC, restores the pprof goroutine labels
+// set for continuous profiling (trooper.route = full method, trooper.method = GRPC).
+func (h serverHandler) HandleRPC(ctx context.Context, s stats.RPCStats) {
+	h.Handler.HandleRPC(ctx, s)
+	if _, ok := s.(*stats.End); ok {
+		trooper.EntryFromContext(ctx).Finish("")
+	}
+}
+
 type config struct{ panicPolicy trooper.PanicPolicy }
 
 // Option configures the interceptors.

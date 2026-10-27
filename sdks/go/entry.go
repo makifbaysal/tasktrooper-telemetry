@@ -26,11 +26,19 @@ type Entry struct {
 	method  string
 	resolve func() string
 	done    bool
+
+	// pprof goroutine labels (only while profile labels are enabled)
+	labelParent context.Context
+	labeled     bool
 }
 
 // BeginEntry marks ctx as the entry of a request/message handled by the span in ctx.
 // route may be empty if not yet known; resolve (optional) is called lazily to obtain it until
 // Finish is called. It also records trooper.caller from baggage (tt.svc) on the span.
+//
+// While profile labels are enabled (continuous profiling, see WithProfiling), the calling goroutine
+// is labelled with pprof labels trooper.route / trooper.method and the returned context carries
+// them; Finish restores the previous labels, so Finish must run on the same goroutine.
 func BeginEntry(ctx context.Context, method, route string, resolve func() string) (context.Context, *Entry) {
 	e := &Entry{span: trace.SpanFromContext(ctx), method: method, route: NormalizeRoute(route), resolve: resolve}
 	if caller := CallerFromContext(ctx); caller != "" {
@@ -39,15 +47,22 @@ func BeginEntry(ctx context.Context, method, route string, resolve func() string
 	if e.route != "" {
 		e.span.SetAttributes(e.attrs(e.route)...)
 	}
-	return context.WithValue(ctx, entryKey{}, e), e
+	parent := ctx
+	ctx = context.WithValue(ctx, entryKey{}, e)
+	if ProfileLabelsEnabled() {
+		ctx = e.applyLabels(parent, ctx, e.route)
+	}
+	return ctx, e
 }
 
 // Finish freezes the entry with the final route (if non-empty) and sets the entry attributes on
-// the entry span. The resolver is not called after Finish. Safe to call on nil.
+// the entry span. The resolver is not called after Finish. It also restores the pprof goroutine
+// labels set by BeginEntry. Safe to call on nil.
 func (e *Entry) Finish(route string) {
 	if e == nil {
 		return
 	}
+	e.restoreLabels()
 	e.mu.Lock()
 	if r := NormalizeRoute(route); r != "" {
 		e.route = r
