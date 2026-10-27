@@ -59,6 +59,10 @@ services:
       - >
         for t in tt.otlp.traces tt.otlp.metrics tt.otlp.logs tt.rum; do
           rpk topic create $$t -p 3 -c retention.ms=86400000 -X brokers=redpanda:9092 || true;
+        done;
+        for t in tt.replay tt.profiles; do
+          rpk topic create $$t -p 3 -c retention.ms=86400000 -c max.message.bytes=10485760 -X brokers=redpanda:9092 ||
+          rpk topic alter-config $$t --set max.message.bytes=10485760 -X brokers=redpanda:9092 || true;
         done
 
   redis:
@@ -102,8 +106,14 @@ services:
   ingest-writer:
     profiles: [app]
     build: { context: ../services, dockerfile: ingest/Dockerfile, args: { CMD: ingest-writer } }
-    environment: *svc_env
-    depends_on: [clickhouse, redpanda]
+    environment:
+      <<: *svc_env
+      # session replay blobs (contracts §23); without TT_S3_ENDPOINT the writer skips tt.replay
+      TT_S3_ENDPOINT: ${TT_S3_ENDPOINT:-http://s3:8333}
+      TT_S3_ACCESS_KEY: ${TT_S3_ACCESS_KEY:-trooper}
+      TT_S3_SECRET_KEY: ${TT_S3_SECRET_KEY:-trooper-secret}
+      TT_REPLAY_S3_BUCKET: ${TT_REPLAY_S3_BUCKET:-tt-replays}
+    depends_on: [clickhouse, redpanda, s3]
 
   api:
     profiles: [app]

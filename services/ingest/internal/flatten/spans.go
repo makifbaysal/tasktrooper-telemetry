@@ -91,8 +91,14 @@ func kindName(k tracepb.Span_SpanKind) string {
 	return "internal"
 }
 
-// Spans appends one SpanRow per OTLP span in req to out.
+// Spans appends one SpanRow per OTLP span in req to out (LLM content is dropped; see SpansWithContent).
 func Spans(t tenant.Tenant, req *coltracepb.ExportTraceServiceRequest, out []SpanRow) []SpanRow {
+	out, _ = SpansWithContent(t, req, out, nil)
+	return out
+}
+
+// SpansWithContent is Spans that also appends the prompt / completion content of LLM spans (contracts §25) to content.
+func SpansWithContent(t tenant.Tenant, req *coltracepb.ExportTraceServiceRequest, out []SpanRow, content []LLMContentRow) ([]SpanRow, []LLMContentRow) {
 	for _, rs := range req.GetResourceSpans() {
 		res := newResource(rs.GetResource().GetAttributes())
 		start := len(out)
@@ -117,13 +123,17 @@ func Spans(t tenant.Tenant, req *coltracepb.ExportTraceServiceRequest, out []Spa
 			}
 		}
 		for _, sp := range spans {
-			out = append(out, spanRow(t, &res, sp, spans, byID, start))
+			row, c := spanRow(t, &res, sp, spans, byID, start)
+			out = append(out, row)
+			if c != nil {
+				content = append(content, *c)
+			}
 		}
 		if byID != nil {
 			inheritEntryRoute(out[start:], byID, start)
 		}
 	}
-	return out
+	return out, content
 }
 
 func countSpans(rs *tracepb.ResourceSpans) int {
@@ -134,8 +144,13 @@ func countSpans(rs *tracepb.ResourceSpans) int {
 	return n
 }
 
-func spanRow(t tenant.Tenant, res *resourceInfo, sp *tracepb.Span, batch []*tracepb.Span, byID map[[8]byte]int, base int) SpanRow {
+func spanRow(t tenant.Tenant, res *resourceInfo, sp *tracepb.Span, batch []*tracepb.Span, byID map[[8]byte]int, base int) (SpanRow, *LLMContentRow) {
 	a := attrIndex(sp.GetAttributes())
+	genAI := hasGenAIKeys(sp.GetAttributes())
+	var llm llmInfo
+	if genAI {
+		llm = detectLLM(a, sp.GetName())
+	}
 	k := sp.GetKind()
 	r := SpanRow{
 		OrgID: t.OrgID, ProjectID: t.ProjectID,
@@ -224,9 +239,27 @@ func spanRow(t tenant.Tenant, res *resourceInfo, sp *tracepb.Span, batch []*trac
 	// Dependencies.
 	if k == tracepb.Span_SPAN_KIND_CLIENT || k == tracepb.Span_SPAN_KIND_PRODUCER {
 		r.Dep, r.DepKind, r.DepService = depOf(a)
+		// The HTTP call under an LLM span (e.g. "HTTP · api.openai.com") is the same time as its "ai" dependency.
+		if r.DepKind == "http" && parentIsModelCall(sp, batch, byID, base) {
+			r.Dep, r.DepKind, r.DepService = "", "", ""
+		}
+	}
+	// LLM model calls are dependencies of kind "ai" whatever their span kind (contracts §25).
+	if isModelCall(llm.op) {
+		r.Dep, r.DepKind, r.DepService = llmDep(llm.provider, llm.model), "ai", ""
 	}
 
-	r.Attrs = attrMap(sp.GetAttributes(), 4)
+	var content *LLMContentRow
+	if genAI {
+		var c LLMContentRow
+		r.Attrs, c = genAIAttrs(sp.GetAttributes(), a, llm, 4)
+		if !c.empty() {
+			c.OrgID, c.ProjectID, c.TS, c.TraceID, c.SpanID, c.Service = r.OrgID, r.ProjectID, r.TS, r.TraceID, r.SpanID, r.Service
+			content = &c
+		}
+	} else {
+		r.Attrs = attrMap(sp.GetAttributes(), 4)
+	}
 
 	if q := a.first("db.query.text", "db.statement"); q != "" {
 		nq := norm.Query(q)
@@ -296,7 +329,24 @@ func spanRow(t tenant.Tenant, res *resourceInfo, sp *tracepb.Span, batch []*trac
 		}
 		r.ErrorFingerprint = norm.ErrorFingerprint(r.Service, r.ErrorType, msg, excStack)
 	}
-	return r
+	return r, content
+}
+
+// parentIsModelCall reports whether sp's parent (in the same resource batch) is an LLM model-call span.
+func parentIsModelCall(sp *tracepb.Span, batch []*tracepb.Span, byID map[[8]byte]int, base int) bool {
+	parent := sp.GetParentSpanId()
+	if byID == nil || len(parent) != 8 {
+		return false
+	}
+	i, ok := byID[[8]byte(parent)]
+	if !ok {
+		return false
+	}
+	p := batch[i-base]
+	if !hasGenAIKeys(p.GetAttributes()) {
+		return false
+	}
+	return isModelCall(detectLLM(attrIndex(p.GetAttributes()), p.GetName()).op)
 }
 
 // serverRoute: trooper.route → http.route → normalized url.path / http.target → rpc service/method → span name.

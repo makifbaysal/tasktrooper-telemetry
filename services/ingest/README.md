@@ -4,8 +4,8 @@ Two binaries (Go module `github.com/tasktrooper/telemetry/services/ingest`), fol
 
 | Binary | Does |
 |---|---|
-| `cmd/ingest-gw` | OTLP/HTTP `:4318` (`/v1/traces`, `/v1/metrics`, `/v1/logs`: protobuf or JSON, optional gzip), RUM `POST /v1/rum` (JSON or protobuf), Vercel drains `POST /v1/drains/vercel`, OTLP/gRPC `:4317`, `GET /healthz`, `GET /metrics`. Authenticates ingest keys, rate-limits per project, validates the payload and publishes it as protobuf to Redpanda. Stateless. |
-| `cmd/ingest-writer` | Consumer group `tt-ingest-writer` over the 4 topics. Flattens payloads into ClickHouse rows (`spans`, `logs`, `metrics`, `rum_events`, `db_1m`, `db_queries_1m`, `broker_*_1m`, `hosts_1m`, `containers_1m`, `processes_1m`, `k8s_*_1m`, `faas_1m`, `gpus_1m`) and batch-inserts them; Kafka offsets are committed only after the insert succeeded (at-least-once). |
+| `cmd/ingest-gw` | OTLP/HTTP `:4318` (`/v1/traces`, `/v1/metrics`, `/v1/logs`: protobuf or JSON, optional gzip), RUM `POST /v1/rum` (JSON or protobuf), session replay `POST /v1/replay`, profiles `POST /v1/profiles`, Vercel drains `POST /v1/drains/vercel`, OTLP/gRPC `:4317`, `GET /healthz`, `GET /metrics`. Authenticates ingest keys, rate-limits per project, validates the payload and publishes it as protobuf to Redpanda. Stateless. |
+| `cmd/ingest-writer` | Consumer group `tt-ingest-writer` over the 6 topics. Flattens payloads into ClickHouse rows (`spans`, `logs`, `metrics`, `rum_events`, `llm_content`, `replay_segments` (+ segment blob in S3), `profile_stacks`, `profiles`, `db_1m`, `db_queries_1m`, `broker_*_1m`, `hosts_1m`, `containers_1m`, `processes_1m`, `k8s_*_1m`, `faas_1m`, `gpus_1m`) and batch-inserts them; Kafka offsets are committed only after the insert succeeded (at-least-once). |
 
 ## Run
 
@@ -37,8 +37,11 @@ It also sends an SQS consumer span (`messaging_system`, `consumer_1m`), cloud-st
 Vercel integration (project 1, secret via `env:` ref) and posts a signed log + speed-insights drain.
 `TestInfraFamilies` (`e2e/infra_test.go`) sends host / container / process / k8s / faas metrics, a Kubernetes Warning event and
 an OBI span through the gw with the internal credential (project 9601, created if missing) and checks every typed table,
-`logs` and `spans.resource_attrs`; its rows are deleted afterwards. Data uses the service prefix
-`ingest2-e2e-<rand>` and is deleted at the end. **Stop any other `ingest-writer` first** — it shares the consumer group
+`logs` and `spans.resource_attrs`; its rows are deleted afterwards. `TestReplayProfilesLLM` (`e2e/blobs_test.go`) posts two gzip'ed replay segments (`?key=`), a Go pprof and a folded JVM profile
+and GenAI spans (chat span + its HTTP child + content), then checks `replay_segments`, `replay_sessions`, the S3 object
+(bucket `tt-replays-e2e`, endpoint `TT_S3_ENDPOINT` or `http://localhost:9002`), `profiles`, `profile_stacks`, `spans`
+(`dep_kind='ai'`, HTTP child without dep, no content attrs), `llm_content`, `llm_1m` and `edges_1m`. Data uses the service prefix
+`ingest2-e2e-<rand>` / `blobs-e2e-<rand>` and is deleted at the end. **Stop any other `ingest-writer` first** — it shares the consumer group
 and would consume the test records without the test's GeoIP db.
 
 ## Configuration
@@ -56,7 +59,12 @@ Common (`services/pkg/config`): `TT_POSTGRES_URL`, `TT_CLICKHOUSE_URL`, `TT_KAFK
 | `TT_INGEST_PRODUCE_BUFFER_BYTES` | `268435456` | same, in bytes |
 | `TT_INGEST_PRODUCE_TIMEOUT` | `30s` | per-record delivery timeout |
 | `TT_INGEST_WRITER_GROUP` | `tt-ingest-writer` | consumer group |
-| `TT_INGEST_WRITER_TOPICS` | the 4 ingest topics | |
+| `TT_INGEST_WRITER_TOPICS` | the 6 ingest topics | `tt.replay` is dropped from the list when S3 is not configured / reachable |
+| `TT_INGEST_REPLAY_MAX_BYTES` / `TT_INGEST_REPLAY_MAX_DECOMPRESSED_BYTES` | `1048576` / `10485760` | `/v1/replay` wire / decompressed limits (413) |
+| `TT_INGEST_PROFILE_MAX_BYTES` / `TT_INGEST_PROFILE_MAX_DECOMPRESSED_BYTES` | `4194304` / `33554432` | `/v1/profiles` wire / decompressed limits (413) |
+| `TT_S3_ENDPOINT` | — | writer: S3 for replay segments (dev `http://localhost:9002`; compose `http://s3:8333`). **Unset = replay off** |
+| `TT_S3_ACCESS_KEY` / `TT_S3_SECRET_KEY` / `TT_S3_REGION` | `trooper` / `trooper-secret` / `us-east-1` | path-style client (as symbolicator) |
+| `TT_REPLAY_S3_BUCKET` | `tt-replays` | created at start when missing |
 | `TT_INGEST_WRITER_BATCH_ROWS` | `50000` | flush when any table batch has this many rows… |
 | `TT_INGEST_WRITER_FLUSH_INTERVAL` | `1s` | …or when the oldest buffered record is this old |
 | `TT_INGEST_WRITER_MAX_POLL` | `5000` | records per poll |
@@ -136,6 +144,59 @@ Common (`services/pkg/config`): `TT_POSTGRES_URL`, `TT_CLICKHOUSE_URL`, `TT_KAFK
   error arrives in another flush may lose its other spans with probability 1 − rate; counts stay unbiased). Rows of a
   failed flush are not re-sampled.
 
+## Session replay (contracts §23)
+
+- `POST /v1/replay`: auth, CORS, `?key=`, internal credential and content types as `/v1/rum`; shares the per-project rate
+  limit. The body (one segment JSON, `Content-Encoding: gzip` recommended) is limited to 1 MiB on the wire and 10 MiB
+  decompressed. gw validates it (`session_id` ≤ 128 chars of `[A-Za-z0-9._-]` — it is part of the S3 key —, `segment`
+  0…999999, `format` rrweb | wireframe, `events` array) and publishes it **gzip'ed** to `tt.replay` (the wire bytes when
+  they were gzip, else compressed in gw) with headers `session_id`, `segment`.
+- writer: gunzips + re-validates, uploads the gzip blob as is to `<org>/<project>/<yyyy-mm-dd of start_ts>/<session_id>/<segment:06d>.json.gz`
+  (`Content-Type: application/json`, `Content-Encoding: gzip`) **before** inserting the `replay_segments` row; uploads are
+  retried like inserts and offsets are committed only after both (at-least-once; a redelivery overwrites the same key and
+  adds a duplicate index row — query with `argMax(…, received_at)`). A flush also starts when ≥ 64 MiB of blobs are buffered.
+- Without `TT_S3_ENDPOINT`, or when the bucket cannot be reached/created within 15 s at start, the writer does not consume
+  `tt.replay` (records wait in Redpanda, 24 h retention), logs a warning and sets `tt_writer_replay_disabled` = 1.
+
+## Profiles (contracts §24)
+
+- `POST /v1/profiles?service=&start=&end=[&env=&version=&host=&runtime=&format=pprof|folded&type=&unit=]`: key header / Bearer /
+  internal credential only (no `?key=`, no CORS; any `Origin` → 403). ≤ 4 MiB on the wire, ≤ 32 MiB decompressed — both
+  for `Content-Encoding: gzip` and for natively gzip'ed pprof (also both at once). `end - start` ≤ 1 h; folded needs
+  `type` + `unit` (unit must match the type). gw parses the profile (400 on garbage, profiles are low-rate) and publishes the
+  smaller of wire / decompressed bytes to `tt.profiles` with the query values as headers.
+- Parsing (`internal/profiling`, shared by gw and writer): pprof sample types → `cpu`, `wall`, `alloc_*`, `inuse_*`,
+  `goroutine(s)` → `goroutines`, `delay` → `lock` (`block` with `?type=block`); `samples/count` and `contentions/count` are
+  skipped (`samples` × period becomes `cpu` only when there is no `cpu/nanoseconds` and the period type is cpu). Frames
+  root first, inlined frames expanded; Go/JVM = function name, Node = `fn (file)` (`file://` stripped, `(anonymous)`),
+  unsymbolized = `[<mapping basename>]` / `[unknown]`; frame ≤ 512 bytes. Labels `trooper.route` / `trooper.method` (folded:
+  `# trooper.route=… trooper.method=…` section lines) tag stacks. Identical (route, method, stack) are summed, values ≤ 0
+  dropped, depth > 128 keeps the leaf side under `[truncated]`, > 10 000 stacks per type fold the smallest into
+  `['[other]']` (one per route/method). One `profiles` row per type (`total`, `stacks`); `profile_stacks.stack_hash` is
+  `DEFAULT cityHash64(stack)` (computed by ClickHouse).
+
+## AI / LLM spans (contracts §25)
+
+- LLM span = `gen_ai.operation.name`, or OpenLLMetry `llm.request.type` (chat / completion → text_completion / embedding(s) /
+  rerank), or a Vercel AI SDK provider call (`ai.operationId` or span name `ai.*.doGenerate|doStream` → chat, `ai.*.doEmbed` →
+  embeddings, with `gen_ai.system` / `ai.model.provider`; the outer `ai.generateText` wrapper is not counted). Provider =
+  `gen_ai.provider.name` ‖ `gen_ai.system` (lower-cased; Vercel ids mapped: `anthropic.messages` → anthropic, `google.*` →
+  gcp.gemini, `google.vertex*` → gcp.vertex_ai, `amazon-bedrock` → aws.bedrock, `azure*` → azure.ai.openai, `mistral` →
+  mistral_ai, `xai` → x_ai), model = response ‖ request (‖ `ai.model.id`).
+- Model calls (not `execute_tool` / `invoke_agent` / `create_agent`) get `dep_kind='ai'`, `dep='<provider> · <model>'` whatever
+  their span kind; an HTTP client span whose parent (same resource batch) is a model call gets no dep. `edges_1m_ai_mv` feeds
+  internal-kind ai spans into `edges_1m` (the original MV only reads client/producer).
+- attrs: content keys are removed (`gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions`,
+  `gen_ai.prompt[.N.*]`, `gen_ai.completion[.N.*]`, Vercel `ai.prompt[.messages]`, `ai.response.text|object|toolCalls`) and
+  written to `llm_content` (legacy N.* fields rebuilt as GenAI message arrays; each field ≤ 32 KiB with `…[truncated]`).
+  Normalized into attrs (8 of the 64 slots are reserved for them): `gen_ai.operation.name`, `gen_ai.provider.name`, token
+  counts `gen_ai.usage.{input,output}_tokens` / `cache_read.input_tokens` / `cache_creation.input_tokens` (from
+  `gen_ai.usage.prompt|completion_tokens`, `llm.usage.*`, `ai.usage.promptTokens|completionTokens`), Vercel model / TTFT
+  (`ai.response.msToFirstChunk` → `trooper.llm.ttft_ms`). `llm_1m_mv` reads these attrs.
+- Logs: a `gen_ai.client.inference.operation.details` event (`event_name` or `event.name` attr) → `llm_content` row with the
+  record's trace/span id; content attrs removed from the log row, a kvlist body is replaced by the event name.
+- Tail sampling drops the `llm_content` rows of traces it drops.
+
 ## Vercel drains
 
 `POST /v1/drains/vercel?key=<ingest key>&integration=<integrations.id>` (contracts §10). The integration must be
@@ -169,4 +230,7 @@ gw: `tt_ingest_gw_requests_total{endpoint,status}`, `_request_bytes_total`, `_re
 `_produce_errors_total{topic,reason=failed|buffer_full}`, `_produce_latency_seconds`, `_drain_events_total{provider,kind}`
 (gRPC endpoints are labelled `grpc:<topic>`). writer: `tt_ingest_writer_records_consumed_total`, `_decode_errors_total`,
 `_rows_inserted_total{table}`, `_clickhouse_errors_total{table}`, `_insert_duration_seconds{table}`,
-`_batch_duration_seconds`, `_consumer_lag{topic,partition}`, `_tail_sampling_spans_total{decision}` + Go/process metrics.
+`_batch_duration_seconds`, `_consumer_lag{topic,partition}`, `_tail_sampling_spans_total{decision}`,
+`_replay_blobs_total`, `_replay_blob_bytes_total`, `_replay_blob_errors_total`, `_replay_blob_upload_seconds`,
+`tt_writer_replay_disabled` (gauge, contracts §23) + Go/process metrics. gw endpoints `/v1/replay` and `/v1/profiles` use the
+same request / auth / rate-limit metrics.
