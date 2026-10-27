@@ -50,13 +50,13 @@ func (s *Store) Close() { s.DB.Close() }
 func (s *Store) Ping(ctx context.Context) error { return s.DB.Ping(ctx) }
 
 const repoCols = `r.id, r.project_id, p.org_id, r.provider, r.full_name, r.default_branch, coalesce(r.last_analyzed_sha, ''), r.status,
-	coalesce(r.installation_id, 0), coalesce(r.credentials_ref, ''), coalesce(r.local_path, ''), coalesce(r.webhook_secret_ref, ''),
+	coalesce(r.installation_id, 0), coalesce(r.credentials_ref, ''), coalesce(r.local_path, ''), coalesce(r.webhook_secret_ref, ''), coalesce(r.base_url, ''),
 	r.analyze_requested_at, r.analyzed_at, r.analysis_started_at, r.analyze_requested_by`
 
 func scanRepo(r pgx.CollectableRow) (model.Repo, error) {
 	var x model.Repo
 	err := r.Scan(&x.ID, &x.ProjectID, &x.OrgID, &x.Provider, &x.FullName, &x.DefaultBranch, &x.LastAnalyzedSHA, &x.Status,
-		&x.InstallationID, &x.CredentialsRef, &x.LocalPath, &x.WebhookSecretRef, &x.AnalyzeRequestedAt, &x.AnalyzedAt, &x.AnalysisStartedAt, &x.AnalyzeRequestedBy)
+		&x.InstallationID, &x.CredentialsRef, &x.LocalPath, &x.WebhookSecretRef, &x.BaseURL, &x.AnalyzeRequestedAt, &x.AnalyzedAt, &x.AnalysisStartedAt, &x.AnalyzeRequestedBy)
 	return x, err
 }
 
@@ -81,12 +81,27 @@ func (s *Store) Repo(ctx context.Context, id int64) (model.Repo, error) {
 
 // ReposByFullName returns GitHub repositories with this owner/name (any project; case-insensitive).
 func (s *Store) ReposByFullName(ctx context.Context, fullName string) ([]model.Repo, error) {
+	return s.ReposByName(ctx, "github", fullName)
+}
+
+// ReposByName returns the repositories of a provider with this full name (any project; case-insensitive). Webhook
+// handlers then keep only those whose webhook secret verifies the delivery.
+func (s *Store) ReposByName(ctx context.Context, provider, fullName string) ([]model.Repo, error) {
 	rows, err := s.DB.Query(ctx, `SELECT `+repoCols+` FROM repositories r JOIN projects p ON p.id = r.project_id
-		WHERE r.provider = 'github' AND lower(r.full_name) = lower($1) ORDER BY r.id`, fullName)
+		WHERE r.provider = $1 AND lower(r.full_name) = lower($2) ORDER BY r.id`, provider, fullName)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, scanRepo)
+}
+
+// WebhookReceived records a verified webhook delivery for these repositories (api: webhookActive).
+func (s *Store) WebhookReceived(ctx context.Context, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err := s.DB.Exec(ctx, `UPDATE repositories SET webhook_received_at = now() WHERE id = ANY($1)`, ids)
+	return err
 }
 
 // Claim marks the repository as analyzing. ok=false when another worker holds a fresh claim or it is disconnected.

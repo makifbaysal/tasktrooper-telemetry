@@ -52,6 +52,7 @@ type Repo struct {
 	CredentialsRef     string
 	LocalPath          string
 	WebhookSecretRef   string
+	BaseURL            string // self-managed GitLab (https://host[/path]); "" = provider default host
 	AnalyzeRequestedAt *time.Time
 	AnalyzedAt         *time.Time
 	AnalysisStartedAt  *time.Time

@@ -90,7 +90,7 @@ func TestFetchLocalAndClone(t *testing.T) {
 	if err == nil || strings.Contains(err.Error(), "tok") && strings.Contains(err.Error(), "Basic") {
 		t.Fatalf("missing repo err %v", err)
 	}
-	if _, err := f.Fetch(ctx, model.Repo{Provider: "gitlab", FullName: "a/b"}); !errors.Is(err, ErrUnsupported) {
+	if _, err := f.Fetch(ctx, model.Repo{Provider: "svn", FullName: "a/b"}); !errors.Is(err, ErrUnsupported) {
 		t.Fatal(err)
 	}
 	if _, err := f.Fetch(ctx, model.Repo{Provider: "github", FullName: "a/b", InstallationID: 5}); err == nil {

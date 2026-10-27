@@ -1,4 +1,5 @@
-// Package webhook handles `POST /v1/webhooks/github` (contracts §18): GitHub App deliveries (and classic repository
+// Package webhook handles `POST /v1/webhooks/github` (contracts §18) — and, in repohook.go, the per-repository GitLab
+// and Bitbucket webhooks (contracts §18a). GitHub: App deliveries (and classic repository
 // webhooks) signed with X-Hub-Signature-256. push on the default branch → analyze_requested_at + pending_paths;
 // installation_repositories removed/added → repository disconnected/reconnected; installation deleted/suspended →
 // github integration error + repositories disconnected. Idempotent by X-GitHub-Delivery.
@@ -34,6 +35,7 @@ type Store interface {
 	SetInstallationRepos(ctx context.Context, installationID int64, fullNames []string, connected bool) (int64, error)
 	InstallationGone(ctx context.Context, installationID int64, reason string) error
 	InstallationBack(ctx context.Context, installationID int64) error
+	WebhookReceived(ctx context.Context, ids []int64) error
 }
 
 // Handler serves the webhook.
@@ -122,6 +124,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.count(event, "unauthorized")
 			http.Error(w, "invalid signature", http.StatusUnauthorized)
 			return
+		}
+		if !appSigned { // classic repository webhook verified: the repo now shows an active webhook
+			ids := make([]int64, len(repos))
+			for i, repo := range repos {
+				ids[i] = repo.ID
+			}
+			if err := h.Store.WebhookReceived(ctx, ids); err != nil {
+				log.Warn("webhook received_at", "err", err)
+			}
 		}
 	}
 	if delivery != "" {

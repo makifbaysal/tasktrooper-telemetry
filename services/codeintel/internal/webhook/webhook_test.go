@@ -161,7 +161,9 @@ func TestPushSignatureAndRepoSecret(t *testing.T) {
 		t.Fatal("unauthorized delivery recorded")
 	}
 	// Repository webhook secret authorizes only the repo that owns it.
-	if rec := send(h, "push", "r-1", body, []byte("repo-secret")); rec.Code != http.StatusAccepted || len(st.calls) != 1 || st.calls[0].id != 1 {
+	// The verified classic webhook also records webhook_received_at for that repo.
+	if rec := send(h, "push", "r-1", body, []byte("repo-secret")); rec.Code != http.StatusAccepted || len(st.calls) != 2 ||
+		st.calls[0].op != "seen" || st.calls[0].names[0] != "[1]" || st.calls[1].id != 1 {
 		t.Fatalf("%d %+v", rec.Code, st.calls)
 	}
 	// A repo secret never authorizes App-level events.

@@ -1,6 +1,7 @@
 // Command codeintel reads connected repositories (ADR-014, contracts §13/§18): endpoint/consumer/cron/view/dependency
 // inventory, criticality (static rules + optional Claude enrichment), matching with observed traffic, alert
-// suggestions, generated load test drafts and alert-as-code monitors. Serves /healthz, /metrics and the GitHub webhook.
+// suggestions, generated load test drafts and alert-as-code monitors. Serves /healthz, /metrics and the GitHub, GitLab and
+// Bitbucket webhooks.
 package main
 
 import (
@@ -21,6 +22,7 @@ import (
 	"github.com/tasktrooper/telemetry/services/pkg/githubapp"
 	"github.com/tasktrooper/telemetry/services/pkg/logx"
 	"github.com/tasktrooper/telemetry/services/pkg/secrets"
+	"github.com/tasktrooper/telemetry/services/pkg/vcs"
 
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/analyze"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/enrich"
@@ -105,7 +107,7 @@ func run(once int64) error {
 
 	reg := obs.NewRegistry()
 	reg.Describe("codeintel_analyses_total", "counter", "Finished analyses by result.")
-	reg.Describe("codeintel_webhooks_total", "counter", "GitHub webhook deliveries by event and result.")
+	reg.Describe("codeintel_webhooks_total", "counter", "GitHub / GitLab / Bitbucket webhook deliveries by event and result.")
 	reg.Describe("codeintel_repositories", "gauge", "Connected repositories.")
 	r := &runner.Runner{
 		Store: st, Analyzer: an, Metrics: reg, Log: log,
@@ -134,6 +136,13 @@ func run(once int64) error {
 	})
 	mux.Handle("GET /metrics", reg)
 	mux.Handle("POST /v1/webhooks/github", wh)
+	repoSecret := func(ctx context.Context, repo model.Repo) ([]byte, error) {
+		b, err := resolve(ctx, repo.WebhookSecretRef, repo.ProjectID)
+		return []byte(strings.TrimSpace(string(b))), err
+	}
+	for _, p := range []string{vcs.GitLab, vcs.Bitbucket} { // per-repository webhooks (contracts §18a)
+		mux.Handle("POST /v1/webhooks/"+p, &webhook.RepoHook{Provider: p, Store: st, RepoSecret: repoSecret, Metrics: reg, Log: log})
+	}
 	addr := config.String("TT_CODEINTEL_ADDR", ":8096")
 	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: time.Minute}
 	go func() {
@@ -165,6 +174,7 @@ func analyzeOnce(ctx context.Context, st *store.Store, an *analyze.Analyzer, id 
 	if err != nil {
 		return err
 	}
+	repo.LastAnalyzedSHA = "" // -once is always a full scan (no git diff against the previous analysis)
 	rep, err := an.Run(ctx, repo, nil)
 	if err != nil {
 		_ = st.FinishError(context.WithoutCancel(ctx), id, started, err.Error(), []string{store.FullScan})
