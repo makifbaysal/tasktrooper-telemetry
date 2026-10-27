@@ -6,15 +6,21 @@ info:
   description: |
     Query API behind the dashboard (apps/web). Single source of truth for the HTTP contract (.ai/contracts.md).
 
-    * Auth: `Authorization: Bearer <api key>` (api_keys.kind = 'api'); the key selects org + project. Every query is tenant-scoped.
+    * Auth (ADR-016): `Authorization: Bearer <api key>` (api_keys.kind = 'api'; the key selects org + project and acts as admin)
+      or the `tt_session` cookie set by OIDC login (`/auth/login`) or dev login (`/auth/dev-login`, TT_AUTH_DEV=true).
+      Cookie sessions pick the project with `X-Trooper-Project: <project id>` (default: first project of the user).
+      Roles: viewer = read only; member = normal writes; admin+ = members, api keys, integrations, domains; owner = owner role changes.
+      Every non-GET request is written to the audit log. Every query is tenant-scoped.
+    * CORS: exact origin echo with credentials (dev: any http://localhost:*).
     * JSON, camelCase. Times are unix ms, durations ms, ratios 0..1.
     * Series are `{timestamps, series: [{id, label, data}]}`, zero-filled, one point per bucket:
-      1h → 60×1m, 6h → 72×5m, 24h → 96×15m, 7d → 84×2h (red_1m for ≤ 24h, red_1h for 7d). The last bucket contains now.
-    * Errors: `{"error": "..."}` with 400 (validation), 401, 404, 409 (state conflict / duplicate id), 500.
+      15m → 15×1m, 30m → 30×1m, 1h → 60×1m, 6h → 72×5m, 24h → 96×15m, 7d → 84×2h (red_1m for ≤ 24h, red_1h for 7d). The last bucket contains now.
+    * Errors: `{"error": "..."}` with 400 (validation), 401, 403 (role / project access), 404, 409 (state conflict / duplicate id), 500.
 servers:
   - url: http://localhost:8080
 security:
   - apiKey: []
+  - session: []
 tags:
   - { name: System, description: "Health check" }
   - { name: APM, description: "Services, endpoints, processes, RED series, callers, dependencies, deploys" }
@@ -27,7 +33,10 @@ tags:
   - { name: Load tests, description: "Scenarios and runs" }
   - { name: Internal, description: "Service-to-service endpoints (collector)" }
   - { name: Integrations, description: "Cloud integrations (AWS, Google Cloud, Vercel, Neon — ADR-012)" }
-  - { name: Code insights, description: "Repo analysis, code inventory and monitor suggestions (no backend yet: empty lists)" }
+  - { name: Auth, description: "OIDC / dev login, sessions, current user (ADR-016)" }
+  - { name: Team, description: "Members, projects, API keys, audit log" }
+  - { name: ChatOps, description: "Slack App and GitHub App installations, Slack interactivity (ADR-017)" }
+  - { name: Code insights, description: "Repo analysis, code inventory and monitor suggestions (services/codeintel)" }
 paths:
   /healthz:
     get:
@@ -404,36 +413,6 @@ paths:
         '404': { $ref: '#/components/responses/E404' }
         '401': { $ref: '#/components/responses/E401' }
         '500': { $ref: '#/components/responses/E500' }
-  /api/v1/suggestions:
-    get:
-      tags: [Code insights]
-      operationId: getSuggestions
-      summary: 'Monitor suggestions from code analysis (no backend yet: always [])'
-      responses:
-        '200':
-          description: OK
-          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/CodeSuggestion' } } } }
-        '401': { $ref: '#/components/responses/E401' }
-  /api/v1/repos:
-    get:
-      tags: [Code insights]
-      operationId: getRepos
-      summary: 'Analyzed repositories (no backend yet: always [])'
-      responses:
-        '200':
-          description: OK
-          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Repo' } } } }
-        '401': { $ref: '#/components/responses/E401' }
-  /api/v1/inventory:
-    get:
-      tags: [Code insights]
-      operationId: getInventory
-      summary: 'Code inventory: endpoints, consumers, crons, views, dependencies (no backend yet: always [])'
-      responses:
-        '200':
-          description: OK
-          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/InventoryItem' } } } }
-        '401': { $ref: '#/components/responses/E401' }
   /api/v1/deploys:
     get:
       tags: [APM]
@@ -544,6 +523,7 @@ paths:
       operationId: getLogs
       summary: 'Search logs (newest first, cursor = nextBefore)'
       parameters:
+        - { name: source, in: query, description: 'Vercel log source (attrs vercel.source): static | lambda | edge | build | external | firewall', schema: { type: string } }
         - $ref: '#/components/parameters/range'
         - $ref: '#/components/parameters/env'
         - $ref: '#/components/parameters/service'
@@ -1549,6 +1529,22 @@ paths:
         '404': { $ref: '#/components/responses/E404' }
         '401': { $ref: '#/components/responses/E401' }
         '500': { $ref: '#/components/responses/E500' }
+    patch:
+      tags: [Load tests]
+      operationId: patchLoadtestsScenariosId
+      summary: 'Set the scenario state (draft → ready after review)'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ScenarioPatch' } } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/LoadTestScenario' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '404': { $ref: '#/components/responses/E404' }
+        '500': { $ref: '#/components/responses/E500' }
   /api/v1/loadtests/scenarios/{id}/runs:
     parameters:
       - { name: id, in: path, required: true, description: 'Id', schema: { type: string } }
@@ -1754,7 +1750,9 @@ paths:
     get:
       tags: [Integrations]
       operationId: getIntegrations
-      summary: 'Cloud integrations with the resources they discovered (databases, clusters, queues, deploy projects)'
+      summary: 'Integrations with the resources they discovered (databases, clusters, queues, deploy projects); slack/github rows carry config only'
+      parameters:
+        - { name: provider, in: query, schema: { type: string, enum: [aws, gcp, vercel, neon, slack, github] } }
       responses:
         '200':
           description: OK
@@ -1852,11 +1850,605 @@ paths:
         '404': { $ref: '#/components/responses/E404' }
         '401': { $ref: '#/components/responses/E401' }
         '500': { $ref: '#/components/responses/E500' }
+  /api/v1/auth/config:
+    get:
+      tags: [Auth]
+      operationId: getAuthConfig
+      summary: 'Login methods available (no auth)'
+      security: []
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/AuthConfig' } } }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/auth/login:
+    get:
+      tags: [Auth]
+      operationId: getAuthLogin
+      summary: 'Start OIDC Authorization Code + PKCE login: redirects to the identity provider (no auth)'
+      security: []
+      parameters:
+        - { name: redirect, in: query, description: 'Web path to return to after login', schema: { type: string } }
+      responses:
+        '302': { description: Redirect to the IdP }
+        '404': { $ref: '#/components/responses/E404' }
+        '500': { $ref: '#/components/responses/E500' }
+        '502': { description: Identity provider unavailable }
+  /api/v1/auth/callback:
+    get:
+      tags: [Auth]
+      operationId: getAuthCallback
+      summary: 'OIDC redirect URI: verifies state/PKCE/nonce, upserts the user, sets the tt_session cookie and redirects to the web app (errors → /login?error=)'
+      security: []
+      parameters:
+        - { name: code, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string } }
+      responses:
+        '302': { description: Redirect to the web app }
+        '404': { $ref: '#/components/responses/E404' }
+  /api/v1/auth/dev-login:
+    post:
+      tags: [Auth]
+      operationId: postAuthDevLogin
+      summary: 'Dev login without an IdP (only when TT_AUTH_DEV=true): sets the tt_session cookie'
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/DevLoginInput' } } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '404': { $ref: '#/components/responses/E404' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      operationId: postAuthLogout
+      summary: 'Delete the session and clear the cookie'
+      security: []
+      responses:
+        '204': { description: Done }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/me:
+    get:
+      tags: [Auth]
+      operationId: getMe
+      summary: 'Current user, orgs (role + projects) and current project (X-Trooper-Project)'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/orgs/{org}/members:
+    parameters:
+      - { name: org, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [Team]
+      operationId: getOrgMembers
+      summary: 'Members of an org (viewer+)'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Member' } } } }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '404': { $ref: '#/components/responses/E404' }
+        '500': { $ref: '#/components/responses/E500' }
+    post:
+      tags: [Team]
+      operationId: postOrgMembers
+      summary: 'Add a member by email (admin+; owner role only by owners). Creates the user when unknown'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/MemberInput' } } }
+      responses:
+        '201':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Member' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '404': { $ref: '#/components/responses/E404' }
+        '409': { $ref: '#/components/responses/E409' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/orgs/{org}/members/{user}:
+    parameters:
+      - { name: org, in: path, required: true, schema: { type: string } }
+      - { name: user, in: path, required: true, schema: { type: string } }
+    patch:
+      tags: [Team]
+      operationId: patchOrgMembersUser
+      summary: 'Change a role (admin+; owner role changes only by owners; the last owner cannot be demoted)'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/MemberPatch' } } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Member' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '404': { $ref: '#/components/responses/E404' }
+        '409': { $ref: '#/components/responses/E409' }
+        '500': { $ref: '#/components/responses/E500' }
+    delete:
+      tags: [Team]
+      operationId: deleteOrgMembersUser
+      summary: 'Remove a member (admin+; the last owner cannot be removed)'
+      responses:
+        '204': { description: Done }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '404': { $ref: '#/components/responses/E404' }
+        '409': { $ref: '#/components/responses/E409' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/projects:
+    get:
+      tags: [Team]
+      operationId: getProjects
+      summary: 'Projects of the users orgs (api key: its project)'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Project' } } } }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+    post:
+      tags: [Team]
+      operationId: postProjects
+      summary: 'Create a project (admin+ of the org)'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ProjectInput' } } }
+      responses:
+        '201':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Project' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '409': { $ref: '#/components/responses/E409' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/api-keys:
+    get:
+      tags: [Team]
+      operationId: getApiKeys
+      summary: 'API keys of the current project (admin+). Plaintext is never returned'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/APIKey' } } } }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '500': { $ref: '#/components/responses/E500' }
+    post:
+      tags: [Team]
+      operationId: postApiKeys
+      summary: 'Create a key (admin+). The response carries `key` (plaintext) once; only sha256 is stored'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/APIKeyInput' } } }
+      responses:
+        '201':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/APIKey' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/api-keys/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    delete:
+      tags: [Team]
+      operationId: deleteApiKeysId
+      summary: 'Revoke a key (admin+)'
+      responses:
+        '204': { description: Done }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '404': { $ref: '#/components/responses/E404' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/audit-log:
+    get:
+      tags: [Team]
+      operationId: getAuditLog
+      summary: 'Audit log of the org, newest first (admin+). Every non-GET request is recorded'
+      parameters:
+        - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/AuditEntry' } } } }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/repos:
+    get:
+      tags: [Code insights]
+      operationId: getRepos
+      summary: 'Connected repositories'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Repo' } } } }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+    post:
+      tags: [Code insights]
+      operationId: postRepos
+      summary: 'Connect a repository and request an analysis. `token` is sealed (pkg/secrets) and never returned; provider github + installationId uses the GitHub App (no token)'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RepoInput' } } }
+      responses:
+        '201':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Repo' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '409': { $ref: '#/components/responses/E409' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/repos/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [Code insights]
+      operationId: getReposId
+      summary: 'One repository'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Repo' } } }
+        '401': { $ref: '#/components/responses/E401' }
+        '404': { $ref: '#/components/responses/E404' }
+        '500': { $ref: '#/components/responses/E500' }
+    delete:
+      tags: [Code insights]
+      operationId: deleteReposId
+      summary: 'Disconnect a repository (inventory and suggestions are deleted)'
+      responses:
+        '204': { description: Done }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '404': { $ref: '#/components/responses/E404' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/repos/{id}/analyze:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Code insights]
+      operationId: postReposIdAnalyze
+      summary: 'Request a re-analysis (sets analyze_requested_at; codeintel picks it up)'
+      responses:
+        '202':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Repo' } } }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '404': { $ref: '#/components/responses/E404' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/inventory:
+    get:
+      tags: [Code insights]
+      operationId: getInventory
+      summary: 'Code inventory (endpoints, consumers, crons, views, dependencies) incl. dead (no traffic for 30 days) and shadow (traffic, not in code) items'
+      parameters:
+        - { name: repoId, in: query, schema: { type: string } }
+        - $ref: '#/components/parameters/kind'
+        - $ref: '#/components/parameters/service'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/InventoryItem' } } } }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/suggestions:
+    get:
+      tags: [Code insights]
+      operationId: getSuggestions
+      summary: 'Monitor suggestions from code analysis'
+      parameters:
+        - { name: state, in: query, schema: { type: string, enum: [proposed, accepted, rejected, all], default: proposed } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/CodeSuggestion' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/suggestions/{id}/accept:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Code insights]
+      operationId: postSuggestionsIdAccept
+      summary: 'Create a monitor (source suggestion) from the suggestions monitorDraft with optional overrides'
+      requestBody:
+        required: false
+        content: { application/json: { schema: { $ref: '#/components/schemas/SuggestionAccept' } } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/SuggestionAccepted' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '404': { $ref: '#/components/responses/E404' }
+        '409': { $ref: '#/components/responses/E409' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/suggestions/{id}/reject:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Code insights]
+      operationId: postSuggestionsIdReject
+      summary: 'Reject a suggestion'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/CodeSuggestion' } } }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '404': { $ref: '#/components/responses/E404' }
+        '409': { $ref: '#/components/responses/E409' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/loadtests/runs/{id}/series:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [Load tests]
+      operationId: getLoadtestsRunsIdSeries
+      summary: 'Run timeline from runner metrics (delta sums per bucket; p95 from histogram buckets; vus summed over regions), falling back to the live snapshot'
+      parameters:
+        - { name: step, in: query, description: 'Bucket size, Go duration 1s..1h (default 5s; at most 2000 points)', schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/RunSeries' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '404': { $ref: '#/components/responses/E404' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/loadtests/runs/{id}/target:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [Load tests]
+      operationId: getLoadtestsRunsIdTarget
+      summary: 'Target service RED during the run: total vs. traffic of caller loadtest:<run id> (series rpm, rpmLoadtest, errorRate, errorRateLoadtest, p95, p95Loadtest)'
+      parameters:
+        - $ref: '#/components/parameters/service'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/RunTarget' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '404': { $ref: '#/components/responses/E404' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/loadtests/domains:
+    get:
+      tags: [Load tests]
+      operationId: getLoadtestsDomains
+      summary: 'Target domains and their verification state'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/LoadTestDomain' } } } }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+    post:
+      tags: [Load tests]
+      operationId: postLoadtestsDomains
+      summary: 'Add a target domain (admin+); publish dnsRecord (TXT) or serve token at httpUrl, then verify'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/LoadTestDomainInput' } } }
+      responses:
+        '201':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/LoadTestDomain' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '409': { $ref: '#/components/responses/E409' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/loadtests/domains/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    delete:
+      tags: [Load tests]
+      operationId: deleteLoadtestsDomainsId
+      summary: 'Remove a target domain (admin+)'
+      responses:
+        '204': { description: Done }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '404': { $ref: '#/components/responses/E404' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/loadtests/domains/{id}/verify:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Load tests]
+      operationId: postLoadtestsDomainsIdVerify
+      summary: 'Request verification (sets verify_requested_at; loadtest-ctl checks DNS/HTTP)'
+      requestBody:
+        required: false
+        content: { application/json: { schema: { type: object, properties: { method: { type: string, enum: [dns, http] } } } } }
+      responses:
+        '202':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/LoadTestDomain' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '404': { $ref: '#/components/responses/E404' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/integrations/slack:
+    get:
+      tags: [ChatOps]
+      operationId: getIntegrationsSlack
+      summary: 'Slack installation of the org (never the token)'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/SlackStatus' } } }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+    delete:
+      tags: [ChatOps]
+      operationId: deleteIntegrationsSlack
+      summary: 'Uninstall Slack for the org (admin+)'
+      responses:
+        '204': { description: Done }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/integrations/slack/install:
+    get:
+      tags: [ChatOps]
+      operationId: getIntegrationsSlackInstall
+      summary: 'Cookie session: redirect to Slack OAuth v2 (admin+, signed state)'
+      parameters:
+        - { name: redirect, in: query, description: 'Web path or allowed origin URL to return to (default /settings/integrations)', schema: { type: string } }
+      responses:
+        '302': { description: Redirect to slack.com }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '501': { description: Not configured, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /api/v1/integrations/slack/install-url:
+    post:
+      tags: [ChatOps]
+      operationId: postIntegrationsSlackInstallUrl
+      summary: 'Signed Slack OAuth URL (admin+) for clients that cannot follow a redirect with their credentials (api key)'
+      parameters:
+        - { name: redirect, in: query, description: 'Web path or allowed origin URL to return to (default /settings/integrations)', schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/InstallURL' } } }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '500': { $ref: '#/components/responses/E500' }
+        '501': { description: Not configured, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /api/v1/integrations/slack/callback:
+    get:
+      tags: [ChatOps]
+      operationId: getIntegrationsSlackCallback
+      summary: 'Slack OAuth redirect URI (no auth; state is HMAC-signed, 15 min): stores the bot token sealed and redirects back with slack=connected|error'
+      security: []
+      parameters:
+        - { name: code, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string } }
+        - { name: error, in: query, schema: { type: string } }
+      responses:
+        '302': { description: Redirect to the web app }
+  /api/v1/integrations/slack/channels:
+    get:
+      tags: [ChatOps]
+      operationId: getIntegrationsSlackChannels
+      summary: 'Channels visible to the bot (all pages, cached 5 min)'
+      parameters:
+        - $ref: '#/components/parameters/q'
+        - { name: refresh, in: query, description: 'Bypass the cache', schema: { type: boolean } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/SlackChannel' } } } }
+        '401': { $ref: '#/components/responses/E401' }
+        '404': { $ref: '#/components/responses/E404' }
+        '500': { $ref: '#/components/responses/E500' }
+        '501': { description: Not configured, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /api/v1/integrations/github:
+    get:
+      tags: [ChatOps]
+      operationId: getIntegrationsGithub
+      summary: 'GitHub App installations of the project'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/GitHubInstall' } } } }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/integrations/github/install:
+    get:
+      tags: [ChatOps]
+      operationId: getIntegrationsGithubInstall
+      summary: 'Cookie session: redirect to the GitHub App installation page (admin+, signed state)'
+      parameters:
+        - { name: redirect, in: query, description: 'Web path or allowed origin URL to return to (default /settings/integrations)', schema: { type: string } }
+      responses:
+        '302': { description: Redirect to github.com }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '501': { description: Not configured, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /api/v1/integrations/github/install-url:
+    post:
+      tags: [ChatOps]
+      operationId: postIntegrationsGithubInstallUrl
+      summary: 'Signed GitHub App installation URL (admin+)'
+      parameters:
+        - { name: redirect, in: query, description: 'Web path or allowed origin URL to return to (default /settings/integrations)', schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/InstallURL' } } }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '500': { $ref: '#/components/responses/E500' }
+        '501': { description: Not configured, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /api/v1/integrations/github/callback:
+    get:
+      tags: [ChatOps]
+      operationId: getIntegrationsGithubCallback
+      summary: 'GitHub App setup URL (no auth; signed state): verifies the installation and redirects back with github=<integration id>|pending|error'
+      security: []
+      parameters:
+        - { name: installation_id, in: query, schema: { type: integer } }
+        - { name: setup_action, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string } }
+      responses:
+        '302': { description: Redirect to the web app }
+  /api/v1/integrations/github/{id}/repos:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [ChatOps]
+      operationId: getIntegrationsGithubIdRepos
+      summary: 'Repositories of an installation (installation token); added = already connected'
+      parameters:
+        - $ref: '#/components/parameters/q'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/GitHubRepo' } } } }
+        '401': { $ref: '#/components/responses/E401' }
+        '404': { $ref: '#/components/responses/E404' }
+        '500': { $ref: '#/components/responses/E500' }
+        '502': { description: GitHub API error, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /api/v1/slack/interactions:
+    post:
+      tags: [ChatOps]
+      operationId: postSlackInteractions
+      summary: 'Slack interactivity (no auth; X-Slack-Signature + timestamp ±5 min). Buttons tt_ack:<incidentId> and tt_mute1h:<monitorId>; the Slack user is mapped by email to an org member (member+)'
+      security: []
+      responses:
+        '200':
+          description: OK
+        '401': { $ref: '#/components/responses/E401' }
 components:
   securitySchemes:
     apiKey: { type: http, scheme: bearer, description: "Project API key (kind = api), e.g. tt_dev_api_key" }
+    session: { type: apiKey, in: cookie, name: tt_session, description: "httpOnly session cookie (7 day sliding); project via X-Trooper-Project" }
   parameters:
-    range: { name: range, in: query, description: "Time range (default 1h)", schema: { type: string, enum: [1h, 6h, 24h, 7d], default: 1h } }
+    range: { name: range, in: query, description: "Time range (default 1h)", schema: { type: string, enum: [15m, 30m, 1h, 6h, 24h, 7d], default: 1h } }
     env: { name: env, in: query, description: "Deployment environment filter", schema: { type: string } }
     type: { name: type, in: query, description: "Service types, comma separated (http | worker | web | mobile)", schema: { type: string } }
     service: { name: service, in: query, description: "Service name (repeatable / comma separated on /logs)", schema: { type: string } }
@@ -1890,50 +2482,92 @@ components:
   responses:
     E400: { description: Invalid parameter or body, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
     E401: { description: Missing or invalid API key, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+    E403: { description: Role too low or project not accessible, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
     E404: { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
     E409: { description: Conflict (duplicate id or invalid state transition), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
     E500: { description: Internal error, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
   schemas:
     CodeSuggestion:
       type: object
-      required: [id, title, kind, target, condition, criticality, confidence, rationale, codeRef, calibrated]
+      required: [id, title, kind, target, condition, criticality, confidence, rationale, codeRef, calibrated, state, createdAt, monitorDraft]
       properties:
         id: { type: string }
         title: { type: string }
         kind: { type: string, description: 'Monitor kind' }
         target: { type: string }
         condition: { type: string }
-        criticality: { type: string }
+        criticality: { type: string, enum: [critical, important, low] }
         confidence: { type: number }
         rationale: { type: string }
         codeRef: { type: string }
         calibrated: { type: boolean }
+        state: { type: string, enum: [proposed, accepted, rejected] }
+        createdAt: { type: integer }
+        monitorId: { type: string, description: 'Monitor created on accept' }
+        monitorDraft: { description: 'POST /monitors body that accept creates' }
+    SuggestionAccept:
+      type: object
+      properties:
+        name: { type: string }
+        severity: { type: string }
+        channels: { type: array, items: { type: string } }
+        status: { type: string }
+    SuggestionAccepted:
+      type: object
+      required: [suggestion, monitor]
+      properties:
+        suggestion: { $ref: '#/components/schemas/CodeSuggestion' }
+        monitor: { $ref: '#/components/schemas/Monitor' }
     Repo:
       type: object
-      required: [id, name, branch, sha, analyzedAt, services, language, status]
+      required: [id, name, provider, branch, sha, analyzedAt, services, language, languages, status, lastAnalyzedSha, pendingPaths, webhookActive]
       properties:
         id: { type: string }
-        name: { type: string }
+        name: { type: string, description: 'owner/repo' }
+        provider: { type: string, enum: [github, gitlab, bitbucket, local] }
         branch: { type: string }
         sha: { type: string }
         analyzedAt: { type: integer, format: int64 }
+        analyzeRequestedAt: { type: integer }
         services: { type: array, items: { type: string } }
         language: { type: string }
-        status: { type: string, enum: [ready, analyzing, error] }
+        languages: { type: array, items: { type: string } }
+        status: { type: string, enum: [ready, analyzing, error, disconnected] }
+        error: { type: string }
+        installationId: { type: string }
+        localPath: { type: string }
+        lastAnalyzedSha: { type: string }
+        pendingPaths: { type: [array, "null"], items: { type: string }, description: 'Files changed by pushes since the last analysis' }
+        webhookActive: { type: boolean, description: 'Connected through the GitHub App (pushes trigger analyses)' }
+    RepoInput:
+      type: object
+      required: [provider, fullName]
+      properties:
+        provider: { type: string, enum: [github, gitlab, bitbucket, local] }
+        fullName: { type: string }
+        defaultBranch: { type: string }
+        token: { type: string, writeOnly: true, description: 'Sealed, never returned' }
+        installationId: { type: [integer, string], description: 'GitHub App installation of this project (no token needed)' }
+        localPath: { type: string }
     InventoryItem:
       type: object
-      required: [id, kind, key, service, file, line, criticality, observed, monitored]
+      required: [id, kind, key, service, file, line, criticality, observed, monitored, dead, shadow]
       properties:
         id: { type: string }
+        repoId: { type: string }
         kind: { type: string, enum: [endpoint, consumer, cron, view, dependency] }
         key: { type: string, description: '"METHOD /route" or process name' }
         source: { type: string, description: 'Consumer: topic/queue; cron: schedule' }
         service: { type: string }
         file: { type: string }
         line: { type: integer }
-        criticality: { type: string }
+        criticality: { type: string, enum: [critical, important, low] }
         observed: { type: boolean }
         monitored: { type: boolean }
+        dead: { type: boolean, description: 'In code, no traffic for 30 days' }
+        shadow: { type: boolean, description: 'Traffic, not in code' }
+        summary: { type: string }
+        analysis: { description: 'LLM interpretation (failure_modes, loadtest_hint)' }
     RcaStats:
       type: object
       required: [requests, rpm, avgMs, p50, p95, errorRate]
@@ -2214,6 +2848,7 @@ components:
         message: { type: string }
         traceId: { type: string }
         route: { type: string }
+        source: { type: string, description: 'Vercel log source' }
     LogPage:
       type: object
       required: [lines, nextBefore, levels, services]
@@ -2375,7 +3010,8 @@ components:
         condition: { type: string }
         severity: { type: string }
         state: { type: string }
-        source: { type: string }
+        source: { type: string, enum: [manual, code, template, suggestion], description: 'code = managed in a repository (PUT/PATCH/DELETE → 409, except muting)' }
+        codeRef: { type: string, description: 'File (and line) that defines a code monitor' }
         lastChange: { type: integer }
         channels: { type: array, items: { type: string } }
         queue: { oneOf: [{ $ref: '#/components/schemas/QueueRule' }, { type: "null" }] }
@@ -2446,7 +3082,7 @@ components:
       required: [id, provider, name, status, config, resources, createdAt, resourceCount, hasSecret]
       properties:
         id: { type: string }
-        provider: { type: string, enum: [aws, gcp, vercel, neon] }
+        provider: { type: string, enum: [aws, gcp, vercel, neon, slack, github] }
         name: { type: string }
         status: { type: string, enum: [pending, ok, error, disabled] }
         error: { type: string }
@@ -2887,6 +3523,8 @@ components:
         duration: { type: number }
         regions: { type: array, items: { type: string } }
         lastRun: { type: string }
+        state: { type: string, enum: [draft, ready], description: 'draft (generated, needs review) cannot run' }
+        services: { type: array, items: { type: string }, description: 'spec.services' }
         spec: {}
     ScenarioInput:
       type: object
@@ -2894,7 +3532,13 @@ components:
       properties:
         name: { type: string }
         source: { type: string }
+        state: { type: string, enum: [draft, ready] }
         spec: {}
+    ScenarioPatch:
+      type: object
+      required: [state]
+      properties:
+        state: { type: string, enum: [draft, ready] }
     Threshold:
       type: object
       required: [name, passed]
@@ -2907,12 +3551,229 @@ components:
       properties:
         id: { type: string }
         scenarioId: { type: string }
-        state: { type: string }
-        startedAt: { type: integer }
+        state: { type: string, enum: [queued, running, passed, failed, aborted, error] }
+        startedAt: { type: integer, description: 'createdAt until a runner claims the run' }
         finishedAt: { type: integer }
+        createdAt: { type: integer }
+        region: { type: string }
+        error: { type: string }
+        live: { $ref: '#/components/schemas/RunLive' }
+        abortRequestedAt: { type: integer }
+        thresholdsPassed: { type: boolean }
+        steps: { type: array, items: { type: object }, description: 'Runner summary: [{key, count, errors, errorRate, rps, p50, p95, p99, avgMs}]' }
+        statusCodes: { type: object, additionalProperties: { type: number } }
         progress: { type: number }
         rps: { type: number }
         p95: { type: number }
         errorRate: { type: number }
         vus: { type: number }
         thresholds: { type: array, items: { $ref: '#/components/schemas/Threshold' } }
+    RunLive:
+      type: object
+      properties:
+        ts: { type: integer }
+        vus: { type: number }
+        rps: { type: number }
+        p95: { type: number }
+        errorRate: { type: number }
+        progress: { type: number }
+    RunSeries:
+      type: object
+      required: [ts, vus, rps, p95, errorRate, stepMs, source]
+      properties:
+        ts: { type: array, items: { type: integer } }
+        vus: { type: array, items: { type: number } }
+        rps: { type: array, items: { type: number } }
+        p95: { type: array, items: { type: number } }
+        errorRate: { type: array, items: { type: number } }
+        stepMs: { type: integer }
+        source: { type: string, enum: [metrics, live] }
+    RedTotals:
+      type: object
+      properties:
+        requests: { type: number }
+        errorRate: { type: number }
+        p95: { type: number }
+    RunTarget:
+      allOf:
+        - $ref: '#/components/schemas/SeriesSet'
+        - type: object
+          required: [service, caller, from, to, total, loadtest, other]
+          properties:
+            service: { type: string }
+            caller: { type: string, description: 'loadtest:<run id>' }
+            from: { type: integer }
+            to: { type: integer }
+            total: { $ref: '#/components/schemas/RedTotals' }
+            loadtest: { $ref: '#/components/schemas/RedTotals' }
+            other: { $ref: '#/components/schemas/RedTotals' }
+    LoadTestDomain:
+      type: object
+      required: [id, host, token, method, verified, createdAt, dnsRecord, httpUrl]
+      properties:
+        id: { type: string }
+        host: { type: string }
+        token: { type: string }
+        method: { type: string, enum: [dns, http] }
+        verified: { type: boolean }
+        verifiedAt: { type: integer }
+        verifyRequestedAt: { type: integer }
+        createdAt: { type: integer }
+        dnsRecord: { type: string, description: 'TXT value to publish' }
+        httpUrl: { type: string, description: 'URL that must serve the token' }
+    LoadTestDomainInput:
+      type: object
+      required: [host]
+      properties:
+        host: { type: string }
+        method: { type: string, enum: [dns, http] }
+    AuthConfig:
+      type: object
+      required: [oidc, devLogin]
+      properties:
+        oidc: { type: boolean }
+        devLogin: { type: boolean }
+    DevLoginInput:
+      type: object
+      properties:
+        email: { type: string, description: 'default dev@tasktrooper.local' }
+        name: { type: string }
+    User:
+      type: object
+      required: [id, email, name]
+      properties:
+        id: { type: string }
+        email: { type: string }
+        name: { type: string }
+    MeOrg:
+      type: object
+      required: [id, name, role, projects]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        role: { type: string, enum: [owner, admin, member, viewer] }
+        projects: { type: array, items: { type: object, properties: { id: { type: string }, name: { type: string }, slug: { type: string } } } }
+    Me:
+      type: object
+      required: [orgs, currentProjectId, role, auth]
+      properties:
+        user: { oneOf: [{ $ref: '#/components/schemas/User' }, { type: "null" }], description: 'null for api keys' }
+        orgs: { type: array, items: { $ref: '#/components/schemas/MeOrg' } }
+        currentProjectId: { type: string }
+        role: { type: string }
+        auth: { type: string, enum: [session, apiKey] }
+    Member:
+      type: object
+      required: [userId, email, name, role]
+      properties:
+        userId: { type: string }
+        email: { type: string }
+        name: { type: string }
+        role: { type: string, enum: [owner, admin, member, viewer] }
+        lastLoginAt: { type: integer }
+    MemberInput:
+      type: object
+      required: [email, role]
+      properties:
+        email: { type: string }
+        name: { type: string }
+        role: { type: string, enum: [owner, admin, member, viewer] }
+    MemberPatch:
+      type: object
+      required: [role]
+      properties:
+        role: { type: string, enum: [owner, admin, member, viewer] }
+    Project:
+      type: object
+      required: [id, orgId, name, slug, createdAt]
+      properties:
+        id: { type: string }
+        orgId: { type: string }
+        name: { type: string }
+        slug: { type: string }
+        role: { type: string }
+        createdAt: { type: integer }
+    ProjectInput:
+      type: object
+      required: [name]
+      properties:
+        orgId: { type: string, description: "default: the current project's org" }
+        name: { type: string }
+        slug: { type: string }
+    APIKey:
+      type: object
+      required: [id, name, kind, prefix, allowedOrigins, createdAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        kind: { type: string, enum: [ingest, api] }
+        prefix: { type: string }
+        allowedOrigins: { type: array, items: { type: string } }
+        createdAt: { type: integer }
+        lastUsedAt: { type: integer }
+        revokedAt: { type: integer }
+        createdBy: { type: string }
+        createdByEmail: { type: string }
+        key: { type: string, description: 'Plaintext, only in the create response' }
+    APIKeyInput:
+      type: object
+      required: [name, kind]
+      properties:
+        name: { type: string }
+        kind: { type: string, enum: [ingest, api] }
+        allowedOrigins: { type: array, items: { type: string } }
+    AuditEntry:
+      type: object
+      required: [id, at, action, target, meta]
+      properties:
+        id: { type: string }
+        at: { type: integer }
+        action: { type: string, description: '"METHOD /route/{pattern}", login, slack.ack, slack.mute' }
+        target: { type: string }
+        projectId: { type: string }
+        userId: { type: string }
+        userEmail: { type: string }
+        apiKeyId: { type: string }
+        apiKeyName: { type: string }
+        meta: {}
+    InstallURL:
+      type: object
+      required: [url]
+      properties:
+        url: { type: string, description: 'Provider URL with a signed state (15 min)' }
+    SlackStatus:
+      type: object
+      required: [installed]
+      properties:
+        installed: { type: boolean }
+        id: { type: string }
+        teamId: { type: string }
+        teamName: { type: string }
+        installedAt: { type: integer }
+    SlackChannel:
+      type: object
+      required: [id, name, isPrivate, isMember]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        isPrivate: { type: boolean }
+        isMember: { type: boolean }
+    GitHubInstall:
+      type: object
+      required: [id, installationId, account, accountType, status, createdAt]
+      properties:
+        id: { type: string, description: 'integration id' }
+        installationId: { type: string }
+        account: { type: string }
+        accountType: { type: string }
+        status: { type: string }
+        createdAt: { type: integer }
+    GitHubRepo:
+      type: object
+      required: [fullName, defaultBranch, private, language, added]
+      properties:
+        fullName: { type: string }
+        defaultBranch: { type: string }
+        private: { type: boolean }
+        language: { type: string }
+        added: { type: boolean }

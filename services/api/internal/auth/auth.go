@@ -1,4 +1,5 @@
-// Package auth resolves `Authorization: Bearer <api key>` to a tenant (api_keys.kind = 'api', sha256 hash).
+// Package auth resolves `Authorization: Bearer <api key>` to a tenant (api_keys.kind = 'api', sha256 hash) and runs
+// the OIDC login flow (oidc.go); sessions live in the store.
 package auth
 
 import (
@@ -21,8 +22,19 @@ type Resolver interface {
 	Resolve(ctx context.Context, key string) (tenant.Tenant, error)
 }
 
+// KeyResolver also returns the key's id (audit log); *PG implements it.
+type KeyResolver interface {
+	ResolveKey(ctx context.Context, key string) (tenant.Tenant, int64, error)
+}
+
+// Forgetter drops a key hash from a cache (revocation takes effect immediately).
+type Forgetter interface {
+	Forget(hash []byte)
+}
+
 type entry struct {
 	t   tenant.Tenant
+	id  int64
 	err error
 	exp time.Time
 }
@@ -41,29 +53,46 @@ func NewPG(pool *pgxpool.Pool) *PG {
 	return &PG{Pool: pool, TTL: time.Minute, cache: map[[32]byte]entry{}}
 }
 
-// Resolve implements Resolver. This is the only api query without a tenant filter: it is how the tenant is found.
+// Resolve implements Resolver.
 func (p *PG) Resolve(ctx context.Context, key string) (tenant.Tenant, error) {
+	t, _, err := p.ResolveKey(ctx, key)
+	return t, err
+}
+
+// Forget implements Forgetter.
+func (p *PG) Forget(hash []byte) {
+	var h [32]byte
+	if copy(h[:], hash) != 32 {
+		return
+	}
+	p.mu.Lock()
+	delete(p.cache, h)
+	p.mu.Unlock()
+}
+
+// ResolveKey implements KeyResolver. Like session lookup, it runs without a tenant filter: it is how the tenant is found.
+func (p *PG) ResolveKey(ctx context.Context, key string) (tenant.Tenant, int64, error) {
 	if key == "" {
-		return tenant.Tenant{}, ErrUnauthorized
+		return tenant.Tenant{}, 0, ErrUnauthorized
 	}
 	h := sha256.Sum256([]byte(key))
 	p.mu.Lock()
 	if e, ok := p.cache[h]; ok && time.Now().Before(e.exp) {
 		p.mu.Unlock()
-		return e.t, e.err
+		return e.t, e.id, e.err
 	}
 	p.mu.Unlock()
-	var org, project int64
-	err := p.Pool.QueryRow(ctx, `SELECT p.org_id, p.id FROM api_keys k JOIN projects p ON p.id = k.project_id
-	  WHERE k.hash = $1 AND k.kind = 'api' AND k.revoked_at IS NULL`, h[:]).Scan(&org, &project)
+	var org, project, id int64
+	err := p.Pool.QueryRow(ctx, `SELECT p.org_id, p.id, k.id FROM api_keys k JOIN projects p ON p.id = k.project_id
+	  WHERE k.hash = $1 AND k.kind = 'api' AND k.revoked_at IS NULL`, h[:]).Scan(&org, &project, &id)
 	e := entry{exp: time.Now().Add(p.TTL)}
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		e.err = ErrUnauthorized
 	case err != nil:
-		return tenant.Tenant{}, err // transient: don't cache
+		return tenant.Tenant{}, 0, err // transient: don't cache
 	default:
-		e.t = tenant.Tenant{OrgID: uint32(org), ProjectID: uint32(project)}
+		e.t, e.id = tenant.Tenant{OrgID: uint32(org), ProjectID: uint32(project)}, id
 		go p.touch(h[:])
 	}
 	p.mu.Lock()
@@ -72,7 +101,7 @@ func (p *PG) Resolve(ctx context.Context, key string) (tenant.Tenant, error) {
 	}
 	p.cache[h] = e
 	p.mu.Unlock()
-	return e.t, e.err
+	return e.t, e.id, e.err
 }
 
 func (p *PG) touch(hash []byte) {
