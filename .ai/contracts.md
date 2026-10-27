@@ -309,3 +309,69 @@ offline kuyruktan gelen ≤ 24 saatlik event'ler kendi zamanlarında kalır.
   --app --release <path>` (`TROOPER_API_URL`, `TROOPER_API_KEY`). Exit kodları: 0 ok, 1 sunucu/ağ, 2 kullanım, 3 yetkisiz, 4 bazı
   dosyalar reddedildi. Android Gradle plugin'i (`com.tasktrooper.mapping-upload`) sadece `r8` yükler; NDK `.so` için CLI
   `upload-ndk-symbols`. iOS: `sdks/ios/Scripts/upload-dsyms.sh`.
+
+## 13. Code intelligence (`services/codeintel`, ADR-014)
+
+- Port :8096 (`/healthz`, `/metrics`, `POST /v1/webhooks/github`). Migration `deploy/postgres/005_codeintel.sql` (codeintel sahibi):
+  - `repositories` + `installation_id bigint`, `credentials_ref text`, `local_path text` (provider `local` eklenir),
+    `analyze_requested_at timestamptz`, `analyzed_at timestamptz`, `error text`, `languages text[]`, `services text[]`,
+    `webhook_secret_ref text`.
+  - `inventory_items` + `service text`, `criticality text` (critical|high|medium|low), `observed bool`, `monitored bool`,
+    `code_hash text`, `summary text`, `dead bool` (kodda var, 30 gün trafik yok), `shadow bool` (trafik var, kodda yok →
+    `repository_id` NULL olabilir), `llm jsonb` (failure_modes, loadtest_hint).
+  - `alert_suggestions` + `title text`, `kind text`, `target text`, `condition text`, `criticality text`, `code_ref text`,
+    `calibrated bool` (eşik gözlem verisiyle ayarlandı), `created_at`. `monitor_draft` = api `POST /monitors` gövdesiyle aynı şekil.
+  - `monitors` + `source text` ('manual'|'code'|'template'|'suggestion'), `code_ref text` (alert-as-code; read-only).
+  - `loadtest_scenarios` + `state text` ('draft'|'ready', default 'ready'); codeintel `source='generated', state='draft'` yazar.
+- `.trooper/config.yaml`: `services: [{ path: services/orders, name: orders-api }]`; yoksa SDK init çağrılarından tespit.
+- `.trooper/monitors/*.yaml`: alerting.md § Kural şeması formatı (name, kind, query, condition, severity, notify, labels).
+- Envanter `key` formatı: endpoint `"METHOD /route/:param"` (writer normalizasyonu ile aynı), consumer = process adı (`source` =
+  topic/queue), cron = job adı (`source` = schedule), view = route, dependency = `"<kind> · <name>"`.
+- Gözlem eşleştirme: `red_1m` (son 7 gün) route'ları ve `consumer_1m` process'leri ile; `observed`, `dead`, `shadow`.
+
+## 14. Load testing (`services/loadtest`, ADR-015)
+
+- `loadtest-ctl` :8097 (`/healthz`, `/metrics`). Migration `deploy/postgres/006_loadtest.sql` (loadtest sahibi):
+  - `loadtest_runs` + `region text`, `live jsonb` (`{ ts, vus, rps, p95, errorRate, progress }`), `abort_requested_at`,
+    `error text`, `created_at`, `requested_by bigint`.
+  - `loadtest_domains (id, project_id, host, token, verified_at, method 'dns'|'http', created_at, UNIQUE(project_id, host))`.
+  - `loadtest_usage (project_id, month date, vu_minutes numeric, PRIMARY KEY(project_id, month))`.
+- Senaryo `spec` (jsonb) = UI `ScenarioEditor` modeli: `{ target, mode: 'vus'|'rps', levels: [{durationS, target}], steps: [key],
+  weights: {key: pct}, requests: {key: {method, path, headers?, json?, checks?}}, thinkTime, regions, gate: {...},
+  thresholds: {p95Ms, errorRate}, script? }`. Şablonlar: `{{int a-b}}`, `{{pool.<name>}}`, `{{weighted a:70 b:30}}`,
+  `{{prev "KEY" .field}}`, `{{uuid}}`.
+- Runner metrikleri (OTLP, `service.name=loadtest`, attr `trooper.loadtest.run`, `trooper.loadtest.step`):
+  `trooper.loadtest.requests` (sum), `trooper.loadtest.errors` (sum), `trooper.loadtest.duration_ms` (histogram),
+  `trooper.loadtest.vus` (gauge) → generic `metrics` tablosu.
+- İstek header'ları: `traceparent`, `baggage: tt.svc=loadtest:<run_id>`, `x-trooper-loadtest-run`, `user-agent: TaskTrooper-LoadTest/1`.
+
+## 15. Kimlik, org ve yönetim API'si (ADR-016)
+
+- Migration `deploy/postgres/007_auth.sql` (api sahibi): `sessions (id text PK, user_id, created_at, expires_at, last_seen_at,
+  user_agent)`, `org_members.role` ∈ owner|admin|member|viewer, `audit_log (id, org_id, project_id, user_id, api_key_id,
+  action, target, meta jsonb, at)`, `users.oidc_subject`, `api_keys.created_by`, `api_keys.last_used_at`.
+- Uçlar (`/api/v1`):
+  - `GET /auth/config` (anonim) → `{ oidc: bool, devLogin: bool }`; `GET /auth/login?redirect=` → OIDC'ye yönlendirir;
+    `GET /auth/callback`; `POST /auth/dev-login {email}`; `POST /auth/logout`; `GET /me` → `{ user, orgs: [{id, name, role,
+    projects: [{id, name}]}], currentProjectId }`.
+  - `GET/POST /orgs/{org}/members`, `PATCH/DELETE /orgs/{org}/members/{user}` (rol), `GET/POST /projects`,
+    `GET/POST /api-keys` (POST cevabı key'i **bir kez** döner), `DELETE /api-keys/{id}`, `GET /audit-log?limit=`.
+- CORS: cookie'li istekler için `Access-Control-Allow-Credentials: true` ve tam origin (wildcard değil).
+
+## 16. Faz 4–5 api uçları ve diğer açık işler
+
+- Code intelligence (api, Postgres'ten okur/yazar):
+  - `GET /repos` → UI `Repo[]`; `POST /repos {provider, fullName, defaultBranch?, token? | installationId? | localPath?}`;
+    `DELETE /repos/{id}`; `POST /repos/{id}/analyze` (→ `analyze_requested_at`).
+  - `GET /inventory?repoId=&kind=&service=` → UI `InventoryItem[]` (+ `dead`, `shadow`, `summary`).
+  - `GET /suggestions?state=proposed` → UI `Suggestion[]`; `POST /suggestions/{id}/accept` (monitor oluşturur, `source=suggestion`)
+    ; `POST /suggestions/{id}/reject`.
+  - `PUT/PATCH/DELETE /monitors/{id}` `source='code'` ise 409 "managed in repository".
+- Load test (api): mevcut uçlar + `GET /loadtests/runs/{id}/series?step=5s` (`{ ts[], vus[], rps[], p95[], errorRate[] }`,
+  `metrics` tablosundan) ve `GET /loadtests/runs/{id}/target?service=` (hedef servisin aynı penceredeki RED'i, caller
+  `loadtest:<id>` ayrımı ile); `GET/POST /loadtests/domains`, `POST /loadtests/domains/{id}/verify`, `DELETE /loadtests/domains/{id}`.
+- Range: `15m`, `30m` eklenir (`timerange` + UI `TimeRange`).
+- Logs: `GET /logs?source=` → `attrs['vercel.source']` filtresi (build|static|external|edge|lambda|redirect|firewall).
+- Ingest internal credential: `x-trooper-internal: <TT_INTERNAL_TOKEN>` + `x-trooper-project: <id>` başlıkları; ingest-gw
+  token eşleşirse key aramaz. trooper-cloud ve loadtest-runner bunu kullanır (`TT_CLOUD_INGEST_KEYS` geri uyumlu kalır).
+- KPI kuralları: `kpi_alert_rules.condition jsonb` (`renotifyMin`) — migration `008_alerting_r3.sql` (alerting sahibi).

@@ -129,3 +129,54 @@ RED metrikleri span'lardan gelir (OTel/Vercel trace drain); bulut metriklerinden
 - Mutasyonlar (`addDatabase`, `addLagMonitor`, ack/resolve …) api'ye POST eder, sonra ilgili cache'i geçersiz kılar.
 **Sonuç:** Ekran kodu değişmez; mock mod geliştirme/demo için korunur. Yükleme sırasında grafikler kısa süre sıfır görünür
 (kabul edildi; kritik ekranlarda `remoteStatus()` ile ince yükleme çubuğu).
+
+## ADR-014 — Code intelligence servisi (`services/codeintel`)
+**Bağlam:** Faz 4: repo okuyup envanter, alert önerisi ve load test taslağı üretmek. Tablolar (`repositories`,
+`inventory_items`, `alert_suggestions`) 001'de var, servis yok.
+**Karar:**
+- Ayrı Go servisi `codeintel` (:8096). api ile aynı Postgres'i kullanır; ClickHouse'u sadece okur (gözlem eşleştirme).
+  api tetikler (`repositories.analyze_requested_at`), codeintel 15 sn'de bir yoklar (trooper-cloud `syncRequestedAt` deseni).
+- Repo erişimi: GitHub App (app id + private key secret'ı, installation token) **veya** token (`secret:`), dev/demo için
+  `local` provider (`file://` yol). Clone shallow; analiz bitince kaynak silinir.
+- Parse: tree-sitter yerine **Go'da yazılmış deterministik extractor'lar** (Go için `go/ast`; TS/JS ve Python için hafif
+  tokenizer + framework kalıpları). Gerekçe: CGO'suz tek binary, extractor'lar zaten kalıp tabanlı. Kapsam code-intelligence.md
+  tablosu.
+- LLM (Claude): sadece **yorumlama** (kritiklik, özet, failure mode, monitor önerisi, loadtest_hint). Model ID `TT_CODEINTEL_MODEL`,
+  anahtar `ANTHROPIC_API_KEY`; ikisinden biri yoksa LLM adımı kapalı → statik kurallar. Sonuçlar dosya hash'i ile cache'lenir.
+- Alert-as-code: scan sırasında `.trooper/monitors/*.yaml` okunur → `monitors` tablosuna `source='code'` upsert
+  (`code_ref` = repo:path). UI ve api bu monitor'leri read-only tutar. Repo'dan silinen dosyanın monitor'ü silinir.
+- Webhook: `POST /v1/webhooks/github` (HMAC `X-Hub-Signature-256`) → default branch push'unda incremental analiz.
+**Sonuç:** Ek dil/framework yeni extractor dosyası demek. Tree-sitter doğruluğu gerekirse sonradan eklenebilir.
+
+## ADR-015 — Load test kontrolcüsü ve runner (`services/loadtest`)
+**Bağlam:** Faz 5: api senaryo/run CRUD'u var, runner yok; run'lar `queued` kalıyor.
+**Karar:**
+- Modül `services/loadtest`: `loadtest-ctl` (:8097) + `loadtest-runner`. ctl `loadtest_runs.state='queued'` satırlarını
+  `FOR UPDATE SKIP LOCKED` ile alır; domain doğrulaması ve plan limitlerini kontrol eder; runner'ı başlatır
+  (`TT_LOADTEST_EXECUTOR=local` alt süreç, `k8s` → Job manifesti, bölge başına bir Job).
+- Yük motoru: k6 gömmek yerine **kendi Go motorumuz** (VU ve arrival-rate modları, stage'ler, check'ler, threshold'lar,
+  think time, şablon değişkenleri). Gerekçe: k6'yı kütüphane olarak gömmek desteklenen bir API değil ve bağımlılık ağacı ağır;
+  declarative senaryo formatımız zaten sınırlı. Ham k6 script modu: runner `k6` binary'si PATH'te varsa onu çağırır.
+- Korelasyon: runner her isteğe `traceparent` + `baggage: tt.svc=loadtest:<run_id>` koyar → hedef servisin SDK'ları bunu
+  `trooper.caller` olarak yazar; UI test trafiğini caller ile ayırır. Ek header `x-trooper-loadtest-run: <run_id>`.
+- Runner metrikleri OTLP ile kendi ingest'imize (`service.name = loadtest`, attr `trooper.loadtest.run`), canlı özet her 5 sn
+  `loadtest_runs.live` (jsonb) kolonuna. Bitince `summary`, `thresholds_passed`, `state ∈ passed|failed|aborted|error`.
+- Güvenlik: hedef host `loadtest_domains`'de doğrulanmış olmalı (DNS TXT `trooper-verify=<token>` veya
+  `https://<host>/.well-known/trooper-verify` içeriği = token); `localhost`/`*.localhost`/`127.0.0.1` dev'de
+  (`TT_LOADTEST_ALLOW_LOCAL=true`) muaf. Limitler: `TT_LOADTEST_MAX_VUS`, `TT_LOADTEST_MAX_DURATION`, aylık VU-dakika.
+  Abort: api `POST /loadtests/runs/{id}/stop` → `abort_requested_at`; ctl runner'ı durdurur. Opsiyonel otomatik abort
+  (`spec.gate.abortErrorRate`).
+**Sonuç:** k6 ekosisteminin tamamı yok; declarative kapsam bilinçli olarak sınırlı.
+
+## ADR-016 — Kullanıcı kimliği: OIDC + oturum, API key'ler korunur
+**Bağlam:** Dashboard şu an tek bir dev api key'i ile çalışıyor; kullanıcı, org, rol yok.
+**Karar:**
+- api OIDC Authorization Code + PKCE akışını yürütür (`TT_OIDC_ISSUER`, `TT_OIDC_CLIENT_ID`, `TT_OIDC_CLIENT_SECRET`,
+  `TT_OIDC_REDIRECT_URL`). Başarılı girişte `users` upsert, httpOnly `tt_session` cookie (Postgres `sessions`, 7 gün, kaydırmalı).
+- İstekte kimlik sırası: `Authorization: Bearer <api key>` (otomasyon, CLI, SDK upload) → `tt_session` cookie. Cookie ile
+  gelen isteklerde proje `X-Trooper-Project` header'ından (yoksa kullanıcının ilk projesi).
+- Roller org seviyesinde: `owner | admin | member | viewer`. viewer sadece GET; admin+ üye/anahtar/entegrasyon yönetir.
+- OIDC yapılandırılmamışsa (`TT_OIDC_ISSUER` boş) **dev login**: `POST /auth/dev-login {email}` sadece `TT_AUTH_DEV=true`
+  iken; UI bu durumda e-posta ile giriş gösterir. Mevcut `VITE_API_KEY` akışı dev için çalışmaya devam eder.
+- `audit_log` tablosu: kim, ne zaman, hangi mutasyon.
+**Sonuç:** SAML/SCIM sonraki iş. API key'ler proje kapsamlı kalır.
