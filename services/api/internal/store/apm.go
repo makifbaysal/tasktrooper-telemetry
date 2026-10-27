@@ -6,6 +6,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/tasktrooper/telemetry/services/api/internal/model"
 	"github.com/tasktrooper/telemetry/services/api/internal/timerange"
@@ -429,6 +430,10 @@ func (d *DB) services(ctx context.Context, q Q, only string) ([]model.Service, e
 	if err != nil {
 		return nil, err
 	}
+	ebpf, err := d.ebpfServices(ctx, q, where, args)
+	if err != nil {
+		return nil, err
+	}
 
 	mins := q.W.Minutes()
 	stepMin := q.W.StepMinutes()
@@ -515,6 +520,10 @@ func (d *DB) services(ctx context.Context, q Q, only string) ([]model.Service, e
 		}
 		s.Version = versions[name]
 		s.Instances = inst[name]
+		s.Source = "sdk"
+		if ebpf[name] {
+			s.Source = "ebpf"
+		}
 		if s.Type == "consumer" || s.Type == "worker" {
 			total := 0.0
 			for _, g := range groups[name] {
@@ -534,6 +543,33 @@ func (d *DB) services(ctx context.Context, q Q, only string) ([]model.Service, e
 		return out[i].Name < out[j].Name
 	})
 	return out, nil
+}
+
+// EBPFSDKNames are telemetry.sdk.name values of OpenTelemetry eBPF Instrumentation (OBI, formerly Beyla).
+var EBPFSDKNames = []string{"opentelemetry-ebpf-instrumentation", "beyla"}
+
+// ebpfServices returns the services whose entry spans all come from eBPF instrumentation (contracts §20), over the
+// window (at most its last 6 hours: the check reads resource attributes).
+func (d *DB) ebpfServices(ctx context.Context, q Q, where string, args []any) (map[string]bool, error) {
+	from := q.W.From
+	if f := q.W.To.Add(-6 * time.Hour); f.After(from) {
+		from = f
+	}
+	rows, err := d.ch.Query(ctx, `SELECT service FROM spans WHERE {{tenant}} AND ts >= toDateTime64(?, 6) AND ts < toDateTime64(?, 6) AND is_entry = 1`+where+`
+	  GROUP BY service HAVING min(resource_attrs['telemetry.sdk.name'] IN (?)) = 1`, append(append([]any{secs(from), secs(q.W.To)}, args...), EBPFSDKNames)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			return nil, err
+		}
+		out[s] = true
+	}
+	return out, rows.Err()
 }
 
 // serviceGroups maps service → consumer groups it reads with (from consumer_1m and consumer_group_owners).

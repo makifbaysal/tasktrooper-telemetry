@@ -1,0 +1,191 @@
+package store
+
+import (
+	"encoding/json"
+	"math"
+	"os"
+	"reflect"
+	"regexp"
+	"testing"
+	"time"
+
+	"github.com/tasktrooper/telemetry/services/api/internal/model"
+)
+
+func TestInfraStatusRules(t *testing.T) {
+	now := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+	fresh, old := now.Add(-time.Minute), now.Add(-6*time.Minute)
+	hosts := []struct {
+		cpu, mem, disk float64
+		notReady       bool
+		last           time.Time
+		want           model.InfraStatus
+	}{
+		{0.5, 0.5, 0.5, false, fresh, model.InfraOK},
+		{0.9, 0.5, 0.5, false, fresh, model.InfraWarning},
+		{0.5, 0.96, 0.5, false, fresh, model.InfraCritical},
+		{0.5, 0.5, 0.99, false, fresh, model.InfraCritical},
+		{0.1, 0.1, 0.1, true, fresh, model.InfraCritical},
+		{0.99, 0.1, 0.1, false, old, model.InfraStale},
+	}
+	for i, c := range hosts {
+		if got := HostStatus(c.cpu, c.mem, c.disk, c.notReady, c.last, now); got != c.want {
+			t.Errorf("host %d: %s want %s", i, got, c.want)
+		}
+	}
+	pods := []struct {
+		phase, reason string
+		ready         bool
+		inRange       float64
+		want          model.InfraStatus
+	}{
+		{"Running", "", true, 0, model.InfraOK},
+		{"Running", "", false, 0, model.InfraCritical},
+		{"Failed", "", false, 0, model.InfraCritical},
+		{"Running", "CrashLoopBackOff", true, 0, model.InfraCritical},
+		{"Pending", "ImagePullBackOff", false, 0, model.InfraCritical},
+		{"Running", "", true, 2, model.InfraWarning},
+		{"Pending", "", false, 0, model.InfraWarning},
+		{"Succeeded", "", false, 0, model.InfraOK},
+	}
+	for i, c := range pods {
+		if got := PodStatus(c.phase, c.reason, c.ready, c.inRange, fresh, now); got != c.want {
+			t.Errorf("pod %d: %s want %s", i, got, c.want)
+		}
+	}
+	if PodStatus("Running", "", true, 0, old, now) != model.InfraStale {
+		t.Error("pod stale")
+	}
+	for i, c := range []struct {
+		desired, avail float64
+		want           model.InfraStatus
+	}{{3, 3, model.InfraOK}, {3, 2, model.InfraWarning}, {3, 0, model.InfraCritical}, {0, 0, model.InfraOK}} {
+		if got := WorkloadStatus(c.desired, c.avail, fresh, now); got != c.want {
+			t.Errorf("workload %d: %s want %s", i, got, c.want)
+		}
+	}
+	c := model.Container{MemoryBytes: 96, MemoryLimit: 100}
+	if ContainerStatus(c, 0, fresh, now) != model.InfraCritical {
+		t.Error("container oom risk")
+	}
+	if ContainerStatus(model.Container{CPU: 0.1}, 1, fresh, now) != model.InfraWarning {
+		t.Error("container restarted")
+	}
+	if ContainerStatus(model.Container{CPU: 0.1}, 0, fresh, now) != model.InfraOK {
+		t.Error("container ok (no limits)")
+	}
+}
+
+func TestRestartIncrease(t *testing.T) {
+	got := RestartIncrease([]float64{0, 2, 2, 5, 0, 7}, []float64{0, 1, 2, 3, 0, 6}, nil)
+	want := []float64{0, 1, 0, 3, 0, 2}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v want %v", got, want)
+	}
+}
+
+func TestFunctionStatusAndCost(t *testing.T) {
+	to := int64(10)
+	for i, c := range []struct {
+		missing           bool
+		inv, er, thr, p95 float64
+		want              string
+	}{
+		{true, 100, 0, 0, 0, "missing"},
+		{false, 0, 0, 0, 0, "idle"},
+		{false, 100, 0.06, 0, 0, "critical"},
+		{false, 100, 0, 1, 0, "critical"},
+		{false, 100, 0.02, 0, 0, "warning"},
+		{false, 100, 0, 0, 8500, "warning"},
+		{false, 100, 0.001, 0, 100, "ok"},
+	} {
+		if got := FunctionStatus(c.missing, c.inv, c.er, c.thr, c.p95, &to); got != c.want {
+			t.Errorf("status %d: %s want %s", i, got, c.want)
+		}
+	}
+	mem := int64(1024)
+	p := DefaultFaasPrices
+	// 1M invocations × 100 ms at 1 GB = 100 000 GB-s
+	got := FaasCost(p, "aws", "x86_64", &mem, faasTotals{inv: 1e6, invMs: 1e6 * 100})
+	if want := 0.20 + 100000*0.0000166667; math.Abs(got-want) > 1e-6 {
+		t.Errorf("lambda x86: %v want %v", got, want)
+	}
+	if got := FaasCost(p, "aws", "arm64", &mem, faasTotals{inv: 1e6, invMs: 1e6 * 100}); math.Abs(got-(0.20+100000*0.0000133334)) > 1e-6 {
+		t.Errorf("lambda arm: %v", got)
+	}
+	// Azure: 1024 MB·s × 1000 = 1 GB-s per 1 024 000 units
+	if got := FaasCost(p, "azure", "", nil, faasTotals{inv: 1e6, units: 1024 * 1000 * 1000}); math.Abs(got-(1000*0.000016+0.20)) > 1e-9 {
+		t.Errorf("azure: %v", got)
+	}
+	t.Setenv("TT_FAAS_LAMBDA_REQUEST_PRICE", "0.4")
+	if FaasPricesFromEnv().LambdaRequest != 0.4 || FaasPricesFromEnv().AzureGBs != p.AzureGBs {
+		t.Error("env override")
+	}
+}
+
+func TestMonitorQueryValidation(t *testing.T) {
+	ok := func(kind, q string) MonitorKindCase { return MonitorKindCase{kind, q, true} }
+	bad := func(kind, q string) MonitorKindCase { return MonitorKindCase{kind, q, false} }
+	for _, c := range []MonitorKindCase{
+		ok("infra", `{"entity":"host","metric":"cpu","agg":"avg","filter":{"cluster":"prod"}}`),
+		ok("infra", `{"entity":"pod","metric":"not_ready"}`),
+		ok("infra", `{"entity":"workload","metric":"unavailable","filter":{"namespace":"shop","workload":"api"}}`),
+		bad("infra", `{"entity":"host","metric":"restarts"}`),
+		bad("infra", `{"entity":"vm","metric":"cpu"}`),
+		bad("infra", `{"entity":"host","metric":"cpu","agg":"p95"}`),
+		bad("infra", `{"entity":"host","metric":"cpu","filter":{"pod":"x"}}`),
+		bad("infra", `{"entity":"host","metric":"cpu","window":"5m"}`),
+		ok("faas", `{"functionId":"aws-eu-west-1-orders","metric":"error_rate"}`),
+		ok("faas", `{"filter":{"provider":"azure","service":"billing"},"metric":"cold_starts"}`),
+		ok("faas", `{"metric":"duration_p95","relativeToTimeout":true}`),
+		bad("faas", `{"metric":"error_rate","relativeToTimeout":true}`),
+		bad("faas", `{"metric":"memory"}`),
+		bad("faas", `{"functionId":"x","filter":{"provider":"aws"},"metric":"errors"}`),
+		bad("faas", `{"filter":{"provider":"gcp"},"metric":"errors"}`),
+	} {
+		in := model.MonitorInput{Name: "m", Kind: c.kind, Severity: "warning", Query: json.RawMessage(c.q)}
+		_, _, _, _, err := normalizeMonitor(&in)
+		if (err == nil) != c.ok {
+			t.Errorf("%s %s: err=%v", c.kind, c.q, err)
+		}
+	}
+	for _, tp := range MonitorTemplates {
+		q, _ := json.Marshal(tp.Query)
+		in := model.MonitorInput{Name: tp.Name, Kind: tp.Kind, Severity: tp.Severity, Query: q, Source: "template"}
+		if _, _, _, _, err := normalizeMonitor(&in); err != nil {
+			t.Errorf("template %s invalid: %v", tp.ID, err)
+		}
+	}
+}
+
+type MonitorKindCase struct {
+	kind, q string
+	ok      bool
+}
+
+// TestMonitorTemplatesInSync compares the ids with alerting's eval.Templates (source file, no module dependency).
+func TestMonitorTemplatesInSync(t *testing.T) {
+	src, err := os.ReadFile("../../../alerting/internal/eval/templates.go")
+	if err != nil {
+		t.Skipf("alerting source not available: %v", err)
+	}
+	var want []string
+	for _, m := range regexp.MustCompile(`\{ID: "([^"]+)"`).FindAllStringSubmatch(string(src), -1) {
+		want = append(want, m[1])
+	}
+	var got []string
+	for _, tp := range MonitorTemplates {
+		got = append(got, tp.ID)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("api templates %v, alerting %v", got, want)
+	}
+}
+
+func TestRestartIncreaseZeroBuckets(t *testing.T) {
+	// counter at 0 for two buckets, then 2: the jump shows up in the bucket where it happened
+	got := RestartIncrease([]float64{0, 0, 0, 2, 2}, []float64{0, 0, 0, 2, 2}, []float64{0, 1, 1, 1, 1})
+	if want := []float64{0, 0, 0, 2, 0}; !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v want %v", got, want)
+	}
+}

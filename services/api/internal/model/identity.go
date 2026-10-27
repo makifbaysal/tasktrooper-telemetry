@@ -31,6 +31,8 @@ type Me struct {
 	// Role in the current project's org.
 	Role string `json:"role"`
 	Auth string `json:"auth"` // session | apiKey
+	// AI is the current org's AI usage this month (contracts §19); absent when there is no current org.
+	AI *MeAI `json:"ai,omitempty"`
 }
 
 type AuthConfig struct {
@@ -44,6 +46,8 @@ type Member struct {
 	Name        string `json:"name"`
 	Role        string `json:"role"`
 	LastLoginAt int64  `json:"lastLoginAt,omitempty"`
+	// AICredits: the member's monthly cap (null = none) and this month's usage (contracts §19).
+	AICredits AILimitUsed `json:"aiCredits"`
 }
 
 // MemberInput adds a member by email (an unknown email creates the user; it is linked on first login).

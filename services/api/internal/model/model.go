@@ -26,21 +26,23 @@ const (
 // ---------------------------------------------------------------- APM
 
 type Service struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	Type          string    `json:"type"` // http | worker | consumer | web | mobile
-	Language      string    `json:"language"`
-	Version       string    `json:"version"`
-	Rpm           float64   `json:"rpm"`
-	ErrorRate     float64   `json:"errorRate"`
-	P95           float64   `json:"p95"`
-	PrevRpm       float64   `json:"prevRpm"`
-	PrevErrorRate float64   `json:"prevErrorRate"`
-	PrevP95       float64   `json:"prevP95"`
-	Status        Health    `json:"status"`
-	Instances     int       `json:"instances"`
-	Lag           *float64  `json:"lag,omitempty"`
-	Spark         []float64 `json:"spark,omitempty"` // rpm per bucket of the requested range
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	Type          string   `json:"type"` // http | worker | consumer | web | mobile
+	Language      string   `json:"language"`
+	Version       string   `json:"version"`
+	Rpm           float64  `json:"rpm"`
+	ErrorRate     float64  `json:"errorRate"`
+	P95           float64  `json:"p95"`
+	PrevRpm       float64  `json:"prevRpm"`
+	PrevErrorRate float64  `json:"prevErrorRate"`
+	PrevP95       float64  `json:"prevP95"`
+	Status        Health   `json:"status"`
+	Instances     int      `json:"instances"`
+	Lag           *float64 `json:"lag,omitempty"`
+	// Source: sdk, or ebpf when every span of the service comes from eBPF instrumentation (OBI; contracts §20).
+	Source string    `json:"source"`
+	Spark  []float64 `json:"spark,omitempty"` // rpm per bucket of the requested range
 }
 
 type Subscription struct {
@@ -803,6 +805,12 @@ type IntegrationInput struct {
 	Name     string          `json:"name"`
 	Config   json.RawMessage `json:"config"`
 	Secret   string          `json:"secret,omitempty"`
+	// Credentials is the azure form ({clientSecret}); sealed like Secret, never returned.
+	Credentials *IntegrationCredentials `json:"credentials,omitempty"`
+}
+
+type IntegrationCredentials struct {
+	ClientSecret string `json:"clientSecret"`
 }
 
 // IntegrationPatch updates name / config / status; a non-empty secret rotates the stored one.
@@ -811,6 +819,8 @@ type IntegrationPatch struct {
 	Config json.RawMessage `json:"config,omitempty"`
 	Secret *string         `json:"secret,omitempty"`
 	Status *string         `json:"status,omitempty"` // disabled | pending (re-enable)
+	// Credentials rotates an azure client secret ({clientSecret}).
+	Credentials *IntegrationCredentials `json:"credentials,omitempty"`
 }
 
 type IntegrationTestResult struct {
@@ -1083,6 +1093,9 @@ type Repo struct {
 	PendingPaths []string `json:"pendingPaths"`
 	// WebhookActive: the repo is connected through the GitHub App, so pushes trigger analyses.
 	WebhookActive bool `json:"webhookActive"`
+	// Analysis is codeintel's summary of the last analysis ({sha, items, llmItems, incremental, llm: {status:
+	// ok|disabled|quota_exceeded, reason?, credits, skipped?}}), passed through as stored.
+	Analysis json.RawMessage `json:"analysis,omitempty"`
 }
 
 // RepoInput connects a repository: token (sealed), GitHub App installationId, or a local path (provider local).

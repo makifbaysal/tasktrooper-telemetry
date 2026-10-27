@@ -152,7 +152,7 @@ func TestIntegrationTestEndpoint(t *testing.T) {
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"ok":true`) || gotSecret != "tok" || strings.Contains(w.Body.String(), "tok\"") {
 		t.Errorf("test: %d %s", w.Code, w.Body)
 	}
-	if w := do(h, "POST", "/api/v1/integrations/test", "good", `{"provider":"azure"}`); w.Code != 400 {
+	if w := do(h, "POST", "/api/v1/integrations/test", "good", `{"provider":"oracle"}`); w.Code != 400 {
 		t.Errorf("unknown provider: %d", w.Code)
 	}
 	if w := do(adminServer(t, &adminFake{}, nil, nil), "POST", "/api/v1/integrations/test", "good", `{"provider":"neon"}`); w.Code != 501 {

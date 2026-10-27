@@ -16,6 +16,7 @@ import (
 	"github.com/tasktrooper/telemetry/services/api/internal/auth"
 	"github.com/tasktrooper/telemetry/services/api/internal/model"
 	"github.com/tasktrooper/telemetry/services/api/internal/store"
+	"github.com/tasktrooper/telemetry/services/pkg/aiquota"
 	"github.com/tasktrooper/telemetry/services/pkg/tenant"
 	"golang.org/x/oauth2"
 )
@@ -46,6 +47,11 @@ type IdentityStore interface {
 	RevokeAPIKey(ctx context.Context, id string) ([]byte, error)
 	WriteAudit(ctx context.Context, a store.AuditRecord) error
 	ListAudit(ctx context.Context, orgID int64, limit int) ([]model.AuditEntry, error)
+	// AI usage quota (ADR-018, contracts §19)
+	MeAI(ctx context.Context, orgID, userID int64, now time.Time) (*model.MeAI, error)
+	AIUsage(ctx context.Context, orgID, userID int64, month time.Time, admin bool) (*model.AIUsage, error)
+	SetOrgAIQuota(ctx context.Context, orgID int64, in model.AIQuotaInput) (*model.AIQuota, error)
+	SetMemberAIQuota(ctx context.Context, orgID, userID int64, in model.MemberAIQuotaInput) (*model.MemberAIQuota, error)
 }
 
 const (
@@ -64,6 +70,8 @@ type principal struct {
 	ProjectID int64
 	Role      string
 	Session   bool
+	// audited: the handler wrote its own audit entry (named action), so guard skips the generic one.
+	audited bool
 }
 
 type principalKey struct{}
@@ -216,7 +224,9 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		rec := &bodyCapture{WrapResponseWriter: middleware.NewWrapResponseWriter(w, r.ProtoMajor)}
 		rec.Tee(&rec.buf)
 		next.ServeHTTP(rec.WrapResponseWriter, r)
-		s.audit(r, p, rec)
+		if !p.audited {
+			s.audit(r, p, rec)
+		}
 	})
 }
 
@@ -281,6 +291,18 @@ func (s *Server) audit(r *http.Request, p *principal, rec *bodyCapture) {
 	a := store.AuditRecord{OrgID: org, ProjectID: p.ProjectID, UserID: p.UserID, APIKeyID: p.APIKeyID,
 		Action: r.Method + " " + pattern, Target: target, Meta: map[string]any{"status": status, "requestId": middleware.GetReqID(r.Context())}}
 	s.writeAudit(r.Context(), a)
+}
+
+// auditAction writes a named audit entry for the current request (and stops guard's generic one).
+func (s *Server) auditAction(r *http.Request, org int64, action, target string, meta map[string]any) {
+	p := principalOf(r.Context())
+	p.audited = true
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	meta["requestId"] = middleware.GetReqID(r.Context())
+	s.writeAudit(r.Context(), store.AuditRecord{OrgID: org, ProjectID: p.ProjectID, UserID: p.UserID, APIKeyID: p.APIKeyID,
+		Action: action, Target: target, Meta: meta})
 }
 
 func (s *Server) writeAudit(ctx context.Context, a store.AuditRecord) {
@@ -493,6 +515,13 @@ func (s *Server) identityRoutes(r chi.Router) {
 			me.CurrentProjectID = strconv.FormatInt(p.ProjectID, 10)
 		}
 		me.Role = p.Role
+		if err == nil && p.OrgID > 0 {
+			ai, aerr := s.Store.MeAI(r.Context(), p.OrgID, p.UserID, s.Now())
+			if aerr != nil {
+				s.Log.Warn("me: ai usage unavailable", "err", aerr, "org", p.OrgID)
+			}
+			me.AI = ai
+		}
 		s.reply(w, r, me, err)
 	})
 
@@ -533,6 +562,23 @@ func (s *Server) identityRoutes(r chi.Router) {
 			v, err := s.Store.UpdateMember(r.Context(), org, uid, in.Role)
 			s.reply(w, r, v, err)
 		}))
+		r.Put("/{user}/ai-quota", s.withOrg("admin", func(w http.ResponseWriter, r *http.Request, org int64, role string) {
+			var in model.MemberAIQuotaInput
+			if err := decode(r, &in); err != nil {
+				s.fail(w, r, err)
+				return
+			}
+			uid, err := strconv.ParseInt(param(r, "user"), 10, 64)
+			if err != nil {
+				s.fail(w, r, store.ErrNotFound)
+				return
+			}
+			v, err := s.Store.SetMemberAIQuota(r.Context(), org, uid, in)
+			if err == nil {
+				s.auditAction(r, org, "ai_quota.member", param(r, "user"), map[string]any{"monthlyCredits": in.MonthlyCredits})
+			}
+			s.reply(w, r, v, err)
+		}))
 		r.Delete("/{user}", s.withOrg("admin", func(w http.ResponseWriter, r *http.Request, org int64, role string) {
 			uid, err := s.memberParam(r, org, role)
 			if err != nil {
@@ -541,6 +587,38 @@ func (s *Server) identityRoutes(r chi.Router) {
 			}
 			s.noContent(w, r, s.Store.RemoveMember(r.Context(), org, uid))
 		}))
+	})
+
+	// ---- AI usage quota (contracts §19)
+	r.Put("/orgs/{org}/ai-quota", s.withOrg("admin", func(w http.ResponseWriter, r *http.Request, org int64, _ string) {
+		var in model.AIQuotaInput
+		if err := decode(r, &in); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		v, err := s.Store.SetOrgAIQuota(r.Context(), org, in)
+		if err == nil {
+			s.auditAction(r, org, "ai_quota.update", strconv.FormatInt(org, 10), map[string]any{"monthlyCredits": v.MonthlyCredits, "notify": v.Notify})
+		}
+		s.reply(w, r, v, err)
+	}))
+	r.Get("/usage/ai", func(w http.ResponseWriter, r *http.Request) {
+		p := principalOf(r.Context())
+		if !store.RoleAtLeast(p.Role, "member") {
+			forbidden(w, "member role required")
+			return
+		}
+		month := s.Now()
+		if m := qs(r, "month"); m != "" {
+			t, err := aiquota.ParsePeriod(m)
+			if err != nil {
+				s.fail(w, r, store.Invalid("month must be YYYY-MM"))
+				return
+			}
+			month = t
+		}
+		v, err := s.Store.AIUsage(r.Context(), p.OrgID, p.UserID, month, store.RoleAtLeast(p.Role, "admin"))
+		s.reply(w, r, v, err)
 	})
 
 	// ---- projects

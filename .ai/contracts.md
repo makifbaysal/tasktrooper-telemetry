@@ -644,3 +644,9 @@ GB-s = Σ(invocations × duration_avg ms / 1000) × memory_mb / 1024. Azure Cons
 `GET /monitor-templates` → `[{id, name, description, kind, severity, query, condition}]` ile döner. `faas` "p95 > timeout × 0.8"
 şablonu `query.relativeToTimeout: true` + eşik 0.8. Incident `rootCause` ek alanları: `infra: [{kind: pod|host, entity,
 cluster?, node?, reason, restarts?, value?, title, confidence}]`, `treeSummary`, `treeConfidence`.
+
+**Faz 6 api notları (uygulamadan):** repo seviyesi analiz özeti `Repo.analysis` (`analysis.llm`); inventory satırlarının
+`analysis`'i öğe seviyesidir. `Pod.lastSeen` (ms), `K8sNode.status` ek alan. Container durumu: `critical` memory > 0.95 × limit;
+`warning` cpu|memory > 0.85, aralıkta restart veya throttled > 0.25; `stale` 5 dk veri yok. eBPF tespiti son 6 saat; servisin tüm
+span'ları OBI/beyla ise `source: 'ebpf'`. `GET /serverless/functions/{id}` numeric id veya slug kabul eder; satırlarda `costUsd`.
+Faas `relativeToTimeout` sadece `duration_p95|duration_p99` ile geçerli.

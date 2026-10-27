@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -31,6 +32,10 @@ var (
 	VercelBase             = "https://api.vercel.com"
 	NeonBase               = "https://console.neon.tech"
 	GCPResourceManagerBase = "https://cloudresourcemanager.googleapis.com"
+	// AzureLoginBase / AzureARMBase: Entra ID token endpoint and Azure Resource Manager (TT_AZURE_LOGIN_URL,
+	// TT_AZURE_ARM_URL override them for tests).
+	AzureLoginBase = envOr("TT_AZURE_LOGIN_URL", "https://login.microsoftonline.com")
+	AzureARMBase   = envOr("TT_AZURE_ARM_URL", "https://management.azure.com")
 	// AWSEndpoint is the STS BaseEndpoint; "" = the SDK default for the region.
 	AWSEndpoint = ""
 	// Timeout bounds one check.
@@ -44,6 +49,17 @@ type cfg struct {
 	ProjectIDs []string `json:"projectIds"`
 	TeamID     string   `json:"teamId"`
 	OrgID      string   `json:"orgId"`
+	// azure
+	TenantID        string   `json:"tenantId"`
+	ClientID        string   `json:"clientId"`
+	SubscriptionIDs []string `json:"subscriptionIds"`
+}
+
+func envOr(k, def string) string {
+	if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	return def
 }
 
 // Run performs a real, minimal credential check for a provider. Timeout 10 s. Never echoes the secret.
@@ -67,8 +83,10 @@ func Run(ctx context.Context, provider string, config json.RawMessage, secret st
 		res = checkVercel(ctx, c, secret)
 	case "neon":
 		res = checkNeon(ctx, c, secret)
+	case "azure":
+		res = checkAzure(ctx, c, secret)
 	default:
-		return fail(fmt.Sprintf("unknown provider %q (aws|gcp|vercel|neon)", provider))
+		return fail(fmt.Sprintf("unknown provider %q (aws|gcp|vercel|neon|azure)", provider))
 	}
 	res.Message = scrub(res.Message, secrets)
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) && !res.OK {
@@ -331,6 +349,69 @@ func checkNeon(ctx context.Context, c cfg, secret string) model.IntegrationTestR
 	res := model.IntegrationTestResult{OK: true, Message: "Neon API key accepted"}
 	for _, p := range ps.Projects {
 		res.Resources = append(res.Resources, model.DiscoveredResource{Kind: "project", Name: firstNonEmpty(p.Name, p.ID), Detail: "Neon · " + p.RegionID})
+	}
+	return res
+}
+
+// checkAzure gets a client_credentials token for the service principal and reads each configured subscription
+// (Reader is enough).
+func checkAzure(ctx context.Context, c cfg, secret string) model.IntegrationTestResult {
+	if strings.TrimSpace(c.TenantID) == "" || strings.TrimSpace(c.ClientID) == "" {
+		return fail("config.tenantId and config.clientId are required")
+	}
+	if strings.TrimSpace(secret) == "" {
+		return fail("the service principal client secret is required")
+	}
+	form := url.Values{"grant_type": {"client_credentials"}, "client_id": {c.ClientID}, "client_secret": {secret},
+		"scope": {"https://management.azure.com/.default"}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, AzureLoginBase+"/"+url.PathEscape(c.TenantID)+"/oauth2/v2.0/token",
+		strings.NewReader(form.Encode()))
+	if err != nil {
+		return fail(err.Error())
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fail("Azure sign-in failed: " + truncate(err.Error(), 200))
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	resp.Body.Close()
+	var tok struct {
+		AccessToken string `json:"access_token"`
+		Error       string `json:"error_description"`
+	}
+	_ = json.Unmarshal(body, &tok)
+	if resp.StatusCode/100 != 2 || tok.AccessToken == "" {
+		msg := statusMsg(resp.StatusCode)
+		if tok.Error != "" {
+			msg += " — " + truncate(tok.Error, 200)
+		}
+		return fail("Azure sign-in failed: " + msg)
+	}
+	var subs struct {
+		Value []struct {
+			SubscriptionID string `json:"subscriptionId"`
+			DisplayName    string `json:"displayName"`
+			State          string `json:"state"`
+		} `json:"value"`
+	}
+	if code, err := getJSON(ctx, http.DefaultClient, AzureARMBase+"/subscriptions?api-version=2022-12-01", tok.AccessToken, &subs); err != nil {
+		return fail("listing subscriptions failed: " + errMsg(code, err))
+	}
+	visible := map[string]bool{}
+	res := model.IntegrationTestResult{OK: true, Message: "Azure service principal accepted"}
+	for _, s := range subs.Value {
+		visible[s.SubscriptionID] = true
+		res.Resources = append(res.Resources, model.DiscoveredResource{Kind: "subscription", RefID: s.SubscriptionID,
+			Name: firstNonEmpty(s.DisplayName, s.SubscriptionID), Detail: "Azure · " + s.State})
+	}
+	for _, want := range c.SubscriptionIDs {
+		if !visible[want] {
+			return fail("subscription " + want + " is not visible to the service principal (assign Reader + Monitoring Reader)")
+		}
+	}
+	if len(res.Resources) == 0 {
+		return fail("the service principal can read no subscription (assign Reader + Monitoring Reader)")
 	}
 	return res
 }

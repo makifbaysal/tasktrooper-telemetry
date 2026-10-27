@@ -402,6 +402,7 @@ func (s *Server) routes(r chi.Router) {
 	}))
 
 	s.infraRoutes(r)
+	s.phase6Routes(r)
 	s.loadTestRoutes(r)
 	s.adminRoutes(r)
 	s.codeInsightRoutes(r)

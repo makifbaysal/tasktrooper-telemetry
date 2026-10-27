@@ -121,7 +121,7 @@ func (s *Server) adminRoutes(r chi.Router) {
 	r.Get("/integrations", func(w http.ResponseWriter, r *http.Request) {
 		p := qs(r, "provider")
 		if p != "" && !store.Providers[p] && p != "slack" && p != "github" {
-			s.fail(w, r, store.Invalid("provider must be aws|gcp|vercel|neon|slack|github"))
+			s.fail(w, r, store.Invalid("provider must be aws|gcp|vercel|neon|azure|slack|github"))
 			return
 		}
 		v, err := s.Store.ListIntegrations(store.WithProviderFilter(r.Context(), p))
@@ -143,8 +143,11 @@ func (s *Server) adminRoutes(r chi.Router) {
 			return
 		}
 		if !store.Providers[in.Provider] {
-			s.fail(w, r, store.Invalid("provider must be aws|gcp|vercel|neon"))
+			s.fail(w, r, store.Invalid("provider must be aws|gcp|vercel|neon|azure"))
 			return
+		}
+		if in.Secret == "" && in.Credentials != nil {
+			in.Secret = in.Credentials.ClientSecret
 		}
 		if s.CloudTest == nil {
 			writeJSON(w, http.StatusNotImplemented, apiError{Error: "integration tests are not configured"})

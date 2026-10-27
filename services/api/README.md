@@ -46,6 +46,13 @@ service of `deploy/docker-compose.yml` (profile `app`).
 | `TT_GITHUB_APP_ID`, `TT_GITHUB_APP_PRIVATE_KEY` (PEM or `env:NAME` / `file:/path`), `TT_GITHUB_API_URL` | – | GitHub App (`services/pkg/githubapp`); unset = GitHub endpoints answer 501 |
 | `TT_GITHUB_APP_SLUG` | – | install page `https://github.com/apps/<slug>/installations/new` |
 | `TT_GITHUB_URL` | `https://github.com` | GitHub Enterprise |
+| `TT_AI_PRICES` | built-in table | LLM prices per model, `<model>=<in>/<out>,...` (USD per 1M tokens → credits; `services/pkg/aiquota`). Invalid value = startup error |
+| `TT_AI_DEFAULT_PRICE` | aiquota default | `<in>/<out>` for models missing from `TT_AI_PRICES` |
+| `TT_AI_PLAN_CREDITS` | `free=100,team=5000,enterprise=-1` | monthly AI credits per plan (`-1` = unlimited); org override via `PUT /orgs/{org}/ai-quota` |
+| `TT_FAAS_LAMBDA_REQUEST_PRICE` | `0.20` | USD per 1M Lambda requests (serverless cost estimate) |
+| `TT_FAAS_LAMBDA_GBS_PRICE`, `TT_FAAS_LAMBDA_GBS_PRICE_ARM64` | `0.0000166667`, `0.0000133334` | USD per GB-second (x86_64 / arm64) |
+| `TT_FAAS_AZURE_GBS_PRICE`, `TT_FAAS_AZURE_REQUEST_PRICE` | `0.000016`, `0.20` | Azure Functions consumption plan: USD per GB-s, per 1M executions |
+| `TT_AZURE_LOGIN_URL`, `TT_AZURE_ARM_URL` | `https://login.microsoftonline.com`, `https://management.azure.com` | Azure endpoints for `POST /integrations/test` (tests / sovereign clouds) |
 
 ## Test
 
