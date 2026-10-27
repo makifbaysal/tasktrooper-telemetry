@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -183,7 +184,7 @@ func (s *Supervisor) Platform(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if _, err := s.Start("platform-"+p.name, filepath.Join(s.Root, "services", p.module), bin, nil, nil); err != nil {
+		if _, err := s.Start("platform-"+p.name, filepath.Join(s.Root, "services", p.module), bin, nil, s3Env()); err != nil {
 			return err
 		}
 		deadline := time.Now().Add(60 * time.Second)
@@ -234,4 +235,40 @@ func FreePort() (int, error) {
 	}
 	defer ln.Close()
 	return ln.Addr().(*net.TCPAddr).Port, nil
+}
+
+// s3Env points the platform services at the compose S3 (SeaweedFS on :9002) for session replay blobs
+// (contracts §23: without TT_S3_ENDPOINT the writer skips tt.replay and the api answers 503 for
+// segments). Values already set in the environment win.
+func s3Env() []string {
+	var out []string
+	for _, kv := range [][2]string{
+		{"TT_S3_ENDPOINT", "http://localhost:9002"},
+		{"TT_S3_ACCESS_KEY", "trooper"},
+		{"TT_S3_SECRET_KEY", "trooper-secret"},
+		{"TT_REPLAY_S3_BUCKET", "tt-replays"},
+	} {
+		if os.Getenv(kv[0]) == "" {
+			out = append(out, kv[0]+"="+kv[1])
+		}
+	}
+	return out
+}
+
+// WriterReplayDisabled reports whether a running ingest-writer exposes tt_writer_replay_disabled 1 on
+// its metrics port (:9464), i.e. it was started without TT_S3_ENDPOINT and drops replay segments.
+func WriterReplayDisabled() bool {
+	c := &http.Client{Timeout: 2 * time.Second}
+	resp, err := c.Get("http://localhost:9464/metrics")
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	for _, l := range strings.Split(string(b), "\n") {
+		if strings.HasPrefix(l, "tt_writer_replay_disabled") && strings.HasSuffix(strings.TrimSpace(l), " 1") {
+			return true
+		}
+	}
+	return false
 }

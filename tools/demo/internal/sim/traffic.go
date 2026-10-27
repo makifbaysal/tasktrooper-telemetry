@@ -182,6 +182,13 @@ type Traffic struct {
 	Requests atomic.Int64
 	RumSent  atomic.Int64
 	RumErr   atomic.Int64
+
+	// session replay (replay.go)
+	Replay         bool
+	ReplayRate     float64 // share of sessions recorded from the start; the others only from their first error
+	ReplaySessions atomic.Int64
+	ReplaySegs     atomic.Int64
+	ReplayErr      atomic.Int64
 }
 
 // ParseDSN splits an ingest DSN (http://key@host:port/project).
@@ -216,6 +223,15 @@ func (t *Traffic) Run(ctx context.Context) {
 	}()
 
 	all := apps()
+	if t.RT.LLM { // support assistant (storefront-bff → anthropic) from the order pages of the shop apps
+		for i := range all {
+			for j, p := range all[i].pages {
+				if (all[i].name == "shop-web" || all[i].name == "shop-mobile") && (p.name == "/account/orders/:id" || p.name == "OrderTracking" || p.name == "/account" || p.name == "Account") {
+					all[i].pages[j].calls = append(append([]apiCall(nil), p.calls...), apiCall{"storefront-bff", "POST", "/v1/assistant/messages", 0.3, false})
+				}
+			}
+		}
+	}
 	appShare := t.RPS * 0.88
 	totalCalls := 0.0
 	for _, a := range all {
@@ -305,6 +321,7 @@ type session struct {
 	conn     string
 	events   []map[string]any
 	mu       sync.Mutex
+	rec      *recorder
 }
 
 func randHex(n int) string {
@@ -317,8 +334,9 @@ func randHex(n int) string {
 }
 
 func (s *session) add(typ string, viewID, viewName string, payloadKey string, payload map[string]any, attrs map[string]string) {
+	ts := time.Now().UnixMilli()
 	e := map[string]any{
-		"type": typ, "ts_ms": time.Now().UnixMilli(), "session_id": s.id, "anonymous_id": s.anon, "connection": s.conn,
+		"type": typ, "ts_ms": ts, "session_id": s.id, "anonymous_id": s.anon, "connection": s.conn,
 	}
 	if viewID != "" {
 		e["view_id"], e["view_name"] = viewID, viewName
@@ -335,6 +353,7 @@ func (s *session) add(typ string, viewID, viewName string, payloadKey string, pa
 	s.mu.Lock()
 	s.events = append(s.events, e)
 	s.mu.Unlock()
+	s.rec.onRUM(typ, ts, payload)
 }
 
 func (s *session) flush(ctx context.Context) {
@@ -461,6 +480,8 @@ func (t *Traffic) session(ctx context.Context, a clientApp) {
 	if rand.Float64() < 0.55 {
 		s.userID = fmt.Sprintf("%s.%d", userNames[rand.IntN(len(userNames))], rand.IntN(5000))
 	}
+	s.rec = t.newRecorder(ctx, s)
+	defer s.rec.close()
 	s.add("SESSION_START", "", "", "", nil, nil)
 	if a.mobile {
 		kind, med, ref := "cold", a.coldStart, "process"
@@ -489,6 +510,7 @@ func (t *Traffic) view(ctx context.Context, s *session, p page, initial bool) bo
 	a := s.app
 	viewID := "v_" + randHex(12)
 	start := time.Now()
+	s.rec.viewBegin(viewID, p, initial)
 	ttfb := 0.0
 	if !a.mobile {
 		ttfb = lognormal(a.ttfb, 0.45)
@@ -541,7 +563,13 @@ func (t *Traffic) view(ctx context.Context, s *session, p page, initial bool) bo
 	}
 	// interactions
 	clicks := 1 + rand.IntN(3)
+	var spent time.Duration // recorded sessions: interactions are spread over the think time so the replay looks human
 	for i := 0; i < clicks; i++ {
+		if s.rec != nil {
+			d := time.Duration(lognormal(1500, 0.4)) * time.Millisecond
+			sleepCtx(ctx, d)
+			spent += d
+		}
 		rage := rand.Float64() < 0.01
 		attrs := map[string]string{"click_count": "1"}
 		if rage {
@@ -582,7 +610,7 @@ func (t *Traffic) view(ctx context.Context, s *session, p page, initial bool) bo
 		}
 	}
 	// time on view (compressed think time), then INP / frames and VIEW_END
-	think := time.Duration(lognormal(9000, 0.7)) * time.Millisecond
+	think := max(time.Duration(lognormal(9000, 0.7))*time.Millisecond-spent, time.Second)
 	if !crashed {
 		sleepCtx(ctx, think)
 	}
