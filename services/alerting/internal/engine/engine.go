@@ -112,7 +112,7 @@ func New(cfg Config, log *slog.Logger, st *store.Store, ch kpi.CH, el *leader.El
 	reg.Describe("tt_alert_stream_matches_total", "counter", "stream records matching a stream rule")
 	reg.Describe("tt_alert_stream_handoffs_total", "counter", "stream hits handed to / claimed from other shards by direction")
 	return &Engine{
-		cfg: cfg, log: log, st: st, ch: ch, ev: &eval.Evaluator{CH: ch}, elector: el, reg: reg, Now: time.Now,
+		cfg: cfg, log: log, st: st, ch: ch, ev: newEvaluator(ch, st), elector: el, reg: reg, Now: time.Now,
 		clear: map[int64]time.Time{}, rules: map[int64]*ruleState{}, sliMark: map[int64]time.Time{}, warned: map[string]bool{},
 		locks: map[int64]*sync.Mutex{},
 	}
@@ -497,21 +497,31 @@ func rcaUnit(m *model.Monitor) rca.Unit {
 }
 
 func (e *Engine) analyze(ctx context.Context, org, project uint32, service, route, method, env string, unit rca.Unit, now time.Time) *rca.Result {
-	if unit == "" || service == "" {
+	if service == "" {
 		return nil
 	}
 	rctx, cancel := context.WithTimeout(ctx, e.cfg.RCATimeout)
 	defer cancel()
-	src := eval.NewRCASource(e.ch, org, project, env, now)
-	res, _, err := rca.Analyze(rctx, src, service, route, method, unit)
-	if err != nil {
-		e.reg.Add("tt_alert_rca_total", 1, "outcome", "error")
-		e.log.Warn("root cause analysis failed", "service", service, "route", route, "err", err)
-		return nil
+	var out *rca.Result
+	if unit != "" {
+		src := eval.NewRCASource(e.ch, org, project, env, now)
+		res, _, err := rca.Analyze(rctx, src, service, route, method, unit)
+		if err != nil {
+			e.reg.Add("tt_alert_rca_total", 1, "outcome", "error")
+			e.log.Warn("root cause analysis failed", "service", service, "route", route, "err", err)
+		} else {
+			e.reg.Add("tt_alert_rca_total", 1, "outcome", "ok")
+			c := rca.Compact(res)
+			out = &c
+		}
 	}
-	e.reg.Add("tt_alert_rca_total", 1, "outcome", "ok")
-	c := rca.Compact(res)
-	return &c
+	// Kubernetes / host candidates of the service (contracts §20); best effort
+	pods, hosts, err := eval.InfraSignals(rctx, e.ch, org, project, service, now)
+	if err != nil {
+		e.log.Warn("infra root cause signals failed", "service", service, "err", err)
+		return out
+	}
+	return rca.ApplyInfra(out, service, unit, rca.InfraCandidates(pods, hosts))
 }
 
 func (e *Engine) link(incidentID int64) string {

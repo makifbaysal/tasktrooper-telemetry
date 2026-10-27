@@ -208,6 +208,8 @@ type MetricsBatch struct {
 	BrokerGroups map[BrokerGroupKey]*BrokerGroupRow
 	BrokerNodes  map[BrokerNodeKey]*BrokerNodeRow
 	BrokerTopics map[BrokerTopicKey]*BrokerTopicRow
+	// Infra holds the host/container/process/k8s/faas families (infra.go), indexed by Family; nil until used.
+	Infra [numFamilies]map[InfraKey]*InfraRow
 }
 
 // NewMetricsBatch returns an empty batch.
@@ -221,7 +223,11 @@ func NewMetricsBatch() *MetricsBatch {
 
 // Len is the number of rows the batch would insert.
 func (b *MetricsBatch) Len() int {
-	return len(b.Metrics) + len(b.DB) + len(b.DBQueries) + len(b.BrokerLag) + len(b.BrokerGroups) + len(b.BrokerNodes) + len(b.BrokerTopics)
+	n := len(b.Metrics) + len(b.DB) + len(b.DBQueries) + len(b.BrokerLag) + len(b.BrokerGroups) + len(b.BrokerNodes) + len(b.BrokerTopics)
+	for _, m := range b.Infra {
+		n += len(m)
+	}
+	return n
 }
 
 // Reset empties the batch, keeping allocations.
@@ -233,6 +239,9 @@ func (b *MetricsBatch) Reset() {
 	clear(b.BrokerGroups)
 	clear(b.BrokerNodes)
 	clear(b.BrokerTopics)
+	for _, m := range b.Infra {
+		clear(m)
+	}
 }
 
 // pair looks attributes up on the data point first, then on the resource.
@@ -253,8 +262,12 @@ func (b *MetricsBatch) Add(t tenant.Tenant, req *colmetricspb.ExportMetricsServi
 		for _, sm := range rm.GetScopeMetrics() {
 			for _, m := range sm.GetMetrics() {
 				name := m.GetName()
-				if strings.HasPrefix(name, "trooper.db.") || strings.HasPrefix(name, "trooper.broker.") {
-					if b.addCollector(t, name, m, resKV) {
+				if strings.HasPrefix(name, "trooper.") {
+					if strings.HasPrefix(name, "trooper.db.") || strings.HasPrefix(name, "trooper.broker.") {
+						if b.addCollector(t, name, m, resKV) {
+							continue
+						}
+					} else if b.addInfra(t, name, m, resKV) {
 						continue
 					}
 				}

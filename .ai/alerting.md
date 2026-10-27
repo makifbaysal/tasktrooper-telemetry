@@ -16,6 +16,8 @@
 | `rum_vital` | `/checkout` sayfasında p75 LCP > 2.5 sn | Periyodik, `rum_views_1m` |
 | `composite` | A AND B (ör. error rate yüksek VE throughput normal) | Alt monitor'lerin durumları |
 | `kpi_burn` | "Homepage loads fast" KPI'ının error budget'ı 1 saatte 6× hızlı yanıyor | Periyodik, `sli_1m`; multi-window burn rate (aşağıda) |
+| `infra` | Pod 10 dk'da 3'ten fazla restart etti; node NotReady; host CPU > %90; workload'da eksik replika | Periyodik, `hosts_1m` / `containers_1m` / `k8s_*_1m` (ADR-019) |
+| `faas` | Lambda/Azure fonksiyonunda error rate > %5, throttle, p95 timeout'un %80'ini aştı | Periyodik, `faas_1m` + cold start için `spans` (ADR-020) |
 
 ## Kural şeması (alert-as-code ile aynı)
 
@@ -64,6 +66,21 @@ bildirim payload'u `codeRef` taşır ve kanallar "Defined in code" olarak göste
 | `error_new` | `errors_1h` geçmişi; stream yolunda +2 s / +6 s ClickHouse kontrolü |
 | `consumer_lag` `oldest_age` | `broker_lag_1m.oldest_age_s`; messaging system `broker_clusters.kind`'den (sqs→`aws_sqs`, pubsub→`gcp_pubsub`); Kafka cluster'da `no_data` |
 | `log_match` (stream) | `TT_ALERT_STREAM=true`; franz-go group `tt-alert-stream`, sadece shard 0'ın sahibi (stream leader) tüketir; bellekte sayım, ~1 s'de firing. Çoklu shard'da stream leader **tüm** shard'ların stream kurallarını değerlendirir; başka shard'ın monitor'ündeki eşleşme `alert_stream_hits` (unlogged) satırı + `NOTIFY tt_stream_hit` ile sahibine devredilir, sahibi `LISTEN` + 1 sn poll ile alıp (~100 ms) sadece yükseltir. Stream sadece yükseltir, resolve periyodik döngüde |
+| `infra` | `query: {entity: host\|container\|pod\|node\|workload, metric, agg: avg (varsayılan)\|max, filter: {cluster, namespace, host, workload, service}}` (`target.service` filter.service yerine geçer). Her varlık için pencere değeri (dakikalık `max`, sonra `agg`); monitor değeri en kötü varlık (op `<` ise en küçük), `detail.entities` en kötü 5 (`id`, label'lar, `value`). `restarts` = pencere içi artış; `cpu_ratio`/`memory_ratio` = Σ kullanım / Σ limit (limiti olan container'lar); pod `not_ready` / node `not_ready` = son örneği ready=0 olan varlık **sayısı** (phase `Succeeded` ve pencerenin en yeni dakikasından 2 dk eski — silinmiş — varlıklar hariç); workload `unavailable` = en son `desired − available`. Eşleşen varlıkta hiç değer yoksa `no_data` |
+| `faas` | `query: {functionId? \| filter: {provider, region, service}, metric, relativeToTimeout?}`. Fonksiyon başına: sayılar toplam, `error_rate` = errors/invocations, `duration_p95/p99` çağrı ağırlıklı ortalama (`relativeToTimeout` → ÷ timeout), `concurrency`/`iterator_age_ms` max, `cold_starts` = fonksiyonun servisinin `spans`'taki `faas.coldstart='true'` entry span'leri. `service` filtresi, cold start ve timeout Postgres `serverless_functions`'tan çözülür. `minRequests` altındaki fonksiyonlar oran/süre metriklerinde breach'e karar vermez. Raporlanmayan metrik (ör. Azure throttles) → `no_data` |
+
+**Şablonlar** (`services/alerting/internal/eval/templates.go`, `source='template'`): pod CrashLoop (`restarts > 3`, 10 dk
+pencere), node NotReady (`not_ready > 0`, 5 dk), host CPU > 0.9 (avg, 10 dk), host disk > 0.9, workload `unavailable > 0`
+(10 dk), fonksiyon error rate > 0.05 (5 dk, minRequests 20), throttles > 0 (5 dk), p95 > timeout × 0.8 (`relativeToTimeout`).
+
+**Altyapı kök neden adayları (ADR-019):** servisi olan her incident'ta (monitor ve KPI) çağrı ağacı RCA'sına ek olarak son 15 dk
+içinde aynı `service`'in pod'ları (`k8s_pods_1m`) ve servisi çalıştıran host'lar (`containers_1m` host'ları + pod node'ları,
+`hosts_1m`) taranır: `OOMKilled` (0.8) / `CrashLoopBackOff` (0.75) / sadece restart artışı (0.6), restart ≥ 3 ise +0.05, birden
+fazla pod etkilenmişse +0.05; host ortalama CPU > 0.9 → "Host <h> CPU saturated" (0.6 + (cpu − 0.9) × 2.5). Güven 0.6–0.85
+aralığına sıkıştırılır, en fazla 5 aday. Çağrı ağacı yoksa, servisin kendi kodunda bitiyorsa, hiçbir şey açıklamıyorsa veya
+güveni en iyi adaydan düşükse özet/güven en iyi adayınki olur ("Pod api-1 restarted (OOMKilled).", Slack "Likely cause" satırı
+bunu gösterir); ağacın cevabı `treeSummary`/`treeConfidence`'ta kalır. Adaylar `root_cause.infra[]` ve kök düğümün
+`evidence`'ında (`kind: resource`) yer alır.
 
 KPI kurallarının state'i `kpi_alert_rules.state/state_since/last_value/last_eval_at`'te tutulur, açılışta yüklenir; KPI incident'ları `kpi_rule_id` taşır. Firing bildirimi enqueue edilmeden önce aynı transaction'da
 `incidents.root_cause` (RCA sonucu, `confidence` dahil) yazılır; payload `rootCause {summary, confidence}` ve servisin son 1 saatteki
@@ -161,3 +178,16 @@ butonlar *Open incident* (`TT_PUBLIC_APP_URL`), *Ack* (`tt_ack:<incidentId>`), *
 `POST /slack/interactions` işler. Hatalar: `not_in_channel` → `conversations.join` + tekrar (private kanal → kalıcı hata, "app'i
 kanala davet et"), `channel_not_found` / `invalid_auth` → kalıcı, 429 → `Retry-After`. `slack:https://hooks.slack.com/…` webhook
 hedefleri eskisi gibi çalışır.
+
+**AI kota bildirimi (ADR-018, contracts §19):** alert-engine her `TT_AI_QUOTA_CHECK_INTERVAL` (5 dk) bu ayın (UTC)
+`ai_usage` toplamını org bazında hesaplar; etkin limit (`orgs.ai_monthly_credits` ?? paket, `-1` sınırsız) %80 / %100'e ulaştıysa
+ve org'un `ai_notify` hedefi varsa `notifications` kuyruğuna kind `ai_quota` satırı yazar (incident yok; payload `{orgId, projectId,
+period, threshold, used, limit, resetsAt, link}`). Dedupe `ai_quota_alerts (org_id, period, threshold)` ile — ay+eşik başına tek
+mesaj; doğrudan %100'e sıçrayan org'a sadece %100 gider (%80 de işaretlenir). Satır PK'sı sayesinde her replika kontrolü
+çalıştırabilir (leader gerekmez). `projectId` = org'un en küçük project id'si (kanal adı / Slack kurulumu çözümü için).
+Notifier metni tüm kanallarda tek satır: "AI usage at 80% of this month's credits (4,012 / 5,000). Resets Nov 1." (%100'de
+"AI enrichment falls back to static rules until then." eklenir). Slack App hedefi → düz `chat.postMessage` (thread / buton /
+`notification_messages` yok); Slack webhook → `{text}`; e-posta → düz metin (konu "AI usage at 80% of this month's credits");
+Teams → tek TextBlock'lu Adaptive Card; webhook → `{event:"ai_quota", …payload, text}` (`X-Trooper-Event: ai_quota`, imza aynı);
+PagerDuty/Opsgenie → warning/P4, dedup `tt-ai-quota-<org>-<period>-<threshold>`. `email:<adres>[,<adres>]` hedefleri
+`notification_channels` satırı olmadan da çözülür.

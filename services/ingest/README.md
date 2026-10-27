@@ -5,7 +5,7 @@ Two binaries (Go module `github.com/tasktrooper/telemetry/services/ingest`), fol
 | Binary | Does |
 |---|---|
 | `cmd/ingest-gw` | OTLP/HTTP `:4318` (`/v1/traces`, `/v1/metrics`, `/v1/logs`: protobuf or JSON, optional gzip), RUM `POST /v1/rum` (JSON or protobuf), Vercel drains `POST /v1/drains/vercel`, OTLP/gRPC `:4317`, `GET /healthz`, `GET /metrics`. Authenticates ingest keys, rate-limits per project, validates the payload and publishes it as protobuf to Redpanda. Stateless. |
-| `cmd/ingest-writer` | Consumer group `tt-ingest-writer` over the 4 topics. Flattens payloads into ClickHouse rows (`spans`, `logs`, `metrics`, `rum_events`, `db_1m`, `db_queries_1m`, `broker_*_1m`) and batch-inserts them; Kafka offsets are committed only after the insert succeeded (at-least-once). |
+| `cmd/ingest-writer` | Consumer group `tt-ingest-writer` over the 4 topics. Flattens payloads into ClickHouse rows (`spans`, `logs`, `metrics`, `rum_events`, `db_1m`, `db_queries_1m`, `broker_*_1m`, `hosts_1m`, `containers_1m`, `processes_1m`, `k8s_*_1m`, `faas_1m`) and batch-inserts them; Kafka offsets are committed only after the insert succeeded (at-least-once). |
 
 ## Run
 
@@ -34,7 +34,10 @@ The e2e test starts gw + writer in-process (gw on random ports), sends spans wit
 ClickHouse until rows exist in `spans`, `red_1m`, `edges_1m`, `errors_1h`, `rum_events`, `rum_views_1m`, `logs`, `db_1m`, `metrics`.
 It also sends an SQS consumer span (`messaging_system`, `consumer_1m`), cloud-style broker topic / queue-age metrics
 (`broker_topics_1m`, `broker_lag_1m.oldest_age_s`), resolves RUM country through a generated GeoIP db, creates a temporary
-Vercel integration (project 1, secret via `env:` ref) and posts a signed log + speed-insights drain. Data uses the service prefix
+Vercel integration (project 1, secret via `env:` ref) and posts a signed log + speed-insights drain.
+`TestInfraFamilies` (`e2e/infra_test.go`) sends host / container / process / k8s / faas metrics, a Kubernetes Warning event and
+an OBI span through the gw with the internal credential (project 9601, created if missing) and checks every typed table,
+`logs` and `spans.resource_attrs`; its rows are deleted afterwards. Data uses the service prefix
 `ingest2-e2e-<rand>` and is deleted at the end. **Stop any other `ingest-writer` first** — it shares the consumer group
 and would consume the test records without the test's GeoIP db.
 
@@ -96,14 +99,22 @@ Common (`services/pkg/config`): `TT_POSTGRES_URL`, `TT_CLICKHOUSE_URL`, `TT_KAFK
   top 5 normalized frames (or the masked message; bare 5xx → name + route). Exception type/message are copied into
   `attrs` (read by `errors_1h_mv`). Attribute maps: ≤ 64 keys, values ≤ 1 KiB (stack traces in events ≤ 16 KiB).
 - **Logs:** severity from `severity_number` (or text), `route` from `trooper.entry.route`, `pattern_id` = Drain-style
-  template hash (tokens with digits / ids / quoted values / `k=v` values masked).
+  template hash (tokens with digits / ids / quoted values / `k=v` values masked). Resource `k8s.cluster.name`,
+  `k8s.namespace.name`, `k8s.pod.name`, `k8s.node.name` are copied into `attrs` unless the record sets them (Kubernetes
+  Warning events: `service.name=k8s`, `k8s.event.*` attrs). Spans keep the whole resource in `resource_attrs`, so eBPF
+  (OBI/Beyla) spans are recognisable by `resource_attrs['telemetry.sdk.name']`.
 - **Metrics:** `trooper.db.*`, `trooper.db.query.*`, `trooper.broker.*` (incl. `trooper.broker.topic.*` →
   `broker_topics_1m`, `trooper.broker.oldest_age_s` → `broker_lag_1m.oldest_age_s`) go to the typed tables. Entity
   attributes are read from the data point first, then the resource — so trooper-cloud payloads (resource-level
   `trooper.broker.cluster`, `cloud.*`, `trooper.integration.id`) route exactly like collector ones, merged per entity and
   minute within a flush. Columns not reported are written as **`-Inf` (max columns) / `+Inf` (`hit_ratio`, min)**, not
   NaN: ClickHouse `max`/`min` over NaN is order-dependent, so NaN partial rows would corrupt merges. Readers should treat
-  non-finite values as "missing". Everything else → `metrics` (gauge/sum/histogram/exp_histogram as explicit
+  non-finite values as "missing". `trooper.host.*`, `trooper.container.*`, `trooper.process.*`, `trooper.k8s.{node,pod,workload}.*`
+  and `trooper.faas.*` (contracts §20, §21) go to `hosts_1m`, `containers_1m`, `processes_1m`, `k8s_nodes_1m`, `k8s_pods_1m`,
+  `k8s_workloads_1m`, `faas_1m` (`internal/flatten/infra.go`: one spec per table — dimension columns and the attribute each
+  comes from, data point first then resource; row key = all dimensions + minute; gauges merged with `max`, unreported
+  `-Inf`; pod `phase`/`reason` taken from the newest data point; `process.command` capped at 128 chars). Unknown names
+  under these prefixes fall through to `metrics`. Everything else → `metrics` (gauge/sum/histogram/exp_histogram as explicit
   buckets/summary with quantiles in attrs; `attrs_hash` = xxhash of sorted attrs).
 - **RUM:** protojson (proto field names, unknown fields ignored). Clock skew: if the newest event of a batch is > 5 min
   from `received_at`, the whole batch is shifted onto it. Browser/OS/device fall back to the `User-Agent` header.

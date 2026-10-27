@@ -43,6 +43,8 @@ Common: `TT_POSTGRES_URL`, `TT_CLICKHOUSE_URL`, `TT_LOG_LEVEL` (see `services/pk
 | `TT_SLACK_API_URL` | `https://slack.com/api` | notifier: Slack Web API base (tests) |
 | `TT_NOTIFIER_POLL` / `_BATCH` / `_CONCURRENCY` / `_MAX_ATTEMPTS` | `2s` / `50` / `8` / `10` | outbox poller |
 | `TT_NOTIFIER_SMTP_ADDR` / `_USER` / `_PASSWORD` / `_FROM` | — | e-mail relay (`host:587`, PLAIN auth when user set) |
+| `TT_AI_QUOTA_CHECK_INTERVAL` | `5m` | alert-engine: AI quota threshold check (80 % / 100 % → kind `ai_quota` to `orgs.ai_notify`) |
+| `TT_AI_PLAN_CREDITS` | `free=100,team=5000,enterprise=-1` | alert-engine: plan credits for the effective org limit (same value as codeintel / api) |
 
 ## Leader election and sharding
 
@@ -95,6 +97,35 @@ and `min_requests` also accepted; `minRequests` suppresses breaches on low traff
 | `error_new` | `errors_1h` | `service?` (or target), `lookback` (30d) | fingerprints first seen in the window with no earlier occurrence in the lookback |
 | `rum_vital` | `rum_vitals_1m` | `app` (or target.service), `view`, `vital` (LCP), `percentile` (p75), `deviceType` | ms (CLS unitless) |
 | `crash_rate` | `rum_views_1m` | `app`, `view`, `per: session \| view` | crashes / sessions |
+| `infra` | `hosts_1m`, `containers_1m`, `k8s_pods_1m`, `k8s_nodes_1m`, `k8s_workloads_1m` | `{entity: host \| container \| pod \| node \| workload, metric, agg: avg (default) \| max, filter: {cluster?, namespace?, host?, workload?, service?}}`; `filter.service` defaults to `target.service`. Metrics: host `cpu \| memory \| disk \| load1`; container/pod `cpu_ratio \| memory_ratio \| restarts \| throttled`; pod/node `not_ready`; workload `unavailable` | worst entity (max; min for `<`/`<=` ops), or the count of not-ready entities |
+| `faas` | `faas_1m`, `spans` (cold starts), Postgres `serverless_functions` | `{functionId? , filter: {provider?, region?, service?}, metric: invocations \| errors \| error_rate \| throttles \| duration_p95 \| duration_p99 \| cold_starts \| concurrency \| iterator_age_ms, relativeToTimeout?}` | worst function |
+
+**Infra.** Per entity: per-minute `max` over the AggregatingMergeTree rows (non-finite = not reported, skipped), then
+`agg` over the window. `cpu_ratio`/`memory_ratio` = Σ usage / Σ limit of the entity's containers that report both
+(pods aggregate their containers from `containers_1m`). `restarts` = increase of the cumulative counter in the window
+(`max − min`; containers from `containers_1m`, pods from `k8s_pods_1m`). `not_ready` = number of pods/nodes whose newest
+sample in the window has `ready = 0` (pods in phase `Succeeded` and entities whose newest sample is > 2 min older than the
+window's newest — deleted pods, removed nodes — are ignored); value 0 when entities exist and all are ready.
+`unavailable` = newest `desired − available` (≥ 0). Filters a table has no column for go through sub-selects
+(`host IN (SELECT host FROM containers_1m …)`, `node IN (SELECT node FROM k8s_pods_1m …)`, workloads of a service via
+`k8s_pods_1m`); pod `host` matches `node`. No entity with a value → `no_data`; unknown entity/metric → `no_data` (logged once).
+`detail`: `{entity, metric, agg, matched, entities: [{id, cluster, namespace, pod, container, host, node, kind, name, phase, value}…]}`
+(worst 5; `id` = `host`, `ns/pod/container` (or `host/container` outside Kubernetes), `ns/pod`, `node`, `ns/Kind/name`).
+
+**FaaS.** Per function over the window: invocations/errors/throttles summed, `error_rate` = errors / invocations,
+`duration_p95/p99` invocation-weighted mean of the minute values (`relativeToTimeout: true` → divided by
+`serverless_functions.timeout_s × 1000`, template threshold 0.8), concurrency / iterator age max, `cold_starts` =
+`sum(sample_weight)` of entry spans with `attrs['faas.coldstart'] = 'true'` of the function's `service`. A service filter
+(`filter.service`, else `target.service` when no `functionId`), cold starts and `relativeToTimeout` resolve functions from
+`serverless_functions` (`missing = false`; table absent → `no_data`); otherwise `faas_1m` is filtered directly by
+`function_id` / `provider` / `region`. With `condition.minRequests`, functions below it do not decide `error_rate` /
+`duration_*` breaches. A metric no function reports in the window (e.g. Azure throttles) → `no_data`.
+`detail`: `{metric, matched, entities: [{id, provider, region, service?, invocations, value}…]}`.
+
+**Templates** (`internal/eval/templates.go`, `eval.Templates`; kind + query + condition as stored, `source = 'template'`):
+`k8s-pod-crashloop` (pod restarts > 3, window 10m), `k8s-node-not-ready` (> 0, for 5m), `host-cpu-high` (avg > 0.9, for 10m),
+`host-disk-full` (max > 0.9), `k8s-workload-unavailable` (> 0, for 10m), `faas-error-rate` (> 0.05, for 5m, minRequests 20),
+`faas-throttles` (> 0, for 5m), `faas-near-timeout` (p95 / timeout > 0.8).
 
 **Anomaly.** The baseline is the same minute-of-week in each of the last `weeks` weeks, widened by ±1 h and cut into
 window-sized buckets aligned with the current window (5m window → 25 buckets/week, 100 over 4 weeks). z = (current −
@@ -198,6 +229,18 @@ evidence. Windows: current = last 15 min, baseline = the hour before. The result
 JSON shape, incl. `confidence`) goes to `incidents.root_cause` in the same transaction that enqueues the firing
 notification; the payload carries `summary` and `rootCause {summary, confidence}` (KPI endpoint targets too).
 
+**Infra candidates** (`rca/infra.go`, `eval.InfraSignals`): for every incident with a service (monitors of any kind and
+KPIs) the engine also reads the last 15 minutes of `k8s_pods_1m` for that `service` (reasons seen, restart increase) and
+`hosts_1m` of the hosts running it (`containers_1m` hosts + the pods' nodes, average CPU). Candidates: pod `OOMKilled`
+0.8, `CrashLoopBackOff` 0.75, restarts only 0.6 (+0.05 for ≥ 3 restarts, +0.05 when several pods of the service are
+affected); host CPU > 0.9 → 0.6 + (cpu − 0.9) × 2.5; clamped to 0.6–0.85, top 5. If there is no call tree, it ends in
+the service's own code, explains nothing (empty path) or is less confident, the best candidate becomes `summary` /
+`confidence` (e.g. "Pod api-1 restarted (OOMKilled).", which Slack shows as the likely cause) and the tree's answer
+moves to `treeSummary` / `treeConfidence`. `root_cause.infra` = `[{kind: pod|host, entity, cluster?, node?, reason:
+OOMKilled|CrashLoopBackOff|restarts|cpu, restarts?, value?, title, confidence}]`; the candidates are also appended to
+`root.evidence` as `{kind: "resource", title, detail: "<cluster> · NN% confidence"}`. Signal query errors (e.g. tables
+missing) are logged and ignored.
+
 Notification payloads also carry `deploy` (newest `deploy_markers` row of the service in the hour before firing:
 `version, source, env, at, url?, commitMessage?, author?`) and, for alert-as-code monitors, `source` / `codeRef`
 (`monitors.source`, `monitors.code_ref` = `repo:path`; read via `to_jsonb` so the engine works before and after
@@ -297,8 +340,23 @@ GOWORK=off go test -tags integration -count=1 -v ./integration      # live Postg
   `codeRef`, RCA confidence and deploy context in the payload; KPI rule reminder (`condition.renotifyMin`); Slack App via a fake
   Slack API: firing messages, `notification_messages`, ack + reminder thread replies with `chat.update`. Creates
   `notification_messages` / the `slack` provider check only when `009_slack_github.sql` is missing, and reverts that afterwards.
+  `TestInfraFaaS` (org/project 9601): synthetic hosts / containers / pods (incl. a deleted not-ready pod) / nodes /
+  workloads / functions + cold-start spans; infra and faas monitors (worst entity, `detail.entities`, `no_data` for
+  unreported gauges, `relativeToTimeout`, cold starts via `serverless_functions` when `011_serverless.sql` is applied) and
+  an error-rate incident whose root cause is the OOMKilled pod (summary in `incidents.root_cause` and the firing payload).
+- `eval` infra/faas: worst-entity selection, entity ids, filter → SQL (placeholder/arg count), unsupported shapes, faas
+  minute aggregation, templates decode into supported monitors; `rca` infra: candidate confidences and merge rules.
 
 ## Not yet
 
 `group_by` dedupe, graph snapshots in notifications,
 `log_pattern_new` as a stream rule (needs the writer's Drain ids), cron-expression schedules for `job_missed`.
+
+## AI quota notifications
+
+The alert-engine sums this month's `ai_usage` per org every `TT_AI_QUOTA_CHECK_INTERVAL` and enqueues one `ai_quota`
+notification (no incident) per `orgs.ai_notify` target when an org reaches 80 % / 100 % of its limit; `ai_quota_alerts`
+dedupes per org + month + threshold, so every replica may run it. The notifier renders a single line for every channel
+type ("AI usage at 80% of this month's credits (4,012 / 5,000). Resets Nov 1."); Slack App targets get a plain
+`chat.postMessage` without thread or buttons. `email:<address>` targets need no `notification_channels` row.
+Details: `.ai/alerting.md` § Bildirim, `.ai/contracts.md` §19.
