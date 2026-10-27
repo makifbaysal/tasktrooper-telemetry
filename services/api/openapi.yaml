@@ -2094,7 +2094,7 @@ paths:
     post:
       tags: [Code insights]
       operationId: postRepos
-      summary: 'Connect a repository and request an analysis. `token` is sealed (pkg/secrets) and never returned; provider github + installationId uses the GitHub App (no token)'
+      summary: 'Connect a repository and request an analysis. `token` is sealed (pkg/secrets) and never returned; provider github + installationId uses the GitHub App (no token). gitlab (optional `baseUrl` for self-managed), bitbucket and App-less github repositories get a generated webhook secret: the answer carries `webhook {url, secret}` once (contracts §18a)'
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/RepoInput' } } }
@@ -2142,6 +2142,22 @@ paths:
         '202':
           description: OK
           content: { application/json: { schema: { $ref: '#/components/schemas/Repo' } } }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '404': { $ref: '#/components/responses/E404' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/repos/{id}/webhook-secret:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Code insights]
+      operationId: postReposIdWebhookSecret
+      summary: 'Issue a new per-repository webhook secret (GitLab, Bitbucket, App-less GitHub); the old one stops working. The answer carries `webhook {url, secret}` once'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Repo' } } }
+        '400': { $ref: '#/components/responses/E400' }
         '401': { $ref: '#/components/responses/E401' }
         '403': { $ref: '#/components/responses/E403' }
         '404': { $ref: '#/components/responses/E404' }
@@ -3009,7 +3025,7 @@ components:
       required: [id, name, provider, branch, sha, analyzedAt, services, language, languages, status, lastAnalyzedSha, pendingPaths, webhookActive]
       properties:
         id: { type: string }
-        name: { type: string, description: 'owner/repo' }
+        name: { type: string, description: 'owner/repo (GitLab: group/subgroup/project, Bitbucket: workspace/repo)' }
         provider: { type: string, enum: [github, gitlab, bitbucket, local] }
         branch: { type: string }
         sha: { type: string }
@@ -3024,18 +3040,30 @@ components:
         localPath: { type: string }
         lastAnalyzedSha: { type: string }
         pendingPaths: { type: [array, "null"], items: { type: string }, description: 'Files changed by pushes since the last analysis' }
-        webhookActive: { type: boolean, description: 'Connected through the GitHub App (pushes trigger analyses)' }
+        webhookActive: { type: boolean, description: 'GitHub App installation, or a verified per-repository webhook delivery arrived (pushes trigger analyses)' }
+        webhookReceivedAt: { type: integer, format: int64, description: 'Last verified per-repository webhook delivery (ms)' }
+        baseUrl: { type: string, description: 'Self-managed GitLab address' }
+        url: { type: string, description: 'Repository page on its host' }
+        webhook: { $ref: '#/components/schemas/RepoWebhook' }
         analysis: { type: object, description: 'codeintel summary of the last analysis: {sha, incremental, items, llmItems, llm: {status: ok|disabled|quota_exceeded, reason?, credits (2 decimals), skipped?}}' }
     RepoInput:
       type: object
       required: [provider, fullName]
       properties:
         provider: { type: string, enum: [github, gitlab, bitbucket, local] }
-        fullName: { type: string }
+        fullName: { type: string, description: 'github owner/name, gitlab group/subgroup/project, bitbucket workspace/repo' }
         defaultBranch: { type: string }
-        token: { type: string, writeOnly: true, description: 'Sealed, never returned' }
+        token: { type: string, writeOnly: true, description: 'Sealed, never returned. gitlab: access token; bitbucket: access token or username:app_password' }
         installationId: { type: [integer, string], description: 'GitHub App installation of this project (no token needed)' }
         localPath: { type: string }
+        baseUrl: { type: string, description: 'gitlab only: self-managed address, https without credentials, query or fragment' }
+    RepoWebhook:
+      type: object
+      description: 'Returned once: point the provider webhook (push events) at url with this secret (GitLab Secret token / Bitbucket and GitHub Secret)'
+      required: [url, secret]
+      properties:
+        url: { type: string, description: '<TT_PUBLIC_WEBHOOK_URL>/v1/webhooks/<provider>' }
+        secret: { type: string }
     InventoryItem:
       type: object
       required: [id, kind, key, service, file, line, criticality, observed, monitored, dead, shadow]

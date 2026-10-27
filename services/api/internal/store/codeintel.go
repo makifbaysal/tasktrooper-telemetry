@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tasktrooper/telemetry/services/api/internal/model"
 	"github.com/tasktrooper/telemetry/services/api/internal/tq"
+	"github.com/tasktrooper/telemetry/services/pkg/vcs"
 )
 
 // Code intelligence (ADR-014, contracts §13/§16). services/codeintel writes repositories / inventory_items /
@@ -74,7 +75,8 @@ func UICriticality(c string) string {
 
 const repoSelect = `SELECT r.id, r.provider, r.full_name, r.default_branch, coalesce(r.last_analyzed_sha, ''), coalesce(r.status, ''),
   r.analyze_requested_at, r.analyzed_at, coalesce(r.error, ''), coalesce(r.languages, '{}'), coalesce(r.services, '{}'),
-  coalesce(r.installation_id, 0), coalesce(r.local_path, ''), coalesce(r.pending_paths, '{}'), r.analysis FROM repositories r`
+  coalesce(r.installation_id, 0), coalesce(r.local_path, ''), coalesce(r.pending_paths, '{}'), r.analysis,
+  coalesce(r.base_url, ''), r.webhook_received_at FROM repositories r`
 
 func scanRepo(row pgx.Row) (model.Repo, error) {
 	var r model.Repo
@@ -82,15 +84,24 @@ func scanRepo(row pgx.Row) (model.Repo, error) {
 	var status string
 	var requested, analyzed *time.Time
 	var analysis []byte
+	var hookSeen *time.Time
 	if err := row.Scan(&id, &r.Provider, &r.Name, &r.Branch, &r.Sha, &status, &requested, &analyzed, &r.Error, &r.Languages,
-		&r.Services, &inst, &r.LocalPath, &r.PendingPaths, &analysis); err != nil {
+		&r.Services, &inst, &r.LocalPath, &r.PendingPaths, &analysis,
+		&r.BaseURL, &hookSeen); err != nil {
 		return r, err
 	}
 	if len(analysis) > 0 && string(analysis) != "null" {
 		r.Analysis = repoAnalysis(analysis) // codeintel's summary, incl. llm {status, reason?, credits} (contracts §19)
 	}
 	r.ID, r.InstallationID, r.LastAnalyzedSha = idStr(id), idStr(inst), r.Sha
-	r.WebhookActive = inst > 0 // GitHub App installations deliver push webhooks to codeintel
+	// GitHub App installations deliver push webhooks to codeintel; other repos once a verified delivery arrived.
+	r.WebhookActive = inst > 0 || hookSeen != nil
+	if hookSeen != nil {
+		r.WebhookReceivedAt = ms(*hookSeen)
+	}
+	if r.Provider != vcs.Local {
+		r.URL = strings.TrimSuffix(vcs.CloneURL(vcs.Host(r.Provider, r.BaseURL), r.Name), ".git")
+	}
 	if analyzed != nil {
 		r.AnalyzedAt = ms(*analyzed)
 	}
@@ -152,22 +163,40 @@ func (d *DB) GetRepo(ctx context.Context, id string) (*model.Repo, error) {
 	return &r, err
 }
 
-var repoName = regexp.MustCompile(`^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$`)
+var branchName = regexp.MustCompile(`^[A-Za-z0-9_.][A-Za-z0-9_./-]*$`)
+
+// hookSecretBytes is the size of generated repository webhook secrets.
+const hookSecretBytes = 32
+
+// usesRepoWebhook: repositories notified by a per-repository webhook (not the GitHub App).
+func usesRepoWebhook(provider string, installationID int64) bool {
+	switch provider {
+	case vcs.GitLab, vcs.Bitbucket:
+		return true
+	case vcs.GitHub:
+		return installationID == 0
+	}
+	return false
+}
 
 // CreateRepo registers a repository and queues its first analysis. A token is sealed into secrets
-// (credentials_ref); a GitHub App installation must be one of the project's github integrations.
+// (credentials_ref); a GitHub App installation must be one of the project's github integrations. GitLab, Bitbucket
+// and App-less GitHub repositories get a generated webhook secret (webhook_secret_ref), returned once in
+// Repo.Webhook (the server adds the URL) — contracts §18a.
 func (d *DB) CreateRepo(ctx context.Context, in model.RepoInput) (*model.Repo, error) {
-	in.FullName = strings.TrimSpace(in.FullName)
+	in.FullName = strings.Trim(strings.TrimSpace(in.FullName), "/")
 	in.LocalPath = strings.TrimPrefix(strings.TrimSpace(in.LocalPath), "file://")
+	in.DefaultBranch = strings.TrimSpace(in.DefaultBranch)
+	in.Token = strings.TrimSpace(in.Token)
 	switch in.Provider {
-	case "github", "gitlab", "bitbucket":
-		if !repoName.MatchString(in.FullName) {
-			return nil, Invalid("fullName must be owner/name")
+	case vcs.GitHub, vcs.GitLab, vcs.Bitbucket:
+		if err := vcs.ValidFullName(in.Provider, in.FullName); err != nil {
+			return nil, Invalid(err.Error())
 		}
 		if in.LocalPath != "" {
 			return nil, Invalid("localPath only applies to provider local")
 		}
-	case "local":
+	case vcs.Local:
 		if in.LocalPath == "" || !filepath.IsAbs(in.LocalPath) {
 			return nil, Invalid("provider local needs an absolute localPath")
 		}
@@ -177,12 +206,28 @@ func (d *DB) CreateRepo(ctx context.Context, in model.RepoInput) (*model.Repo, e
 	default:
 		return nil, Invalid("provider must be github|gitlab|bitbucket|local")
 	}
+	var base *string
+	if strings.TrimSpace(in.BaseURL) != "" {
+		if in.Provider != vcs.GitLab {
+			return nil, Invalid("baseUrl only applies to provider gitlab (self-managed)")
+		}
+		b, err := vcs.NormalizeBaseURL(in.BaseURL)
+		if err != nil {
+			return nil, Invalid(err.Error())
+		}
+		if b != vcs.GitLabURL {
+			base = &b
+		}
+	}
 	if in.DefaultBranch == "" {
 		in.DefaultBranch = "main"
 	}
+	if !branchName.MatchString(in.DefaultBranch) || strings.Contains(in.DefaultBranch, "..") || len(in.DefaultBranch) > 255 {
+		return nil, Invalid("defaultBranch is not a valid branch name")
+	}
 	var inst *int64
 	if in.InstallationID != 0 {
-		if in.Provider != "github" {
+		if in.Provider != vcs.GitHub {
 			return nil, Invalid("installationId only applies to provider github")
 		}
 		if in.Token != "" {
@@ -199,13 +244,32 @@ func (d *DB) CreateRepo(ctx context.Context, in model.RepoInput) (*model.Repo, e
 		v := int64(in.InstallationID)
 		inst = &v
 	}
+	var sealed []string
+	cleanup := func() {
+		for _, r := range sealed {
+			_ = d.deleteSecret(context.WithoutCancel(ctx), r)
+		}
+	}
 	var ref *string
 	if in.Token != "" {
 		r, err := d.sealSecret(ctx, "repo token "+in.FullName, []byte(in.Token))
 		if err != nil {
 			return nil, err
 		}
+		sealed = append(sealed, r)
 		ref = &r
+	}
+	var hookRef *string
+	var hookSecret string
+	if usesRepoWebhook(in.Provider, int64(in.InstallationID)) {
+		hookSecret = randomToken(hookSecretBytes)
+		r, err := d.sealSecret(ctx, "repo webhook "+in.FullName, []byte(hookSecret))
+		if err != nil {
+			cleanup()
+			return nil, err
+		}
+		sealed = append(sealed, r)
+		hookRef = &r
 	}
 	var local *string
 	if in.LocalPath != "" {
@@ -213,19 +277,64 @@ func (d *DB) CreateRepo(ctx context.Context, in model.RepoInput) (*model.Repo, e
 	}
 	var id int64
 	err := d.pg.QueryRow(ctx, `INSERT INTO repositories (project_id, provider, full_name, default_branch, status, credentials_ref,
-	    installation_id, local_path, analyze_requested_at)
-	  VALUES ({{project}}, $1, $2, $3, 'pending', $4, $5, $6, now()) RETURNING id`,
-		in.Provider, in.FullName, in.DefaultBranch, ref, inst, local).Scan(&id)
+	    installation_id, local_path, base_url, webhook_secret_ref, analyze_requested_at)
+	  VALUES ({{project}}, $1, $2, $3, 'pending', $4, $5, $6, $7, $8, now()) RETURNING id`,
+		in.Provider, in.FullName, in.DefaultBranch, ref, inst, local, base, hookRef).Scan(&id)
 	if err != nil {
-		if ref != nil {
-			_ = d.deleteSecret(ctx, *ref)
-		}
+		cleanup()
 		if isUnique(err) {
 			return nil, Conflict("repository already connected")
 		}
 		return nil, err
 	}
-	return d.GetRepo(ctx, strconv.FormatInt(id, 10))
+	r, err := d.GetRepo(ctx, strconv.FormatInt(id, 10))
+	if err == nil && hookSecret != "" {
+		r.Webhook = &model.RepoWebhook{Secret: hookSecret}
+	}
+	return r, err
+}
+
+// RotateRepoWebhookSecret replaces a repository's webhook secret and returns the new one once (Repo.Webhook).
+// GitHub App repositories have no per-repository webhook.
+func (d *DB) RotateRepoWebhookSecret(ctx context.Context, id string) (*model.Repo, error) {
+	n, err := parseID(id)
+	if err != nil {
+		return nil, err
+	}
+	r, err := d.GetRepo(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	inst, _ := strconv.ParseInt(r.InstallationID, 10, 64)
+	if !usesRepoWebhook(r.Provider, inst) {
+		return nil, Invalid("this repository is notified by the GitHub App (or is local); it has no webhook secret")
+	}
+	secret := randomToken(hookSecretBytes)
+	ref, err := d.sealSecret(ctx, "repo webhook "+r.Name, []byte(secret))
+	if err != nil {
+		return nil, err
+	}
+	var old *string
+	err = d.pg.QueryRow(ctx, `WITH prev AS (SELECT id, webhook_secret_ref FROM repositories WHERE {{tenant}} AND id = $1 FOR UPDATE)
+	  UPDATE repositories r SET webhook_secret_ref = $2, webhook_received_at = NULL FROM prev WHERE r.id = prev.id
+	  RETURNING prev.webhook_secret_ref`, n, ref).Scan(&old)
+	if err != nil {
+		_ = d.deleteSecret(context.WithoutCancel(ctx), ref)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if old != nil {
+		if err := d.deleteSecret(ctx, *old); err != nil {
+			return nil, err
+		}
+	}
+	r, err = d.GetRepo(ctx, id)
+	if err == nil {
+		r.Webhook = &model.RepoWebhook{Secret: secret}
+	}
+	return r, err
 }
 
 // DeleteRepo disconnects a repository (inventory cascades) and deletes its sealed secrets.

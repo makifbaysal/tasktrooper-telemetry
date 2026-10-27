@@ -41,6 +41,7 @@ service of `deploy/docker-compose.yml` (profile `app`).
 | `TT_OIDC_REDIRECT_URL` | `http://localhost:8080/api/v1/auth/callback` | must be registered at the IdP |
 | `TT_OIDC_SCOPES` | `openid,email,profile` | |
 | `TT_PUBLIC_API_URL` | `http://localhost:8080` | public base of this api (Slack OAuth redirect URI = `<it>/api/v1/integrations/slack/callback`) |
+| `TT_PUBLIC_WEBHOOK_URL` | `http://localhost:8096` | public base of codeintel; repository webhook URLs returned by `POST /repos` = `<it>/v1/webhooks/<github\|gitlab\|bitbucket>` |
 | `TT_SLACK_CLIENT_ID`, `TT_SLACK_CLIENT_SECRET`, `TT_SLACK_SIGNING_SECRET` | – | Slack App (ADR-017); unset = Slack endpoints answer 501 |
 | `TT_SLACK_API_URL` | `https://slack.com/api` | tests / proxies |
 | `TT_GITHUB_APP_ID`, `TT_GITHUB_APP_PRIVATE_KEY` (PEM or `env:NAME` / `file:/path`), `TT_GITHUB_API_URL` | – | GitHub App (`services/pkg/githubapp`); unset = GitHub endpoints answer 501 |
@@ -114,7 +115,11 @@ npx @redocly/cli lint openapi.yaml
   baseline, ms per request deltas. Client apps (web/mobile) get RUM-based `/services/{app}/series`; consumers list
   their topic sources as callers.
 * Code insights (ADR-014, written by `services/codeintel`): `POST /repos` seals `token` (`credentials_ref = secret:<id>`)
-  or links a GitHub App installation of the project, and stamps `analyze_requested_at`; status is derived (`analyzing`
+  or links a GitHub App installation of the project, and stamps `analyze_requested_at`. Providers github / gitlab (group/sub/project,
+  optional self-managed `baseUrl`, https only) / bitbucket (workspace/repo) / local; formats come from `services/pkg/vcs`.
+  GitLab, Bitbucket and App-less GitHub repos get a generated webhook secret (`webhook_secret_ref`), returned once as
+  `webhook {url, secret}`; `POST /repos/{id}/webhook-secret` rotates it (contracts §18a). `webhookActive` = App installation
+  or `webhook_received_at` set by codeintel. Status is derived (`analyzing`
   while a request is newer than `analyzed_at`). `/inventory` reads `inventory_items.project_id` (shadow items have no
   repo); criticality critical|high|medium|low → critical|important|important|low. Accepting a suggestion creates the
   monitor from `monitor_draft` (`source = suggestion`) in one transaction. Monitors with `source = code` are managed in
