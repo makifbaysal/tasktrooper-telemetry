@@ -13,11 +13,11 @@ import { useApp } from '@/components/layout/context';
 import { isApi, monitors, series, services, timestamps, type InventoryItem, type TimeRange } from '@/data';
 import {
   acceptSuggestion, acceptedSuggestions, analyzeRepo, codeIntelAvailable, codeLink, codeRefLink, deleteRepo, inventoryRows, refreshCodeIntel, rejectSuggestion, repoList,
-  suggestionRows, type InventoryRow, type RepoInfo, type SuggestionRow,
+  rotateWebhookSecret, suggestionRows, type InventoryRow, type RepoInfo, type RepoWebhook, type SuggestionRow,
 } from '@/data/codeintel';
 import { ago, compact } from '@/lib/format';
 import { CriticalityBadge } from './shared';
-import { ConnectRepoDrawer } from './ConnectRepo';
+import { ConnectRepoDrawer, WebhookSetup } from './ConnectRepo';
 
 type Filter = 'all' | 'monitored' | 'unmonitored' | 'dead' | 'shadow';
 
@@ -422,11 +422,14 @@ function RepoRow({ r }: { r: RepoInfo }) {
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [hook, setHook] = useState<RepoWebhook | null>(null);
   const run = async (f: () => Promise<void>) => {
     setBusy(true); setError('');
     try { await f(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     setBusy(false);
   };
+  // GitLab, Bitbucket and App-less GitHub repos are notified by a per-repository webhook (contracts §18a)
+  const repoHook = r.provider !== 'local' && !r.installationId && r.status !== 'disconnected';
   return (
     <div className="list__row" style={{ alignItems: 'flex-start' }}>
       <FolderGit2 size={16} className="muted" aria-hidden style={{ marginTop: 2 }} />
@@ -434,6 +437,13 @@ function RepoRow({ r }: { r: RepoInfo }) {
         <span className="list__title row" style={{ gap: 'var(--space-2)' }}>
           {r.url ? <a href={r.url} target="_blank" rel="noreferrer">{r.name}</a> : r.name}
           {r.provider === 'local' && <Badge>Local</Badge>}
+          {r.provider === 'gitlab' && <Badge>{r.baseUrl ? 'GitLab self-managed' : 'GitLab'}</Badge>}
+          {r.provider === 'bitbucket' && <Badge>Bitbucket</Badge>}
+          {repoHook && !r.webhookActive && !hook && (
+            <span className="row muted" style={{ gap: 4, fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-regular)' }} title="No push has been received yet — set up the repository webhook">
+              <Webhook size={12} aria-hidden />No webhook delivery yet
+            </span>
+          )}
           {r.webhookActive && r.status !== 'disconnected' && <span className="row muted" style={{ gap: 4, fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-regular)' }} title="Pushes to the default branch trigger an incremental analysis"><Webhook size={12} aria-hidden />Webhook active</span>}
         </span>
         <span className="list__meta row" style={{ gap: 6, flexWrap: 'wrap' }}>
@@ -449,7 +459,18 @@ function RepoRow({ r }: { r: RepoInfo }) {
         )}
         {(r.status === 'error' || r.status === 'disconnected') && r.error && <span className="secondary" style={{ fontSize: 'var(--text-sm)' }}>{r.error}</span>}
         {error && <span className="secondary" style={{ fontSize: 'var(--text-sm)' }}>{error}</span>}
+        {hook && r.provider && (
+          <div className="stack" style={{ gap: 'var(--space-2)', marginTop: 'var(--space-2)' }}>
+            <WebhookSetup provider={r.provider} hook={hook} />
+            <div><Button size="sm" variant="ghost" onClick={() => setHook(null)}>Hide</Button></div>
+          </div>
+        )}
       </div>
+      {repoHook && !hook && (
+        <Button size="sm" variant="ghost" icon={<Webhook size={14} />} disabled={busy}
+          title="Issue a new webhook secret (the old one stops working)"
+          onClick={() => void run(async () => setHook(await rotateWebhookSecret(r.id)))}>{r.webhookActive ? 'New secret' : 'Webhook setup'}</Button>
+      )}
       {r.status === 'analyzing'
         ? <Badge tone="accent" icon={<CircleDashed />}>{r.pendingPaths?.length ? 'Analyzing push…' : 'Analyzing…'}</Badge>
         : r.status === 'disconnected'

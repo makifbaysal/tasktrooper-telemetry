@@ -10,7 +10,10 @@ import type { Criticality, InventoryItem, Monitor, Repo, Suggestion } from './ty
 
 // ---------------------------------------------------------------- types
 
-export type RepoProvider = 'github' | 'local';
+export type RepoProvider = 'github' | 'gitlab' | 'bitbucket' | 'local';
+
+/** Where to point a per-repository webhook (GitLab, Bitbucket, App-less GitHub); the secret is only shown once. */
+export interface RepoWebhook { url: string; secret: string }
 
 export type RepoStatus = Repo['status'] | 'disconnected';
 
@@ -22,11 +25,15 @@ export interface RepoInfo extends Omit<Repo, 'status'> {
   installationId?: number;
   /** files changed by the last push, analysis pending (incremental) */
   pendingPaths?: string[];
-  /** GitHub App webhook delivers pushes for this repo */
+  /** pushes trigger analyses: GitHub App installation, or a verified per-repository webhook delivery */
   webhookActive?: boolean;
+  /** self-managed GitLab address */
+  baseUrl?: string;
+  /** only right after connecting / rotating: webhook URL + secret, shown once */
+  webhook?: RepoWebhook;
   /** analysis failure (status = error) */
   error?: string;
-  /** browse URL of the default branch, e.g. https://github.com/org/repo */
+  /** browse URL of the repository, e.g. https://github.com/org/repo, https://gitlab.com/group/sub/project */
   url?: string;
   localPath?: string;
   /** LLM step of the last analysis (api: `analysis.llm`, contracts §19) */
@@ -55,10 +62,13 @@ export interface SuggestionRow extends Suggestion { repoId?: string }
 
 export interface ConnectRepoInput {
   provider: RepoProvider;
-  /** owner/name for GitHub, a display name for local */
+  /** owner/name (GitHub), group/subgroup/project (GitLab), workspace/repo (Bitbucket), a display name for local */
   fullName: string;
   defaultBranch?: string;
+  /** GitHub/GitLab access token, Bitbucket access token or username:app_password */
   token?: string;
+  /** GitLab only: self-managed address (https) */
+  baseUrl?: string;
   installationId?: number;
   localPath?: string;
 }
@@ -89,22 +99,59 @@ interface RawRepo {
   analyzedAt?: number | string | null; services?: string[] | null; language?: string; languages?: string[] | null;
   status?: string; error?: string | null; provider?: string; url?: string; localPath?: string;
   installationId?: number | string | null; pendingPaths?: string[] | null; pending_paths?: string[] | null; webhookActive?: boolean | null;
+  baseUrl?: string | null; webhook?: RepoWebhook | null;
   analysis?: { llm?: { status?: string; reason?: string | null; credits?: number | null; skipped?: number | null } | null } | null;
 }
 const STATUSES = new Set<RepoStatus>(['ready', 'analyzing', 'error', 'disconnected']);
-const mapRepo = (r: RawRepo): RepoInfo => ({
-  id: String(r.id), name: r.name ?? r.fullName ?? String(r.id), branch: r.branch ?? r.defaultBranch ?? 'main', sha: r.sha ?? '',
+const PROVIDERS = new Set<RepoProvider>(['github', 'gitlab', 'bitbucket', 'local']);
+
+/** Web host of a repository (GitLab: self-managed baseUrl when set). */
+export function repoHost(provider: RepoProvider | undefined, baseUrl?: string): string {
+  if (provider === 'gitlab') return (baseUrl || 'https://gitlab.com').replace(/\/+$/, '');
+  if (provider === 'bitbucket') return 'https://bitbucket.org';
+  return 'https://github.com';
+}
+
+const SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
+/** Same rules as the api (services/pkg/vcs): error message, or '' when the full name is valid. */
+export function fullNameError(provider: RepoProvider, name: string): string {
+  const parts = name.trim().replace(/^\/+|\/+$/g, '').split('/');
+  const bad = parts.some((p) => !SEGMENT.test(p) || p.endsWith('.git') || p.endsWith('.atom') || p.includes('..'));
+  if (provider === 'gitlab') return parts.length < 2 || parts.length > 21 || bad ? 'Use group/project (subgroups allowed: group/sub/project)' : '';
+  if (provider === 'bitbucket') return parts.length !== 2 || bad ? 'Use workspace/repo' : '';
+  if (provider === 'github') return parts.length !== 2 || bad ? 'Use owner/name' : '';
+  return '';
+}
+
+/** Self-managed GitLab address check (https, no credentials, query or fragment): error message or ''. */
+export function baseUrlError(raw: string): string {
+  if (!raw.trim()) return '';
+  let u: URL;
+  try { u = new URL(raw.trim()); } catch { return 'Not a URL'; }
+  if (u.protocol !== 'https:') return 'Use https';
+  if (u.username || u.password) return 'Remove the credentials from the URL';
+  if (u.search || u.hash) return 'Remove the query or fragment';
+  return '';
+}
+
+const mapRepo = (r: RawRepo): RepoInfo => {
+  const provider: RepoProvider = PROVIDERS.has(r.provider as RepoProvider) ? (r.provider as RepoProvider) : 'github';
+  const name = r.name ?? r.fullName ?? String(r.id);
+  return {
+  id: String(r.id), name, branch: r.branch ?? r.defaultBranch ?? 'main', sha: r.sha ?? '',
   analyzedAt: toMs(r.analyzedAt), services: r.services ?? [], language: r.language ?? (r.languages ?? []).join(', '),
   status: STATUSES.has(r.status as RepoStatus) ? (r.status as RepoStatus) : r.status === 'pending' || r.status === 'queued' ? 'analyzing' : 'ready',
-  error: r.error ?? undefined, provider: r.provider === 'local' ? 'local' : 'github', localPath: r.localPath,
-  url: r.url ?? (r.provider !== 'local' && (r.fullName ?? r.name)?.includes('/') ? `https://github.com/${r.fullName ?? r.name}` : undefined),
-  installationId: r.installationId != null ? Number(r.installationId) : undefined,
+  error: r.error ?? undefined, provider, localPath: r.localPath, baseUrl: r.baseUrl ?? undefined,
+  url: r.url ?? (provider !== 'local' && name.includes('/') ? `${repoHost(provider, r.baseUrl ?? undefined)}/${name}` : undefined),
+  installationId: r.installationId != null && r.installationId !== '' ? Number(r.installationId) : undefined,
   pendingPaths: r.pendingPaths ?? r.pending_paths ?? undefined,
   webhookActive: r.webhookActive ?? (r.installationId != null ? true : undefined),
+  webhook: r.webhook ?? undefined,
   llm: r.analysis?.llm?.status === 'ok' || r.analysis?.llm?.status === 'disabled' || r.analysis?.llm?.status === 'quota_exceeded'
     ? { status: r.analysis.llm.status, reason: r.analysis.llm.reason ?? undefined, credits: r.analysis.llm.credits ?? 0, skipped: r.analysis.llm.skipped ?? undefined }
     : undefined,
-});
+  };
+};
 
 interface RawItem extends Omit<InventoryRow, 'criticality' | 'id' | 'line' | 'failureModes'> {
   id: string | number; criticality?: string; line?: number | null;
@@ -259,6 +306,9 @@ if (!isApi) {
       url: 'https://github.com/shopco/legacy-admin', installationId: MOCK_INSTALLATION.installationId, error: 'Removed from the GitHub App installation — re-add it on GitHub to resume analysis.' },
     { id: 'rp5', name: 'shopco/email-worker', branch: 'main', sha: '77ab310', analyzedAt: NOW - 3 * 3600_000, services: ['email-worker'], language: 'Python', status: 'error', provider: 'github',
       url: 'https://github.com/shopco/email-worker', installationId: MOCK_INSTALLATION.installationId, webhookActive: true, error: 'Analysis failed: worker/tasks/__init__.py could not be parsed (SyntaxError at line 41).' },
+    // self-managed GitLab, connected with a token; the push webhook has not delivered yet
+    { id: 'rp6', name: 'shopco/platform/pricing-engine', branch: 'main', sha: '3be41c2', analyzedAt: NOW - 26 * 3600_000, services: [], language: 'Kotlin', status: 'ready', provider: 'gitlab',
+      baseUrl: 'https://gitlab.shopco.dev', url: 'https://gitlab.shopco.dev/shopco/platform/pricing-engine', webhookActive: false },
   );
   // first analysis of the storefront finishes while the page is open
   const sf = rp.find((r) => r.id === 'rp3');
@@ -274,7 +324,10 @@ export function codeLink(item: Pick<InventoryItem, 'file' | 'line' | 'service'>)
   if (!item.file) return undefined;
   const r = repoList().find((x) => x.services.includes(item.service));
   if (!r || r.provider === 'local' || !r.url) return undefined;
-  return `${r.url}/blob/${r.sha || r.branch}/${item.file}#L${item.line}`;
+  const ref = r.sha || r.branch;
+  if (r.provider === 'gitlab') return `${r.url}/-/blob/${ref}/${item.file}#L${item.line}`;
+  if (r.provider === 'bitbucket') return `${r.url}/src/${ref}/${item.file}#lines-${item.line}`;
+  return `${r.url}/blob/${ref}/${item.file}#L${item.line}`;
 }
 
 /** Link to the handler of a suggestion's `codeRef` ("path/file.ts:42"). */
@@ -306,8 +359,12 @@ export async function connectRepo(input: ConnectRepoInput): Promise<RepoInfo> {
     await refreshCodeIntel();
     return raw ? mapRepo(raw) : repoList()[0];
   }
-  const name = input.fullName.trim();
-  if (input.provider === 'github' && !/^[\w.-]+\/[\w.-]+$/.test(name)) throw new Error('Use the owner/name form, e.g. shopco/orders-service');
+  const name = input.fullName.trim().replace(/^\/+|\/+$/g, '');
+  const nameErr = fullNameError(input.provider, name);
+  if (nameErr) throw new Error(nameErr);
+  if (input.baseUrl && input.provider !== 'gitlab') throw new Error('A base URL only applies to GitLab');
+  const urlErr = baseUrlError(input.baseUrl ?? '');
+  if (urlErr) throw new Error(`Base URL: ${urlErr}`);
   if (repos.some((r) => r.name === name)) throw new Error(`${name} is already connected`);
   if (input.provider === 'github' && !input.token && !input.installationId) throw new Error('Add a GitHub token or the GitHub App installation id');
   const lang = MOCK_GH_REPOS.find((x) => x.fullName === name)?.language;
@@ -315,13 +372,33 @@ export async function connectRepo(input: ConnectRepoInput): Promise<RepoInfo> {
   const r: RepoInfo = {
     id: `rp${Date.now().toString(36)}`, name, branch: input.defaultBranch || 'main', sha: '', analyzedAt: 0,
     services: svc ? [svc.name] : [], language: lang ?? '—', status: 'analyzing', provider: input.provider,
-    url: input.provider === 'github' ? `https://github.com/${name}` : undefined, localPath: input.localPath,
+    url: input.provider === 'local' ? undefined : `${repoHost(input.provider, input.baseUrl)}/${name}`, localPath: input.localPath,
+    baseUrl: input.baseUrl?.trim().replace(/\/+$/, '') || undefined,
     installationId: input.installationId, webhookActive: !!input.installationId,
+    webhook: input.provider !== 'local' && !input.installationId ? mockWebhook(input.provider) : undefined,
   };
   repoList().push(r);
   notify();
   finishAnalysisSoon(r);
   return r;
+}
+
+const mockSecret = () => Array.from(crypto.getRandomValues(new Uint8Array(24)), (b) => b.toString(16).padStart(2, '0')).join('');
+const mockWebhook = (provider: RepoProvider): RepoWebhook => ({ url: `http://localhost:8096/v1/webhooks/${provider}`, secret: mockSecret() });
+
+/** Issue a new webhook secret for a GitLab / Bitbucket / App-less GitHub repository (`POST /repos/{id}/webhook-secret`). */
+export async function rotateWebhookSecret(id: string): Promise<RepoWebhook> {
+  if (isApi) {
+    const raw = await api<RawRepo>(`/repos/${encodeURIComponent(id)}/webhook-secret`, { method: 'POST' });
+    await refreshCodeIntel();
+    if (!raw?.webhook) throw new Error('The api did not return a webhook secret');
+    return raw.webhook;
+  }
+  const r = repoList().find((x) => x.id === id);
+  if (!r || r.provider === 'local' || r.installationId) throw new Error('This repository is notified by the GitHub App');
+  r.webhookActive = false;
+  notify();
+  return mockWebhook(r.provider ?? 'github');
 }
 
 export async function deleteRepo(id: string) {
