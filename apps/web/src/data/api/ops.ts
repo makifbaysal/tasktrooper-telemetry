@@ -29,17 +29,16 @@ export interface ApiMonitor extends Monitor {
 
 interface RawMonitor {
   id: string; name: string; kind: string; target: string; condition: string; severity: string; state: string; source: string;
-  lastChange: number; channels?: string[] | null; queue?: QueueRule | null; status?: string; targetSpec?: MonitorTargetSpec;
+  lastChange: number; channels?: string[] | null; queue?: QueueRule | null; codeRef?: string | null; status?: string; targetSpec?: MonitorTargetSpec;
   query?: Record<string, unknown> | null; rule?: MonitorRule; lastValue?: number | null; mutedUntil?: number | string | null;
 }
 
-/** Engine kinds without a UI MonitorKind yet (composite → shown as anomaly-like; `apiKind` keeps the real one). */
+/** Engine kinds without a UI MonitorKind (`apiKind` keeps the real one). */
 const UI_KIND: Record<string, MonitorKind> = {
-  composite: 'anomaly',
   error_rate: 'metric_threshold', throughput: 'throughput_change', apdex: 'latency', log_count: 'log_match',
   log_pattern: 'log_pattern_new', dlq: 'consumer_lag', consumer_failures: 'consumer_lag', crash_rate: 'rum_vital',
 };
-const KINDS = new Set<string>(['metric_threshold', 'latency', 'throughput_change', 'anomaly', 'log_match', 'log_pattern_new', 'error_new', 'consumer_lag', 'job_missed', 'rum_vital', 'kpi_burn']);
+const KINDS = new Set<string>(['metric_threshold', 'latency', 'throughput_change', 'anomaly', 'log_match', 'log_pattern_new', 'error_new', 'consumer_lag', 'job_missed', 'rum_vital', 'kpi_burn', 'composite']);
 const sev = (s: string): Severity => (s === 'critical' || s === 'warning' ? s : 'info');
 const toMs = (v: number | string | null | undefined) => (v == null || v === '' ? undefined : typeof v === 'number' ? v : Date.parse(v) || undefined);
 
@@ -50,7 +49,7 @@ export function mapMonitor(r: RawMonitor): ApiMonitor {
   return {
     id: r.id, name: r.name, kind: KINDS.has(r.kind) ? (r.kind as MonitorKind) : UI_KIND[r.kind] ?? 'metric_threshold', apiKind: r.kind,
     target: r.target, condition: r.condition, severity: sev(r.severity), state,
-    source: r.source === 'code' || r.source === 'template' ? r.source : 'manual',
+    source: r.source === 'code' || r.source === 'template' || r.source === 'suggestion' ? r.source : 'manual', codeRef: r.codeRef || undefined,
     lastChange: r.lastChange, channels: r.channels ?? [], queue: r.queue ?? undefined,
     targetSpec: r.targetSpec, rule: r.rule, query: r.query ?? undefined, status: r.status, mutedUntil, lastValue: r.lastValue,
   };
@@ -149,7 +148,7 @@ interface RawRun extends Omit<LoadTestRun, 'state'> { state: string; finishedAt?
 const RUN_STATES = new Set(['queued', 'running', 'passed', 'failed', 'aborted']);
 export const mapRun = (r: RawRun): LoadTestRun => ({
   ...r, id: localId(r.id), scenarioId: localId(r.scenarioId),
-  state: (RUN_STATES.has(r.state) ? r.state : 'queued') as LoadTestRun['state'], thresholds: r.thresholds ?? [],
+  state: (RUN_STATES.has(r.state) ? r.state : r.state === 'error' ? 'failed' : 'queued') as LoadTestRun['state'], thresholds: r.thresholds ?? [],
 });
 
 // ---------------------------------------------------------------- POST-shaped reads (previews)

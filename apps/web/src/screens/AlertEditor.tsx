@@ -1,52 +1,101 @@
 import { useData } from '@/data/remote';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
-import { Activity, Clock, FileText, Gauge, Sparkles, TrendingUp } from 'lucide-react';
-import { TimeSeries } from '@/components/charts';
-import { Button, Callout, Card, Field, Input, MetricCard, PageHeader, Select, Toggle } from '@/components/ui';
-import { clusters, endpointsFor, groupsOfService, isApi, monitors, mutate, qs, seg, series, services, timestamps } from '@/data';
+import { Activity, Bug, Clock, Code2, FileText, Gauge, GitMerge, Lock, Sparkles, TrendingUp } from 'lucide-react';
+import { Columns, TimeSeries } from '@/components/charts';
+import { Badge, Button, Callout, Card, Field, Input, MetricCard, PageHeader, Segmented, Select, StatusBadge, Toggle } from '@/components/ui';
+import { clusters, endpointsFor, groupsOfService, isApi, monitors, mutate, qs, seg, series, services, timestamps, type Monitor } from '@/data';
 import { postRemote, type ApiMonitor } from '@/data/api/ops';
+import { can, denied } from '@/data/auth';
 import { LagAlertEditor } from './LagAlerts';
+import { NotifyPicker } from './NotifyPicker';
 import { compact, ms, pct } from '@/lib/format';
 
-const KINDS = [
+type Kind = 'metric_threshold' | 'anomaly' | 'composite' | 'log_match' | 'error_new' | 'consumer_lag' | 'job_missed';
+const KINDS: { id: Kind; label: string; desc: string; Icon: typeof Activity }[] = [
   { id: 'metric_threshold', label: 'Metric threshold', desc: 'Error rate, throughput, latency above/below a value', Icon: Activity },
-  { id: 'anomaly', label: 'Anomaly', desc: 'Deviation from seasonal baseline', Icon: TrendingUp },
+  { id: 'anomaly', label: 'Anomaly', desc: 'Deviation from the seasonal baseline', Icon: TrendingUp },
+  { id: 'error_new', label: 'New error', desc: 'An error group never seen before appears', Icon: Bug },
+  { id: 'job_missed', label: 'Missed job', desc: 'Cron/worker did not report in time', Icon: Clock },
+  { id: 'composite', label: 'Composite', desc: 'Several monitors firing together (and / or)', Icon: GitMerge },
   { id: 'log_match', label: 'Log query', desc: 'Count of matching log lines', Icon: FileText },
   { id: 'consumer_lag', label: 'Consumer lag', desc: 'Queue backlog and DLQ', Icon: Gauge },
-  { id: 'job_missed', label: 'Missed job', desc: 'Cron/heartbeat did not report', Icon: Clock },
-] as const;
+];
+/** Kinds the editor can save to the api (log_match: YAML only for now; consumer_lag: lag editor). */
+const SAVABLE = new Set<Kind>(['metric_threshold', 'anomaly', 'composite', 'job_missed', 'error_new']);
 
 type Metric = 'error_rate' | 'p95' | 'rpm';
 const METRICS: { value: Metric; label: string }[] = [{ value: 'error_rate', label: 'Error rate' }, { value: 'p95', label: 'p95 latency' }, { value: 'rpm', label: 'Throughput' }];
 const unitOf = (m: Metric) => (m === 'error_rate' ? '%' : m === 'p95' ? 'ms' : 'req/min');
 const fmtOf = (m: Metric) => (m === 'error_rate' ? (v: number) => pct(v) : m === 'p95' ? ms : (v: number) => compact(v));
+const MOCK_BASE: Record<Metric, number> = { error_rate: 0.009, p95: 320, rpm: 1400 };
+
+type Sensitivity = 'low' | 'medium' | 'high';
+const Z: Record<Sensitivity, number> = { low: 4, medium: 3, high: 2 };
+const sensitivityOf = (z: number): Sensitivity | undefined => (Object.entries(Z) as [Sensitivity, number][]).find(([, v]) => v === z)?.[0];
 
 interface Preview { timestamps: number[]; data: number[]; th: number; episodes: number; firingNow: boolean; now: number }
+
+const toKind = (m?: ApiMonitor): Kind | undefined => {
+  if (!m) return undefined;
+  const k = m.apiKind ?? m.kind;
+  if (k === 'latency' || k === 'error_rate' || k === 'throughput') return 'metric_threshold';
+  return KINDS.some((x) => x.id === k) ? (k as Kind) : undefined;
+};
+const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
+
+/** Rolling z-score of each point against the previous `w` points (mock anomaly preview). */
+function zScores(data: number[], w = 16): number[] {
+  return data.map((v, i) => {
+    const win = data.slice(Math.max(0, i - w), i);
+    if (win.length < 4) return 0;
+    const mean = win.reduce((a, x) => a + x, 0) / win.length;
+    const sd = Math.sqrt(win.reduce((a, x) => a + (x - mean) ** 2, 0) / win.length) || mean * 0.05 || 1;
+    return (v - mean) / sd;
+  });
+}
+const episodesOf = (hit: boolean[]) => hit.filter((h, i) => h && !hit[i - 1]).length;
 
 export function AlertEditor() {
   useData();
   const nav = useNavigate();
   const [params] = useSearchParams();
-  const editing = isApi ? (monitors.find((m) => m.id === params.get('edit')) as ApiMonitor | undefined) : undefined;
-  const [kind, setKind] = useState<string>(params.get('kind') ?? 'metric_threshold');
+  const editing = monitors.find((m) => m.id === params.get('edit')) as ApiMonitor | undefined;
+  const managed = editing?.source === 'code';
+  const readOnly = managed || !can('write');
+  const [kind, setKind] = useState<Kind>(toKind(editing) ?? (KINDS.some((k) => k.id === params.get('kind')) ? params.get('kind') as Kind : 'metric_threshold'));
   // monitors live under their service; go back to its Alerts tab
   const svcParam = params.get('service') ?? editing?.targetSpec?.service ?? null;
   const svcName = services.find((s) => s.id === svcParam)?.name ?? svcParam ?? '';
   const back = `/services/${svcParam}?tab=alerts`;
   const goBack = () => (svcParam ? nav(back) : nav(-1));
 
-  const initMetric = (editing?.apiKind === 'latency' ? 'p95' : (editing?.query?.metric as Metric | undefined)) ?? 'error_rate';
+  const q = editing?.query ?? {};
+  const initMetric = (editing?.apiKind === 'latency' ? 'p95' : (q.metric as Metric | undefined)) ?? 'error_rate';
   const [name, setName] = useState(editing?.name ?? '');
   const [service, setService] = useState(svcParam ?? services.find((s) => s.type !== 'web' && s.type !== 'mobile')?.id ?? '');
   const [endpoint, setEndpoint] = useState(editing?.targetSpec?.endpoint ?? params.get('endpoint') ?? '*');
   const [metric, setMetric] = useState<Metric>(initMetric);
-  const [threshold, setThreshold] = useState(editing?.rule ? String(initMetric === 'error_rate' ? +(editing.rule.threshold * 100).toFixed(3) : editing.rule.threshold) : '2');
+  const [threshold, setThreshold] = useState(editing?.rule && kind === 'metric_threshold' ? String(initMetric === 'error_rate' ? +(editing.rule.threshold * 100).toFixed(3) : editing.rule.threshold) : '2');
   const [forMin, setForMin] = useState(String(editing?.rule?.forMin ?? 5));
   const [minReq, setMinReq] = useState(String(editing?.rule?.minRequests ?? 50));
   const [renotify, setRenotify] = useState(String(editing?.rule?.renotifyMin ?? 0));
   const [severity, setSeverity] = useState<string>(editing?.severity ?? 'critical');
-  const [channels, setChannels] = useState(editing?.channels.join(', ') ?? '#payments-alerts, PagerDuty: payments');
+  const [channels, setChannels] = useState<string[]>(editing?.channels ?? (isApi ? [] : ['slack:C01PAYALRT#payments-alerts', 'pagerduty:payments']));
+  // anomaly
+  const [z, setZ] = useState(String(num(q.sensitivity, editing?.rule && kind === 'anomaly' ? editing.rule.threshold : 3)));
+  const [baseline, setBaseline] = useState(String(q.baseline ?? '7d'));
+  const [direction, setDirection] = useState<'up' | 'down' | 'both'>((q.direction as 'up' | 'down' | 'both' | undefined) ?? 'up');
+  // composite
+  const [compOp, setCompOp] = useState<'and' | 'or'>(q.op === 'or' ? 'or' : 'and');
+  const [picked, setPicked] = useState<string[]>(Array.isArray(q.monitorIds) ? (q.monitorIds as string[]) : []);
+  // job_missed
+  const [process, setProcess] = useState(editing?.targetSpec?.process ?? '');
+  const [everyMin, setEveryMin] = useState(String(num(q.expectedEveryMin, 60)));
+  const [graceMin, setGraceMin] = useState(String(num(q.graceMin, 10)));
+  // error_new
+  const [errScope, setErrScope] = useState<string>(kind === 'error_new' && editing && !editing.targetSpec?.service ? '*' : svcParam ?? '*');
+
   const [yaml, setYaml] = useState(false);
   const [lagOpen, setLagOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -54,42 +103,71 @@ export function AlertEditor() {
   const lagGroup = svcParam ? groupsOfService(svcParam)[0] : undefined;
   const lagCluster = lagGroup?.clusterId ?? clusters[0]?.id;
 
+  const backend = services.filter((s) => s.type !== 'web' && s.type !== 'mobile');
   const eps = endpointsFor(service);
   const ep = eps.find((e) => `${e.method} ${e.route}` === endpoint);
+  const svcLabel = services.find((s) => s.id === service)?.name ?? service;
   const below = metric === 'rpm';
   const thValue = metric === 'error_rate' ? Number(threshold) / 100 : Number(threshold);
-  const fmt = fmtOf(metric);
-  const thLabel = metric === 'error_rate' ? `${threshold}%` : `${threshold} ${unitOf(metric)}`;
-  const body = {
-    name: name.trim() || `${services.find((s) => s.id === service)?.name ?? service} ${ep ? `${ep.method} ${ep.route}` : ''} ${METRICS.find((m) => m.value === metric)!.label.toLowerCase()}`.replace(/\s+/g, ' ').trim(),
-    kind: metric === 'p95' ? 'latency' : 'metric_threshold',
-    target: { service, endpoint: ep ? `${ep.method} ${ep.route}` : undefined },
-    query: metric === 'p95' ? { percentile: 'p95' } : { metric },
-    condition: { op: below ? '<' : '>', threshold: Number.isFinite(thValue) ? thValue : 0, forMin: Number(forMin) || 0, minRequests: Number(minReq) || 0, ...(Number(renotify) ? { renotifyMin: Number(renotify) } : {}) },
-    severity, channels: channels.split(',').map((s) => s.trim()).filter(Boolean), source: 'manual',
+  const zValue = Number(z);
+  const every = Math.max(1, Number(everyMin) || 0);
+  const grace = Math.max(0, Number(graceMin) || 0);
+  // processes a missed-job monitor can watch: cron / consumer subscriptions of the service, else its routes
+  const processes = eps.filter((e) => e.sub).map((e) => e.sub!.process);
+  const candidates = monitors.filter((m) => m.id !== editing?.id && m.kind !== 'composite' && (!svcParam || m.target.startsWith(svcName)));
+  const otherMonitors = monitors.filter((m) => m.id !== editing?.id && m.kind !== 'composite' && !candidates.includes(m));
+
+  const rule = { forMin: Number(forMin) || 0, ...(Number(renotify) ? { renotifyMin: Number(renotify) } : {}) };
+  const common = { severity, channels, source: editing?.source === 'suggestion' ? 'suggestion' : 'manual' };
+  const autoName: Record<Kind, string> = {
+    metric_threshold: `${svcLabel} ${ep ? `${ep.method} ${ep.route}` : ''} ${METRICS.find((m) => m.value === metric)!.label.toLowerCase()}`,
+    anomaly: `${svcLabel} ${ep ? `${ep.method} ${ep.route}` : ''} ${METRICS.find((m) => m.value === metric)!.label.toLowerCase()} anomaly`,
+    composite: `${compOp === 'and' ? 'All' : 'Any'} of ${picked.length} monitors`,
+    job_missed: `${process || svcLabel} missed run`,
+    error_new: `New errors in ${errScope === '*' ? 'any service' : services.find((s) => s.id === errScope)?.name ?? errScope}`,
+    log_match: `${svcLabel} log query`, consumer_lag: `${svcLabel} consumer lag`,
+  };
+  const finalName = (name.trim() || autoName[kind]).replace(/\s+/g, ' ').trim();
+  const target = { service, endpoint: ep ? `${ep.method} ${ep.route}` : undefined };
+  const bodies: Partial<Record<Kind, object>> = {
+    metric_threshold: {
+      name: finalName, kind: metric === 'p95' ? 'latency' : 'metric_threshold', target,
+      query: metric === 'p95' ? { percentile: 'p95' } : { metric },
+      condition: { op: below ? '<' : '>', threshold: Number.isFinite(thValue) ? thValue : 0, minRequests: Number(minReq) || 0, ...rule }, ...common,
+    },
+    anomaly: {
+      name: finalName, kind: 'anomaly', target, query: { metric, baseline, direction, sensitivity: zValue },
+      condition: { op: '>', threshold: Number.isFinite(zValue) ? zValue : 3, minRequests: Number(minReq) || 0, ...rule }, ...common,
+    },
+    composite: {
+      name: finalName, kind: 'composite', target: { service: svcParam ?? undefined }, query: { op: compOp, monitorIds: picked },
+      condition: { op: '>=', threshold: compOp === 'and' ? picked.length : 1, ...rule }, ...common,
+    },
+    job_missed: {
+      name: finalName, kind: 'job_missed', target: { service, process: process || undefined },
+      query: { expectedEveryMin: every, graceMin: grace },
+      condition: { op: '>', threshold: every + grace, forMin: 0, ...(Number(renotify) ? { renotifyMin: Number(renotify) } : {}) }, ...common,
+    },
+    error_new: {
+      name: finalName, kind: 'error_new', target: { service: errScope === '*' ? undefined : errScope }, query: {},
+      condition: { op: '>', threshold: 0, forMin: 0, ...(Number(renotify) ? { renotifyMin: Number(renotify) } : {}) }, ...common,
+    },
+  };
+  const body = bodies[kind];
+
+  const validate = (): string | undefined => {
+    if (kind === 'metric_threshold' || kind === 'anomaly' || kind === 'job_missed') if (!service) return 'Pick a service.';
+    if (kind === 'anomaly' && !(zValue > 0)) return 'Sensitivity must be a positive number of standard deviations.';
+    if (kind === 'composite' && picked.length < 2) return 'Pick at least two monitors.';
+    if (kind === 'job_missed' && !process.trim()) return 'Name the job or process that should report.';
+    return undefined;
   };
 
-  // preview: api replays the rule over the last 24 h; mock draws a plausible error-rate curve
-  const ts = timestamps('24h');
-  let data: number[];
-  let episodes: number;
-  let breaches: number;
-  if (isApi) {
-    const p = postRemote<Preview | null>(`alert-editor:${JSON.stringify(body)}`, `/monitors/preview${qs({ range: '24h' })}`, body, null);
-    const d = p?.data ?? [];
-    data = d.length >= ts.length ? d.slice(d.length - ts.length) : [...Array(ts.length - d.length).fill(0), ...d];
-    episodes = p?.episodes ?? 0;
-    breaches = data.filter((v) => (below ? v < thValue : v > thValue)).length;
-  } else {
-    data = series('editor', '24h', { base: 0.009, noise: 0.35, spikeAt: 0.62, spikeMul: 3.2 });
-    breaches = data.filter((v) => v > thValue).length;
-    // count separate breach episodes, not intervals
-    episodes = data.filter((v, i) => v > thValue && !(data[i - 1] > thValue)).length;
-  }
-
   const save = async () => {
-    if (!isApi || kind !== 'metric_threshold') return goBack();
-    if (!service) return setError('Pick a service.');
+    if (readOnly) return;
+    if (!isApi || !SAVABLE.has(kind) || !body) return goBack();
+    const v = validate();
+    if (v) return setError(v);
     setSaving(true); setError(undefined);
     try {
       if (editing) await mutate('PUT', `/monitors/${seg(editing.id)}`, { ...body, status: editing.status === 'muted' ? 'muted' : 'active' }, ['/monitors']);
@@ -101,30 +179,44 @@ export function AlertEditor() {
     setSaving(false);
   };
 
+  const togglePick = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+  const title = managed ? editing!.name : editing ? `Edit ${editing.name}` : 'New monitor';
+
   return (
     <>
-      <PageHeader title={editing ? `Edit ${editing.name}` : 'New monitor'} crumbs={[...(svcParam ? [{ label: svcName, to: back }] : []), { label: editing ? 'Edit monitor' : 'New monitor' }]}
+      <PageHeader title={title} crumbs={[...(svcParam ? [{ label: svcName, to: back }] : []), { label: editing ? (managed ? 'Monitor' : 'Edit monitor') : 'New monitor' }]}
         actions={<>
-          <span className="row secondary" style={{ fontSize: 'var(--text-sm)' }}>Sync to repo as YAML <Toggle label="Sync to repo" checked={yaml} onChange={setYaml} /></span>
-          <Button onClick={goBack}>Cancel</Button>
-          <Button variant="primary" disabled={saving} onClick={() => void save()}>{editing ? 'Save monitor' : 'Create monitor'}</Button>
+          {!readOnly && <span className="row secondary" style={{ fontSize: 'var(--text-sm)' }}>Sync to repo as YAML <Toggle label="Sync to repo" checked={yaml} onChange={setYaml} /></span>}
+          <Button onClick={goBack}>{readOnly ? 'Back' : 'Cancel'}</Button>
+          {!readOnly && <Button variant="primary" disabled={saving} onClick={() => void save()}>{editing ? 'Save monitor' : 'Create monitor'}</Button>}
         </>} />
 
+      {managed && (
+        <Callout icon={<Code2 size={16} color="var(--accent)" />}>
+          <span className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}><Badge tone="accent" icon={<Lock />}>Managed in repository</Badge>
+            <span className="mono secondary" style={{ fontSize: 'var(--text-sm)' }}>{editing?.codeRef ?? '.trooper/monitors/*.yaml'}</span></span>
+          <div className="secondary" style={{ marginTop: 'var(--space-1)' }}>Change the YAML file and push to the default branch — the next analysis updates this monitor. It can’t be edited or deleted here.</div>
+        </Callout>
+      )}
+      {!managed && !can('write') && <Callout icon={<Lock size={16} />}>{denied('write')} — monitors can’t be created or changed.</Callout>}
+      {editing?.source === 'suggestion' && <Callout icon={<Sparkles size={16} color="var(--accent)" />}>Created from a code suggestion. Editing it here makes it a regular monitor.</Callout>}
       {error && <Callout icon={<Activity size={16} color="var(--status-critical)" />}>{error}</Callout>}
 
+      <fieldset disabled={readOnly} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 420px) minmax(0, 1fr)', gap: 'var(--space-4)', alignItems: 'start' }}>
         <div className="stack">
           <Card title="1 · Type">
-            <div className="stack" style={{ gap: 6 }}>
+            <div className="stack" style={{ gap: 'var(--space-1)' }}>
               {KINDS.map((k) => (
-                <button key={k.id} onClick={() => setKind(k.id)} className="card card--interactive"
-                  style={{ flexDirection: 'row', gap: 12, padding: 12, alignItems: 'center', textAlign: 'left', borderColor: kind === k.id ? 'var(--accent)' : undefined, boxShadow: kind === k.id ? '0 0 0 1px var(--accent)' : undefined }}>
+                <button key={k.id} type="button" onClick={() => setKind(k.id)} className="card card--interactive" aria-pressed={kind === k.id}
+                  style={{ flexDirection: 'row', gap: 'var(--space-3)', padding: 'var(--space-3)', alignItems: 'center', textAlign: 'left', borderColor: kind === k.id ? 'var(--accent)' : undefined, boxShadow: kind === k.id ? '0 0 0 1px var(--accent)' : undefined }}>
                   <k.Icon size={18} color={kind === k.id ? 'var(--accent)' : 'var(--text-muted)'} />
-                  <div><div style={{ fontWeight: 500 }}>{k.label}</div><div className="muted" style={{ fontSize: 'var(--text-sm)' }}>{k.desc}</div></div>
+                  <div><div style={{ fontWeight: 'var(--weight-medium)' }}>{k.label}</div><div className="muted" style={{ fontSize: 'var(--text-sm)' }}>{k.desc}</div></div>
                 </button>
               ))}
             </div>
           </Card>
+
           {kind === 'consumer_lag' && (
             <Card title="Consumer lag is defined on the consumer group">
               <p className="secondary" style={{ marginTop: 0 }}>Lag comes from the broker (Kafka, RabbitMQ, SQS, Pub/Sub), per consumer group and topic. The lag alert editor picks the group, offers lag, time behind, oldest message, hot partition, growing-lag and rebalance conditions, and replays the last 24 hours.</p>
@@ -135,49 +227,281 @@ export function AlertEditor() {
           )}
           {lagOpen && lagCluster && <LagAlertEditor scope={{ clusterId: lagCluster, group: lagGroup?.id }} onClose={() => setLagOpen(false)}
             onSaved={() => { setLagOpen(false); if (svcParam) nav(back); else nav('/infrastructure/queues'); }} />}
-          {isApi && kind !== 'metric_threshold' && kind !== 'consumer_lag' && (
-            <Callout icon={<Sparkles size={16} />}>This monitor type can't be created from the editor yet — use a metric threshold, or define it as YAML in the repository.</Callout>
+          {isApi && kind === 'log_match' && (
+            <Callout icon={<Sparkles size={16} />}>Log query monitors can’t be created from the editor yet — define them as YAML in the repository (<span className="mono">.trooper/monitors/</span>).</Callout>
           )}
-          <Card title="2 · Scope">
-            <div className="stack" style={{ gap: 12 }}>
-              <Field label="Service"><Select value={service} onChange={(e) => { setService(e.target.value); setEndpoint('*'); }}
-                options={services.filter((s) => s.type !== 'web' && s.type !== 'mobile').map((s) => ({ value: s.id, label: s.name }))} /></Field>
-              <Field label="Endpoint"><Select value={ep ? endpoint : '*'} onChange={(e) => setEndpoint(e.target.value)}
-                options={[{ value: '*', label: 'All endpoints' }, ...eps.map((e) => ({ value: `${e.method} ${e.route}`, label: `${e.method} ${e.route}` }))]} /></Field>
-              <Field label="Metric"><Select value={metric} onChange={(e) => { const m = e.target.value as Metric; setMetric(m); setThreshold(m === 'error_rate' ? '2' : m === 'p95' ? '600' : '100'); }} options={METRICS} /></Field>
-              <Field label="Name"><Input value={name} placeholder={body.name} onChange={(e) => setName(e.target.value)} /></Field>
-            </div>
-          </Card>
-          <Card title="3 · Condition">
-            <div className="stack" style={{ gap: 12 }}>
-              <div className="grid grid-2" style={{ gap: 8 }}>
-                <Field label={`${below ? 'Below' : 'Above'} (${unitOf(metric)})`}><Input mono value={threshold} onChange={(e) => setThreshold(e.target.value)} inputMode="decimal" /></Field>
-                <Field label="For"><Select value={forMin} onChange={(e) => setForMin(e.target.value)} options={[{ value: '5', label: '5 minutes' }, { value: '10', label: '10 minutes' }, { value: '15', label: '15 minutes' }]} /></Field>
+
+          {(kind === 'metric_threshold' || kind === 'anomaly') && (
+            <Card title="2 · Scope">
+              <div className="stack" style={{ gap: 'var(--space-3)' }}>
+                <Field label="Service"><Select value={service} onChange={(e) => { setService(e.target.value); setEndpoint('*'); }} options={backend.map((s) => ({ value: s.id, label: s.name }))} /></Field>
+                <Field label="Endpoint"><Select value={ep ? endpoint : '*'} onChange={(e) => setEndpoint(e.target.value)}
+                  options={[{ value: '*', label: 'All endpoints' }, ...eps.map((e) => ({ value: `${e.method} ${e.route}`, label: `${e.method} ${e.route}` }))]} /></Field>
+                <Field label="Metric"><Select value={metric} onChange={(e) => { const m = e.target.value as Metric; setMetric(m); setThreshold(m === 'error_rate' ? '2' : m === 'p95' ? '600' : '100'); if (kind === 'anomaly') setDirection(m === 'rpm' ? 'down' : 'up'); }} options={METRICS} /></Field>
+                <Field label="Name"><Input value={name} placeholder={finalName} onChange={(e) => setName(e.target.value)} /></Field>
               </div>
-              <Field label="Minimum requests" hint="Skip evaluation when traffic is too low to be meaningful."><Input mono value={minReq} onChange={(e) => setMinReq(e.target.value)} /></Field>
-              <Field label="Severity"><Select value={severity} onChange={(e) => setSeverity(e.target.value)} options={[{ value: 'critical', label: 'Critical' }, { value: 'warning', label: 'Warning' }, { value: 'info', label: 'Info' }]} /></Field>
-              <Field label="Notify"><Input value={channels} onChange={(e) => setChannels(e.target.value)} /></Field>
-              <Field label="Remind while firing" hint="Notify the channels again until someone acknowledges."><Select value={renotify} onChange={(e) => setRenotify(e.target.value)}
-                options={[{ value: '0', label: 'Only once' }, { value: '30', label: 'Every 30 minutes' }, { value: '60', label: 'Every hour' }, { value: '240', label: 'Every 4 hours' }]} /></Field>
-            </div>
-          </Card>
+            </Card>
+          )}
+
+          {kind === 'metric_threshold' && (
+            <Card title="3 · Condition">
+              <div className="stack" style={{ gap: 'var(--space-3)' }}>
+                <div className="grid grid-2" style={{ gap: 'var(--space-2)' }}>
+                  <Field label={`${below ? 'Below' : 'Above'} (${unitOf(metric)})`}><Input mono value={threshold} onChange={(e) => setThreshold(e.target.value)} inputMode="decimal" /></Field>
+                  <ForField value={forMin} onChange={setForMin} />
+                </div>
+                <Field label="Minimum requests" hint="Skip evaluation when traffic is too low to be meaningful."><Input mono value={minReq} onChange={(e) => setMinReq(e.target.value)} /></Field>
+              </div>
+            </Card>
+          )}
+
+          {kind === 'anomaly' && (
+            <Card title="3 · Sensitivity">
+              <div className="stack" style={{ gap: 'var(--space-3)' }}>
+                <Field label="Sensitivity" hint="How far from the seasonal baseline, in standard deviations (z), counts as anomalous.">
+                  <div className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+                    <Segmented label="Sensitivity" value={sensitivityOf(zValue) ?? ('' as Sensitivity)} onChange={(s) => setZ(String(Z[s]))}
+                      options={[{ id: 'low', label: 'Low · 4σ' }, { id: 'medium', label: 'Medium · 3σ' }, { id: 'high', label: 'High · 2σ' }]} />
+                    <div style={{ width: 'var(--space-12)' }}><Input mono aria-label="z threshold" style={{ width: '100%' }} value={z} onChange={(e) => setZ(e.target.value)} inputMode="decimal" /></div>
+                  </div>
+                </Field>
+                <div className="grid grid-2" style={{ gap: 'var(--space-2)' }}>
+                  <Field label="Baseline window" hint="Same hour of day / week is compared.">
+                    <Select value={baseline} onChange={(e) => setBaseline(e.target.value)} options={[{ value: '1d', label: 'Last day' }, { value: '7d', label: 'Last 7 days' }, { value: '14d', label: 'Last 14 days' }, { value: '28d', label: 'Last 28 days' }]} />
+                  </Field>
+                  <ForField value={forMin} onChange={setForMin} />
+                </div>
+                <Field label="Direction"><Segmented label="Direction" value={direction} onChange={setDirection}
+                  options={[{ id: 'up', label: 'Above baseline' }, { id: 'down', label: 'Below baseline' }, { id: 'both', label: 'Either' }]} /></Field>
+                <Field label="Minimum requests"><Input mono value={minReq} onChange={(e) => setMinReq(e.target.value)} /></Field>
+              </div>
+            </Card>
+          )}
+
+          {kind === 'composite' && (
+            <Card title="2 · Monitors" subtitle="Fires only on the combination — use it to cut noise from correlated alerts.">
+              <div className="stack" style={{ gap: 'var(--space-3)' }}>
+                <Field label="Fire when"><Segmented label="Operator" value={compOp} onChange={setCompOp}
+                  options={[{ id: 'and', label: 'All are firing (AND)' }, { id: 'or', label: 'Any is firing (OR)' }]} /></Field>
+                <div className="pick-list" role="group" aria-label="Monitors">
+                  {[...candidates, ...otherMonitors].map((m) => (
+                    <label key={m.id} className="pick-list__row">
+                      <input type="checkbox" checked={picked.includes(m.id)} onChange={() => togglePick(m.id)} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div className="truncate">{m.name}</div>
+                        <div className="muted truncate" style={{ fontSize: 'var(--text-xs)' }}>{m.target}</div>
+                      </div>
+                      <StatusBadge status={m.state} label={m.state === 'ok' ? 'OK' : undefined} />
+                    </label>
+                  ))}
+                  {candidates.length + otherMonitors.length === 0 && <div className="pick-list__row muted">No other monitors yet.</div>}
+                </div>
+                <Field label="Name"><Input value={name} placeholder={finalName} onChange={(e) => setName(e.target.value)} /></Field>
+                <ForField value={forMin} onChange={setForMin} label="Held for" />
+              </div>
+            </Card>
+          )}
+
+          {kind === 'job_missed' && (
+            <Card title="2 · Job">
+              <div className="stack" style={{ gap: 'var(--space-3)' }}>
+                <Field label="Service"><Select value={service} onChange={(e) => { setService(e.target.value); setProcess(''); }} options={backend.map((s) => ({ value: s.id, label: s.name }))} /></Field>
+                <Field label="Process or route" hint="The cron job, worker process or heartbeat route that must report a success.">
+                  <Input mono list="job-processes" value={process} placeholder={processes[0] ?? 'invoice-batch'} onChange={(e) => setProcess(e.target.value)} />
+                </Field>
+                <datalist id="job-processes">
+                  {[...processes, ...eps.filter((e) => !e.sub).map((e) => `${e.method} ${e.route}`)].map((p) => <option key={p} value={p} />)}
+                </datalist>
+                <div className="grid grid-2" style={{ gap: 'var(--space-2)' }}>
+                  <Field label="Expected every">
+                    <Select value={everyMin} onChange={(e) => setEveryMin(e.target.value)} options={[
+                      { value: '5', label: '5 minutes' }, { value: '15', label: '15 minutes' }, { value: '60', label: 'Hour' },
+                      { value: '360', label: '6 hours' }, { value: '1440', label: 'Day' }, { value: '10080', label: 'Week' },
+                    ]} />
+                  </Field>
+                  <Field label="Grace (min)" hint="Late runs inside the grace don’t alert."><Input mono value={graceMin} onChange={(e) => setGraceMin(e.target.value)} inputMode="numeric" /></Field>
+                </div>
+                <Field label="Name"><Input value={name} placeholder={finalName} onChange={(e) => setName(e.target.value)} /></Field>
+              </div>
+            </Card>
+          )}
+
+          {kind === 'error_new' && (
+            <Card title="2 · Scope">
+              <div className="stack" style={{ gap: 'var(--space-3)' }}>
+                <Field label="Service" hint="Errors are grouped by fingerprint (type + top frames); the first event of an unseen group alerts.">
+                  <Select value={errScope} onChange={(e) => setErrScope(e.target.value)}
+                    options={[{ value: '*', label: 'All services' }, ...services.map((s) => ({ value: s.id, label: s.name }))]} />
+                </Field>
+                <Field label="Name"><Input value={name} placeholder={finalName} onChange={(e) => setName(e.target.value)} /></Field>
+              </div>
+            </Card>
+          )}
+
+          {kind !== 'consumer_lag' && (
+            <Card title={kind === 'metric_threshold' || kind === 'anomaly' ? '4 · Notify' : '3 · Notify'}>
+              <div className="stack" style={{ gap: 'var(--space-3)' }}>
+                <Field label="Severity"><Select value={severity} onChange={(e) => setSeverity(e.target.value)} options={[{ value: 'critical', label: 'Critical' }, { value: 'warning', label: 'Warning' }, { value: 'info', label: 'Info' }]} /></Field>
+                <div className="field"><span className="field__label">Notify</span><NotifyPicker value={channels} onChange={setChannels} disabled={readOnly} /></div>
+                <Field label="Remind while firing" hint="Notify the channels again until someone acknowledges."><Select value={renotify} onChange={(e) => setRenotify(e.target.value)}
+                  options={[{ value: '0', label: 'Only once' }, { value: '30', label: 'Every 30 minutes' }, { value: '60', label: 'Every hour' }, { value: '240', label: 'Every 4 hours' }]} /></Field>
+              </div>
+            </Card>
+          )}
         </div>
 
-        <div className="stack" style={{ position: 'sticky', top: 'calc(var(--topbar-h) + 16px)' }}>
-          <MetricCard className="metric--hero" label="Preview · last 24 hours"
-            value={`${episodes} alert${episodes === 1 ? '' : 's'}`}
-            hint={<>would have fired · {breaches} of {data.length} intervals {below ? 'below' : 'above'} {thLabel}</>}>
-            <TimeSeries timestamps={ts} height={280} area format={isApi ? fmt : (v) => pct(v)}
-              threshold={Number.isFinite(thValue) ? { value: thValue, label: thLabel } : undefined}
-              series={[{ id: 'er', label: METRICS.find((m) => m.value === metric)!.label, slot: 8, data }]} />
-          </MetricCard>
-          {!isApi && (
+        <div className="stack" style={{ position: 'sticky', top: 'calc(var(--topbar-h) + var(--space-4))' }}>
+          {kind === 'metric_threshold' && <ThresholdPreview body={body!} metric={metric} below={below} thValue={thValue} thLabel={metric === 'error_rate' ? `${threshold}%` : `${threshold} ${unitOf(metric)}`} />}
+          {kind === 'anomaly' && <AnomalyPreview body={body!} metric={metric} z={zValue} direction={direction} seed={`${service}|${endpoint}|${metric}`} />}
+          {kind === 'composite' && <CompositePreview picked={monitors.filter((m) => picked.includes(m.id))} op={compOp} />}
+          {kind === 'job_missed' && <JobPreview body={body!} every={every} grace={grace} seed={`${service}|${process}`} />}
+          {kind === 'error_new' && <ErrorNewPreview body={body!} seed={errScope} />}
+          {kind === 'metric_threshold' && !isApi && (
             <Card title={<span className="row"><Sparkles size={14} color="var(--accent)" />Recommendation</span>}>
               <p className="secondary">14-day p99 error rate for this endpoint is <strong>1.9%</strong>. A 2% threshold with a 5-minute window would have caught the 2 incidents on Oct 19 and Oct 22 with no false positives.</p>
             </Card>
           )}
         </div>
       </div>
+      </fieldset>
     </>
+  );
+}
+
+function ForField({ value, onChange, label = 'For' }: { value: string; onChange: (v: string) => void; label?: string }) {
+  return (
+    <Field label={label}><Select value={value} onChange={(e) => onChange(e.target.value)}
+      options={[{ value: '0', label: 'Immediately' }, { value: '5', label: '5 minutes' }, { value: '10', label: '10 minutes' }, { value: '15', label: '15 minutes' }]} /></Field>
+  );
+}
+
+// ---------------------------------------------------------------- previews
+
+/** Api replay of the rule over the last 24 h (`POST /monitors/preview`); null until it lands or when the api can't preview the kind. */
+function useApiPreview(body: object): Preview | null {
+  return isApi ? postRemote<Preview | null>(`alert-editor:${JSON.stringify(body)}`, `/monitors/preview${qs({ range: '24h' })}`, body, null) : null;
+}
+function fit(d: number[], n: number) {
+  return d.length >= n ? d.slice(d.length - n) : [...Array<number>(n - d.length).fill(0), ...d];
+}
+
+function PreviewCard({ value, hint, children }: { value: string; hint: ReactNode; children: ReactNode }) {
+  return <MetricCard className="metric--hero" label="Preview · last 24 hours" value={value} hint={hint}>{children}</MetricCard>;
+}
+function NoPreview() {
+  return <Card title="Preview · last 24 hours"><p className="muted" style={{ margin: 0 }}>The api can’t replay this monitor type yet — it is evaluated from the moment it is saved.</p></Card>;
+}
+const alerts = (n: number) => `${n} alert${n === 1 ? '' : 's'}`;
+
+function ThresholdPreview({ body, metric, below, thValue, thLabel }: { body: object; metric: Metric; below: boolean; thValue: number; thLabel: string }) {
+  const ts = timestamps('24h');
+  const p = useApiPreview(body);
+  let data: number[];
+  let episodes: number;
+  if (isApi) {
+    data = fit(p?.data ?? [], ts.length);
+    episodes = p?.episodes ?? 0;
+  } else {
+    data = series('editor', '24h', { base: MOCK_BASE.error_rate, noise: 0.35, spikeAt: 0.62, spikeMul: 3.2 });
+    if (metric !== 'error_rate') data = series(`editor-${metric}`, '24h', { base: MOCK_BASE[metric], noise: 0.35, spikeAt: 0.62, spikeMul: metric === 'rpm' ? 0.3 : 3.2 });
+    episodes = episodesOf(data.map((v) => (below ? v < thValue : v > thValue)));
+  }
+  const breaches = data.filter((v) => (below ? v < thValue : v > thValue)).length;
+  return (
+    <PreviewCard value={alerts(episodes)} hint={<>would have fired · {breaches} of {data.length} intervals {below ? 'below' : 'above'} {thLabel}</>}>
+      <TimeSeries timestamps={ts} height={280} area format={fmtOf(metric)}
+        threshold={Number.isFinite(thValue) ? { value: thValue, label: thLabel } : undefined}
+        series={[{ id: 'er', label: METRICS.find((m) => m.value === metric)!.label, slot: 8, data }]} />
+    </PreviewCard>
+  );
+}
+
+function AnomalyPreview({ body, metric, z, direction, seed }: { body: object; metric: Metric; z: number; direction: 'up' | 'down' | 'both'; seed: string }) {
+  const ts = timestamps('24h');
+  const p = useApiPreview(body);
+  if (isApi && !p) return <NoPreview />;
+  // api: data = deviation in σ per bucket; mock: rolling z of a plausible metric curve
+  const dev = isApi ? fit(p!.data, ts.length)
+    : zScores(series(`anomaly-${seed}`, '24h', { base: MOCK_BASE[metric], noise: 0.3, spikeAt: 0.7, spikeMul: metric === 'rpm' ? 0.35 : 3, spikeWidth: 2 }));
+  const shown = direction === 'down' ? dev.map((v) => -v) : direction === 'both' ? dev.map(Math.abs) : dev;
+  const hits = shown.map((v) => v > z);
+  const episodes = isApi ? p!.episodes : episodesOf(hits);
+  return (
+    <PreviewCard value={alerts(episodes)} hint={<>would have fired · {hits.filter(Boolean).length} of {shown.length} intervals beyond {z}σ {direction === 'down' ? 'below' : direction === 'both' ? 'from' : 'above'} the baseline</>}>
+      <TimeSeries timestamps={ts} height={280} area format={(v) => `${v.toFixed(1)}σ`}
+        threshold={Number.isFinite(z) ? { value: z, label: `${z}σ` } : undefined}
+        series={[{ id: 'z', label: 'Deviation from baseline (σ)', slot: 7, data: shown.map((v) => Math.max(0, v)) }]} />
+    </PreviewCard>
+  );
+}
+
+function CompositePreview({ picked, op }: { picked: Monitor[]; op: 'and' | 'or' }) {
+  const firing = picked.filter((m) => m.state === 'firing');
+  const now = picked.length > 0 && (op === 'and' ? firing.length === picked.length : firing.length > 0);
+  return (
+    <Card title="Right now">
+      {picked.length === 0 ? <p className="muted" style={{ margin: 0 }}>Pick the monitors to combine.</p> : (
+        <div className="stack" style={{ gap: 'var(--space-3)' }}>
+          <div className="row" style={{ gap: 'var(--space-2)' }}>
+            <StatusBadge status={now ? 'firing' : 'ok'} label={now ? 'Would be firing' : 'Would be OK'} />
+            <span className="secondary">{firing.length} of {picked.length} firing · {op === 'and' ? 'needs all' : 'needs any'}</span>
+          </div>
+          <div className="list">
+            {picked.map((m) => (
+              <div key={m.id} className="list__row">
+                <div className="list__main"><span className="list__title">{m.name}</span><span className="list__meta">{m.condition}</span></div>
+                <StatusBadge status={m.state} label={m.state === 'ok' ? 'OK' : undefined} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function JobPreview({ body, every, grace, seed }: { body: object; every: number; grace: number; seed: string }) {
+  const ts = timestamps('24h');
+  const p = useApiPreview(body);
+  if (isApi && !p) return <NoPreview />;
+  let runs: number[];
+  let episodes: number;
+  if (isApi) {
+    runs = fit(p!.data, ts.length);
+    episodes = p!.episodes;
+  } else {
+    // a run every `every` minutes; one outage around 60% of the window
+    const step = ts[1] - ts[0];
+    const gapFrom = ts[Math.floor(ts.length * 0.6)];
+    const gapTo = gapFrom + Math.max(3, Math.ceil(((every + grace) * 60_000 * 1.5) / step)) * step;
+    let h = 0; for (const c of seed) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+    const offset = (h % every) * 60_000;
+    runs = ts.map((t) => {
+      if (t >= gapFrom && t < gapTo) return 0;
+      let n = 0;
+      for (let x = Math.ceil((t - offset) / (every * 60_000)) * every * 60_000 + offset; x < t + step; x += every * 60_000) n++;
+      return n;
+    });
+    const missed = (gapTo - gapFrom) > (every + grace) * 60_000;
+    episodes = missed ? 1 : 0;
+  }
+  return (
+    <PreviewCard value={alerts(episodes)} hint={<>would have fired · a run is expected every {every >= 60 ? `${every / 60} h` : `${every} min`} (+{grace} min grace)</>}>
+      <Columns timestamps={ts} height={220} format={(v) => compact(v)} series={[{ id: 'runs', label: 'Successful runs', data: runs, color: 'var(--series-1)' }]} />
+    </PreviewCard>
+  );
+}
+
+function ErrorNewPreview({ body, seed }: { body: object; seed: string }) {
+  const ts = timestamps('24h');
+  const p = useApiPreview(body);
+  if (isApi && !p) return <NoPreview />;
+  const groups = isApi ? fit(p!.data, ts.length)
+    : series(`err-new-${seed}`, '24h', { base: seed === '*' ? 0.35 : 0.12, noise: 0.9, spikeAt: 0.8, spikeMul: 8, spikeWidth: 1 }).map((v) => Math.floor(v * 1.6));
+  const total = isApi ? p!.episodes : groups.reduce((a, v) => a + v, 0);
+  return (
+    <PreviewCard value={alerts(total)} hint="would have fired · one per new error group (first occurrence only)">
+      <Columns timestamps={ts} height={220} format={(v) => compact(v)} series={[{ id: 'g', label: 'New error groups', data: groups, color: 'var(--series-8)' }]} />
+    </PreviewCard>
   );
 }

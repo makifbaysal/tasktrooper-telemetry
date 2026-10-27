@@ -26,6 +26,8 @@ function hash(s: string): number {
 }
 
 export const RANGE_POINTS: Record<TimeRange, { points: number; stepMs: number }> = {
+  '15m': { points: 15, stepMs: 60_000 },
+  '30m': { points: 30, stepMs: 60_000 },
   '1h': { points: 60, stepMs: 60_000 },
   '6h': { points: 72, stepMs: 5 * 60_000 },
   '24h': { points: 96, stepMs: 15 * 60_000 },
@@ -240,17 +242,17 @@ export const logs: LogLine[] = Array.from({ length: 120 }, (_, i) => {
 });
 
 export const monitors: Monitor[] = [
-  { id: 'm1', name: 'Charges error rate', kind: 'metric_threshold', target: 'payments-api · POST /v1/charges', condition: 'error rate > 2% for 5m', severity: 'critical', state: 'firing', source: 'code', lastChange: NOW - 23 * 60_000, channels: ['#payments-alerts', 'PagerDuty'] },
-  { id: 'm2', name: 'Charges p95 latency', kind: 'latency', target: 'payments-api · POST /v1/charges', condition: 'p95 > 600 ms for 10m', severity: 'warning', state: 'firing', source: 'code', lastChange: NOW - 41 * 60_000, channels: ['#payments-alerts'] },
+  { id: 'm1', name: 'Charges error rate', kind: 'metric_threshold', target: 'payments-api · POST /v1/charges', condition: 'error rate > 2% for 5m', severity: 'critical', state: 'firing', source: 'code', codeRef: 'shop/payments:.trooper/monitors/charges.yaml', lastChange: NOW - 23 * 60_000, channels: ['#payments-alerts', 'PagerDuty'] },
+  { id: 'm2', name: 'Charges p95 latency', kind: 'latency', target: 'payments-api · POST /v1/charges', condition: 'p95 > 600 ms for 10m', severity: 'warning', state: 'firing', source: 'suggestion', lastChange: NOW - 41 * 60_000, channels: ['#payments-alerts'] },
   { id: 'm3', name: 'order-created-handler lag', kind: 'consumer_lag', target: 'order-events-consumer · order-created-handler', condition: 'lag > 10K for 5m', severity: 'warning', state: 'pending', source: 'code', lastChange: NOW - 3 * 60_000, channels: ['#orders-oncall'],
     queue: { clusterId: 'kafka-main', group: 'order-events.fulfilment', topic: 'orders.created', metric: 'lag', threshold: 10_000, forMin: 5 } },
   { id: 'm12', name: 'reco-trainer drains every run', kind: 'consumer_lag', target: 'kafka-main · reco-trainer', condition: 'lag not drained in 2h', severity: 'warning', state: 'ok', source: 'manual', lastChange: NOW - 4 * 86400_000, channels: ['#data-platform'],
     queue: { clusterId: 'kafka-main', group: 'reco-trainer', topic: 'reco.events', metric: 'not_drained', threshold: 2, forMin: 0 } },
   { id: 'm4', name: 'Create order errors', kind: 'metric_threshold', target: 'orders-api · POST /v1/orders', condition: 'error rate > 1% for 5m', severity: 'critical', state: 'ok', source: 'manual', lastChange: NOW - 2 * 86400_000, channels: ['#orders-oncall', 'PagerDuty'] },
-  { id: 'm5', name: 'Payment provider timeouts', kind: 'log_match', target: 'payments-api logs', condition: 'count("provider timeout") > 20 in 5m', severity: 'critical', state: 'ok', source: 'code', lastChange: NOW - 26 * 3600_000, channels: ['#payments-alerts'] },
+  { id: 'm5', name: 'Payment provider timeouts', kind: 'log_match', target: 'payments-api logs', condition: 'count("provider timeout") > 20 in 5m', severity: 'critical', state: 'ok', source: 'suggestion', lastChange: NOW - 26 * 3600_000, channels: ['#payments-alerts'] },
   { id: 'm6', name: 'Checkout LCP', kind: 'rum_vital', target: 'shop-web · /checkout', condition: 'p75 LCP > 2.5 s for 15m', severity: 'warning', state: 'ok', source: 'template', lastChange: NOW - 5 * 3600_000, channels: ['#web-team'] },
   { id: 'm7', name: 'Catalog throughput drop', kind: 'throughput_change', target: 'catalog-api · all endpoints', condition: '−50% vs same hour last week', severity: 'warning', state: 'ok', source: 'manual', lastChange: NOW - 6 * 86400_000, channels: ['#platform'] },
-  { id: 'm8', name: 'Nightly invoice job', kind: 'job_missed', target: 'email-worker · invoice-batch', condition: 'no success in 26h', severity: 'warning', state: 'muted', source: 'code', lastChange: NOW - 3 * 86400_000, channels: ['#billing'] },
+  { id: 'm8', name: 'Nightly invoice job', kind: 'job_missed', target: 'email-worker · invoice-batch', condition: 'no success in 26h', severity: 'warning', state: 'muted', source: 'code', codeRef: 'shop/billing:.trooper/monitors/invoice-batch.yaml', lastChange: NOW - 3 * 86400_000, channels: ['#billing'] },
   { id: 'm9', name: 'Homepage loads fast · fast burn', kind: 'kpi_burn', target: 'KPI · Homepage loads fast', condition: 'budget burns > 6× too fast over 1h and 5m', severity: 'critical', state: 'firing', source: 'code', lastChange: DEGRADED_SINCE + 5 * 60_000, channels: ['#web-team', 'PagerDuty'] },
   { id: 'm10', name: 'Checkout succeeds · fast burn', kind: 'kpi_burn', target: 'KPI · Checkout succeeds', condition: 'budget burns > 3× too fast over 1h and 5m', severity: 'critical', state: 'firing', source: 'code', lastChange: NOW - 18 * 60_000, channels: ['#payments-alerts', 'PagerDuty'] },
   { id: 'm11', name: 'Order placement API succeeds · slow burn', kind: 'kpi_burn', target: 'KPI · Order placement API succeeds', condition: 'budget burns > 1.5× too fast over 6h and 30m', severity: 'warning', state: 'pending', source: 'code', lastChange: NOW - 40 * 60_000, channels: ['#orders-oncall'] },

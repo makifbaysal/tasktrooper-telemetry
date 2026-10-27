@@ -64,6 +64,7 @@ function templates(s: Service): Tpl[] {
   return [...out, ...(INCIDENT[s.id] ?? [])];
 }
 
+const VERCEL_SOURCES = ['lambda', 'lambda', 'lambda', 'edge', 'edge', 'static', 'external', 'build', 'redirect', 'firewall'];
 const ROUTES = ['/', '/p/:slug', '/cart', '/checkout', '/orders', '/search'];
 const SCREENS = ['Home', 'ProductDetail', 'Cart', 'Checkout', 'OrderTracking'];
 const SEGS = ['home', 'orders', 'items', 'cart', 'recommendations'];
@@ -91,6 +92,8 @@ function generate(s: Service): LogLine[] {
     return {
       id: `${s.id}-l${i}`, ts, level: t[0], service: s.name, message: msg,
       traceId: rnd() > 0.25 ? Math.floor(rnd() * 1e16).toString(16).padStart(16, '0') : undefined,
+      // web apps deploy on Vercel in the demo: their lines arrive through the log drain with a source
+      ...(s.type === 'web' ? { source: VERCEL_SOURCES[(i * 7 + hash(msg)) % VERCEL_SOURCES.length] } : {}),
     };
   });
 }
@@ -132,17 +135,17 @@ export function logsFor(serviceId: string): LogLine[] {
   return out;
 }
 
-export interface LogQuery { serviceId?: string; levels?: LogLine['level'][]; q?: string; traceId?: string; route?: string; limit?: number }
+export interface LogQuery { serviceId?: string; levels?: LogLine['level'][]; q?: string; traceId?: string; route?: string; limit?: number; /** Vercel drain source */ source?: string }
 const svcName = (id?: string) => (id ? services.find((x) => x.id === id)?.name ?? id : undefined);
 const logQs = (range: TimeRange, f: LogQuery) =>
-  qs({ range, service: svcName(f.serviceId), level: f.levels?.join(','), q: f.q, traceId: f.traceId, route: f.route });
+  qs({ range, service: svcName(f.serviceId), level: f.levels?.join(','), q: f.q, traceId: f.traceId, route: f.route, source: f.source });
 
 /** Server-side log search (full-text `q`, levels, trace id). Mock: filters the generated lines. */
 export function searchLogs(range: TimeRange, f: LogQuery = {}): LogLine[] {
   if (isApi) return remote(`/logs${logQs(range, f)}&limit=${f.limit ?? 200}`, [], mapLogPage);
   const base = f.serviceId ? logsFor(f.serviceId) : allLogs;
   return base.filter((l) => (!f.levels || f.levels.includes(l.level)) && (!f.traceId || l.traceId === f.traceId)
-    && (!f.q || l.message.toLowerCase().includes(f.q.toLowerCase()))).slice(0, f.limit ?? 200);
+    && (!f.source || l.source === f.source) && (!f.q || l.message.toLowerCase().includes(f.q.toLowerCase()))).slice(0, f.limit ?? 200);
 }
 
 /** Log volume per level over time (error / warn / info / debug). */

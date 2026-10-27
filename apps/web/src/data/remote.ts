@@ -11,18 +11,46 @@ export type DataMode = 'mock' | 'api';
 export const DATA_MODE: DataMode = import.meta.env.VITE_DATA === 'api' ? 'api' : 'mock';
 export const isApi = DATA_MODE === 'api';
 export const API_URL: string = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:8080';
-const API_KEY: string = (import.meta.env.VITE_API_KEY as string | undefined) ?? 'tt_dev_api_key';
+const EXPLICIT_KEY = (import.meta.env.VITE_API_KEY as string | undefined) || undefined;
+/** VITE_API_KEY set explicitly: always send it (automation / dev), never show the login screen (ADR-016). */
+export const hasKeyOverride = !!EXPLICIT_KEY;
+const API_KEY: string = EXPLICIT_KEY ?? 'tt_dev_api_key';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public path: string) { super(message); }
 }
 
+// ── auth transport (ADR-016, contracts §15) ──
+// 'key': Bearer api key (default until data/auth.ts finds a session-capable api) · 'session': tt_session cookie + X-Trooper-Project
+let session = false;
+let projectHeader: string | undefined;
+let onUnauthorized: (() => void) | undefined;
+/** Called by data/auth.ts once the auth mode and the selected project are known. */
+export function configureTransport(o: { session: boolean; projectId?: string; onUnauthorized?: () => void }) {
+  session = o.session;
+  projectHeader = o.projectId;
+  onUnauthorized = o.onUnauthorized;
+}
+/** Headers + credentials for a request to the api (also used by data/auth.ts for /auth and /me). */
+export function authInit(init?: RequestInit, opts: { cookies?: boolean } = {}): RequestInit {
+  const cookies = session || !!opts.cookies;
+  return {
+    ...init,
+    // cookies only when the api is session-capable: credentialed CORS needs Allow-Credentials on the api
+    credentials: cookies ? 'include' : 'same-origin',
+    headers: {
+      ...(!session || hasKeyOverride ? { Authorization: `Bearer ${API_KEY}` } : {}),
+      ...(session && projectHeader && !hasKeyOverride ? { 'X-Trooper-Project': projectHeader } : {}),
+      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+      ...init?.headers,
+    },
+  };
+}
+
 /** Fetch JSON from the api (`path` starts after /api/v1). */
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_URL}/api/v1${path}`, {
-    ...init,
-    headers: { Authorization: `Bearer ${API_KEY}`, ...(init?.body ? { 'Content-Type': 'application/json' } : {}), ...init?.headers },
-  });
+  const res = await fetch(`${API_URL}/api/v1${path}`, authInit(init));
+  if (res.status === 401 && session && !hasKeyOverride) onUnauthorized?.();
   if (!res.ok) {
     let msg = res.statusText;
     try { const j = await res.json() as { error?: string; message?: string }; msg = j.error ?? j.message ?? msg; } catch { /* not json */ }
@@ -44,6 +72,8 @@ function bump() {
   // coalesce many responses into one render
   setTimeout(() => { scheduled = false; version++; listeners.forEach((l) => l()); }, 16);
 }
+/** Re-render data consumers without dropping anything (local/mock mutations). */
+export function notifyData() { bump(); }
 export function subscribe(l: () => void) { listeners.add(l); return () => { listeners.delete(l); }; }
 export const dataVersion = () => version;
 

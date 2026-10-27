@@ -4,8 +4,9 @@ import { ArrowDownRight, ArrowUpRight, ChevronRight, Gauge, Play, Plus, Sparkles
 import { Badge, Button, Card, EmptyState, MethodBadge, Section, Table, useDrawer } from '@/components/ui';
 import { runs, scenarios, services, type LoadTestRun, type LoadTestScenario } from '@/data';
 import { ago, compact, duration, ms, pct } from '@/lib/format';
-import { SPEC, levelsOf, liveRun, runCurves, runEndpoints, startRun, useLoadTests, type RunEndpoint } from '@/lib/loadtest';
-import { RunState, ScenarioDrawer } from './LoadTests';
+import { SPEC, levelsOf, liveRun, runCurves, runEndpoints, useLoadTests, type RunEndpoint } from '@/lib/loadtest';
+import { scenarioState } from '@/data/loadtest';
+import { RunBlockedCallout, RunState, ScenarioDrawer, ScenarioSource, useRunStarter } from './LoadTests';
 
 const MAX_COMPARE = 4;
 
@@ -26,7 +27,8 @@ export function ServiceLoadTests({ serviceId }: { serviceId: string }) {
   const [picked, setPicked] = useState<string[]>(() => finished.slice(0, 2).map((r) => r.id));
   const selected = live.filter((r) => picked.includes(r.id)).sort((a, b) => a.startedAt - b.startedAt);
   const scName = (r: LoadTestRun) => scenarios.find((s) => s.id === r.scenarioId)?.name ?? r.scenarioId;
-  const run = (id: string) => nav(`/load-tests/runs/${startRun(id)}`);
+  const starter = useRunStarter();
+  const run = starter.run;
   const togglePick = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : p.length >= MAX_COMPARE ? [...p.slice(1), id] : [...p, id]));
 
   const newActions = <>
@@ -46,6 +48,7 @@ export function ServiceLoadTests({ serviceId }: { serviceId: string }) {
 
   return (
     <>
+      {starter.blocked && <RunBlockedCallout err={starter.blocked.err} scenarioName={scenarios.find((s) => s.id === starter.blocked!.scenarioId)?.name} onClose={starter.clear} />}
       <Section title="Scenarios" subtitle={`${mine.length} hit ${svc.name}`} actions={newActions}>
         <Card flush>
           <Table rows={mine} rowKey={(s) => s.id} onRowClick={drawer.open} columns={[
@@ -56,8 +59,11 @@ export function ServiceLoadTests({ serviceId }: { serviceId: string }) {
             } },
             { key: 'dur', header: 'Duration', numeric: true, sortValue: (s) => s.duration, render: (s) => duration(s.duration) },
             { key: 'last', header: 'Last run', render: (s) => { const r = live.find((x) => x.id === s.lastRun); return r ? <RunState state={r.state} /> : <span className="muted">Never run</span>; } },
-            { key: 'run', header: '', width: 72, render: (s) => (
-              <Button size="sm" icon={<Play size={12} />} disabled={running.some((r) => r.scenarioId === s.id)}
+            { key: 'src', header: 'Source', render: (s) => <ScenarioSource s={s} /> },
+            { key: 'run', header: '', width: 72, render: (s) => scenarioState(s.id) === 'draft'
+              ? <Button size="sm" onClick={(e) => { e.stopPropagation(); drawer.open(s); }}>Review</Button>
+              : (
+              <Button size="sm" icon={<Play size={12} />} disabled={running.some((r) => r.scenarioId === s.id) || starter.busy === s.id}
                 onClick={(e) => { e.stopPropagation(); run(s.id); }}>Run</Button>) },
             { key: 'go', header: '', width: 32, render: () => <ChevronRight size={16} className="muted" aria-hidden /> },
           ]} />
