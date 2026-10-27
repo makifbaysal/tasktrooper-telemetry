@@ -1,0 +1,103 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tasktrooper"
+dynamic = ["version"]
+description = "TaskTrooper Telemetry for Python: an OpenTelemetry distribution with route-aware APM, continuous profiling and LLM monitoring"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+authors = [{ name = "TaskTrooper" }]
+keywords = ["opentelemetry", "apm", "observability", "profiling", "llm", "tracing"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: System :: Monitoring",
+  "Typing :: Typed",
+]
+dependencies = [
+  "opentelemetry-api>=1.27",
+  "opentelemetry-sdk>=1.27",
+  "opentelemetry-exporter-otlp-proto-http>=1.27",
+  "opentelemetry-instrumentation>=0.48b0",
+]
+
+# Framework / library instrumentation comes from OpenTelemetry contrib (ADR-011, ADR-024). Each extra is optional:
+# `tasktrooper.init()` enables whatever is installed and silently skips the rest.
+[project.optional-dependencies]
+django = ["opentelemetry-instrumentation-django>=0.48b0"]
+fastapi = ["opentelemetry-instrumentation-fastapi>=0.48b0"]
+flask = ["opentelemetry-instrumentation-flask>=0.48b0"]
+starlette = ["opentelemetry-instrumentation-starlette>=0.48b0"]
+requests = ["opentelemetry-instrumentation-requests>=0.48b0"]
+httpx = ["opentelemetry-instrumentation-httpx>=0.48b0"]
+urllib3 = ["opentelemetry-instrumentation-urllib3>=0.48b0"]
+aiohttp = ["opentelemetry-instrumentation-aiohttp-client>=0.48b0"]
+sqlalchemy = ["opentelemetry-instrumentation-sqlalchemy>=0.48b0"]
+psycopg = ["opentelemetry-instrumentation-psycopg>=0.48b0"]
+psycopg2 = ["opentelemetry-instrumentation-psycopg2>=0.48b0"]
+redis = ["opentelemetry-instrumentation-redis>=0.48b0"]
+celery = ["opentelemetry-instrumentation-celery>=0.48b0"]
+kafka = ["opentelemetry-instrumentation-kafka-python>=0.48b0"]
+confluent-kafka = ["opentelemetry-instrumentation-confluent-kafka>=0.48b0"]
+pika = ["opentelemetry-instrumentation-pika>=0.48b0"]
+logging = ["opentelemetry-instrumentation-logging>=0.48b0"]
+# Convenience bundles.
+web = [
+  "tasktrooper[fastapi,flask,django,requests,httpx,logging]",
+]
+all = [
+  "tasktrooper[django,fastapi,flask,starlette,requests,httpx,urllib3,aiohttp,sqlalchemy,psycopg,psycopg2,redis,celery,kafka,confluent-kafka,pika,logging]",
+]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.23",
+  "fastapi",
+  "flask",
+  "httpx",
+  "requests",
+  "openai>=1.40",
+  "anthropic>=0.40",
+  "opentelemetry-instrumentation-fastapi",
+  "opentelemetry-instrumentation-flask",
+  "opentelemetry-instrumentation-requests",
+  "opentelemetry-instrumentation-httpx",
+  "opentelemetry-instrumentation-logging",
+]
+
+[project.scripts]
+tasktrooper-run = "tasktrooper._run:main"
+
+[project.urls]
+Homepage = "https://github.com/tasktrooper/telemetry"
+Source = "https://github.com/tasktrooper/telemetry/tree/main/sdks/python"
+
+[tool.hatch.version]
+path = "src/tasktrooper/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tasktrooper"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/tasktrooper", "README.md", "CHANGELOG.md", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+  "live: sends telemetry to a locally running ingest-gw (skipped when it is not reachable)",
+]
+filterwarnings = [
+  "ignore::DeprecationWarning:opentelemetry.*",
+  "ignore:The model .* is deprecated:DeprecationWarning",
+]
