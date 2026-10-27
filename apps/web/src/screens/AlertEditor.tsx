@@ -1,7 +1,7 @@
 import { useData } from '@/data/remote';
 import { useState, type ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
-import { Activity, Bug, Clock, Code2, FileText, Gauge, GitMerge, Lock, Server, Sparkles, SquareFunction, TrendingUp } from 'lucide-react';
+import { Activity, BotMessageSquare, Bug, Clock, Code2, FileText, Gauge, GitMerge, Lock, Server, Sparkles, SquareFunction, TrendingUp } from 'lucide-react';
 import { Columns, TimeSeries } from '@/components/charts';
 import { Badge, Button, Callout, Card, Field, Input, MetricCard, PageHeader, Segmented, Select, StatusBadge, Toggle } from '@/components/ui';
 import { clusters, endpointsFor, groupsOfService, isApi, monitors, mutate, qs, seg, series, services, timestamps, type Monitor } from '@/data';
@@ -9,11 +9,13 @@ import { postRemote, type ApiMonitor } from '@/data/api/ops';
 import { can, denied } from '@/data/auth';
 import { serverlessFunctions } from '@/data/serverless';
 import { monitorTemplates, type MonitorTemplate } from '@/data/monitorTemplates';
+import { aiOverview, aiProviderLabel } from '@/data/aimon';
+import { usd } from './Serverless';
 import { LagAlertEditor } from './LagAlerts';
 import { NotifyPicker } from './NotifyPicker';
 import { compact, ms, pct } from '@/lib/format';
 
-type Kind = 'metric_threshold' | 'anomaly' | 'composite' | 'log_match' | 'error_new' | 'consumer_lag' | 'job_missed' | 'infra' | 'faas';
+type Kind = 'metric_threshold' | 'anomaly' | 'composite' | 'log_match' | 'error_new' | 'consumer_lag' | 'job_missed' | 'infra' | 'faas' | 'llm';
 const KINDS: { id: Kind; label: string; desc: string; Icon: typeof Activity }[] = [
   { id: 'metric_threshold', label: 'Metric threshold', desc: 'Error rate, throughput, latency above/below a value', Icon: Activity },
   { id: 'anomaly', label: 'Anomaly', desc: 'Deviation from the seasonal baseline', Icon: TrendingUp },
@@ -24,9 +26,10 @@ const KINDS: { id: Kind; label: string; desc: string; Icon: typeof Activity }[] 
   { id: 'consumer_lag', label: 'Consumer lag', desc: 'Queue backlog and DLQ', Icon: Gauge },
   { id: 'infra', label: 'Infrastructure', desc: 'Hosts, containers, pods, nodes and workloads', Icon: Server },
   { id: 'faas', label: 'Serverless function', desc: 'Lambda / Azure Functions errors, throttles, duration', Icon: SquareFunction },
+  { id: 'llm', label: 'AI / LLM', desc: 'LLM cost, tokens, errors and latency per model', Icon: BotMessageSquare },
 ];
 /** Kinds the editor can save to the api (log_match: YAML only for now; consumer_lag: lag editor). */
-const SAVABLE = new Set<Kind>(['metric_threshold', 'anomaly', 'composite', 'job_missed', 'error_new', 'infra', 'faas']);
+const SAVABLE = new Set<Kind>(['metric_threshold', 'anomaly', 'composite', 'job_missed', 'error_new', 'infra', 'faas', 'llm']);
 
 // ---- infra (contracts §20) and faas (§21) rule shapes
 type InfraEntity = 'host' | 'container' | 'pod' | 'node' | 'workload';
@@ -56,6 +59,48 @@ const isDuration = (m: FaasMetric) => m === 'duration_p95' || m === 'duration_p9
 const isFaasMetric = (v: unknown): v is FaasMetric => FAAS_METRICS.some((x) => x.value === v);
 const isInfraEntity = (v: unknown): v is InfraEntity => INFRA_ENTITIES.some((x) => x.value === v);
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
+
+// ---- llm (contracts §25): llm_1m / llm_1h + price table
+type LlmMetric = 'cost_usd' | 'cost_usd_per_hour' | 'tokens' | 'input_tokens' | 'output_tokens' | 'calls' | 'errors' | 'error_rate' | 'p95_ms' | 'ttft_p95_ms';
+type LlmUnit = 'USD' | 'USD/h' | 'tokens' | 'calls' | '%' | 'ms';
+const LLM_METRICS: { value: LlmMetric; label: string; short: string; unit: LlmUnit }[] = [
+  { value: 'cost_usd_per_hour', label: 'Cost per hour (est.)', short: 'cost/h', unit: 'USD/h' },
+  { value: 'cost_usd', label: 'Cost in window (est.)', short: 'cost', unit: 'USD' },
+  { value: 'tokens', label: 'Tokens (input + output)', short: 'tokens', unit: 'tokens' },
+  { value: 'input_tokens', label: 'Input tokens', short: 'input tokens', unit: 'tokens' },
+  { value: 'output_tokens', label: 'Output tokens', short: 'output tokens', unit: 'tokens' },
+  { value: 'calls', label: 'Calls', short: 'calls', unit: 'calls' },
+  { value: 'errors', label: 'Failed calls', short: 'errors', unit: 'calls' },
+  { value: 'error_rate', label: 'Error rate', short: 'error rate', unit: '%' },
+  { value: 'p95_ms', label: 'p95 duration', short: 'p95', unit: 'ms' },
+  { value: 'ttft_p95_ms', label: 'p95 time to first token (streaming)', short: 'TTFT p95', unit: 'ms' },
+];
+const llmMeta = (m: LlmMetric) => LLM_METRICS.find((x) => x.value === m)!;
+const isLlmMetric = (v: unknown): v is LlmMetric => LLM_METRICS.some((x) => x.value === v);
+/** rate / latency metrics: minRequests applies */
+const LLM_RATE = new Set<LlmMetric>(['error_rate', 'p95_ms', 'ttft_p95_ms']);
+const LLM_DEFAULT_TH: Record<LlmMetric, string> = {
+  cost_usd_per_hour: '20', cost_usd: '100', tokens: '5000000', input_tokens: '4000000', output_tokens: '1000000', calls: '10000', errors: '50',
+  error_rate: '5', p95_ms: '20000', ttft_p95_ms: '5000',
+};
+const LLM_DEFAULT_WINDOW = (m: LlmMetric) => (m === 'cost_usd_per_hour' || m === 'tokens' || m === 'input_tokens' || m === 'output_tokens' || m === 'cost_usd' ? '1h' : '15m');
+const LLM_WINDOWS = [{ value: '5m', label: '5 minutes' }, { value: '15m', label: '15 minutes' }, { value: '1h', label: '1 hour' }, { value: '6h', label: '6 hours' }, { value: '24h', label: '24 hours' }];
+const LLM_OPERATIONS = [{ value: '', label: 'Any operation' }, { value: 'chat', label: 'chat' }, { value: 'text_completion', label: 'text_completion' }, { value: 'embeddings', label: 'embeddings' }, { value: 'generate_content', label: 'generate_content' }];
+const llmFmt = (m: LlmMetric) => {
+  const u = llmMeta(m).unit;
+  if (u === 'USD') return usd;
+  if (u === 'USD/h') return (v: number) => `${usd(v)}/h`;
+  if (u === '%') return (v: number) => pct(v);
+  if (u === 'ms') return ms;
+  return (v: number) => compact(v);
+};
+const windowMinutes = (w: string) => { const n = parseFloat(w); return w.endsWith('h') ? n * 60 : w.endsWith('d') ? n * 1440 : n; };
+/** "POST /chat" → method + route; a bare route has no method. */
+function splitEndpoint(v: string): { method?: string; route?: string } {
+  const t = v.trim();
+  const m = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(.+)$/i.exec(t);
+  return m ? { method: m[1].toUpperCase(), route: m[2].trim() } : { route: t || undefined };
+}
 
 type Metric = 'error_rate' | 'p95' | 'rpm';
 const METRICS: { value: Metric; label: string }[] = [{ value: 'error_rate', label: 'Error rate' }, { value: 'p95', label: 'p95 latency' }, { value: 'rpm', label: 'Throughput' }];
@@ -101,7 +146,8 @@ export function AlertEditor() {
   const svcParam = params.get('service') ?? editing?.targetSpec?.service ?? null;
   const svcName = services.find((s) => s.id === svcParam)?.name ?? svcParam ?? '';
   const back = `/services/${svcParam}?tab=alerts`;
-  const goBack = () => (svcParam ? nav(back) : nav(-1));
+  // llm links carry the telemetry service name, which is not always a known service id
+  const goBack = () => (svcParam && services.some((s) => s.id === svcParam) ? nav(back) : nav(-1));
 
   const q = editing?.query ?? {};
   const initMetric = (editing?.apiKind === 'latency' ? 'p95' : (q.metric as Metric | undefined)) ?? 'error_rate';
@@ -144,6 +190,21 @@ export function AlertEditor() {
   const [faasMetric, setFaasMetric] = useState<FaasMetric>(isFaasMetric(q.metric) ? q.metric : isFaasMetric(params.get('metric')) ? params.get('metric') as FaasMetric : 'error_rate');
   const [fProvider, setFProvider] = useState(str(qf.provider));
   const [fRegion, setFRegion] = useState(str(qf.region));
+  // llm
+  const isLlm = kind === 'llm';
+  const [llmMetric, setLlmMetric] = useState<LlmMetric>(isLlmMetric(q.metric) ? q.metric : isLlmMetric(params.get('metric')) ? params.get('metric') as LlmMetric : 'cost_usd_per_hour');
+  const [lService, setLService] = useState(str(qf.service) || (isLlm ? params.get('service') ?? '' : ''));
+  const [lProvider, setLProvider] = useState(str(qf.provider) || (isLlm ? params.get('provider') ?? '' : ''));
+  const [lModel, setLModel] = useState(str(qf.model) || (isLlm ? params.get('model') ?? '' : ''));
+  const [lEndpoint, setLEndpoint] = useState(`${str(qf.method)} ${str(qf.route)}`.trim() || (isLlm ? params.get('route') ?? '' : ''));
+  const [lOperation, setLOperation] = useState(str(qf.operation));
+  const [llmTh, setLlmTh] = useState(() => {
+    const t = editing?.rule?.threshold;
+    if (!isLlm || t === undefined) return LLM_DEFAULT_TH[llmMetric];
+    return String(llmMetric === 'error_rate' ? +(t * 100).toFixed(3) : t);
+  });
+  const [llmWindow, setLlmWindow] = useState(str((editing?.rule as { window?: unknown } | undefined)?.window) || LLM_DEFAULT_WINDOW(llmMetric));
+  const [llmMinReq, setLlmMinReq] = useState(String(editing?.rule?.minRequests ?? 20));
   const [op, setOp] = useState<'>' | '<'>(editing?.rule?.op === '<' ? '<' : '>');
   // "p95 > timeout × 0.8" = relativeToTimeout + threshold 0.8 (contracts §21)
   const [relTimeout, setRelTimeout] = useState(q.relativeToTimeout === true);
@@ -175,7 +236,38 @@ export function AlertEditor() {
   const ruleLabel = ruleUnit === '%' ? `${ruleTh}%` : ruleUnit === 'ms' ? ms(Number(ruleTh) || 0) : relative ? `${ruleTh} × timeout` : ruleTh;
   const infraFilter = Object.fromEntries(Object.entries({ cluster: fCluster, namespace: fNamespace, host: fHost, workload: fWorkload, service: fService }).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v));
   const faasFilter = Object.fromEntries(Object.entries({ provider: fProvider, region: fRegion.trim(), service: fService.trim() }).filter(([, v]) => v));
-  const templates = kind === 'infra' || kind === 'faas' ? monitorTemplates(kind) : [];
+  const templates = kind === 'infra' || kind === 'faas' || kind === 'llm' ? monitorTemplates(kind) : [];
+  // llm pickers: providers / models / services / routes seen in the last 24 h
+  const ai = isLlm ? aiOverview('24h').data : undefined;
+  const aiProviders = [...new Set((ai?.byModel ?? []).map((m) => m.provider))].sort();
+  const svcModels = lService ? ai?.byService.find((s) => s.service === lService)?.models : undefined;
+  const aiModels = [...new Set((ai?.byModel ?? []).filter((m) => (!lProvider || m.provider === lProvider) && (!svcModels || svcModels.includes(m.model))).map((m) => m.model))].sort();
+  const aiServices = (ai?.byService ?? []).map((s) => s.service).sort();
+  const aiRoutes = [...new Set((ai?.byEndpoint ?? []).filter((e) => !lService || e.service === lService).map((e) => `${e.method} ${e.route}`.trim()))].sort();
+  const withCurrent = (vals: string[], cur: string) => (cur && !vals.includes(cur) ? [cur, ...vals] : vals);
+  const llmUnit = llmMeta(llmMetric).unit;
+  const llmValue = llmMetric === 'error_rate' ? Number(llmTh) / 100 : Number(llmTh);
+  const llmThLabel = llmUnit === '%' ? `${llmTh}%` : llmUnit === 'ms' ? ms(Number(llmTh) || 0) : llmUnit === 'USD' ? usd(Number(llmTh) || 0) : llmUnit === 'USD/h' ? `${usd(Number(llmTh) || 0)}/h` : compact(Number(llmTh) || 0);
+  const { method: lMethod, route: lRoute } = splitEndpoint(lEndpoint);
+  const llmFilter = Object.fromEntries(Object.entries({ service: lService, provider: lProvider, model: lModel, route: lRoute ?? '', method: lMethod ?? '', operation: lOperation }).filter(([, v]) => v));
+  /** mock preview baseline: the AI overview of the same scope, per window */
+  const llmBase = (() => {
+    if (!isLlm || isApi) return undefined;
+    const t = aiOverview('24h', { service: lService || undefined, provider: lProvider || undefined, model: lModel || undefined }).data.totals;
+    const perWin = windowMinutes(llmWindow) / 1440;
+    switch (llmMetric) {
+      case 'cost_usd_per_hour': return (t.costUsd ?? 0) / 24;
+      case 'cost_usd': return (t.costUsd ?? 0) * perWin;
+      case 'tokens': return (t.inputTokens + t.outputTokens) * perWin;
+      case 'input_tokens': return t.inputTokens * perWin;
+      case 'output_tokens': return t.outputTokens * perWin;
+      case 'calls': return t.calls * perWin;
+      case 'errors': return t.errors * perWin;
+      case 'error_rate': return t.errorRate;
+      case 'p95_ms': return t.p95Ms;
+      case 'ttft_p95_ms': return t.ttftP95Ms ?? t.p95Ms * 0.3;
+    }
+  })();
   /** Fill the form from a template (GET /monitor-templates); scope filters stay as picked. */
   const applyTemplate = (t: MonitorTemplate) => {
     const tq = t.query ?? {};
@@ -189,6 +281,12 @@ export function AlertEditor() {
       const m = (INFRA_METRICS[tq.entity] as string[]).includes(str(tq.metric)) ? tq.metric as InfraMetric : INFRA_METRICS[tq.entity][0];
       setEntity(tq.entity); setInfraMetric(m); if (tq.agg === 'avg' || tq.agg === 'max') setAgg(tq.agg);
       setRuleTh(String(INFRA_RATIO.has(m) ? +(th * 100).toFixed(2) : th));
+    }
+    if (t.kind === 'llm' && isLlmMetric(tq.metric)) {
+      setLlmMetric(tq.metric);
+      setLlmTh(String(tq.metric === 'error_rate' ? +(th * 100).toFixed(3) : th));
+      setLlmWindow(typeof c.window === 'string' ? c.window : LLM_DEFAULT_WINDOW(tq.metric));
+      if (typeof c.minRequests === 'number') setLlmMinReq(String(c.minRequests));
     }
     if (t.kind === 'faas' && isFaasMetric(tq.metric)) {
       const rel = tq.relativeToTimeout === true;
@@ -206,7 +304,7 @@ export function AlertEditor() {
   const otherMonitors = monitors.filter((m) => m.id !== editing?.id && m.kind !== 'composite' && !candidates.includes(m));
 
   const rule = { forMin: Number(forMin) || 0, ...(Number(renotify) ? { renotifyMin: Number(renotify) } : {}) };
-  const common = { severity, channels, source: editing?.source === 'suggestion' ? 'suggestion' : !editing && templateId && (kind === 'infra' || kind === 'faas') ? 'template' : 'manual' };
+  const common = { severity, channels, source: editing?.source === 'suggestion' ? 'suggestion' : !editing && templateId && (kind === 'infra' || kind === 'faas' || kind === 'llm') ? 'template' : 'manual' };
   const ruleExtra = { ...(condWindow ? { window: condWindow } : {}) };
   const autoName: Record<Kind, string> = {
     metric_threshold: `${svcLabel} ${ep ? `${ep.method} ${ep.route}` : ''} ${METRICS.find((m) => m.value === metric)!.label.toLowerCase()}`,
@@ -217,6 +315,7 @@ export function AlertEditor() {
     log_match: `${svcLabel} log query`, consumer_lag: `${svcLabel} consumer lag`,
     infra: `${INFRA_ENTITIES.find((e) => e.value === entity)!.label} ${INFRA_METRIC_LABEL[infraMetric].toLowerCase()}${fService || fCluster || fHost ? ` · ${fService || fCluster || fHost}` : ''}`,
     faas: `${fn && fnId !== '*' ? fn.name : 'Functions'} ${FAAS_METRICS.find((m) => m.value === faasMetric)!.label.toLowerCase()}`,
+    llm: ['LLM ' + llmMeta(llmMetric).short, lService, lModel || (lProvider ? aiProviderLabel(lProvider) : ''), lRoute].filter(Boolean).join(' · '),
   };
   const finalName = (name.trim() || autoName[kind]).replace(/\s+/g, ' ').trim();
   const target = { service, endpoint: ep ? `${ep.method} ${ep.route}` : undefined };
@@ -249,6 +348,11 @@ export function AlertEditor() {
       query: { ...(fnId !== '*' ? { functionId: fnId } : { filter: faasFilter }), metric: faasMetric, ...(relative ? { relativeToTimeout: true } : {}) },
       condition: { op, threshold: Number.isFinite(ruleValue) ? ruleValue : 0, ...ruleExtra, ...(faasMetric === 'error_rate' && Number(minReq) ? { minRequests: Number(minReq) } : {}), ...rule }, ...common,
     },
+    llm: {
+      name: finalName, kind: 'llm', target: { service: lService || undefined },
+      query: { filter: llmFilter, metric: llmMetric },
+      condition: { op, threshold: Number.isFinite(llmValue) ? llmValue : 0, window: llmWindow, ...rule, ...(LLM_RATE.has(llmMetric) && Number(llmMinReq) ? { minRequests: Number(llmMinReq) } : {}) }, ...common,
+    },
     error_new: {
       name: finalName, kind: 'error_new', target: { service: errScope === '*' ? undefined : errScope }, query: {},
       condition: { op: '>', threshold: 0, forMin: 0, ...(Number(renotify) ? { renotifyMin: Number(renotify) } : {}) }, ...common,
@@ -263,6 +367,7 @@ export function AlertEditor() {
     if (kind === 'job_missed' && !process.trim()) return 'Name the job or process that should report.';
     if ((kind === 'infra' || kind === 'faas') && !(Number.isFinite(ruleValue) && ruleTh.trim() !== '')) return 'Enter a numeric threshold.';
     if (kind === 'faas' && fnId !== '*' && !fn) return 'Pick a function.';
+    if (kind === 'llm' && !(Number.isFinite(llmValue) && llmTh.trim() !== '')) return 'Enter a numeric threshold.';
     return undefined;
   };
 
@@ -526,8 +631,64 @@ export function AlertEditor() {
             </Card>
           )}
 
+          {kind === 'llm' && (
+            <Card title="2 · Scope" subtitle="LLM calls reported as OpenTelemetry GenAI spans. Leave a filter on “Any” to cover everything.">
+              <div className="stack" style={{ gap: 'var(--space-3)' }}>
+                {templates.length > 0 && (
+                  <Field label="Template" hint={templates.find((t) => t.id === templateId)?.description}>
+                    <div className="row" style={{ gap: 'var(--space-1)', flexWrap: 'wrap' }}>
+                      {templates.map((t) => <Button key={t.id} size="sm" variant={t.id === templateId ? 'primary' : 'secondary'} title={t.description} onClick={() => applyTemplate(t)}>{t.name}</Button>)}
+                    </div>
+                  </Field>
+                )}
+                <Field label="Service"><Select value={lService} onChange={(e) => { setLService(e.target.value); setLEndpoint(''); }}
+                  options={[{ value: '', label: 'Any service' }, ...withCurrent(aiServices, lService).map((s) => ({ value: s, label: s }))]} /></Field>
+                <div className="grid grid-2" style={{ gap: 'var(--space-2)' }}>
+                  <Field label="Provider"><Select value={lProvider} onChange={(e) => { setLProvider(e.target.value); setLModel(''); }}
+                    options={[{ value: '', label: 'Any provider' }, ...withCurrent(aiProviders, lProvider).map((p) => ({ value: p, label: aiProviderLabel(p) }))]} /></Field>
+                  <Field label="Model"><Select value={lModel} onChange={(e) => setLModel(e.target.value)}
+                    options={[{ value: '', label: 'Any model' }, ...withCurrent(aiModels, lModel).map((m) => ({ value: m, label: m }))]} /></Field>
+                </div>
+                <div className="grid grid-2" style={{ gap: 'var(--space-2)' }}>
+                  <Field label="Endpoint" hint="Entry route of the request that made the call.">
+                    <Input mono list="llm-routes" value={lEndpoint} placeholder="any" onChange={(e) => setLEndpoint(e.target.value)} />
+                  </Field>
+                  <Field label="Operation"><Select value={lOperation} onChange={(e) => setLOperation(e.target.value)} options={LLM_OPERATIONS} /></Field>
+                </div>
+                <datalist id="llm-routes">{aiRoutes.map((r) => <option key={r} value={r} />)}</datalist>
+                <Field label="Metric" hint={llmUnit === 'USD' || llmUnit === 'USD/h' ? 'Estimate from token counts × model price; models without a price are left out.' : undefined}>
+                  <Select value={llmMetric} onChange={(e) => { const m = e.target.value as LlmMetric; setLlmMetric(m); setLlmTh(LLM_DEFAULT_TH[m]); setLlmWindow(LLM_DEFAULT_WINDOW(m)); }}
+                    options={LLM_METRICS.map((m) => ({ value: m.value, label: `${m.label} · ${m.unit}` }))} />
+                </Field>
+                <Field label="Name"><Input value={name} placeholder={finalName} onChange={(e) => setName(e.target.value)} /></Field>
+              </div>
+            </Card>
+          )}
+
+          {kind === 'llm' && (
+            <Card title="3 · Condition">
+              <div className="stack" style={{ gap: 'var(--space-3)' }}>
+                <Field label={`Value (${llmUnit})`}>
+                  <div className="row" style={{ gap: 'var(--space-1)' }}>
+                    <Segmented label="Operator" value={op} onChange={setOp} options={[{ id: '>', label: 'Above' }, { id: '<', label: 'Below' }]} />
+                    <Input mono aria-label="Threshold" value={llmTh} onChange={(e) => setLlmTh(e.target.value)} inputMode="decimal" style={{ flex: 1, minWidth: 0 }} />
+                  </div>
+                </Field>
+                <div className="grid grid-2" style={{ gap: 'var(--space-2)' }}>
+                  <Field label="Window" hint={windowMinutes(llmWindow) >= 360 ? 'Long windows read the hourly rollup.' : undefined}>
+                    <Select value={llmWindow} onChange={(e) => setLlmWindow(e.target.value)} options={withCurrent(LLM_WINDOWS.map((w) => w.value), llmWindow).map((v) => ({ value: v, label: LLM_WINDOWS.find((w) => w.value === v)?.label ?? v }))} />
+                  </Field>
+                  <ForField value={forMin} onChange={setForMin} />
+                </div>
+                {LLM_RATE.has(llmMetric) && (
+                  <Field label="Minimum calls" hint="Windows with fewer calls never fire."><Input mono value={llmMinReq} onChange={(e) => setLlmMinReq(e.target.value)} inputMode="numeric" /></Field>
+                )}
+              </div>
+            </Card>
+          )}
+
           {kind !== 'consumer_lag' && (
-            <Card title={kind === 'metric_threshold' || kind === 'anomaly' || kind === 'infra' || kind === 'faas' ? '4 · Notify' : '3 · Notify'}>
+            <Card title={kind === 'metric_threshold' || kind === 'anomaly' || kind === 'infra' || kind === 'faas' || kind === 'llm' ? '4 · Notify' : '3 · Notify'}>
               <div className="stack" style={{ gap: 'var(--space-3)' }}>
                 <Field label="Severity"><Select value={severity} onChange={(e) => setSeverity(e.target.value)} options={[{ value: 'critical', label: 'Critical' }, { value: 'warning', label: 'Warning' }, { value: 'info', label: 'Info' }]} /></Field>
                 <div className="field"><span className="field__label">Notify</span><NotifyPicker value={channels} onChange={setChannels} disabled={readOnly} /></div>
@@ -547,6 +708,8 @@ export function AlertEditor() {
           {(kind === 'infra' || kind === 'faas') && <RulePreview cap={(kind === 'infra' && INFRA_RATIO.has(infraMetric)) || (kind === 'faas' && faasMetric === 'error_rate') ? 1 : undefined} body={body!} seed={JSON.stringify(body)} threshold={ruleValue} below={op === '<'} thLabel={ruleLabel}
             label={kind === 'infra' ? INFRA_METRIC_LABEL[infraMetric] : FAAS_METRICS.find((m) => m.value === faasMetric)!.label}
             format={kind === 'infra' ? (INFRA_RATIO.has(infraMetric) ? (v: number) => pct(v, 0) : (v: number) => compact(v)) : relative ? (v: number) => `${v.toFixed(2)}×` : faasFmt(faasMetric)} />}
+          {kind === 'llm' && <RulePreview body={body!} seed={JSON.stringify(body)} threshold={llmValue} below={op === '<'} thLabel={llmThLabel}
+            label={llmMeta(llmMetric).label} format={llmFmt(llmMetric)} cap={llmMetric === 'error_rate' ? 1 : undefined} base={llmBase} />}
           {kind === 'metric_threshold' && !isApi && (
             <Card title={<span className="row"><Sparkles size={14} color="var(--accent)" />Recommendation</span>}>
               <p className="secondary">14-day p99 error rate for this endpoint is <strong>1.9%</strong>. A 2% threshold with a 5-minute window would have caught the 2 incidents on Oct 19 and Oct 22 with no false positives.</p>
@@ -697,16 +860,19 @@ function ErrorNewPreview({ body, seed }: { body: object; seed: string }) {
   );
 }
 
-/** infra / faas: api replay when available, else a plausible curve around the threshold (mock). */
-function RulePreview({ body, seed, threshold, below, thLabel, label, format, cap }: {
-  body: object; seed: string; threshold: number; below: boolean; thLabel: string; label: string; format: (v: number) => string; cap?: number;
+/** infra / faas / llm: api replay when available, else a plausible curve around the threshold — or around `base` (mock). */
+function RulePreview({ body, seed, threshold, below, thLabel, label, format, cap, base }: {
+  body: object; seed: string; threshold: number; below: boolean; thLabel: string; label: string; format: (v: number) => string; cap?: number; base?: number;
 }) {
   const ts = timestamps('24h');
   const p = useApiPreview(body);
   if (isApi && !p) return <NoPreview />;
   const th = Number.isFinite(threshold) ? threshold : 0;
   const data = isApi ? fit(p!.data, ts.length)
-    : series(`rule-${seed}`, '24h', { base: th > 0 ? th * (below ? 1.4 : 0.62) : 0.3, noise: 0.3, spikeAt: 0.7, spikeMul: below ? 0.4 : th > 0 ? 1.9 : 9, spikeWidth: 2 })
+    : base !== undefined && base > 0
+      ? series(`rule-${seed}`, '24h', { base, noise: 0.3, spikeAt: 0.7, spikeMul: below ? 0.4 : 2.4, spikeWidth: 2 })
+        .map((v) => (cap === undefined ? v : Math.min(cap, v)))
+      : series(`rule-${seed}`, '24h', { base: th > 0 ? th * (below ? 1.4 : 0.62) : 0.3, noise: 0.3, spikeAt: 0.7, spikeMul: below ? 0.4 : th > 0 ? 1.9 : 9, spikeWidth: 2 })
       .map((v) => (th === 0 || Number.isInteger(th) && th >= 1 && th < 50 ? Math.floor(v) : v))
       .map((v) => (cap === undefined ? v : Math.min(cap, v)));
   const hits = data.map((v) => (below ? v < th : v > th));

@@ -149,15 +149,16 @@ function Dots({ x, y, w, h, count, color }: { x: number; y: number; w: number; h
 function WireNodeShape({ n, clipId }: { n: WireNode; clipId?: string }) {
   const ink = n.fg ?? 'var(--text-muted)';
   const common = { opacity: n.alpha ?? 1, clipPath: clipId ? `url(#${clipId})` : undefined };
-  const box = (cls?: string) => (
-    <rect className={cls} x={n.x} y={n.y} width={n.w} height={n.h} rx={n.radius ?? 0}
-      fill={n.bg ?? 'none'} stroke={n.border ?? 'none'} strokeWidth={n.border ? 1 : 0} />
+  const box = (fill = 'none') => (
+    <rect x={n.x} y={n.y} width={n.w} height={n.h} rx={n.radius ?? 0}
+      fill={n.bg ?? fill} stroke={n.border ?? 'none'} strokeWidth={n.border ? 1 : 0} />
   );
   switch (n.kind) {
     case 'text':
       return <g {...common}>{n.masked || !n.text ? <TextBars x={n.x} y={n.y} w={n.w} h={n.h} text={n.text ?? '••••'} color={ink} /> : <text x={n.x} y={n.y + n.h * 0.75} fontSize={n.h * 0.8} fill={ink}>{n.text}</text>}</g>;
     case 'button':
-      return <g {...common}>{box()}{n.text && <TextBars x={n.x + 8} y={n.y} w={n.w - 16} h={n.h} text={n.text} color={ink} align="middle" />}</g>;
+      // No recorded background (e.g. a system-styled button): neutral fill so it still reads as a button.
+      return <g {...common}>{box('var(--bg-active)')}{n.text && <TextBars x={n.x + 8} y={n.y} w={n.w - 16} h={n.h} text={n.text} color={ink} align="middle" />}</g>;
     case 'input':
       return <g {...common}>{box()}{n.text ? (n.masked ? <Dots x={n.x} y={n.y} w={n.w} h={n.h} count={n.text.replace(/\s/g, '').length} color={ink} /> : <text x={n.x + 12} y={n.y + n.h * 0.65} fontSize={n.h * 0.4} fill={ink}>{n.text}</text>) : null}</g>;
     case 'image':
@@ -169,8 +170,24 @@ function WireNodeShape({ n, clipId }: { n: WireNode; clipId?: string }) {
           )}
         </g>
       );
-    case 'switch':
-      return <g {...common}><rect x={n.x} y={n.y} width={n.w} height={n.h} rx={n.h / 2} fill={n.bg ?? 'var(--bg-sunken)'} stroke={n.border ?? 'none'} /><circle cx={n.x + n.h / 2} cy={n.y + n.h / 2} r={n.h / 2 - 3} fill={n.fg ?? 'var(--bg-surface)'} className="wire__knob" /></g>;
+    case 'switch': {
+      const on = n.checked === true;
+      const fill = n.bg ?? (on ? 'var(--accent)' : 'var(--bg-sunken)');
+      const stroke = n.border ?? (on ? 'none' : 'var(--border-strong)');
+      if (n.w < n.h * 1.4) {
+        // Square-ish: checkbox / radio box with a check mark when on.
+        const s = Math.min(n.w, n.h);
+        const bx = n.x + (n.w - s) / 2, by = n.y + (n.h - s) / 2;
+        return (
+          <g {...common}>
+            <rect x={bx} y={by} width={s} height={s} rx={n.radius ?? s / 4} fill={fill} stroke={stroke} />
+            {on && <polyline points={`${bx + s * 0.25},${by + s * 0.52} ${bx + s * 0.43},${by + s * 0.7} ${bx + s * 0.76},${by + s * 0.32}`} fill="none" stroke={n.fg ?? 'var(--bg-surface)'} strokeWidth={Math.max(1.5, s / 8)} strokeLinecap="round" strokeLinejoin="round" />}
+          </g>
+        );
+      }
+      const r = n.h / 2;
+      return <g {...common}><rect x={n.x} y={n.y} width={n.w} height={n.h} rx={r} fill={fill} stroke={stroke} /><circle cx={on ? n.x + n.w - r : n.x + r} cy={n.y + r} r={r - 3} fill={n.fg ?? 'var(--bg-surface)'} className="wire__knob" /></g>;
+    }
     case 'icon':
       return <g {...common}><rect x={n.x + 2} y={n.y + 2} width={n.w - 4} height={n.h - 4} rx={(n.w - 4) / 3} fill="none" stroke={ink} strokeWidth={2} opacity={0.7} /></g>;
     case 'webview':

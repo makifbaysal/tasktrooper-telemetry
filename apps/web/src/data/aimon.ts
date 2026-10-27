@@ -92,7 +92,7 @@ function hash(s: string): number {
 }
 const hex = (n: number, len: number) => n.toString(16).padStart(len, '0').slice(-len);
 
-/** Price families of the price table (services/api/internal/llmprice): `gen_ai.provider.name` → family. */
+/** Price families of the price table (services/pkg/llmprice): `gen_ai.provider.name` → family. */
 export const AI_PRICE_FAMILIES = ['openai', 'anthropic', 'google', 'amazon', 'meta', 'mistral_ai', 'cohere', 'deepseek', 'x_ai', 'groq'];
 const FAMILY: Record<string, string> = {
   openai: 'openai', 'azure.ai.openai': 'openai', azure_openai: 'openai', 'az.ai.openai': 'openai', anthropic: 'anthropic',
@@ -140,7 +140,7 @@ export function priceCost(p: AiPrice | undefined, input: number, output: number,
 
 // ---------------------------------------------------------------- mock: prices
 
-/** Code defaults (USD per 1M tokens; a subset of services/api/internal/llmprice/defaults.json). Provider = price family. */
+/** Code defaults (USD per 1M tokens; a subset of services/pkg/llmprice/defaults.json). Provider = price family. */
 const DEFAULT_PRICES: AiPrice[] = [
   { provider: 'openai', model: 'gpt-5', inputPerMTok: 1.25, outputPerMTok: 10, cacheReadPerMTok: 0.125, source: 'default' },
   { provider: 'openai', model: 'gpt-5-mini', inputPerMTok: 0.25, outputPerMTok: 2, cacheReadPerMTok: 0.025, source: 'default' },

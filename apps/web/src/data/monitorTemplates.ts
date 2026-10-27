@@ -1,5 +1,5 @@
 /**
- * Ready-made infra / serverless monitors (contracts §20, §21). Api: `GET /monitor-templates`; mock mirrors
+ * Ready-made infra / serverless / LLM monitors (contracts §20, §21, §25). Api: `GET /monitor-templates`; mock mirrors
  * `services/alerting/internal/eval/templates.go` (the source of truth — keep ids and shapes in sync).
  */
 import { isApi, remote } from './remote';
@@ -8,7 +8,7 @@ export interface MonitorTemplate {
   id: string;
   name: string;
   description: string;
-  kind: 'infra' | 'faas' | (string & {});
+  kind: 'infra' | 'faas' | 'llm' | (string & {});
   severity: 'critical' | 'warning' | 'info' | (string & {});
   query: Record<string, unknown>;
   /** {op, threshold, window?, forMin?, minRequests?} */
@@ -32,6 +32,14 @@ const MOCK: MonitorTemplate[] = [
     query: { metric: 'throttles', filter: {} }, condition: { op: '>', threshold: 0, window: '5m', forMin: 5 } },
   { id: 'faas-near-timeout', name: 'Function p95 near timeout', description: "p95 duration above 80 % of the function's timeout", kind: 'faas', severity: 'warning',
     query: { metric: 'duration_p95', relativeToTimeout: true, filter: {} }, condition: { op: '>', threshold: 0.8, window: '5m', forMin: 5 } },
+  { id: 'llm-cost-per-hour', name: 'LLM cost above $20/hour', description: 'Estimated LLM spend (priced models) above $20 over the last hour', kind: 'llm', severity: 'warning',
+    query: { metric: 'cost_usd_per_hour', filter: {} }, condition: { op: '>', threshold: 20, window: '1h', forMin: 0 } },
+  { id: 'llm-error-rate', name: 'LLM error rate > 5%', description: 'More than 5 % of LLM calls failed over 15 minutes (at least 20 calls)', kind: 'llm', severity: 'critical',
+    query: { metric: 'error_rate', filter: {} }, condition: { op: '>', threshold: 0.05, window: '15m', forMin: 0, minRequests: 20 } },
+  { id: 'llm-p95-slow', name: 'LLM p95 > 20 s', description: 'p95 LLM call duration above 20 seconds over 15 minutes', kind: 'llm', severity: 'warning',
+    query: { metric: 'p95_ms', filter: {} }, condition: { op: '>', threshold: 20000, window: '15m', forMin: 0, minRequests: 20 } },
+  { id: 'llm-token-spike', name: 'Token spike', description: 'More than 5M tokens (input + output) in an hour', kind: 'llm', severity: 'warning',
+    query: { metric: 'tokens', filter: {} }, condition: { op: '>', threshold: 5000000, window: '1h', forMin: 0 } },
 ];
 
 /** All templates; api falls back to the built-in list while loading or when the endpoint is missing. */

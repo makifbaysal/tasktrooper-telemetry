@@ -34,7 +34,17 @@ const RUNTIME_NOTE: Record<string, string> = {
   'Node.js': 'Node SDK: node:inspector CPU profiler and sampling heap profiler.',
   Java: 'JVM agent: JFR execution, allocation and monitor samples.',
   Kotlin: 'JVM agent: JFR execution, allocation and monitor samples.',
+  Python: 'Python SDK (tasktrooper): sampling CPU profiler and tracemalloc allocations, with route labels per request.',
+  '.NET': '.NET SDK: EventPipe CPU samples and GC allocation ticks.',
+  'C#': '.NET SDK: EventPipe CPU samples and GC allocation ticks.',
 };
+/** In-code switch per runtime (the env variables work everywhere). */
+const RUNTIME_CODE: Record<string, string> = {
+  Python: 'import tasktrooper\n\ntasktrooper.init(service="checkout", profiling=True)',
+  '.NET': 'builder.Services.AddTrooper(o => o.Service = "checkout");\nbuilder.Services.AddTaskTrooperProfiling();',
+  'C#': 'builder.Services.AddTrooper(o => o.Service = "checkout");\nbuilder.Services.AddTaskTrooperProfiling();',
+};
+const OTLP_NOTE = <>Any other language can send pprof-compatible profiles via OTLP profiles (<span className="mono">/v1development/profiles</span>).</>;
 
 /** Shown when a service sends no profiles. */
 export function ProfilingSetup({ svc, compact }: { svc: Service; compact?: boolean }) {
@@ -54,12 +64,14 @@ export function ProfilingSetup({ svc, compact }: { svc: Service; compact?: boole
       <EmptyState icon={<Flame />} title={supported ? `No profiles from ${svc.name} yet` : `Profiling isn’t available for ${svc.language} yet`}>
         {supported
           ? 'Continuous profiling shows which functions use CPU and memory, per endpoint and per version. Overhead stays under 2% CPU.'
-          : 'The Go, JVM and Node.js SDKs send profiles today; .NET and Python are next.'}
+          : <>The Go, JVM, Node.js, Python (<span className="mono">tasktrooper.init(profiling=True)</span>) and .NET (<span className="mono">services.AddTaskTrooperProfiling()</span>) SDKs send profiles. {OTLP_NOTE}</>}
       </EmptyState>
       {supported && (
         <div className="stack" style={{ maxWidth: 640, margin: '0 auto', gap: 'var(--space-3)' }}>
           <p className="secondary" style={{ margin: 0, fontSize: 'var(--text-sm)' }}>Enable it with environment variables on the service, then redeploy. {RUNTIME_NOTE[svc.language]}</p>
           <CopyCode>{env}</CopyCode>
+          {RUNTIME_CODE[svc.language] && <><p className="secondary" style={{ margin: 0, fontSize: 'var(--text-sm)' }}>Or turn it on in code:</p><CopyCode>{RUNTIME_CODE[svc.language]}</CopyCode></>}
+          <p className="muted" style={{ margin: 0, fontSize: 'var(--text-xs)' }}>Supported: Go, JVM, Node.js, Python, .NET. {OTLP_NOTE}</p>
           <p className="muted" style={{ margin: 0, fontSize: 'var(--text-xs)' }}>Profiles appear about a minute after the first period. Retention 14 days.</p>
         </div>
       )}

@@ -7,7 +7,7 @@
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { BotMessageSquare, Coins, ExternalLink, Loader2, MessageSquareText, Pencil, Plus, RotateCcw, ShieldAlert, Wrench } from 'lucide-react';
+import { BellPlus, BotMessageSquare, Coins, ExternalLink, Loader2, MessageSquareText, Pencil, Plus, RotateCcw, ShieldAlert, Wrench } from 'lucide-react';
 import { Columns, TimeSeries } from '@/components/charts';
 import {
   Badge, Button, Callout, Card, CopyCode, Drawer, DrawerSection, EmptyState, Field, Input, KeyValues, MetricCard, PageHeader, Section,
@@ -15,7 +15,8 @@ import {
 } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
 import { can, denied } from '@/data/auth';
-import { endpointsFor, services, useData } from '@/data';
+import { endpointsFor, monitors, services, useData } from '@/data';
+import type { ApiMonitor } from '@/data/api/ops';
 import {
   AI_PRICE_FAMILIES, aiCall, aiCalls, aiOverview, aiPrices, aiProviderLabel, findPrice, priceKey, resetAiPrice, setAiPrice,
   type AiCall, type AiEndpointRow, type AiModelRow, type AiOverview, type AiPrice, type AiServiceRow, type TraceLlm,
@@ -63,13 +64,27 @@ const svcOf = (name: string) => services.find((s) => s.id === name || s.name ===
 const shortError = (e: string) => e.split(':')[0];
 const tokenPair = (i: number, o: number) => `${compact(i)} → ${compact(o)}`;
 
+/** Alert editor deep link for an LLM monitor (contracts §25). */
+export const llmAlertLink = (p: { service?: string; provider?: string; model?: string } = {}) =>
+  `/alerts/new?kind=llm${Object.entries(p).filter(([, v]) => v).map(([k, v]) => `&${k}=${encodeURIComponent(v!)}`).join('')}`;
+
+/** Small row action: "Alert" → the llm monitor editor prefilled with the row's scope. */
+function AlertAction({ to, label }: { to: string; label: string }) {
+  const nav = useNavigate();
+  if (!can('write')) return null;
+  return <Button size="sm" variant="ghost" icon={<BellPlus size={14} />} title={label} aria-label={label}
+    onClick={(e) => { e.stopPropagation(); nav(to); }}>Alert</Button>;
+}
+
 // ---------------------------------------------------------------- page
 
 export function AiMonitoring() {
+  const nav = useNavigate();
   return (
     <>
       <PageHeader title="AI monitoring"
-        subtitle="LLM calls from your services — calls, tokens, estimated cost, errors and latency per provider, model, service and endpoint" />
+        subtitle="LLM calls from your services — calls, tokens, estimated cost, errors and latency per provider, model, service and endpoint"
+        actions={<Button icon={<BellPlus size={14} />} disabled={!can('write')} title={can('write') ? undefined : denied('write')} onClick={() => nav(llmAlertLink())}>Create alert</Button>} />
       <AiMonitoringBody />
     </>
   );
@@ -109,9 +124,10 @@ export function AiMonitoringBody({ service }: { service?: string }) {
   }
   return (
     <>
+      {service && <LlmMonitors service={service} />}
       <AiCharts data={data} service={service} onPrices={() => openPrices()} />
       <Section title="Models" subtitle="cost is an estimate from token counts × model price · click a row for its recent calls">
-        <Card flush><ModelsTable rows={data.byModel} onSetPrice={(m) => openPrices({ provider: m.provider, model: m.model })} /></Card>
+        <Card flush><ModelsTable rows={data.byModel} service={service} onSetPrice={(m) => openPrices({ provider: m.provider, model: m.model })} /></Card>
       </Section>
       {!service && data.byService.length > 0 && (
         <Section title="Services">
@@ -125,6 +141,44 @@ export function AiMonitoringBody({ service }: { service?: string }) {
         onSetPrice={(p) => openPrices(p)} />
       {drawers}
     </>
+  );
+}
+
+// ---------------------------------------------------------------- service tab: the service's LLM monitors
+
+/** `llm` monitors scoped to the service (target.service or query.filter.service), with a "Create alert" action. */
+function LlmMonitors({ service }: { service: string }) {
+  const nav = useNavigate();
+  const mine = (monitors as ApiMonitor[]).filter((m) => {
+    if ((m.apiKind ?? m.kind) !== 'llm') return false;
+    const f = (m.query?.filter ?? {}) as Record<string, unknown>;
+    return m.targetSpec?.service === service || f.service === service;
+  });
+  const create = <Button size="sm" icon={<BellPlus size={14} />} disabled={!can('write')} title={can('write') ? undefined : denied('write')}
+    onClick={() => nav(llmAlertLink({ service }))}>Create alert</Button>;
+  if (mine.length === 0) {
+    return (
+      <Callout icon={<BellPlus size={16} />}>
+        <span className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+          <span className="secondary">No LLM alerts for this service — alert on estimated cost, token spikes, error rate or p95 per model.</span>
+          <span className="spacer" />{create}
+        </span>
+      </Callout>
+    );
+  }
+  return (
+    <Section title="LLM alerts" actions={create}>
+      <Card flush>
+        <div className="list">
+          {mine.map((m) => (
+            <a key={m.id} href="#" className="list__row" onClick={(e) => { e.preventDefault(); nav(`/alerts/new?kind=llm&service=${encodeURIComponent(service)}&edit=${encodeURIComponent(m.id)}`); }}>
+              <div className="list__main"><span className="list__title">{m.name}</span><span className="list__meta">{m.condition}</span></div>
+              <StatusBadge status={m.state} label={m.state === 'ok' ? 'OK' : undefined} />
+            </a>
+          ))}
+        </div>
+      </Card>
+    </Section>
   );
 }
 
@@ -186,7 +240,7 @@ function ModelCell({ provider, model }: { provider: string; model: string }) {
   return <span className="row" style={{ gap: 'var(--space-2)', whiteSpace: 'nowrap' }}><ProviderBadge provider={provider} /><span className="mono">{model}</span></span>;
 }
 
-function ModelsTable({ rows, onSetPrice }: { rows: AiModelRow[]; onSetPrice: (m: AiModelRow) => void }) {
+function ModelsTable({ rows, service, onSetPrice }: { rows: AiModelRow[]; service?: string; onSetPrice: (m: AiModelRow) => void }) {
   const columns: Column<AiModelRow>[] = [
     { key: 'model', header: 'Model', sortValue: (m) => m.model, render: (m) => <ModelCell provider={m.provider} model={m.model} /> },
     { key: 'calls', header: 'Calls', numeric: true, sortValue: (m) => m.calls, render: (m) => compact(m.calls) },
@@ -195,6 +249,7 @@ function ModelsTable({ rows, onSetPrice }: { rows: AiModelRow[]; onSetPrice: (m:
     { key: 'out', header: 'Output tokens', numeric: true, sortValue: (m) => m.outputTokens, render: (m) => (m.outputTokens ? compact(m.outputTokens) : <span className="muted">—</span>) },
     { key: 'p95', header: 'p95', numeric: true, sortValue: (m) => m.p95Ms, render: (m) => ms(m.p95Ms) },
     { key: 'cost', header: 'Cost (est.)', numeric: true, sortValue: (m) => m.costUsd ?? -1, render: (m) => <CostCell value={m.costUsd} unknown={!m.priceKnown} onSetPrice={() => onSetPrice(m)} /> },
+    { key: 'alert', header: '', render: (m) => <AlertAction to={llmAlertLink({ service, provider: m.provider, model: m.model })} label={`Create an alert for ${m.model}`} /> },
   ];
   return <Table rows={rows} rowKey={(m) => `${m.provider}|${m.model}`} defaultSort={{ key: 'cost', dir: 'desc' }} columns={columns} />;
 }
@@ -208,6 +263,7 @@ function ServicesTable({ rows }: { rows: AiServiceRow[] }) {
     { key: 'calls', header: 'Calls', numeric: true, sortValue: (s) => s.calls, render: (s) => compact(s.calls) },
     { key: 'tok', header: 'Tokens in → out', numeric: true, sortValue: (s) => s.inputTokens + s.outputTokens, render: (s) => tokenPair(s.inputTokens, s.outputTokens) },
     { key: 'cost', header: 'Cost (est.)', numeric: true, sortValue: (s) => s.costUsd ?? -1, render: (s) => <CostCell value={s.costUsd} /> },
+    { key: 'alert', header: '', render: (s) => <AlertAction to={llmAlertLink({ service: s.service })} label={`Create an alert for ${s.service}`} /> },
   ];
   return (
     <Table rows={rows} rowKey={(s) => s.service} defaultSort={{ key: 'cost', dir: 'desc' }} columns={columns}
@@ -644,15 +700,15 @@ builder.Services.AddChatClient(new OpenAIClient(key).GetChatClient("gpt-5-mini")
   },
   python: {
     label: 'Python',
-    note: <>There is no Trooper Python SDK — use OpenLLMetry (or any OTel GenAI instrumentation) and send OTLP to the ingest endpoint with an ingest key.</>,
-    code: `pip install traceloop-sdk
+    note: <>The <span className="mono">tasktrooper</span> package wraps OpenAI and Anthropic clients (sync, async and streaming). OpenLLMetry / other OTel GenAI instrumentations work too.</>,
+    code: `pip install tasktrooper
 
-from traceloop.sdk import Traceloop
-Traceloop.init(app_name="support-bot", disable_batch=False)
+import tasktrooper
+from openai import OpenAI
 
-# OTEL_EXPORTER_OTLP_ENDPOINT=https://ingest.trooper.dev
-# OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <ingest key>
-# TRACELOOP_TRACE_CONTENT=false   # prompts off by default`,
+tasktrooper.init(service="support-bot")  # DSN from TROOPER_DSN
+client = tasktrooper.instrument_openai(OpenAI())
+# Anthropic: tasktrooper.instrument_anthropic(Anthropic())`,
   },
 };
 
