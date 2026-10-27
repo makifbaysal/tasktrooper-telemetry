@@ -36,6 +36,19 @@ public sealed class TaskTrooperOptions
     /// <summary>Retries on 429/5xx/network errors (exponential 1s→60s with jitter, honours Retry-After).</summary>
     public int MaxExportRetries { get; set; } = 5;
 
+    /// <summary>
+    /// Listen to GenAI ActivitySources (Microsoft.Extensions.AI, OpenAI .NET SDK, Azure AI Inference, Semantic Kernel) and
+    /// turn on the OpenAI SDK's OpenTelemetry switch. Default <c>true</c>.
+    /// </summary>
+    public bool EnableLlm { get; set; } = true;
+
+    /// <summary>
+    /// Record LLM prompts / completions. Env: <c>TROOPER_LLM_CAPTURE_CONTENT</c>. <c>true</c>: on (also the default of
+    /// M.E.AI <c>EnableSensitiveData</c>); <c>false</c>: content tags are stripped from every GenAI span; <c>null</c>
+    /// (default): libraries' own opt-ins (all off by default) decide.
+    /// </summary>
+    public bool? LlmCaptureContent { get; set; }
+
     /// <summary>Extra resource attributes.</summary>
     public IDictionary<string, object> ResourceAttributes { get; } = new Dictionary<string, object>();
 

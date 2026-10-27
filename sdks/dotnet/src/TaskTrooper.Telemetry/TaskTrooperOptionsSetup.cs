@@ -36,6 +36,7 @@ internal sealed class TaskTrooperOptionsSetup : IConfigureOptions<TaskTrooperOpt
             o.Environment = Env("TROOPER_ENVIRONMENT") ?? o.Environment;
             if (double.TryParse(Env("TROOPER_SAMPLE_RATE"), NumberStyles.Float, CultureInfo.InvariantCulture, out var rate)) o.SampleRate = rate;
             if (bool.TryParse(Env("TROOPER_ENABLED"), out var enabled)) o.Enabled = enabled;
+            if (bool.TryParse(Env("TROOPER_LLM_CAPTURE_CONTENT"), out var capture)) o.LlmCaptureContent = capture;
 
             // 2) configuration section "TaskTrooper"
             var section = configuration?.GetSection(TaskTrooperOptions.SectionName);
@@ -50,6 +51,8 @@ internal sealed class TaskTrooperOptionsSetup : IConfigureOptions<TaskTrooperOpt
                 if (bool.TryParse(section[nameof(o.EnableTraces)], out var t)) o.EnableTraces = t;
                 if (bool.TryParse(section[nameof(o.EnableMetrics)], out var m)) o.EnableMetrics = m;
                 if (bool.TryParse(section[nameof(o.EnableLogs)], out var l)) o.EnableLogs = l;
+                if (bool.TryParse(section[nameof(o.EnableLlm)], out var llm)) o.EnableLlm = llm;
+                if (bool.TryParse(section[nameof(o.LlmCaptureContent)], out var c)) o.LlmCaptureContent = c;
             }
         }
         catch (Exception e)

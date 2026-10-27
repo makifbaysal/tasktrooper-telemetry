@@ -4,6 +4,7 @@ import io.opentelemetry.context.propagation.TextMapPropagator;
 import io.opentelemetry.sdk.autoconfigure.spi.AutoConfigurationCustomizer;
 import io.opentelemetry.sdk.autoconfigure.spi.ConfigProperties;
 import io.opentelemetry.sdk.trace.samplers.Sampler;
+import io.tasktrooper.telemetry.core.profiling.ProfilerBootstrap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -24,9 +25,16 @@ public final class TrooperCustomizations {
         customizer.addTracerProviderCustomizer((builder, props) -> builder.addSpanProcessor(new TrooperSpanProcessor()));
         customizer.addSamplerCustomizer((sampler, props) -> TrooperSampler.wrap(sampler, effectiveRate(props)));
         customizer.addPropagatorCustomizer((propagator, props) -> withCallerBaggage(propagator, serviceName(config, props)));
-        customizer.addSpanExporterCustomizer((exporter, props) -> OtlpRetry.span(exporter));
+        customizer.addSpanExporterCustomizer((exporter, props) -> OtlpRetry.span(GenAiSpans.wrap(exporter, config.llmCaptureContent())));
         customizer.addMetricExporterCustomizer((exporter, props) -> OtlpRetry.metric(exporter));
         customizer.addLogRecordExporterCustomizer((exporter, props) -> OtlpRetry.log(exporter));
+        if (config.profilingEnabled()) {
+            // the resource carries the final service / env / version / host for the profile metadata
+            customizer.addResourceCustomizer((resource, props) -> {
+                ProfilerBootstrap.startIfEnabled(config, resource, props);
+                return resource;
+            });
+        }
         if (config.dsn() == null) {
             LOG.log(Level.INFO, "TaskTrooper: no DSN configured (TROOPER_DSN / trooper.dsn); using the OTel exporter settings as-is");
         }

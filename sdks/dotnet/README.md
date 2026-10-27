@@ -8,7 +8,7 @@ Targets `net8.0`, `net9.0`, `net10.0`. OpenTelemetry 1.20.
 
 | Package | Purpose |
 |---|---|
-| `TaskTrooper.Telemetry` | Core: `AddTaskTrooper()`, DSN, OTLP export with retry, sampler, entry route / caller propagation, HttpClient + SqlClient instrumentation; listens to Npgsql, RabbitMQ.Client 7 and MassTransit sources when present |
+| `TaskTrooper.Telemetry` | Core: `AddTaskTrooper()`, DSN, OTLP export with retry, sampler, entry route / caller propagation, HttpClient + SqlClient instrumentation; listens to Npgsql, RabbitMQ.Client 7, MassTransit and GenAI (Microsoft.Extensions.AI, OpenAI) sources when present; `TrooperLlm` manual LLM spans |
 | `TaskTrooper.Telemetry.AspNetCore` | Server spans (minimal APIs, controllers, MVC, gRPC services) with `trooper.route`, caller, exceptions; Kestrel/hosting metrics |
 | `TaskTrooper.Telemetry.Kafka` | Confluent.Kafka consumer/producer helpers (entry spans, header propagation) |
 | `TaskTrooper.Telemetry.RabbitMQ` | RabbitMQ.Client 7 consumer conventions, attempt from `x-delivery-count`/`x-death`, `tt.svc` on publish |
@@ -82,6 +82,45 @@ builder.Services.AddTaskTrooper()
 
 Npgsql (8+), SqlClient and HttpClient (incl. gRPC clients) need nothing extra.
 
+## AI / LLM monitoring (ADR-023, contracts §25)
+
+LLM calls are exported as OTel GenAI client spans (`gen_ai.operation.name`, `gen_ai.provider.name`, models,
+`gen_ai.usage.*`, `trooper.llm.ttft_ms`). `AddTaskTrooper()` listens by default (`EnableLlm`) to:
+
+| Source | Library |
+|---|---|
+| `Experimental.Microsoft.Extensions.AI` (+ `Microsoft.Extensions.AI*`) | `Microsoft.Extensions.AI`: `chatClient.AsBuilder().UseOpenTelemetry().Build()` (also embedding generators) |
+| `OpenAI.*` | OpenAI .NET SDK — the SDK turns on its `OpenAI.Experimental.EnableOpenTelemetry` AppContext switch (unless you set it) |
+| `Azure.AI.Inference*`, `Microsoft.SemanticKernel*` | emitted when those libraries' own telemetry is enabled |
+
+```csharp
+IChatClient chat = new OpenAI.Chat.ChatClient("gpt-4o-mini", key).AsIChatClient()
+    .AsBuilder().UseOpenTelemetry().Build();
+```
+
+Any other client — manual helper (`ActivitySource` `TaskTrooper.Telemetry.Llm`):
+
+```csharp
+using var call = TrooperLlm.Start("anthropic", "claude-sonnet-4-5");      // operation defaults to "chat"
+await foreach (var chunk in stream) { call.FirstToken(); /* … */ }      // trooper.llm.ttft_ms
+call.ResponseModel(model).FinishReasons("end_turn")
+    .End(new LlmUsage(inputTokens, outputTokens, CacheReadInputTokens: cached));
+// on error: call.Fail(exception);   content: call.Prompt(text) / Completion(text) / InputMessages(json)
+```
+
+**Content (prompts / completions)** — `LlmCaptureContent` / `TROOPER_LLM_CAPTURE_CONTENT`:
+- `true`: `TrooperLlm` records content, and `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true` is set (when unset) —
+  M.E.AI's default for `EnableSensitiveData`. M.E.AI reads that variable once per process, so with the env var it applies
+  from `AddTaskTrooper()` on; if a telemetry chat client could be created earlier, set `EnableSensitiveData = true` in
+  `UseOpenTelemetry(configure: …)`.
+- `false`: content tags (`gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions`, tool call
+  arguments/results, legacy `gen_ai.prompt*`/`gen_ai.completion*`) are removed from every GenAI span, even if a library
+  recorded them.
+- unset (default): nothing recorded by `TrooperLlm`; an explicit `EnableSensitiveData = true` in M.E.AI is respected.
+
+`TrooperGenAIProcessor` also fills `gen_ai.provider.name` from the older `gen_ai.system` and converts M.E.AI's
+`gen_ai.response.time_to_first_chunk` (seconds) to `trooper.llm.ttft_ms`.
+
 ## Configuration
 
 Order (later wins): environment variables → `TaskTrooper` config section (`appsettings.json`) → code delegate.
@@ -97,6 +136,8 @@ Order (later wins): environment variables → `TaskTrooper` config section (`app
 | `EnableTraces` / `EnableMetrics` / `EnableLogs` | — | `true` | Per-signal export |
 | `ExportTimeout` | — | 10 s | Per HTTP attempt |
 | `MaxExportRetries` | — | 5 | 429/5xx/network: exponential backoff 1 s → 60 s with jitter, honours `Retry-After`; other 4xx drop the batch |
+| `EnableLlm` | — | `true` | Listen to the GenAI ActivitySources above |
+| `LlmCaptureContent` | `TROOPER_LLM_CAPTURE_CONTENT` | unset | `true` / `false` / unset, see AI / LLM monitoring |
 | `ResourceAttributes`, `Sources`, `Meters` | — | — | Extra resource attributes / ActivitySources / Meters |
 
 ```json
@@ -123,3 +164,5 @@ No local `dotnet` needed — `./build.sh` runs in `mcr.microsoft.com/dotnet/sdk:
 ```
 
 Samples: `samples/MinimalApi` (ASP.NET Core) and `samples/KafkaWorker` (worker service consuming `orders.created`).
+
+Continuous profiling is not available in the .NET SDK yet (contracts §24; Go / JVM / Node only).
