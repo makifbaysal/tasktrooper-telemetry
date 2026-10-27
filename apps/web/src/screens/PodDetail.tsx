@@ -1,11 +1,13 @@
+import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { Boxes, FileText, ListTree, Wrench } from 'lucide-react';
 import { TimeSeries } from '@/components/charts';
-import { Button, Card, EmptyState, KeyValues, MetricCard, PageHeader, Section, Table } from '@/components/ui';
+import { Button, Card, EmptyState, KeyValues, MetricCard, PageHeader, Section, Segmented, Table } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
-import { k8sPodDetails, services, timestamps, useData, type K8sPodDetails } from '@/data';
+import { endpointsFor, k8sPodDetails, podTraces, services, timestamps, useData, type K8sPodDetails } from '@/data';
 import { int, pct } from '@/lib/format';
 import { LINE_SLOTS } from './shared';
+import { TraceTable } from './apm';
 import { EventList, InfraStatusBadge, PodPhaseBadge, ServiceLink, bytes, clusterUrl, cores, hostUrl } from './k8sShared';
 
 /** usage / request / limit — one unit per chart, fixed slots. */
@@ -38,12 +40,24 @@ export function PodDetail() {
   const { cluster = '', uid = '' } = useParams();
   const { range } = useApp();
   const nav = useNavigate();
+  const [traceFilter, setTraceFilter] = useState<'all' | 'errors'>('all');
   const p = k8sPodDetails(uid, range);
+  // hooks above; everything below may return early
   if (!p) return <EmptyState icon={<Boxes />} title="Pod not found">It may have been deleted, or it has not reported in the selected range.</EmptyState>;
   const ts = timestamps(range);
   const svc = services.find((s) => s.id === p.service || s.name === p.service);
   const d = diagnosis(p);
   const clusterName = p.cluster || cluster;
+  const traces = podTraces({ name: p.name, namespace: p.namespace, service: p.service }, range, { errors: traceFilter === 'errors', limit: 20 });
+  const eps = svc ? endpointsFor(svc.id) : [];
+  const endpointUrl = (t: { method?: string; route?: string }) => {
+    const ep = svc && eps.find((e) => !e.sub && e.method === t.method && e.route === t.route);
+    return ep && svc ? `/services/${encodeURIComponent(svc.id)}/endpoints/${encodeURIComponent(ep.id)}` : undefined;
+  };
+  // server-side pod filter on the service's log tab (GET /logs?pod=&namespace=)
+  const logsUrl = (extra: Record<string, string> = {}) => svc
+    ? `/services/${encodeURIComponent(svc.id)}?${new URLSearchParams({ tab: 'logs', pod: p.name, ...(p.namespace ? { namespace: p.namespace } : {}), ...extra })}`
+    : undefined;
 
   return (
     <>
@@ -55,8 +69,8 @@ export function PodDetail() {
           {p.node ? <Link to={hostUrl(p.node)} className="muted">node {p.node}</Link> : <span className="muted">not scheduled</span>}
         </span>}
         actions={svc && <>
-          <Button icon={<FileText size={14} />} onClick={() => nav(`/services/${svc.id}?tab=logs&q=${encodeURIComponent(p.name)}`)}>Logs</Button>
-          <Button icon={<ListTree size={14} />} onClick={() => nav(`/services/${svc.id}?tab=endpoints`)}>Traces</Button>
+          <Button icon={<FileText size={14} />} onClick={() => nav(logsUrl()!)}>Logs</Button>
+          <Button icon={<ListTree size={14} />} onClick={() => document.getElementById('pod-traces')?.scrollIntoView({ behavior: 'smooth' })}>Traces</Button>
         </>} />
 
       {d && (
@@ -84,6 +98,21 @@ export function PodDetail() {
           </MetricCard>
         </div>
       </Section>
+
+      <div id="pod-traces">
+        <Section title="Traces" subtitle={`recent requests served by this pod${p.service ? ` · ${p.service}` : ''} (span resource k8s.pod.name)`}
+          actions={<Segmented label="Traces" value={traceFilter} onChange={setTraceFilter} options={[{ id: 'all', label: 'All' }, { id: 'errors', label: 'Errors only' }]} />}>
+          <Card flush>
+            <TraceTable rows={traces} endpointUrl={endpointUrl}
+              onRowClick={svc ? (t) => nav(logsUrl({ traceId: t.id })!) : undefined}
+              actions={svc ? (t) => <Link to={logsUrl({ traceId: t.id })!} onClick={(e) => e.stopPropagation()} style={{ fontSize: 'var(--text-sm)', whiteSpace: 'nowrap' }}>Logs</Link> : undefined}
+              empty={<p className="muted" style={{ padding: 'var(--space-4)' }}>
+                {traceFilter === 'errors' ? 'No failed requests on this pod in the selected range.'
+                  : 'No traces from this pod. Set OTEL_RESOURCE_ATTRIBUTES=k8s.pod.name=$(POD_NAME),k8s.namespace.name=$(POD_NAMESPACE) on the container so spans carry the pod.'}
+              </p>} />
+          </Card>
+        </Section>
+      </div>
 
       <Section title="Containers">
         <Card flush>

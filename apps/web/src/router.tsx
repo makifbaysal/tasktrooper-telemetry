@@ -73,5 +73,8 @@ export const router = createBrowserRouter([
 function LogsRedirect() {
   const [params] = useSearchParams();
   const svc = params.get('service');
-  return <Navigate to={svc ? `/services/${svc}?tab=logs` : '/services'} replace />;
+  // keep the search and the server-side filters (?q=, ?pod=, ?namespace=, ?traceId=) on the service's log tab
+  const keep = new URLSearchParams({ tab: 'logs' });
+  for (const k of ['q', 'pod', 'namespace', 'traceId']) { const v = params.get(k); if (v) keep.set(k, v); }
+  return <Navigate to={svc ? `/services/${encodeURIComponent(svc)}?${keep}` : '/services'} replace />;
 }

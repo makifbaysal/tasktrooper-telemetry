@@ -103,6 +103,7 @@ type fnMeta struct {
 	meta    map[string]any
 	integ   int64
 	integNm string
+	parent  string // meta.parent: slug of the Azure app row of a per-function row
 }
 
 const fnSelect = `SELECT f.id, f.slug, f.name, f.provider, coalesce(f.app, ''), f.region, f.runtime, f.memory_mb::bigint, f.timeout_s::bigint, f.arch,
@@ -128,6 +129,9 @@ func (d *DB) fnMetas(ctx context.Context, where string, args ...any) ([]fnMeta, 
 			m.f.Triggers = []string{}
 		}
 		_ = json.Unmarshal(meta, &m.meta)
+		if m.f.Provider == "azure" {
+			m.parent, _ = m.meta["parent"].(string)
+		}
 		out = append(out, m)
 	}
 	return out, rows.Err()
@@ -233,9 +237,61 @@ func metaFunctions(meta map[string]any) []string {
 	return out
 }
 
-// ServerlessFilter narrows GET /serverless/functions.
+// ServerlessFilter narrows GET /serverless/functions. Parent (id or slug of an Azure app row) keeps its per-function
+// rows only.
 type ServerlessFilter struct {
-	Provider, Q string
+	Provider, Q, Parent string
+}
+
+// parentIDs resolves the parent slugs of metas to row ids (same project).
+func (d *DB) parentIDs(ctx context.Context, metas []fnMeta) (map[string]string, error) {
+	out := map[string]string{}
+	var slugs []string
+	for _, m := range metas {
+		if m.parent != "" {
+			slugs = append(slugs, m.parent)
+		}
+	}
+	if len(slugs) == 0 {
+		return out, nil
+	}
+	rows, err := d.pg.Query(ctx, `SELECT slug, id FROM serverless_functions WHERE {{tenant}} AND slug = ANY($1)`, slugs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var slug string
+		var id int64
+		if err := rows.Scan(&slug, &id); err != nil {
+			return nil, err
+		}
+		out[slug] = strconv.FormatInt(id, 10)
+	}
+	return out, rows.Err()
+}
+
+// SummaryRows applies the no-double-count rule of GET /serverless/summary (contracts §22, api README): an Azure app
+// row carries app-level totals, so every per-function row (meta.parent set) is left out of the metric sums
+// (invocations, errors, throttles, cold starts, cost), and an app row that has per-function rows in fns is not
+// counted in `functions` (its functions are). Returns per row: count it as a function, add its metrics.
+func SummaryRows(fns []model.ServerlessFunction) (countFn, addMetrics []bool) {
+	ids := map[string]bool{}
+	hasChild := map[string]bool{}
+	for _, f := range fns {
+		ids[f.ID] = true
+	}
+	for _, f := range fns {
+		if f.ParentID != "" && ids[f.ParentID] {
+			hasChild[f.ParentID] = true
+		}
+	}
+	countFn, addMetrics = make([]bool, len(fns)), make([]bool, len(fns))
+	for i, f := range fns {
+		countFn[i] = !hasChild[f.ID]
+		addMetrics[i] = f.ParentID == "" && f.ParentSlug == ""
+	}
+	return countFn, addMetrics
 }
 
 func (d *DB) functions(ctx context.Context, q Q, metas []fnMeta) ([]model.ServerlessFunction, error) {
@@ -270,10 +326,18 @@ func (d *DB) functions(ctx context.Context, q Q, metas []fnMeta) ([]model.Server
 			return nil, err
 		}
 	}
+	parents, err := d.parentIDs(ctx, metas)
+	if err != nil {
+		return nil, err
+	}
 	pr := prices()
 	out := make([]model.ServerlessFunction, 0, len(metas))
 	for _, m := range metas {
 		f := m.f
+		f.ParentID, f.ParentSlug = parents[m.parent], m.parent
+		if f.Provider == "azure" && m.parent == "" {
+			f.AppInsights, _ = m.meta["appInsights"].(string)
+		}
 		t := tot[f.Slug]
 		f.Invocations, f.Errors, f.Throttles, f.P95Ms, f.P99Ms, f.ConcurrencyMax = t.inv, t.errs, t.thr, t.p95, t.p99, t.conc
 		f.ErrorRate = div(t.errs, t.inv)
@@ -302,6 +366,15 @@ func (d *DB) ListFunctions(ctx context.Context, q Q, f ServerlessFilter) ([]mode
 		n := "$" + strconv.Itoa(len(args))
 		where += " AND (f.name ILIKE " + n + " OR f.slug ILIKE " + n + " OR f.service ILIKE " + n + " OR coalesce(f.app, '') ILIKE " + n + ")"
 	}
+	if p := strings.TrimSpace(f.Parent); p != "" {
+		col := "p.slug"
+		if n, err := strconv.ParseInt(p, 10, 64); err == nil && n > 0 {
+			col = "p.id::text"
+		}
+		args = append(args, p)
+		where += " AND f.provider = 'azure' AND f.meta->>'parent' = (SELECT p.slug FROM serverless_functions p WHERE p.project_id = f.project_id AND " +
+			col + " = $" + strconv.Itoa(len(args)) + ")"
+	}
 	metas, err := d.fnMetas(ctx, where, args...)
 	if err != nil {
 		return nil, err
@@ -320,20 +393,27 @@ func (d *DB) ServerlessSummary(ctx context.Context, q Q) (*model.ServerlessSumma
 	if err != nil {
 		return nil, err
 	}
-	s := &model.ServerlessSummary{Functions: len(fns), ByProvider: []model.ServerlessProvider{}}
+	s := &model.ServerlessSummary{ByProvider: []model.ServerlessProvider{}}
 	by := map[string]*model.ServerlessProvider{}
-	for _, f := range fns {
-		s.Invocations += f.Invocations
-		s.Errors += f.Errors
-		s.Throttles += f.Throttles
-		s.ColdStarts += f.ColdStarts
-		s.CostUSD += f.CostUSD
+	countFn, addMetrics := SummaryRows(fns)
+	for i, f := range fns {
 		p, ok := by[f.Provider]
 		if !ok {
 			p = &model.ServerlessProvider{Provider: f.Provider}
 			by[f.Provider] = p
 		}
-		p.Functions++
+		if countFn[i] {
+			s.Functions++
+			p.Functions++
+		}
+		if !addMetrics[i] {
+			continue
+		}
+		s.Invocations += f.Invocations
+		s.Errors += f.Errors
+		s.Throttles += f.Throttles
+		s.ColdStarts += f.ColdStarts
+		s.CostUSD += f.CostUSD
 		p.Invocations += f.Invocations
 		p.CostUSD += f.CostUSD
 	}
@@ -442,11 +522,16 @@ func (d *DB) GetFunction(ctx context.Context, q Q, id string) (*model.Serverless
 		}
 	}
 	out.Series.ColdStarts = set(q.W, []string{"coldStarts"}, [][]float64{cold})
-	if m.f.Provider == "azure" {
+	if m.f.Provider == "azure" && m.parent == "" {
 		out.Functions = metaFunctions(m.meta)
 		if out.Functions == nil {
 			out.Functions = []string{}
 		}
+		kids, err := d.ListFunctions(ctx, q, ServerlessFilter{Parent: strconv.FormatInt(m.id, 10)})
+		if err != nil {
+			return nil, err
+		}
+		out.Children = kids
 	}
 	if m.integ > 0 {
 		out.Integration = &model.IntegrationRef{ID: strconv.FormatInt(m.integ, 10), Name: m.integNm}

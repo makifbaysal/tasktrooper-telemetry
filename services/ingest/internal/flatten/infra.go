@@ -12,8 +12,8 @@ import (
 	"github.com/tasktrooper/telemetry/services/pkg/tenant"
 )
 
-// Host / container / process / Kubernetes / serverless families (contracts §20, §21;
-// deploy/clickhouse/003_infra_k8s_faas.sql). Every family is one AggregatingMergeTree table keyed by its dimension
+// Host / container / process / Kubernetes / serverless / GPU families (contracts §20–§22;
+// deploy/clickhouse/003_infra_k8s_faas.sql, 004_gpu.sql). Every family is one AggregatingMergeTree table keyed by its dimension
 // columns + minute; gauges are merged with max inside a flush, unreported value columns are -Inf (contracts §5) and
 // state columns (pod phase / reason) keep the value of the newest data point.
 
@@ -28,6 +28,7 @@ const (
 	FamK8sPods
 	FamK8sWorkloads
 	FamFaaS
+	FamGPUs
 	numFamilies
 )
 
@@ -42,6 +43,7 @@ type infraDim struct {
 	col   string
 	attrs []string // first non-empty attribute (data point first, then resource)
 	limit int      // max length (0 = MaxAttrValueLen)
+	uint  int      // 8 / 32 = UInt8 / UInt32 column parsed from the attribute (0 = String)
 }
 
 type familySpec struct {
@@ -49,7 +51,6 @@ type familySpec struct {
 	dims   []infraDim
 	states []infraDim
 	vals   []string
-	pidDim int // index of the UInt32 dimension (processes.pid), -1 = none
 }
 
 func d(col string, attrs ...string) infraDim { return infraDim{col: col, attrs: attrs} }
@@ -67,31 +68,34 @@ var (
 )
 
 var families = [numFamilies]familySpec{
-	FamHosts: {table: "hosts_1m", pidDim: -1,
+	FamHosts: {table: "hosts_1m",
 		dims: []infraDim{dCluster, dHost, d("host_id", "host.id"), d("os", "os.type"), d("arch", "host.arch"), dNode},
 		vals: []string{"cpu", "cpu_cores", "memory", "memory_bytes", "disk", "disk_read", "disk_write", "net_in", "net_out", "load1", "uptime_s"}},
-	FamContainers: {table: "containers_1m", pidDim: -1,
+	FamContainers: {table: "containers_1m",
 		dims: []infraDim{dCluster, dHost, dNamespace, dPod, dPodUID, d("container", "container.name"), d("container_id", "container.id"),
 			d("image", "container.image.name"), dWlKind, dWorkload, dService},
 		vals: []string{"cpu", "cpu_limit", "memory_bytes", "memory_limit", "restarts", "net_in", "net_out", "throttled"}},
-	FamProcesses: {table: "processes_1m", pidDim: 2,
-		dims: []infraDim{dHost, d("container_id", "container.id"), d("pid", "process.pid"), d("exe", "process.executable.name"),
+	FamProcesses: {table: "processes_1m",
+		dims: []infraDim{dHost, d("container_id", "container.id"), {col: "pid", attrs: []string{"process.pid"}, uint: 32}, d("exe", "process.executable.name"),
 			{col: "command", attrs: []string{"process.command"}, limit: maxCommandLen}},
 		vals: []string{"cpu", "memory_bytes", "threads", "fds"}},
-	FamK8sNodes: {table: "k8s_nodes_1m", pidDim: -1,
+	FamK8sNodes: {table: "k8s_nodes_1m",
 		dims: []infraDim{dCluster, dNode},
 		vals: []string{"ready", "allocatable_cpu", "allocatable_memory", "pods"}},
-	FamK8sPods: {table: "k8s_pods_1m", pidDim: -1,
+	FamK8sPods: {table: "k8s_pods_1m",
 		dims:   []infraDim{dCluster, dNamespace, dPod, dPodUID, dNode, dWlKind, dWorkload, dService},
 		states: []infraDim{d("phase", "k8s.pod.phase"), d("reason", "trooper.k8s.pod.reason")},
 		vals:   []string{"ready", "restarts", "cpu_request", "cpu_limit", "memory_request", "memory_limit"}},
-	FamK8sWorkloads: {table: "k8s_workloads_1m", pidDim: -1,
+	FamK8sWorkloads: {table: "k8s_workloads_1m",
 		dims: []infraDim{dCluster, dNamespace, d("kind", "trooper.k8s.workload.kind"), d("name", "trooper.k8s.workload.name")},
 		vals: []string{"desired", "ready", "available", "updated"}},
-	FamFaaS: {table: "faas_1m", pidDim: -1,
+	FamFaaS: {table: "faas_1m",
 		dims: []infraDim{d("function_id", "trooper.faas.id"), d("provider", "cloud.provider"), d("region", "cloud.region")},
 		vals: []string{"invocations", "errors", "throttles", "duration_avg", "duration_max", "duration_p95", "duration_p99",
 			"concurrency", "iterator_age_ms", "memory_bytes", "execution_units"}},
+	FamGPUs: {table: "gpus_1m",
+		dims: []infraDim{dCluster, dHost, {col: "gpu_index", attrs: []string{"gpu.index"}, uint: 8}, d("gpu_uuid", "gpu.uuid"), d("model", "gpu.model")},
+		vals: []string{"utilization", "memory", "memory_bytes", "temperature_c", "power_w"}},
 }
 
 type infraCol struct {
@@ -124,6 +128,9 @@ var infraMetricCol = func() map[string]infraCol {
 			"trooper.faas.duration.p95": "duration_p95", "trooper.faas.duration.p99": "duration_p99",
 			"trooper.faas.concurrency": "concurrency", "trooper.faas.iterator_age_ms": "iterator_age_ms",
 			"trooper.faas.memory_bytes": "memory_bytes", "trooper.faas.execution_units": "execution_units"},
+		FamGPUs: {"trooper.host.gpu.utilization": "utilization", "trooper.host.gpu.memory": "memory",
+			"trooper.host.gpu.memory_bytes": "memory_bytes", "trooper.host.gpu.temperature_c": "temperature_c",
+			"trooper.host.gpu.power_w": "power_w"},
 	}
 	out := map[string]infraCol{}
 	for fam, m := range names {
@@ -186,13 +193,17 @@ func (r *InfraRow) Values() []any {
 	s := &families[r.Fam]
 	v := make([]any, 0, 3+len(s.dims)+len(s.states)+len(s.vals))
 	v = append(v, r.Key.Org, r.Key.Project)
-	for i := range s.dims {
-		if i == s.pidDim {
-			pid, _ := strconv.ParseUint(r.Key.Dims[i], 10, 32)
-			v = append(v, uint32(pid))
-			continue
+	for i, dim := range s.dims {
+		switch dim.uint {
+		case 32:
+			n, _ := strconv.ParseUint(r.Key.Dims[i], 10, 32)
+			v = append(v, uint32(n))
+		case 8:
+			n, _ := strconv.ParseUint(r.Key.Dims[i], 10, 8)
+			v = append(v, uint8(n))
+		default:
+			v = append(v, r.Key.Dims[i])
 		}
-		v = append(v, r.Key.Dims[i])
 	}
 	v = append(v, time.Unix(r.Key.Minute, 0).UTC())
 	for i := range s.states {

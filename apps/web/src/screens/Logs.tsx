@@ -7,7 +7,7 @@ import {
   useDrawer, type Tone,
 } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
-import { allLogs, logsFor, series, services, timestamps, type LogLine, type TimeRange } from '@/data';
+import { allLogs, logsFor, searchLogs, series, services, timestamps, type LogLine, type TimeRange } from '@/data';
 import { can } from '@/data/auth';
 import { ago, clock, compact, dateTime, int } from '@/lib/format';
 
@@ -79,11 +79,18 @@ function lineContext(l: LogLine) {
 export function LogExplorer({ serviceId }: { serviceId?: string }) {
   const nav = useNavigate();
   const { range, dataVersion } = useApp();
+  // ?q= pre-fills the search; ?pod= / ?namespace= / ?traceId= (pod page) are server-side filters (GET /logs)
+  const [params, setParams] = useSearchParams();
+  const pod = params.get('pod') ?? '';
+  const namespace = params.get('namespace') ?? '';
+  const traceId = params.get('traceId') ?? '';
+  const scoped = !!(pod || namespace || traceId);
   // allLogs is hydrated in place, so the data version is part of the key.
-  const logs = useMemo(() => (serviceId ? logsFor(serviceId) : [...allLogs]), [serviceId, dataVersion]);
-  // ?q= pre-fills the search (pod page → "Logs" link)
-  const [initialQ] = useSearchParams();
-  const [q, setQ] = useState(() => initialQ.get('q') ?? '');
+  const logs = useMemo(() => (scoped
+    ? searchLogs(range, { serviceId, pod: pod || undefined, namespace: namespace || undefined, traceId: traceId || undefined, limit: 500 })
+    : serviceId ? logsFor(serviceId) : [...allLogs]), [serviceId, dataVersion, scoped, pod, namespace, traceId, range]);
+  const clearScope = () => setParams((p) => { const n = new URLSearchParams(p); ['pod', 'namespace', 'traceId'].forEach((k) => n.delete(k)); return n; }, { replace: true });
+  const [q, setQ] = useState(() => params.get('q') ?? '');
   const [levels, setLevels] = useState<Set<Level>>(new Set(['info', 'warn', 'error']));
   const [svc, setSvc] = useState<string | null>(null);
   const [src, setSrc] = useState<string | null>(null);
@@ -119,6 +126,15 @@ export function LogExplorer({ serviceId }: { serviceId?: string }) {
             </div>
             {serviceId && can('write') && <Button icon={<Bell size={14} />} onClick={() => nav('/alerts/new?kind=log_match')}>Alert on this query</Button>}
           </div>
+          {scoped && (
+            <div className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap', fontSize: 'var(--text-sm)' }}>
+              <span className="muted">Filtered to</span>
+              {pod && <Badge>pod {namespace ? `${namespace}/` : ''}{pod}</Badge>}
+              {!pod && namespace && <Badge>namespace {namespace}</Badge>}
+              {traceId && <Badge>trace <span className="mono">{traceId.slice(0, 12)}</span></Badge>}
+              <Button size="sm" onClick={clearScope}>Clear</Button>
+            </div>
+          )}
           <Columns timestamps={ts} height={110} format={(v) => compact(v)} series={[
             { id: 'info', label: 'info', data: series(`log-info-${seed}`, range, { base: 1800 * scale }), color: 'var(--series-1)' },
             { id: 'warn', label: 'warn', data: series(`log-warn-${seed}`, range, { base: 160 * scale, noise: 0.3 }), color: 'var(--series-4)' },

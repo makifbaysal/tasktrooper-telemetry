@@ -6,9 +6,9 @@ import { Badge, Button, Callout, Card, EmptyState, KeyValues, PageHeader, Sectio
 import { useApp } from '@/components/layout/context';
 import { integrationOf, isApi, services, timestamps, useData } from '@/data';
 import { pick } from '@/data/api/apm';
-import { FAAS_PROVIDER_LABEL, serverlessFunction, type FaasRecentError } from '@/data/serverless';
+import { FAAS_PROVIDER_LABEL, faasRank, serverlessFunction, serverlessFunctions, type FaasFunction, type FaasRecentError } from '@/data/serverless';
 import { ago, compact, dateTime, ms, pct } from '@/lib/format';
-import { FaasStatusBadge, TriggerBadge, Triggers, usd } from './Serverless';
+import { AppInsightsBadge, FaasStatusBadge, TriggerBadge, Triggers, usd } from './Serverless';
 
 export function FunctionDetail() {
   useData();
@@ -16,7 +16,15 @@ export function FunctionDetail() {
   const nav = useNavigate();
   const { range } = useApp();
   const d = serverlessFunction(functionId, range);
-  const crumbs = [{ label: 'Serverless', to: '/infrastructure/serverless' }];
+  const list = serverlessFunctions(range);
+  const crumbs: { label: string; to?: string }[] = [{ label: 'Serverless', to: '/infrastructure/serverless' }];
+  // Azure per-function row → breadcrumb through its Function App
+  const parentId = d?.fn.parentId;
+  if (parentId) {
+    const parent = list.find((x) => x.id === parentId);
+    crumbs.push({ label: parent?.name ?? d?.fn.app ?? 'Function app', to: `/infrastructure/serverless/${encodeURIComponent(parentId)}` });
+  }
+  const openFn = (x: FaasFunction) => nav(`/infrastructure/serverless/${encodeURIComponent(x.id)}`);
 
   if (!d) {
     return (
@@ -46,7 +54,8 @@ export function FunctionDetail() {
     <>
       <PageHeader title={f.name} crumbs={[...crumbs, { label: f.name }]}
         subtitle={<span className="row" style={{ gap: 'var(--space-3)', flexWrap: 'wrap' }}>
-          <FaasStatusBadge status={f.status} /><span>{FAAS_PROVIDER_LABEL[f.provider]}</span><span className="muted">{f.runtime} · {f.region}</span>
+          <FaasStatusBadge status={f.status} /><span>{FAAS_PROVIDER_LABEL[f.provider]}{f.parentId ? ' · function' : ''}</span><span className="muted">{f.runtime} · {f.region}</span>
+          <AppInsightsBadge state={f.appInsights} />
         </span>}
         actions={<Button variant="primary" icon={<Bell size={14} />} onClick={createAlert}>Create alert</Button>} />
 
@@ -66,7 +75,9 @@ export function FunctionDetail() {
           <StatTile label="Invocations" value={compact(f.invocations)} trend={inv.length > 1 ? inv : undefined} />
           <StatTile label="Error rate" value={f.invocations ? pct(f.errorRate) : '—'} />
           <StatTile label="p95 duration" value={f.invocations ? ms(f.p95Ms) : '—'} unit={timeoutMs ? `of ${f.timeoutS} s` : undefined} />
-          <StatTile label="Cost" value={usd(f.costUsd)} unit="est." />
+          {f.parentId && f.costUsd === 0
+            ? <StatTile label="Cost" value="—" unit="billed on the app" />
+            : <StatTile label="Cost" value={usd(f.costUsd)} unit="est." />}
         </div>
       </Section>
 
@@ -102,6 +113,21 @@ export function FunctionDetail() {
           </Card>
         </div>
       </Section>
+
+      {d.children && d.children.length > 0 && (
+        <Section title="Functions" subtitle={`${d.children.length} functions · per-function metrics from Application Insights; the charts above are app totals`}>
+          <Card flush>
+            <Table<FaasFunction> rows={d.children} rowKey={(x) => x.id} onRowClick={openFn} defaultSort={{ key: 'inv', dir: 'desc' }} columns={[
+              { key: 'name', header: 'Function', sortValue: (x) => x.name, render: (x) => <span style={{ fontWeight: 'var(--weight-medium)' }}>{x.name}</span> },
+              { key: 'trg', header: 'Trigger', render: (x) => <Triggers triggers={x.triggers} /> },
+              { key: 'status', header: 'Status', sortValue: (x) => faasRank(x.status), render: (x) => <FaasStatusBadge status={x.status} /> },
+              { key: 'inv', header: 'Invocations', numeric: true, sortValue: (x) => x.invocations, render: (x) => compact(x.invocations) },
+              { key: 'err', header: 'Error rate', numeric: true, sortValue: (x) => x.errorRate, render: (x) => (x.invocations ? pct(x.errorRate) : <span className="muted">—</span>) },
+              { key: 'p95', header: 'p95', numeric: true, sortValue: (x) => x.p95Ms, render: (x) => (x.invocations ? ms(x.p95Ms) : <span className="muted">—</span>) },
+            ]} />
+          </Card>
+        </Section>
+      )}
 
       <Section title="Recent errors" subtitle="From the function's traces">
         <Card flush>
@@ -142,7 +168,7 @@ export function FunctionDetail() {
                 : <span className="muted">—</span>],
               ['Slug', <span key="sl" className="mono" style={{ overflowWrap: 'anywhere' }}>{f.slug}</span>],
             ]} />
-            {d.functions && d.functions.length > 0 && (
+            {d.functions && d.functions.length > 0 && !(d.children && d.children.length > 0) && (
               <div style={{ marginTop: 'var(--space-3)' }}>
                 <div className="field__label" style={{ marginBottom: 'var(--space-1)' }}>Functions in this app</div>
                 <div className="list">

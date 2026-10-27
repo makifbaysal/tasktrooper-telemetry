@@ -338,7 +338,13 @@ func (d *DB) ListHosts(ctx context.Context, q Q, f InfraFilter) ([]model.Host, e
 	if err != nil {
 		return nil, err
 	}
-	return finishHosts(q, f, hosts, ctrs, nodes, spark), nil
+	gpus, err := d.hostGPUs(ctx, q, f.Cluster, "")
+	if err != nil {
+		return nil, err
+	}
+	out := finishHosts(q, f, hosts, ctrs, nodes, spark)
+	AttachGPUs(out, gpus)
+	return out, nil
 }
 
 func finishHosts(q Q, f InfraFilter, hosts []hostRow, ctrs []containerRow, nodes []nodeRow, spark map[string][][]float64) []model.Host {
@@ -403,9 +409,17 @@ func (d *DB) GetHost(ctx context.Context, q Q, host string) (*model.HostDetail, 
 		s = make([][]float64, 5)
 	}
 	hl := finishHosts(q, InfraFilter{}, hosts, ctrs, nodes, map[string][][]float64{host: {s[0], s[1]}})
+	gpus, err := d.hostGPUs(ctx, q, "", host)
+	if err != nil {
+		return nil, err
+	}
+	AttachGPUs(hl, gpus)
 	out := &model.HostDetail{Host: hl[0], ContainerList: []model.Container{}, Services: []string{}}
 	out.Series = model.HostSeries{CPU: set(q.W, []string{"cpu"}, s[0:1]), Memory: set(q.W, []string{"memory"}, s[1:2]),
 		Disk: set(q.W, []string{"disk"}, s[2:3]), Network: set(q.W, []string{"in", "out"}, s[3:5])}
+	if out.Series.GPU, err = d.gpuSeries(ctx, q.W, host, out.GPUs); err != nil {
+		return nil, err
+	}
 	svc := map[string]bool{}
 	for _, c := range ctrs {
 		out.ContainerList = append(out.ContainerList, c.c)

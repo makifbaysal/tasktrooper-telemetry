@@ -94,7 +94,7 @@ func (s *Server) phase6Routes(r chi.Router) {
 			s.fail(w, r, store.Invalid("provider must be aws|azure"))
 			return
 		}
-		v, err := s.Store.ListFunctions(r.Context(), q, store.ServerlessFilter{Provider: p, Q: qs(r, "q")})
+		v, err := s.Store.ListFunctions(r.Context(), q, store.ServerlessFilter{Provider: p, Q: qs(r, "q"), Parent: qs(r, "parent")})
 		s.reply(w, r, v, err)
 	}))
 	r.Get("/serverless/functions/{id}", s.withQ(func(w http.ResponseWriter, r *http.Request, q store.Q) {

@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { AlertTriangle, ArrowRight, Bell, FileCode2, Play, Sparkles } from 'lucide-react';
 import { BreakdownBar, Columns, TimeSeries, seriesColor } from '@/components/charts';
 import {
-  Badge, Button, Callout, Card, CodeBlock, Drawer, DrawerSection, EmptyState, KeyValues, MetricCard, PageHeader, Section, StatusBadge, Table, useDrawer,
+  Badge, Button, Callout, Card, CodeBlock, Drawer, DrawerSection, EmptyState, KeyValues, MetricCard, PageHeader, Section, StatusBadge, useDrawer,
 } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
 import {
@@ -12,7 +12,7 @@ import {
   type CallerTraffic, type Dependency, type Endpoint, type LogLine, type TimeCategory,
 } from '@/data';
 import { ago, compact, dateTime, ms, pct } from '@/lib/format';
-import { CallerDrawer, DependencyDrawer, ErrorCell, epLabel, epRef, sourceLabel, latencyHint, latencySeries, statusSplit } from './apm';
+import { CallerDrawer, DependencyDrawer, ErrorCell, TraceTable, epLabel, epRef, sourceLabel, latencyHint, latencySeries, statusSplit } from './apm';
 import { AlertCount, AlertsBody, OpenIncidents } from './Alerts';
 import { CALLER_KIND_LABEL, CriticalityBadge, DEP_KIND_LABEL, callerColorFor, categoryOf } from './shared';
 import { RootCauseCard, diagnose } from './rca';
@@ -176,12 +176,7 @@ export function EndpointDetail() {
             </div>
           </Card>
           <Card title="Sample traces" subtitle="Click for the span waterfall" flush>
-            <Table rowKey={(t) => t.id} rows={traces} onRowClick={traceDrawer.open} columns={[
-              { key: 'id', header: 'Trace', render: (t) => <span className="mono">{t.id.slice(0, 12)}</span> },
-              { key: 's', header: 'Status', render: (t) => t.status >= 500 ? <StatusBadge status="critical" label={String(t.status)} /> : <Badge>{t.status}</Badge> },
-              { key: 'd', header: 'Duration', numeric: true, render: (t) => ms(t.dur) },
-              { key: 't', header: 'When', numeric: true, render: (t) => <span className="muted">{ago(t.ts)}</span> },
-            ]} />
+            <TraceTable rows={traces} onRowClick={traceDrawer.open} />
           </Card>
         </div>
       </Section>

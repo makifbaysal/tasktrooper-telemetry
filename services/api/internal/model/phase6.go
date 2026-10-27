@@ -123,6 +123,19 @@ type Host struct {
 	LastSeen    int64       `json:"lastSeen"`
 	Status      InfraStatus `json:"status"`
 	Spark       HostSpark   `json:"spark"`
+	GPUs        []HostGPU   `json:"gpus"` // latest minute per GPU (contracts §22); [] when none
+}
+
+// HostGPU is one GPU of a host (gpus_1m, latest minute): utilization / memory 0..1.
+type HostGPU struct {
+	Index        int     `json:"index"`
+	Model        string  `json:"model"`
+	UUID         string  `json:"uuid"`
+	Utilization  float64 `json:"utilization"`
+	Memory       float64 `json:"memory"`
+	MemoryBytes  float64 `json:"memoryBytes"`
+	TemperatureC float64 `json:"temperatureC"`
+	PowerW       float64 `json:"powerW"`
 }
 
 type HostProcess struct {
@@ -142,6 +155,7 @@ type HostSeries struct {
 	Memory  SeriesSet `json:"memory"`
 	Disk    SeriesSet `json:"disk"`
 	Network SeriesSet `json:"network"`
+	GPU     SeriesSet `json:"gpu"` // utilization 0..1 per GPU, ids gpu<index> (no series without GPUs)
 }
 
 type HostDetail struct {
@@ -363,6 +377,12 @@ type ServerlessFunction struct {
 	CostUSD        float64   `json:"costUsd"`
 	Status         string    `json:"status"` // ok | warning | critical | idle | missing
 	Spark          []float64 `json:"spark"`  // invocations per bucket
+	// ParentID is the id of the Azure function app row of a per-function row (meta.parent; contracts §22).
+	ParentID string `json:"parentId,omitempty"`
+	// ParentSlug is meta.parent (set even when the app row cannot be resolved); summary math only.
+	ParentSlug string `json:"-"`
+	// AppInsights is an Azure app row's meta.appInsights: connected | unavailable ('' = not probed yet).
+	AppInsights string `json:"appInsights,omitempty"`
 }
 
 type FunctionError struct {
@@ -390,5 +410,7 @@ type ServerlessFunctionDetail struct {
 	Series       FunctionSeries  `json:"series"`
 	RecentErrors []FunctionError `json:"recentErrors"`
 	Functions    []string        `json:"functions,omitempty"` // Azure: the app's functions
-	Integration  *IntegrationRef `json:"integration"`
+	// Children are the per-function rows of an Azure function app (App Insights; contracts §22); absent otherwise.
+	Children    []ServerlessFunction `json:"children,omitempty"`
+	Integration *IntegrationRef      `json:"integration"`
 }

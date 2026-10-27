@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
-import { Plug, SquareFunction } from 'lucide-react';
+import { Activity, Plug, SquareFunction } from 'lucide-react';
 import { Sparkline } from '@/components/charts';
 import { Badge, Button, Card, EmptyState, PageHeader, SearchInput, Section, Segmented, StatTile, StatusBadge, Table } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
@@ -24,6 +24,14 @@ export function FaasStatusBadge({ status }: { status: FaasStatus }) {
 /** USD estimate: cents under $1, two decimals under $100, whole dollars above. */
 export const usd = (v: number) => (v === 0 ? '$0' : v < 0.01 ? '<$0.01' : v < 100 ? `$${v.toFixed(2)}` : `$${Math.round(v).toLocaleString('en-US')}`);
 export const providerShort = (p: FaasProvider) => (p === 'aws' ? 'Lambda' : 'Azure');
+
+/** Azure Function App: per-function metrics from Application Insights (contracts §22). */
+export function AppInsightsBadge({ state }: { state?: 'connected' | 'unavailable' }) {
+  if (!state) return null;
+  return state === 'connected'
+    ? <span title="Per-function invocations, errors and duration from Application Insights"><Badge tone="accent" icon={<Activity aria-hidden />}>App Insights</Badge></span>
+    : <span title="No Application Insights component linked to this app (or no access): app-level metrics only"><Badge>No App Insights</Badge></span>;
+}
 
 /** One-line reason for a function in "Needs attention". */
 function problemOf(f: FaasFunction): string {
@@ -56,8 +64,18 @@ export function Serverless() {
   const open = (f: FaasFunction) => nav(`/infrastructure/serverless/${encodeURIComponent(f.id)}`);
   const bad = all.filter((f) => f.status === 'critical' || f.status === 'warning').sort((a, b) => faasRank(b.status) - faasRank(a.status));
   const needle = q.trim().toLowerCase();
-  const rows = all.filter((f) => (provider === 'all' || f.provider === provider)
-    && (!needle || `${f.name} ${f.service} ${f.region} ${f.runtime} ${f.triggers.join(' ')}`.toLowerCase().includes(needle)));
+  const matches = (f: FaasFunction) => (provider === 'all' || f.provider === provider)
+    && (!needle || `${f.name} ${f.app ?? ''} ${f.service} ${f.region} ${f.runtime} ${f.triggers.join(' ')}`.toLowerCase().includes(needle));
+  // Azure per-function rows are listed under their Function App (indented); an app shows when it or one of its functions matches
+  const ids = new Set(all.map((f) => f.id));
+  const kids = new Map<string, FaasFunction[]>();
+  for (const f of all) if (f.parentId && ids.has(f.parentId)) kids.set(f.parentId, [...(kids.get(f.parentId) ?? []), f]);
+  const childrenOf = (f: FaasFunction) => {
+    const ks = kids.get(f.id);
+    return ks && (matches(f) ? ks : ks.filter(matches));
+  };
+  const rows = all.filter((f) => !(f.parentId && ids.has(f.parentId)) && (matches(f) || (childrenOf(f)?.length ?? 0) > 0));
+  const shown = rows.length + rows.reduce((a, f) => a + (childrenOf(f)?.length ?? 0), 0);
   const providers = [...new Set(all.map((f) => f.provider))];
 
   const header = <PageHeader title="Serverless" subtitle="AWS Lambda functions and Azure Function Apps — invocations, errors, duration, cold starts and estimated cost" />;
@@ -107,19 +125,26 @@ export function Serverless() {
         </div>
       </Section>
 
-      <Section title="Functions" subtitle={`${rows.length} of ${all.length} · cost is an estimate from duration × memory and request price, free tier not deducted`}
+      <Section title="Functions" subtitle={`${shown} of ${all.length} · cost is an estimate from duration × memory and request price, free tier not deducted`}
         actions={<div className="row" style={{ gap: 'var(--space-2)' }}>
           {providers.length > 1 && <Segmented label="Provider" value={provider} onChange={setProvider}
             options={[{ id: 'all', label: 'All' }, ...providers.map((p) => ({ id: p, label: FAAS_PROVIDER_LABEL[p] }))]} />}
           <div style={{ width: 240 }}><SearchInput placeholder="Name, runtime, trigger…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
         </div>}>
         <Card flush>
-          <Table<FaasFunction> rows={rows} rowKey={(f) => f.id} onRowClick={open} defaultSort={{ key: 'status', dir: 'desc' }}
+          <Table<FaasFunction> rows={rows} rowKey={(f) => f.id} onRowClick={open} defaultSort={{ key: 'status', dir: 'desc' }} childRows={childrenOf}
             empty={<EmptyState icon={<SquareFunction />} title="No function matches" />} columns={[
-              { key: 'name', header: 'Function', sortValue: (f) => f.name, render: (f) => (
+              { key: 'name', header: 'Function', sortValue: (f) => f.name, render: (f) => f.parentId && ids.has(f.parentId) ? (
                 <div style={{ whiteSpace: 'nowrap' }}>
-                  <div className="row" style={{ gap: 'var(--space-2)', fontWeight: 'var(--weight-medium)' }}>{f.name}<Badge>{providerShort(f.provider)}</Badge></div>
-                  <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>{f.runtime} · {f.region}{f.triggers.length ? ` · ${f.triggers.join(', ')}` : ''}</span>
+                  <div style={{ fontWeight: 'var(--weight-medium)' }}>{f.name}</div>
+                  <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>function{f.triggers.length ? ` · ${f.triggers.join(', ')}` : ''}</span>
+                </div>
+              ) : (
+                <div style={{ whiteSpace: 'nowrap' }}>
+                  <div className="row" style={{ gap: 'var(--space-2)', fontWeight: 'var(--weight-medium)' }}>{f.name}<Badge>{providerShort(f.provider)}</Badge><AppInsightsBadge state={f.appInsights} /></div>
+                  <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+                    {f.runtime} · {f.region}{kids.has(f.id) ? ` · ${kids.get(f.id)!.length} functions` : f.triggers.length ? ` · ${f.triggers.join(', ')}` : ''}
+                  </span>
                 </div>) },
               { key: 'status', header: 'Status', sortValue: (f) => faasRank(f.status), render: (f) => <FaasStatusBadge status={f.status} /> },
               { key: 'inv', header: 'Invocations', numeric: true, sortValue: (f) => f.invocations, render: (f) => (
@@ -131,7 +156,8 @@ export function Serverless() {
               { key: 'thr', header: 'Throttles', numeric: true, sortValue: (f) => f.throttles, render: (f) => (f.throttles ? compact(f.throttles) : <span className="muted">0</span>) },
               { key: 'cold', header: 'Cold starts', numeric: true, sortValue: (f) => f.coldStarts, render: (f) => (f.coldStarts
                 ? <span title={`${pct(f.coldStartRate)} of invocations`}>{compact(f.coldStarts)}</span> : <span className="muted">0</span>) },
-              { key: 'cost', header: 'Cost (est.)', numeric: true, sortValue: (f) => f.costUsd, render: (f) => usd(f.costUsd) },
+              { key: 'cost', header: 'Cost (est.)', numeric: true, sortValue: (f) => f.costUsd, render: (f) => (f.parentId && f.costUsd === 0
+                ? <span className="muted" title="Billed on the Function App">in app</span> : usd(f.costUsd)) },
             ]} />
         </Card>
       </Section>

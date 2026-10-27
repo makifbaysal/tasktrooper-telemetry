@@ -65,7 +65,7 @@ Font: `--font-sans` (Inter), `--font-mono` (JetBrains Mono — route, log, kod, 
 | `StatusBadge` | Durum için tek doğru yol — ikon + etiket |
 | `Card` | `title`, `subtitle`, `actions`, `flush` (tablo/list için padding'siz) |
 | `StatTile` | label · value(+unit) · delta (yön × `upIsGood`) · opsiyonel sparkline |
-| `Table` | Kolon tanımlı, `numeric` sağa hizalı tabular, `sortValue` ile sıralanabilir, `onRowClick` |
+| `Table` | Kolon tanımlı, `numeric` sağa hizalı tabular, `sortValue` ile sıralanabilir, `onRowClick`; `childRows` ile iç içe satırlar (ebeveynin hemen altında girintili, aynı sıralama — ör. Azure Function App'in fonksiyonları) |
 | `Tabs` / `Segmented` | Tabs = sayfa içi bölüm; Segmented = filtre/zaman aralığı |
 | `Field`, `Input`, `Textarea`, `SearchInput`, `Select`, `Toggle` | Form elemanları (`Textarea mono` JSON/header şablonları için) |
 | `PageHeader` | breadcrumb + başlık + alt başlık + aksiyonlar |

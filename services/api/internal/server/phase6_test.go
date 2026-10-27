@@ -116,8 +116,20 @@ type phase6Fake struct {
 	fakeStore
 	gotF   store.InfraFilter
 	gotSF  store.ServerlessFilter
+	gotTF  store.TraceFilter
+	gotLF  store.LogFilter
 	gotQ   store.Q
 	gotArg string
+}
+
+func (f *phase6Fake) SearchTraces(_ context.Context, _ store.Q, fl store.TraceFilter) ([]model.TraceSummary, error) {
+	f.gotTF = fl
+	return []model.TraceSummary{}, nil
+}
+
+func (f *phase6Fake) SearchLogs(_ context.Context, _ store.Q, fl store.LogFilter) (model.LogPage, error) {
+	f.gotLF = fl
+	return model.LogPage{}, nil
 }
 
 func (f *phase6Fake) ListHosts(_ context.Context, q store.Q, fl store.InfraFilter) ([]model.Host, error) {
@@ -204,6 +216,17 @@ func TestPhase6Routes(t *testing.T) {
 	// a non-finite value never produces a broken 200 (the store maps them to 0; writeJSON turns them into a 500)
 	if w := do(h, "GET", "/api/v1/serverless/functions?provider=aws&q=ord", "good", ""); w.Code != 500 || f.gotSF.Provider != "aws" || f.gotSF.Q != "ord" {
 		t.Errorf("functions: %d %+v", w.Code, f.gotSF)
+	}
+	if do(h, "GET", "/api/v1/serverless/functions?parent=12", "good", ""); f.gotSF.Parent != "12" {
+		t.Errorf("functions parent: %+v", f.gotSF)
+	}
+	// pod traces / logs (contracts §22)
+	if w := do(h, "GET", "/api/v1/traces?service=api&pod=api-7f&namespace=shop&node=n1&host=h1&errors=true", "good", ""); w.Code != 200 ||
+		f.gotTF.Pod != "api-7f" || f.gotTF.Namespace != "shop" || f.gotTF.Node != "n1" || f.gotTF.Host != "h1" || !f.gotTF.ErrorsOnly || f.gotTF.Service != "api" {
+		t.Errorf("trace filter: %d %+v", w.Code, f.gotTF)
+	}
+	if w := do(h, "GET", "/api/v1/logs?pod=api-7f&namespace=shop&q=boom", "good", ""); w.Code != 200 || f.gotLF.Pod != "api-7f" || f.gotLF.Namespace != "shop" || f.gotLF.Text != "boom" {
+		t.Errorf("log filter: %d %+v", w.Code, f.gotLF)
 	}
 	w = do(h, "GET", "/api/v1/serverless/functions/aws-eu-west-1-orders", "good", "")
 	var fd map[string]json.RawMessage

@@ -162,6 +162,10 @@ func TestInfraKeys(t *testing.T) {
 		{"functions by id", attrs("cloud.provider", "azure"), []*metricspb.Metric{
 			igauge("trooper.faas.invocations", 1, infraTS, attrs("trooper.faas.id", "azure-a")),
 			igauge("trooper.faas.execution_units", 1, infraTS, attrs("trooper.faas.id", "azure-b"))}, FamFaaS, 2},
+		{"gpus of one host by index", attrs("host.name", "gpu-1"), []*metricspb.Metric{
+			igauge("trooper.host.gpu.utilization", 1, infraTS, attrs("gpu.index", 0, "gpu.uuid", "GPU-a", "gpu.model", "A100")),
+			igauge("trooper.host.gpu.memory", 1, infraTS, attrs("gpu.index", 0, "gpu.uuid", "GPU-a", "gpu.model", "A100")),
+			igauge("trooper.host.gpu.utilization", 1, infraTS, attrs("gpu.index", 1, "gpu.uuid", "GPU-b", "gpu.model", "A100"))}, FamGPUs, 2},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -183,11 +187,41 @@ func TestInfraColumnsMatchSchema(t *testing.T) {
 		FamK8sPods:      "org_id, project_id, cluster, namespace, pod, pod_uid, node, workload_kind, workload, service, minute, phase, reason, ready, restarts, cpu_request, cpu_limit, memory_request, memory_limit",
 		FamK8sWorkloads: "org_id, project_id, cluster, namespace, kind, name, minute, desired, ready, available, updated",
 		FamFaaS:         "org_id, project_id, function_id, provider, region, minute, invocations, errors, throttles, duration_avg, duration_max, duration_p95, duration_p99, concurrency, iterator_age_ms, memory_bytes, execution_units",
+		FamGPUs:         "org_id, project_id, cluster, host, gpu_index, gpu_uuid, model, minute, utilization, memory, memory_bytes, temperature_c, power_w",
 	}
 	for f, cols := range want {
 		if got := InfraColumns(f); got != cols {
 			t.Errorf("%s:\n got %s\nwant %s", InfraTable(f), got, cols)
 		}
+	}
+}
+
+// GPU gauges (contracts §22) land in gpus_1m with a UInt8 gpu_index; hosts_1m is untouched.
+func TestGPURouting(t *testing.T) {
+	res := attrs("service.name", "trooper-agent", "host.name", "gpu-node", "k8s.cluster.name", "prod")
+	g0 := attrs("gpu.index", 1, "gpu.uuid", "GPU-5f1c", "gpu.model", "NVIDIA A100-SXM4-40GB")
+	b := NewMetricsBatch()
+	b.Add(tn, imetrics(res,
+		igauge("trooper.host.gpu.utilization", 0.42, infraTS, g0),
+		igauge("trooper.host.gpu.utilization", 0.91, infraTS+15e9, g0),
+		igauge("trooper.host.gpu.memory", 0.5, infraTS, g0),
+		igauge("trooper.host.gpu.memory_bytes", 20e9, infraTS, g0),
+		igauge("trooper.host.gpu.temperature_c", 64, infraTS, g0),
+		igauge("trooper.host.gpu.power_w", 250, infraTS, g0),
+	))
+	if len(b.Infra[FamHosts]) != 0 {
+		t.Errorf("gpu metrics reached hosts_1m")
+	}
+	g := only(t, b, FamGPUs)
+	for c, want := range map[string]any{"cluster": "prod", "host": "gpu-node", "gpu_index": uint8(1), "gpu_uuid": "GPU-5f1c",
+		"model": "NVIDIA A100-SXM4-40GB", "minute": time.Unix(1_700_000_040, 0).UTC(), "utilization": 0.91, "memory": 0.5,
+		"memory_bytes": 20e9, "temperature_c": 64.0, "power_w": 250.0} {
+		if got := col(t, g, c); got != want {
+			t.Errorf("gpus_1m.%s = %v (%T), want %v", c, got, got, want)
+		}
+	}
+	if InfraTable(FamGPUs) != "gpus_1m" {
+		t.Errorf("table %s", InfraTable(FamGPUs))
 	}
 }
 
@@ -226,7 +260,7 @@ func TestEBPFSpanResource(t *testing.T) {
 }
 
 // BenchmarkInfraMetrics: one host-mode export (host gauges, 20 containers × 8, 20 processes × 4) + one cluster-mode
-// export (20 pods × 6, 5 workloads × 4) → typed rows.
+// export (20 pods × 6, 5 workloads × 4) + 2 GPUs × 5 → typed rows.
 func BenchmarkInfraMetrics(b *testing.B) {
 	res := attrs("service.name", "trooper-agent", "host.name", "node-a", "host.id", "m-1", "os.type", "linux", "host.arch", "amd64",
 		"k8s.cluster.name", "prod", "k8s.node.name", "node-a")
@@ -255,6 +289,12 @@ func BenchmarkInfraMetrics(b *testing.B) {
 		wa := attrs("k8s.namespace.name", "shop", "trooper.k8s.workload.kind", "Deployment", "trooper.k8s.workload.name", fmt.Sprintf("w%d", i))
 		for _, n := range []string{"desired", "ready", "available", "updated"} {
 			ms = append(ms, igauge("trooper.k8s.workload."+n, 1, infraTS, wa))
+		}
+	}
+	for i := range 2 {
+		ga := attrs("gpu.index", i, "gpu.uuid", fmt.Sprintf("GPU-%d", i), "gpu.model", "NVIDIA A100")
+		for _, n := range []string{"utilization", "memory", "memory_bytes", "temperature_c", "power_w"} {
+			ms = append(ms, igauge("trooper.host.gpu."+n, 1, infraTS, ga))
 		}
 	}
 	req := imetrics(res, ms...)

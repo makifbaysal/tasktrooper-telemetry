@@ -19,6 +19,23 @@ type TraceFilter struct {
 	MinMs      float64
 	Slowest    bool
 	Limit      int
+	// Kubernetes / host placement (contracts §22): span resource_attrs k8s.pod.name, k8s.namespace.name,
+	// k8s.node.name, host.name.
+	Pod, Namespace, Node, Host string
+}
+
+// resourceConds returns the WHERE tail for the placement fields (resource attributes).
+func (f TraceFilter) resourceConds() (string, []any) {
+	where := ""
+	var args []any
+	for _, c := range []struct{ key, v string }{{"k8s.pod.name", f.Pod}, {"k8s.namespace.name", f.Namespace},
+		{"k8s.node.name", f.Node}, {"host.name", f.Host}} {
+		if c.v != "" {
+			where += " AND resource_attrs[?] = ?"
+			args = append(args, c.key, c.v)
+		}
+	}
+	return where, args
 }
 
 // ValidTraceID reports whether s is a 32-char hex trace id.
@@ -57,6 +74,9 @@ func (d *DB) SearchTraces(ctx context.Context, q Q, f TraceFilter) ([]model.Trac
 		where += " AND duration_ns >= ?"
 		args = append(args, uint64(f.MinMs*1e6))
 	}
+	rw, ra := f.resourceConds()
+	where += rw
+	args = append(args, ra...)
 	ec, ea := envCond(q.Env, "env")
 	order := "ts DESC"
 	if f.Slowest {

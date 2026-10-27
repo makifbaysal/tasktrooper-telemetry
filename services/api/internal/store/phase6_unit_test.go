@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tasktrooper/telemetry/services/api/internal/model"
+	"github.com/tasktrooper/telemetry/services/api/internal/timerange"
 )
 
 func TestInfraStatusRules(t *testing.T) {
@@ -187,5 +188,62 @@ func TestRestartIncreaseZeroBuckets(t *testing.T) {
 	got := RestartIncrease([]float64{0, 0, 0, 2, 2}, []float64{0, 0, 0, 2, 2}, []float64{0, 1, 1, 1, 1})
 	if want := []float64{0, 0, 0, 2, 0}; !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v want %v", got, want)
+	}
+}
+
+func TestPodTraceAndLogFilters(t *testing.T) {
+	w, args := TraceFilter{Pod: "api-7f", Host: "h1"}.resourceConds()
+	if w != " AND resource_attrs[?] = ? AND resource_attrs[?] = ?" || len(args) != 4 || args[0] != "k8s.pod.name" || args[1] != "api-7f" ||
+		args[2] != "host.name" || args[3] != "h1" {
+		t.Errorf("trace conds: %q %v", w, args)
+	}
+	if w, _ := (TraceFilter{}).resourceConds(); w != "" {
+		t.Errorf("empty trace conds: %q", w)
+	}
+	lw, la, err := logWhere(LogFilter{Pod: "api-7f", Namespace: "shop"}, true)
+	if err != nil || lw != " AND attrs['k8s.pod.name'] = ? AND attrs['k8s.namespace.name'] = ?" || len(la) != 2 {
+		t.Errorf("log where: %q %v %v", lw, la, err)
+	}
+}
+
+func TestServerlessSummaryRows(t *testing.T) {
+	fns := []model.ServerlessFunction{
+		{ID: "1", Provider: "aws"},
+		{ID: "2", Provider: "azure"},                        // app with children
+		{ID: "3", Provider: "azure", ParentID: "2"},         // child
+		{ID: "4", Provider: "azure", ParentID: "2"},         // child
+		{ID: "5", Provider: "azure"},                        // app without per-function rows
+		{ID: "6", Provider: "azure", ParentID: "99"},        // parent filtered out: a function, metrics excluded
+		{ID: "7", Provider: "azure", ParentSlug: "azure-x"}, // parent row unresolved: still excluded from metrics
+	}
+	countFn, add := SummaryRows(fns)
+	wantCount := []bool{true, false, true, true, true, true, true}
+	wantAdd := []bool{true, true, false, false, true, false, false}
+	for i := range fns {
+		if countFn[i] != wantCount[i] || add[i] != wantAdd[i] {
+			t.Errorf("row %s: count %v add %v", fns[i].ID, countFn[i], add[i])
+		}
+	}
+}
+
+func TestHostGPUs(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	hosts := []model.Host{{ID: "gpu-1", LastSeen: now.UnixMilli()}, {ID: "cpu-only", LastSeen: now.UnixMilli()}}
+	AttachGPUs(hosts, map[string][]gpuRow{"gpu-1": {
+		{g: model.HostGPU{Index: 1, Model: "A100", Utilization: 0.5}, last: now},
+		{g: model.HostGPU{Index: 0, Model: "A100", Utilization: 0.9}, last: now.Add(-time.Minute)},
+		{g: model.HostGPU{Index: 2, Model: "T4"}, last: now.Add(-10 * time.Minute)}, // gone
+	}})
+	if len(hosts[0].GPUs) != 2 || hosts[0].GPUs[0].Index != 0 || hosts[0].GPUs[1].Index != 1 {
+		t.Errorf("gpus: %+v", hosts[0].GPUs)
+	}
+	if hosts[1].GPUs == nil || len(hosts[1].GPUs) != 0 {
+		t.Errorf("no gpus must be [], got %#v", hosts[1].GPUs)
+	}
+	w := timerange.Custom(now, time.Minute, 3)
+	s := GPUSet(w, hosts[0].GPUs, map[string][][]float64{"1": {{0.1, 0.2, 0.3}}})
+	if len(s.Series) != 2 || s.Series[0].ID != "gpu0" || s.Series[1].ID != "gpu1" || s.Series[1].Label != "GPU 1 · A100" ||
+		s.Series[1].Data[2] != 0.3 || s.Series[0].Data[0] != 0 || len(s.Timestamps) != 3 {
+		t.Errorf("gpu set: %+v", s)
 	}
 }

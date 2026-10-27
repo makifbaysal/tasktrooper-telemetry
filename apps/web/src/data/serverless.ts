@@ -3,7 +3,8 @@
  * cloud integrations, with CloudWatch / Azure Monitor metrics, cold starts from spans and an estimated cost.
  *
  * Api mode: `GET /serverless/summary`, `GET /serverless/functions`, `GET /serverless/functions/{id}` (all `?range=`).
- * Mock mode: seven functions across both providers — one throttling, one close to its timeout, one idle.
+ * Mock mode: seven functions across both providers — one throttling, one close to its timeout, one idle — plus the three
+ * per-function rows (App Insights, contracts §22) of the `shop-notifications` Azure app.
  */
 import { NOW, RANGE_POINTS, series, timestamps } from './mock';
 import { isApi, qs, remote, seg } from './remote';
@@ -47,6 +48,10 @@ export interface FaasFunction {
   status: FaasStatus;
   /** invocations per range bucket */
   spark: number[];
+  /** Azure per-function row (App Insights, contracts §22): id of its Function App row */
+  parentId?: string;
+  /** Azure Function App row: whether per-function metrics come from Application Insights */
+  appInsights?: 'connected' | 'unavailable';
 }
 
 export interface FaasSummary {
@@ -67,6 +72,8 @@ export interface FaasDetail {
   recentErrors: FaasRecentError[];
   /** Azure: functions inside the app (`meta.functions`) */
   functions?: FaasAppFunction[];
+  /** Azure Function App: its per-function rows (`children`) */
+  children?: FaasFunction[];
   integration?: { id: string; name: string };
 }
 
@@ -97,6 +104,8 @@ export const faasRank = (s: FaasStatus) => ({ critical: 4, warning: 3, missing: 
 interface MockFn {
   slug: string; name: string; provider: FaasProvider; app?: string; region: string; runtime: string; memoryMb: number; timeoutS?: number;
   arch: string; triggers: string[]; service: string; integration: { id: string; name: string }; functions?: FaasAppFunction[];
+  /** per-function row: the app's slug (meta.parent); no execution units → no cost */
+  parent?: string; appInsights?: 'connected' | 'unavailable';
   /** invocations per minute */
   rpm: number; errorRate: number; avgMs: number; p95Ms: number; coldRate: number; throttlePerMin?: number; spikeAt?: number; idle?: boolean;
 }
@@ -116,13 +125,25 @@ const MOCK_FNS: MockFn[] = [
     arch: 'arm64', triggers: ['schedule'], service: 'nightly-report', integration: AWS_INT, rpm: 0, errorRate: 0, avgMs: 0, p95Ms: 0, coldRate: 0, idle: true },
   { slug: 'azure-shop-notifications', name: 'shop-notifications', app: 'shop-notifications', provider: 'azure', region: 'westeurope', runtime: 'node 20', memoryMb: 1536,
     arch: '', triggers: ['http', 'queue:notifications', 'timer'], service: 'shop-notifications', integration: AZ_INT,
-    functions: [{ name: 'SendEmail', trigger: 'queue:notifications' }, { name: 'SendPush', trigger: 'http' }, { name: 'DailyDigest', trigger: 'timer', disabled: true }], rpm: 760, errorRate: 0.0031, avgMs: 140, p95Ms: 420, coldRate: 0.018 },
+    functions: [{ name: 'SendEmail', trigger: 'queue:notifications' }, { name: 'SendPush', trigger: 'http' }, { name: 'DailyDigest', trigger: 'timer', disabled: true }], rpm: 760, errorRate: 0.0031, avgMs: 140, p95Ms: 420, coldRate: 0.018,
+    appInsights: 'connected' },
+  // per-function rows of shop-notifications (Application Insights requests)
+  { slug: 'azure-shop-notifications-SendEmail', name: 'SendEmail', app: 'shop-notifications', parent: 'azure-shop-notifications', provider: 'azure', region: 'westeurope',
+    runtime: 'node 20', memoryMb: 1536, arch: '', triggers: ['queue:notifications'], service: 'shop-notifications', integration: AZ_INT,
+    rpm: 470, errorRate: 0.0046, avgMs: 180, p95Ms: 510, coldRate: 0.02 },
+  { slug: 'azure-shop-notifications-SendPush', name: 'SendPush', app: 'shop-notifications', parent: 'azure-shop-notifications', provider: 'azure', region: 'westeurope',
+    runtime: 'node 20', memoryMb: 1536, arch: '', triggers: ['http'], service: 'shop-notifications', integration: AZ_INT,
+    rpm: 290, errorRate: 0.0008, avgMs: 75, p95Ms: 190, coldRate: 0.015 },
+  { slug: 'azure-shop-notifications-DailyDigest', name: 'DailyDigest', app: 'shop-notifications', parent: 'azure-shop-notifications', provider: 'azure', region: 'westeurope',
+    runtime: 'node 20', memoryMb: 1536, arch: '', triggers: ['timer'], service: 'shop-notifications', integration: AZ_INT,
+    rpm: 0, errorRate: 0, avgMs: 0, p95Ms: 0, coldRate: 0, idle: true },
   { slug: 'azure-invoice-pdf', name: 'invoice-pdf', app: 'invoice-pdf', provider: 'azure', region: 'westeurope', runtime: 'dotnet-isolated 8', memoryMb: 2048,
     arch: '', triggers: ['http', 'queue:invoices'], service: 'invoice-pdf', integration: AZ_INT,
     functions: [{ name: 'RenderInvoice', trigger: 'queue:invoices' }, { name: 'RetryFailed', trigger: 'http' }], rpm: 85, errorRate: 0.024, avgMs: 1900, p95Ms: 5200, coldRate: 0.09, spikeAt: 0.55 },
 ];
 
 function mockCost(m: MockFn, invocations: number): number {
+  if (m.parent) return 0; // per-function rows carry no execution units: cost stays on the app row
   const gbs = (invocations * m.avgMs) / 1000 * (m.memoryMb / 1024);
   if (m.provider === 'aws') return invocations * 0.2 / 1e6 + gbs * (m.arch === 'arm64' ? 0.0000133334 : 0.0000166667);
   const units = invocations * m.avgMs * m.memoryMb; // MB·ms
@@ -166,7 +187,7 @@ function mockRow(m: MockFn, range: TimeRange): FaasFunction {
     invocations, errors, errorRate: invocations ? errors / invocations : 0, throttles,
     p95Ms: invocations ? Math.max(...s.p95.slice(-5)) : 0, p99Ms: invocations ? Math.max(...s.p99.slice(-5)) : 0,
     coldStarts, coldStartRate: invocations ? coldStarts / invocations : 0, concurrencyMax: Math.max(0, ...s.conc),
-    costUsd: mockCost(m, invocations), spark: s.inv,
+    costUsd: mockCost(m, invocations), spark: s.inv, parentId: m.parent, appInsights: m.appInsights,
   };
   return { ...row, status: faasStatus(row) };
 }
@@ -193,20 +214,34 @@ function mockDetail(m: MockFn, range: TimeRange): FaasDetail {
     coldStarts: set([['coldStarts', 'Cold starts', s.cold]]),
     recentErrors: errs,
     functions: m.functions,
+    children: m.provider === 'azure' && !m.parent ? MOCK_FNS.filter((x) => x.parent === m.slug).map((x) => mockRow(x, range)) : undefined,
     integration: m.integration,
   };
 }
 
+/**
+ * Summary rule (contracts §22, api README): Azure per-function rows are left out of the metric sums (the app row carries
+ * the app-level totals) and an app with per-function rows counts as its functions, not as one more.
+ */
+export function summaryRows(rows: FaasFunction[]): { countFn: boolean[]; addMetrics: boolean[] } {
+  const ids = new Set(rows.map((r) => r.id));
+  const hasChild = new Set(rows.filter((r) => r.parentId && ids.has(r.parentId)).map((r) => r.parentId!));
+  return { countFn: rows.map((r) => !hasChild.has(r.id)), addMetrics: rows.map((r) => !r.parentId) };
+}
+
 function mockSummary(range: TimeRange): FaasSummary {
-  const rows = MOCK_FNS.map((m) => mockRow(m, range));
+  const all = MOCK_FNS.map((m) => mockRow(m, range));
+  const { countFn, addMetrics } = summaryRows(all);
+  const rows = all.filter((_, i) => addMetrics[i]);
+  const counted = all.filter((_, i) => countFn[i]);
   const invocations = sum(rows.map((r) => r.invocations));
   const errors = sum(rows.map((r) => r.errors));
   return {
-    functions: rows.length, invocations, errors, errorRate: invocations ? errors / invocations : 0,
+    functions: counted.length, invocations, errors, errorRate: invocations ? errors / invocations : 0,
     throttles: sum(rows.map((r) => r.throttles)), coldStarts: sum(rows.map((r) => r.coldStarts)), costUsd: sum(rows.map((r) => r.costUsd)),
     byProvider: (['aws', 'azure'] as FaasProvider[]).map((p) => {
       const rs = rows.filter((r) => r.provider === p);
-      return { provider: p, functions: rs.length, invocations: sum(rs.map((r) => r.invocations)), costUsd: sum(rs.map((r) => r.costUsd)) };
+      return { provider: p, functions: counted.filter((r) => r.provider === p).length, invocations: sum(rs.map((r) => r.invocations)), costUsd: sum(rs.map((r) => r.costUsd)) };
     }),
   };
 }
@@ -215,6 +250,7 @@ function mockSummary(range: TimeRange): FaasSummary {
 
 type RawFn = Partial<Omit<FaasFunction, 'id' | 'triggers' | 'spark'>> & {
   id: string | number; triggers?: string[] | null; spark?: number[] | null; memoryMb?: number | null; timeoutS?: number | null; app?: string | null;
+  parentId?: string | number | null; appInsights?: string | null;
 };
 function mapFn(r: RawFn): FaasFunction {
   const provider: FaasProvider = r.provider === 'azure' ? 'azure' : 'aws';
@@ -227,6 +263,8 @@ function mapFn(r: RawFn): FaasFunction {
     concurrencyMax: num(r.concurrencyMax), costUsd: num(r.costUsd),
     status: STATUSES.includes(r.status as FaasStatus) ? (r.status as FaasStatus) : 'ok',
     spark: arr(r.spark).map((v) => num(v)),
+    parentId: r.parentId != null && r.parentId !== '' ? String(r.parentId) : undefined,
+    appInsights: r.appInsights === 'connected' || r.appInsights === 'unavailable' ? r.appInsights : undefined,
   };
 }
 interface RawSet { timestamps?: number[] | null; series?: { id: string; label: string; data: number[] | null }[] | null }
@@ -242,6 +280,7 @@ type RawDetail = RawFn & {
   functions?: (string | { name: string; trigger?: string | null; disabled?: boolean | null })[] | null;
   meta?: { functions?: (string | { name: string; trigger?: string | null; disabled?: boolean | null })[] | null } | null;
   integration?: { id: string | number; name: string } | null;
+  children?: RawFn[] | null;
 };
 function mapDetail(r: RawDetail): FaasDetail {
   const s = r.series ?? {};
@@ -252,6 +291,7 @@ function mapDetail(r: RawDetail): FaasDetail {
     fn, invocations: inv, duration: mapSet(s.duration), concurrency: mapSet(s.concurrency), coldStarts: mapSet(s.coldStarts),
     recentErrors: arr(r.recentErrors).map((e) => ({ ts: toMs(e.ts), traceId: e.traceId, message: e.message })),
     functions: (r.functions ?? r.meta?.functions ?? undefined)?.map((x) => (typeof x === 'string' ? { name: x } : { name: x.name, trigger: x.trigger ?? undefined, disabled: x.disabled ?? undefined })),
+    children: r.children ? arr(r.children).map(mapFn) : undefined,
     integration: r.integration ? { id: String(r.integration.id), name: r.integration.name } : undefined,
   };
 }

@@ -5,7 +5,7 @@ Two binaries (Go module `github.com/tasktrooper/telemetry/services/ingest`), fol
 | Binary | Does |
 |---|---|
 | `cmd/ingest-gw` | OTLP/HTTP `:4318` (`/v1/traces`, `/v1/metrics`, `/v1/logs`: protobuf or JSON, optional gzip), RUM `POST /v1/rum` (JSON or protobuf), Vercel drains `POST /v1/drains/vercel`, OTLP/gRPC `:4317`, `GET /healthz`, `GET /metrics`. Authenticates ingest keys, rate-limits per project, validates the payload and publishes it as protobuf to Redpanda. Stateless. |
-| `cmd/ingest-writer` | Consumer group `tt-ingest-writer` over the 4 topics. Flattens payloads into ClickHouse rows (`spans`, `logs`, `metrics`, `rum_events`, `db_1m`, `db_queries_1m`, `broker_*_1m`, `hosts_1m`, `containers_1m`, `processes_1m`, `k8s_*_1m`, `faas_1m`) and batch-inserts them; Kafka offsets are committed only after the insert succeeded (at-least-once). |
+| `cmd/ingest-writer` | Consumer group `tt-ingest-writer` over the 4 topics. Flattens payloads into ClickHouse rows (`spans`, `logs`, `metrics`, `rum_events`, `db_1m`, `db_queries_1m`, `broker_*_1m`, `hosts_1m`, `containers_1m`, `processes_1m`, `k8s_*_1m`, `faas_1m`, `gpus_1m`) and batch-inserts them; Kafka offsets are committed only after the insert succeeded (at-least-once). |
 
 ## Run
 
@@ -113,7 +113,9 @@ Common (`services/pkg/config`): `TT_POSTGRES_URL`, `TT_CLICKHOUSE_URL`, `TT_KAFK
   and `trooper.faas.*` (contracts §20, §21) go to `hosts_1m`, `containers_1m`, `processes_1m`, `k8s_nodes_1m`, `k8s_pods_1m`,
   `k8s_workloads_1m`, `faas_1m` (`internal/flatten/infra.go`: one spec per table — dimension columns and the attribute each
   comes from, data point first then resource; row key = all dimensions + minute; gauges merged with `max`, unreported
-  `-Inf`; pod `phase`/`reason` taken from the newest data point; `process.command` capped at 128 chars). Unknown names
+  `-Inf`; pod `phase`/`reason` taken from the newest data point; `process.command` capped at 128 chars).
+  `trooper.host.gpu.*` (contracts §22) goes to `gpus_1m` (dims `cluster, host, gpu_index` (UInt8, from `gpu.index`),
+  `gpu_uuid`, `model`), not `hosts_1m`. Unknown names
   under these prefixes fall through to `metrics`. Everything else → `metrics` (gauge/sum/histogram/exp_histogram as explicit
   buckets/summary with quantiles in attrs; `attrs_hash` = xxhash of sorted attrs).
 - **RUM:** protojson (proto field names, unknown fields ignored). Clock skew: if the newest event of a batch is > 5 min

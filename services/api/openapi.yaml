@@ -447,6 +447,10 @@ paths:
         - $ref: '#/components/parameters/minMs'
         - $ref: '#/components/parameters/sort'
         - $ref: '#/components/parameters/limit'
+        - { name: pod, in: query, description: "Span resource attribute k8s.pod.name", schema: { type: string } }
+        - { name: namespace, in: query, description: "Span resource attribute k8s.namespace.name", schema: { type: string } }
+        - { name: node, in: query, description: "Span resource attribute k8s.node.name", schema: { type: string } }
+        - { name: host, in: query, description: "Span resource attribute host.name", schema: { type: string } }
       responses:
         '200':
           description: OK
@@ -536,6 +540,8 @@ paths:
         - $ref: '#/components/parameters/route'
         - $ref: '#/components/parameters/before'
         - $ref: '#/components/parameters/limit'
+        - { name: pod, in: query, description: "attrs['k8s.pod.name'] (resource placement copied by the writer)", schema: { type: string } }
+        - { name: namespace, in: query, description: "attrs['k8s.namespace.name']", schema: { type: string } }
       responses:
         '200':
           description: OK
@@ -2644,6 +2650,7 @@ paths:
       tags: [Serverless]
       operationId: getServerlessSummary
       summary: 'Totals over the range (costUsd is an estimate: list prices, free tier not deducted)'
+      description: 'Azure per-function rows (meta.parent) are not added to invocations / errors / throttles / coldStarts / costUsd (the app row carries app-level totals); an app row with per-function rows is not counted in `functions`.'
       parameters:
         - $ref: '#/components/parameters/range'
       responses:
@@ -2660,6 +2667,7 @@ paths:
         - $ref: '#/components/parameters/range'
         - { name: provider, in: query, schema: { type: string, enum: [aws, azure] } }
         - { name: q, in: query, description: 'Substring of name / slug / service / app', schema: { type: string } }
+        - { name: parent, in: query, description: 'Id (or slug) of an Azure Function App row: only its per-function rows', schema: { type: string } }
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ServerlessFunction' } } } } }
         '400': { $ref: '#/components/responses/E400' }
@@ -4104,7 +4112,7 @@ components:
     InfraStatus: { type: string, enum: [ok, warning, critical, stale] }
     Host:
       type: object
-      required: [id, hostId, os, arch, cluster, node, cpu, cpuCores, memory, memoryBytes, disk, netIn, netOut, load1, uptimeS, containers, lastSeen, status, spark]
+      required: [id, hostId, os, arch, cluster, node, cpu, cpuCores, memory, memoryBytes, disk, netIn, netOut, load1, uptimeS, containers, lastSeen, status, spark, gpus]
       properties:
         id: { type: string, description: host.name }
         hostId: { type: string }
@@ -4125,6 +4133,19 @@ components:
         lastSeen: { type: integer }
         status: { $ref: '#/components/schemas/InfraStatus' }
         spark: { type: object, required: [cpu, memory], properties: { cpu: { type: array, items: { type: number } }, memory: { type: array, items: { type: number } } } }
+        gpus: { type: array, items: { $ref: '#/components/schemas/HostGPU' }, description: 'Latest minute per GPU (gpus_1m); [] when none' }
+    HostGPU:
+      type: object
+      required: [index, model, uuid, utilization, memory, memoryBytes, temperatureC, powerW]
+      properties:
+        index: { type: integer }
+        model: { type: string }
+        uuid: { type: string }
+        utilization: { type: number, description: 0..1 }
+        memory: { type: number, description: 0..1 }
+        memoryBytes: { type: number }
+        temperatureC: { type: number }
+        powerW: { type: number }
     HostDetail:
       allOf:
         - { $ref: '#/components/schemas/Host' }
@@ -4133,12 +4154,13 @@ components:
           properties:
             series:
               type: object
-              required: [cpu, memory, disk, network]
+              required: [cpu, memory, disk, network, gpu]
               properties:
                 cpu: { $ref: '#/components/schemas/SeriesSet' }
                 memory: { $ref: '#/components/schemas/SeriesSet' }
                 disk: { $ref: '#/components/schemas/SeriesSet' }
                 network: { $ref: '#/components/schemas/SeriesSet' }
+                gpu: { allOf: [{ $ref: '#/components/schemas/SeriesSet' }], description: 'Utilization 0..1 per GPU, ids gpu<index> (no series without GPUs)' }
             containerList: { type: array, items: { $ref: '#/components/schemas/Container' } }
             processes:
               type: array
@@ -4349,6 +4371,8 @@ components:
         costUsd: { type: number, description: 'Estimate (TT_FAAS_* prices)' }
         status: { type: string, enum: [ok, warning, critical, idle, missing] }
         spark: { type: array, items: { type: number }, description: 'Invocations per bucket' }
+        parentId: { type: string, description: 'Azure per-function rows only (meta.parent): id of the Function App row' }
+        appInsights: { type: string, enum: [connected, unavailable], description: 'Azure Function App rows: whether per-function metrics come from Application Insights (meta.appInsights)' }
     ServerlessFunctionDetail:
       allOf:
         - { $ref: '#/components/schemas/ServerlessFunction' }
@@ -4367,6 +4391,7 @@ components:
               type: array
               items: { type: object, required: [ts, traceId, message], properties: { ts: { type: integer }, traceId: { type: string }, message: { type: string } } }
             functions: { type: array, items: { type: string }, description: 'Azure: the Function App functions' }
+            children: { type: array, items: { $ref: '#/components/schemas/ServerlessFunction' }, description: 'Azure Function App rows only: the per-function rows (App Insights)' }
             integration: { oneOf: [{ type: object, required: [id, name], properties: { id: { type: string }, name: { type: string } } }, { type: "null" }] }
     MonitorTemplate:
       type: object

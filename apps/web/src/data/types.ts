@@ -421,6 +421,20 @@ export interface Host {
   lastSeen: number;
   status: InfraStatus;
   spark: { cpu: number[]; memory: number[] };
+  /** GPUs (trooper-agent nvidia-smi, latest minute; contracts §22); [] when the host has none. */
+  gpus: HostGPU[];
+}
+
+/** One GPU of a host: utilization / memory 0..1. */
+export interface HostGPU {
+  index: number;
+  model: string;
+  uuid: string;
+  utilization: number;
+  memory: number;
+  memoryBytes: number;
+  temperatureC: number;
+  powerW: number;
 }
 
 /** GET /infra/containers. cpu in cores, memory in bytes, net bytes/s, throttled 0..1. */
@@ -454,6 +468,8 @@ export interface HostDetails extends Host {
   diskSeries: number[];
   netInSeries: number[];
   netOutSeries: number[];
+  /** Utilization (0..1) per GPU, id `gpu<index>`; empty without GPUs. */
+  gpuSeries: { id: string; label: string; data: number[] }[];
   containerList: InfraContainer[];
   processes: HostProcess[];
   services: string[];

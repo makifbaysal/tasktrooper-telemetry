@@ -6,7 +6,7 @@
 import { NOW, RANGE_POINTS, series } from './mock';
 import { hydrateList, isApi, qs, registerHydrator, remote, remoteStatus, seg } from './remote';
 import { GiB, MiB, asInfraStatus, k8sClusters, k8sPods, mapInfraContainer, mapK8sPod, mockK8sNodes, mockPodContainers, pickInfraSeries, utilStatus } from './k8s';
-import type { Host, HostDetails, HostProcess, InfraContainer, InfraSeriesSet, ServiceInfra, TimeRange } from './types';
+import type { Host, HostDetails, HostGPU, HostProcess, InfraContainer, InfraSeriesSet, ServiceInfra, TimeRange } from './types';
 
 function h(s: string): number {
   let x = 2166136261;
@@ -16,7 +16,11 @@ function h(s: string): number {
 const frac = (key: string, lo: number, hi: number) => lo + ((h(key) % 1000) / 1000) * (hi - lo);
 
 // ---------------------------------------------------------------- mock world
-interface VmDef { id: string; os: string; cores: number; memGiB: number; cpu: number; memory: number; disk: number; lastSeenAgo: number; containers: [string, string, string, number, number][] }
+interface VmDef {
+  id: string; os: string; cores: number; memGiB: number; cpu: number; memory: number; disk: number; lastSeenAgo: number; containers: [string, string, string, number, number][];
+  /** GPUs: [model, utilization, memory 0..1, memory total GiB, temperature °C, power W] */
+  gpus?: [string, number, number, number, number, number][];
+}
 /** VMs outside Kubernetes: Docker containers [name, image, service, cpu cores, memory MiB]. */
 const VMS: VmDef[] = [
   { id: 'backup-vm-01', os: 'linux · Ubuntu 24.04', cores: 4, memGiB: 16, cpu: 0.18, memory: 0.41, disk: 0.72, lastSeenAgo: 0,
@@ -24,6 +28,9 @@ const VMS: VmDef[] = [
   { id: 'legacy-billing-01', os: 'linux · Debian 12', cores: 2, memGiB: 8, cpu: 0.89, memory: 0.78, disk: 0.91, lastSeenAgo: 0,
     containers: [['billing-legacy', 'acme/billing-legacy:2019.11', 'billing-legacy', 1.6, 4600], ['nginx', 'nginx:1.27-alpine', 'billing-legacy', 0.08, 40]] },
   { id: 'bastion-01', os: 'linux · Amazon Linux 2023', cores: 2, memGiB: 4, cpu: 0.03, memory: 0.22, disk: 0.34, lastSeenAgo: 12, containers: [] },
+  { id: 'ml-train-01', os: 'linux · Ubuntu 22.04', cores: 32, memGiB: 256, cpu: 0.46, memory: 0.58, disk: 0.49, lastSeenAgo: 0,
+    containers: [['recommendation-trainer', 'ghcr.io/acme/recommendation-trainer:0.9.3', 'recommendation', 11.5, 98_000]],
+    gpus: [['NVIDIA A100-SXM4-80GB', 0.87, 0.71, 80, 71, 342], ['NVIDIA A100-SXM4-80GB', 0.34, 0.22, 80, 54, 141]] },
 ];
 
 interface MockWorld { hosts: Host[]; containers: InfraContainer[] }
@@ -42,7 +49,7 @@ function buildWorld(): MockWorld {
         cluster, node: n.name, cpu: Math.min(1, n.cpu / cores), cpuCores: cores, memory: n.memoryBytes / memTotal, memoryBytes: memTotal,
         disk: frac(n.name + 'disk', 0.28, 0.62), netIn: mine.reduce((a, c) => a + c.netIn, 0), netOut: mine.reduce((a, c) => a + c.netOut, 0),
         load1: +((n.cpu) * 1.1).toFixed(2), uptimeS: Math.round(frac(n.name + 'up', 3, 40) * 86400), containers: mine.length, lastSeen: NOW,
-        status: 'ok', spark: { cpu: [], memory: [] },
+        status: 'ok', spark: { cpu: [], memory: [] }, gpus: [],
       };
       host.status = utilStatus([host.cpu, host.memory, host.disk], host.lastSeen, n.ready);
       hosts.push(host);
@@ -60,6 +67,10 @@ function buildWorld(): MockWorld {
       cpu: v.cpu, cpuCores: v.cores, memory: v.memory, memoryBytes: v.memGiB * GiB, disk: v.disk,
       netIn: mine.reduce((a, c) => a + c.netIn, 0) + 12_000, netOut: mine.reduce((a, c) => a + c.netOut, 0) + 8_000, load1: +(v.cpu * v.cores * 1.2).toFixed(2),
       uptimeS: Math.round(frac(v.id + 'up', 20, 400) * 86400), containers: mine.length, lastSeen, status: 'ok', spark: { cpu: [], memory: [] },
+      gpus: (v.gpus ?? []).map(([model, utilization, memory, memGiB, temperatureC, powerW], index): HostGPU => ({
+        index, model, uuid: `GPU-${h(v.id + index).toString(16).padStart(8, '0')}-${h(model + index).toString(16).slice(0, 4)}`,
+        utilization, memory, memoryBytes: memory * memGiB * GiB, temperatureC, powerW,
+      })),
     };
     host.status = utilStatus([host.cpu, host.memory, host.disk], lastSeen);
     hosts.push(host);
@@ -115,25 +126,34 @@ export function infraContainers(f: { host?: string; service?: string }): InfraCo
 
 const mapHost = (x: Host): Host => ({
   ...x, cluster: x.cluster ?? '', node: x.node ?? '', status: asInfraStatus(x.status), spark: { cpu: x.spark?.cpu ?? [], memory: x.spark?.memory ?? [] },
+  gpus: x.gpus ?? [],
 });
+
+/** "GPU 0 · NVIDIA A100" — the label of a GPU's series. */
+export const gpuLabel = (g: HostGPU) => `GPU ${g.index}${g.model ? ` · ${g.model}` : ''}`;
 const zeros = (range: TimeRange) => Array<number>(RANGE_POINTS[range].points).fill(0);
 
 export function hostDetails(id: string, range: TimeRange): HostDetails | undefined {
   const base = hosts.find((x) => x.id === id);
   if (isApi) {
     type Raw = Host & {
-      series?: { cpu?: InfraSeriesSet; memory?: InfraSeriesSet; disk?: InfraSeriesSet; network?: InfraSeriesSet } | null;
+      series?: { cpu?: InfraSeriesSet; memory?: InfraSeriesSet; disk?: InfraSeriesSet; network?: InfraSeriesSet; gpu?: InfraSeriesSet } | null;
       containerList?: InfraContainer[] | null; processes?: HostProcess[] | null; services?: string[] | null;
     };
     const fallback: HostDetails | undefined = base && {
       ...base, cpuSeries: zeros(range), memorySeries: zeros(range), diskSeries: zeros(range), netInSeries: zeros(range), netOutSeries: zeros(range),
-      containerList: [], processes: [], services: [],
+      gpuSeries: base.gpus.map((g) => ({ id: `gpu${g.index}`, label: gpuLabel(g), data: zeros(range) })), containerList: [], processes: [], services: [],
     };
     return remote<HostDetails | undefined>(`/infra/hosts/${seg(id)}${qs({ range })}`, fallback, (r: Raw) => {
       const { series, containerList, processes, services, ...row } = r;
       const one = (s: InfraSeriesSet | undefined, id: string) => pickInfraSeries(s, s?.series?.find((x) => x.id === id) ? id : s?.series?.[0]?.id ?? id, range);
+      const mapped = mapHost(row);
       return {
-        ...mapHost(row),
+        ...mapped,
+        gpuSeries: mapped.gpus.map((g) => {
+          const id = `gpu${g.index}`;
+          return { id, label: series?.gpu?.series?.find((x) => x.id === id)?.label ?? gpuLabel(g), data: pickInfraSeries(series?.gpu, id, range) };
+        }),
         cpuSeries: one(series?.cpu, 'cpu'), memorySeries: one(series?.memory, 'memory'), diskSeries: one(series?.disk, 'disk'),
         netInSeries: pickInfraSeries(series?.network, 'in', range), netOutSeries: pickInfraSeries(series?.network, 'out', range),
         containerList: (containerList ?? []).map(mapInfraContainer), processes: processes ?? [], services: services ?? [],
@@ -151,6 +171,8 @@ export function hostDetails(id: string, range: TimeRange): HostDetails | undefin
     diskSeries: cut(series(`host-disk-${id}`, range, { base: base.disk, noise: 0.002, daily: 0 }).map((v) => Math.min(1, v))),
     netInSeries: cut(series(`host-in-${id}`, range, { base: base.netIn, noise: 0.2, daily: 0.3 })),
     netOutSeries: cut(series(`host-out-${id}`, range, { base: base.netOut, noise: 0.2, daily: 0.3 })),
+    gpuSeries: base.gpus.map((g) => ({ id: `gpu${g.index}`, label: gpuLabel(g),
+      data: cut(series(`host-gpu-${id}-${g.index}`, range, { base: g.utilization, noise: 0.15, daily: 0.1 }).map((v) => Math.min(1, Math.max(0, v)))) })),
     containerList, processes: mockProcesses(base, containerList),
     services: [...new Set(containerList.map((c) => c.service).filter(Boolean))].sort(),
   };

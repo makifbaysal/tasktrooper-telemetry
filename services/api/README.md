@@ -118,6 +118,20 @@ npx @redocly/cli lint openapi.yaml
   Draft scenarios cannot run (409). Stop: queued → aborted, running → `abort_requested_at` (loadtest-ctl stops runners).
   Domains: `verify` stamps `verify_requested_at` for loadtest-ctl.
 * Logs `?source=` filters `attrs['vercel.source']`.
+* Pod / host placement (contracts §22): `GET /traces?pod=&namespace=&node=&host=` filter span `resource_attrs`
+  (`k8s.pod.name`, `k8s.namespace.name`, `k8s.node.name`, `host.name`); `GET /logs?pod=&namespace=` filter
+  `attrs['k8s.pod.name']` / `attrs['k8s.namespace.name']` (the writer copies those resource attributes into log attrs).
+* GPUs (`gpus_1m`, contracts §22): host list/detail rows carry `gpus` (latest minute per GPU, `[]` when none; a GPU
+  that stopped reporting 3 min before its host is dropped); host detail `series.gpu` = utilization per GPU (ids
+  `gpu<index>`, label `GPU <index> · <model>`).
+* Serverless, Azure per-function rows (contracts §22): rows with `meta.parent` (the app's slug) get `parentId` (the app
+  row's id, same project); `?parent=<id|slug>` keeps those rows; an Azure app's detail has `children`.
+  **Summary rule (no double counting):** an Azure app row carries app-level totals (Azure Monitor), so in
+  `/serverless/summary` (totals and `byProvider`) every per-function row (`meta.parent` set, even when the app row
+  cannot be resolved) is left out of invocations / errors / throttles / coldStarts / costUsd; an app row that has
+  per-function rows is not counted in `functions` (its functions are). Child rows carry no execution units, so cost
+  stays on the app row. The list itself returns every row with its own metrics; Azure app rows add `appInsights`
+  (`connected|unavailable`, from `meta.appInsights`).
 
 ## Auth, roles, audit (ADR-016)
 

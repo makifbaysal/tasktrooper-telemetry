@@ -5,7 +5,7 @@ import { Badge, Card, EmptyState, MetricCard, PageHeader, Section, StatTile, Tab
 import { useApp } from '@/components/layout/context';
 import { hostDetails, k8sPods, timestamps, useData, type HostProcess, type InfraContainer } from '@/data';
 import { int, pct } from '@/lib/format';
-import { InfraStatusBadge, LimitCell, ServiceLink, bytes, bytesRate, cores, lastSeenText, uptime } from './k8sShared';
+import { InfraStatusBadge, LimitCell, ServiceLink, UsageCell, bytes, bytesRate, cores, lastSeenText, uptime } from './k8sShared';
 
 export function HostDetail() {
   useData();
@@ -59,6 +59,39 @@ export function HostDetail() {
           <StatTile label="Containers" value={int(host.containerList.length || host.containers)} unit={host.cluster ? 'via kubelet' : 'via Docker'} />
         </div>
       </Section>
+
+      {host.gpus.length > 0 && (
+        <Section title="GPUs" subtitle={`${host.gpus.length} × ${[...new Set(host.gpus.map((g) => g.model))].join(', ')} · nvidia-smi, last minute`}>
+          <div className="grid grid-3">
+            {host.gpus.map((g) => (
+              <Card key={g.index}>
+                <div className="row" style={{ justifyContent: 'space-between', gap: 'var(--space-2)', marginBottom: 'var(--space-3)', minWidth: 0 }}>
+                  <strong>GPU {g.index}</strong>
+                  <span className="muted truncate" style={{ fontSize: 'var(--text-xs)' }} title={g.uuid}>{g.model}</span>
+                </div>
+                <div className="stack" style={{ gap: 'var(--space-3)' }}>
+                  <div>
+                    <div className="muted" style={{ fontSize: 'var(--text-xs)', marginBottom: 'var(--space-1)' }}>Utilization</div>
+                    <UsageCell value={g.utilization} />
+                  </div>
+                  <div>
+                    <div className="muted" style={{ fontSize: 'var(--text-xs)', marginBottom: 'var(--space-1)' }}>Memory</div>
+                    <UsageCell value={g.memory} label={g.memory > 0 ? `${bytes(g.memoryBytes, 0)} / ${bytes(g.memoryBytes / g.memory, 0)}` : bytes(g.memoryBytes, 0)} />
+                  </div>
+                  <div className="row secondary num" style={{ gap: 'var(--space-4)', fontSize: 'var(--text-sm)' }}>
+                    <span>{Math.round(g.temperatureC)} °C</span>
+                    <span>{Math.round(g.powerW)} W</span>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+          <MetricCard label="GPU utilization" value={pct(host.gpus.reduce((a, g) => a + g.utilization, 0) / host.gpus.length, 0)} hint="average of all GPUs, now">
+            <TimeSeries timestamps={ts} height={170} yMax={1} format={(v) => pct(v, 0)}
+              series={host.gpuSeries.map((s, i) => ({ id: s.id, label: s.label, slot: i + 1, data: s.data }))} />
+          </MetricCard>
+        </Section>
+      )}
 
       <Section title="Services on this host" subtitle="from container labels (tasktrooper.io/service, app.kubernetes.io/name, app)">
         <Card>

@@ -185,6 +185,7 @@ func (s *Server) routes(r chi.Router) {
 		v, err := s.Store.SearchTraces(r.Context(), q, store.TraceFilter{
 			Service: qs(r, "service"), Ref: refParam(r), ErrorsOnly: qs(r, "errors") == "true", MinMs: minMs,
 			Slowest: qs(r, "sort") == "slowest", Limit: qint(r, "limit"),
+			Pod: qs(r, "pod"), Namespace: qs(r, "namespace"), Node: qs(r, "node"), Host: qs(r, "host"),
 		})
 		s.reply(w, r, v, err)
 	}))
@@ -219,7 +220,7 @@ func (s *Server) routes(r chi.Router) {
 	logFilter := func(r *http.Request) store.LogFilter {
 		before, _ := strconv.ParseInt(qs(r, "before"), 10, 64)
 		return store.LogFilter{Services: qlist(r, "service"), Levels: qlist(r, "level"), Text: qs(r, "q"), TraceID: strings.ToLower(qs(r, "traceId")),
-			Route: qs(r, "route"), Source: qs(r, "source"), Before: before, Limit: qint(r, "limit")}
+			Route: qs(r, "route"), Source: qs(r, "source"), Pod: qs(r, "pod"), Namespace: qs(r, "namespace"), Before: before, Limit: qint(r, "limit")}
 	}
 	r.Get("/logs", s.withQ(func(w http.ResponseWriter, r *http.Request, q store.Q) {
 		v, err := s.Store.SearchLogs(r.Context(), q, logFilter(r))

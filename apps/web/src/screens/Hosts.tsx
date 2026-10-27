@@ -38,6 +38,8 @@ export function Hosts() {
     && (!q || `${x.id} ${x.node} ${x.os}`.toLowerCase().includes(q.toLowerCase())));
   const bad = hosts.filter((x) => x.status !== 'ok').sort((a, b) => INFRA_RANK[b.status] - INFRA_RANK[a.status]);
   const outside = hosts.filter((x) => !x.cluster).length;
+  const anyGpu = hosts.some((x) => x.gpus.length > 0);
+  const gpuAvg = (x: Host) => (x.gpus.length ? x.gpus.reduce((a, g) => a + g.utilization, 0) / x.gpus.length : -1);
 
   return (
     <>
@@ -84,6 +86,9 @@ export function Hosts() {
               { key: 'disk', header: 'Disk', sortValue: (x) => x.disk, render: (x) => <UsageCell value={x.disk} /> },
               { key: 'net', header: 'Net in / out', numeric: true, sortValue: (x) => x.netIn + x.netOut, render: (x) => (
                 <span style={{ whiteSpace: 'nowrap', fontSize: 'var(--text-sm)' }}>{bytesRate(x.netIn)} <span className="muted">/</span> {bytesRate(x.netOut)}</span>) },
+              ...(anyGpu ? [{ key: 'gpu', header: 'GPU', sortValue: gpuAvg, render: (x: Host) => x.gpus.length
+                ? <UsageCell value={gpuAvg(x)} label={`${x.gpus.length} GPU${x.gpus.length > 1 ? 's' : ''}`} />
+                : <span className="muted" style={{ fontSize: 'var(--text-sm)' }}>—</span> }] : []),
               { key: 'ctr', header: 'Containers', numeric: true, sortValue: (x) => x.containers, render: (x) => x.containers },
               { key: 'where', header: 'Cluster', sortValue: (x) => x.cluster, render: (x) => x.cluster
                 ? <span style={{ fontSize: 'var(--text-sm)' }}>{x.cluster}</span>

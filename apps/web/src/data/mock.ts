@@ -791,6 +791,39 @@ export function tracesFor(serviceId: string, ep: Endpoint | undefined, range: Ti
   }));
 }
 
+/**
+ * Recent traces served by one Kubernetes pod (contracts §22: GET /traces?service=&pod=&namespace=, span resource
+ * attributes k8s.pod.name / k8s.namespace.name). Mock: deterministic requests over the service's HTTP endpoints.
+ */
+export function podTraces(pod: { name: string; namespace: string; service: string }, range: TimeRange, opts: { errors?: boolean; limit?: number } = {}): TraceSummary[] {
+  const limit = opts.limit ?? 20;
+  if (isApi) {
+    return A.list(`/traces${A.rangeQs(range, {
+      service: pod.service || undefined, pod: pod.name, namespace: pod.namespace || undefined, errors: opts.errors ? 'true' : undefined, limit,
+    })}`, (raw: TraceSummary[] | null) => raw ?? []);
+  }
+  const s = services.find((x) => x.id === pod.service || x.name === pod.service);
+  if (!s) return [];
+  const eps = endpointsFor(s.id).filter((e) => !e.sub);
+  const rnd = mulberry32(hash(`pod-traces-${pod.namespace}/${pod.name}`));
+  const errEvery = s.errorRate > 0.02 ? 3 : s.errorRate > 0.005 ? 6 : 11;
+  const out: TraceSummary[] = [];
+  let t = NOW - Math.round(rnd() * 20_000);
+  for (let i = 0; i < 40 && out.length < limit; i++) {
+    const ep = eps.length ? eps[Math.floor(rnd() * eps.length)] : undefined;
+    const isError = i % errEvery === errEvery - 1;
+    const p95 = ep?.p95 ?? s.p95;
+    const tr: TraceSummary = {
+      id: (hash(`${pod.name}-${i}`).toString(16).padStart(8, '0') + hash(`${i}-${pod.namespace}`).toString(16).padStart(8, '0')).repeat(2).slice(0, 32),
+      ts: t, dur: +(p95 * (0.25 + rnd() * (isError ? 1.6 : 0.9))).toFixed(1), status: isError ? (rnd() < 0.7 ? 500 : 503) : 200,
+      service: s.name, method: ep?.method ?? 'GET', route: ep?.route ?? '/', isError,
+    };
+    t -= Math.round(5_000 + rnd() * 70_000);
+    if (!opts.errors || isError) out.push(tr);
+  }
+  return out;
+}
+
 /** The mock implementations, for modules that derive mock data from mock data (graph.ts). */
 export const mockApm = {
   endpointsFor: mockEndpointsFor, endpointCalls: mockEndpointCalls, endpointBreakdown: mockEndpointBreakdown, endpointCallers: mockEndpointCallers,
