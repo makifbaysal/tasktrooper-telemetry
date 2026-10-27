@@ -14,8 +14,13 @@ public struct TrooperHybridContext: Sendable, Equatable {
     public var viewId: String?
     public var viewName: String?
     public var userId: String?
+    /// RUM sampling decision of the JS/Dart layer for this session (`setContext` `sampled`). nil = not sent: the
+    /// native decision current when the session was adopted is kept for it.
+    public var sampled: Bool?
 
-    public init(sessionId: String, anonymousId: String, viewId: String? = nil, viewName: String? = nil, userId: String? = nil) {
+    public init(sessionId: String, anonymousId: String, viewId: String? = nil, viewName: String? = nil, userId: String? = nil,
+                sampled: Bool? = nil) {
+        self.sampled = sampled
         self.sessionId = sessionId
         self.anonymousId = anonymousId
         self.viewId = viewId
@@ -35,17 +40,20 @@ public struct TrooperHybridContext: Sendable, Equatable {
     public init?(dictionary d: [String: Any]) {
         guard let s = d["session_id"] as? String, !s.isEmpty else { return nil }
         self.init(sessionId: s, anonymousId: d["anonymous_id"] as? String ?? "", viewId: d["view_id"] as? String,
-                  viewName: d["view_name"] as? String, userId: d["user_id"] as? String)
+                  viewName: d["view_name"] as? String, userId: d["user_id"] as? String,
+                  sampled: d["sampled"] as? Bool)
     }
 }
 
 extension TaskTrooper {
-    /// `getContext()`: the native session (nil before `start`).
+    /// `getContext()`: the adopted context once `setContext` was called, else the native session (nil before `start`).
     public static func hybridContext() -> TrooperHybridContext? {
         core.current?.nativeContext()
     }
 
-    /// `setContext(...)`: the JS/Dart layer owns session/view; native crash reports use this context.
+    /// `setContext(...)`: the JS/Dart layer owns session/view. The adopted session is external (contracts.md §9):
+    /// native events, crash reports and session replay use it, it never gets a native SESSION_START and native
+    /// inactivity / 4 h rules never rotate it. `sampled` (when sent) is its RUM sampling decision. nil = hand back.
     public static func setHybridContext(_ context: TrooperHybridContext?) {
         core.current?.setExternalContext(context)
     }

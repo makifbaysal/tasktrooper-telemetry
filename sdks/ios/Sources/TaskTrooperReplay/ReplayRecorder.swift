@@ -1,6 +1,10 @@
 #if canImport(UIKit) && os(iOS)
 import UIKit
 import ObjectiveC
+import os.signpost
+#if SWIFT_PACKAGE
+@_spi(TrooperReplay) import TaskTrooper
+#endif
 
 /// Main-thread side of replay. A main run loop observer (after Core Animation's commit) marks the UI dirty
 /// whenever the run loop did work; captures run at most every `minInterval` (≥ 0.5 s = 2 fps, raised when a
@@ -11,20 +15,17 @@ import ObjectiveC
 final class ReplayRecorder {
     static private(set) var shared: ReplayRecorder?
 
-    static let minInterval: TimeInterval = 0.5
-    static let maxInterval: TimeInterval = 5
     static let moveInterval: TimeInterval = 0.1
     static let sessionCheckInterval: TimeInterval = 5
+    static let signpostLog = OSLog(subsystem: "dev.tasktrooper.replay", category: .pointsOfInterest)
 
     private let controller: ReplayController
     private let mapper: UIKitWireframeMapper
     private var observer: CFRunLoopObserver?
-    private var lastCapture: CFTimeInterval = 0
+    private var notificationTokens: [NSObjectProtocol] = []
+    private var throttle = CaptureThrottle()
     private var lastSessionCheck: CFTimeInterval = 0
-    private var trailingScheduled = false
-    private var ownWake = false
     private var lastMove: TimeInterval = 0
-    private(set) var minInterval = ReplayRecorder.minInterval
     private(set) var lastCost: TimeInterval = 0
 
     static func install(controller: ReplayController, options: TrooperReplayOptions) {
@@ -32,6 +33,17 @@ final class ReplayRecorder {
         let r = ReplayRecorder(controller: controller, mapper: UIKitWireframeMapper(maskAllText: options.maskAllText))
         shared = r
         r.start()
+    }
+
+    /// Undoes `install` for `controller` (`TrooperReplay.stop()`): no more captures, keyboard events or touches (the
+    /// `sendEvent` hook stays, observing nothing while `shared` is nil). A later `install` starts a new recorder.
+    static func uninstall(controller: ReplayController) {
+        guard let r = shared, r.controller === controller else { return }
+        shared = nil
+        if let obs = r.observer { CFRunLoopRemoveObserver(CFRunLoopGetMain(), obs, .commonModes); CFRunLoopObserverInvalidate(obs) }
+        r.observer = nil
+        r.notificationTokens.forEach(NotificationCenter.default.removeObserver)
+        r.notificationTokens = []
     }
 
     init(controller: ReplayController, mapper: UIKitWireframeMapper) {
@@ -48,33 +60,30 @@ final class ReplayRecorder {
         observer = obs
         TouchHook.install()
         let nc = NotificationCenter.default
-        nc.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { ReplayRecorder.shared?.keyboard(true) }
-        }
-        nc.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { ReplayRecorder.shared?.keyboard(false) }
-        }
-        nc.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { ReplayRecorder.shared?.controller.flush() }
-        }
+        notificationTokens = [
+            nc.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { ReplayRecorder.shared?.keyboard(true) }
+            },
+            nc.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { ReplayRecorder.shared?.keyboard(false) }
+            },
+            nc.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { ReplayRecorder.shared?.controller.flush() }
+            },
+        ]
         runLoopWillSleep()
     }
 
     // MARK: - Capture scheduling
 
     private func runLoopWillSleep() {
-        if ownWake { ownWake = false; return } // the iteration of our own capture: not a UI change
-        let now = CACurrentMediaTime()
-        let due = lastCapture + minInterval
-        if now >= due {
-            capture()
-        } else if !trailingScheduled {
-            trailingScheduled = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + (due - now)) {
+        switch throttle.runLoopIdle(now: CACurrentMediaTime()) {
+        case .none: break
+        case .capture: capture()
+        case .scheduleTrailing(let delay):
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                 MainActor.assumeIsolated {
-                    guard let r = ReplayRecorder.shared else { return }
-                    r.trailingScheduled = false
-                    r.ownWake = true // this wake-up is ours, not a UI change
+                    guard let r = ReplayRecorder.shared, r.throttle.trailingFired() else { return }
                     r.capture()
                 }
             }
@@ -91,8 +100,9 @@ final class ReplayRecorder {
                     guard capturing else { return }
                     DispatchQueue.main.async {
                         MainActor.assumeIsolated {
-                            ReplayRecorder.shared?.ownWake = true
-                            ReplayRecorder.shared?.capture()
+                            guard let r = ReplayRecorder.shared else { return }
+                            r.throttle.markOwnWake()
+                            r.capture()
                         }
                     }
                 }
@@ -102,15 +112,19 @@ final class ReplayRecorder {
         let windows = Self.windows()
         guard let base = windows.first(where: { $0.isKeyWindow }) ?? windows.first else { return }
         let ts = Int64((Date().timeIntervalSince1970 * 1000).rounded())
+        // Points of Interest interval (Instruments) around the main-thread part of a capture.
+        os_signpost(.begin, log: Self.signpostLog, name: "replay.capture")
         let result = mapper.map(windows: windows)
-        lastCapture = CACurrentMediaTime()
+        os_signpost(.end, log: Self.signpostLog, name: "replay.capture", "%d nodes", result.nodes.count)
+        throttle.didCapture(now: CACurrentMediaTime(), cost: result.cost, truncated: result.truncated)
         lastCost = result.cost
-        // Budget ≈ 1% of main-thread time: interval = cost × 100, clamped to [0.5 s, 5 s].
-        minInterval = min(max(result.cost * 100, Self.minInterval), Self.maxInterval)
-        if result.truncated { minInterval = max(minInterval, 2) }
+        if TrooperReplayBridge.isDebug {
+            TrooperReplayBridge.log(String(format: "replay: capture %.2f ms, %d nodes%@", result.cost * 1000, result.nodes.count,
+                                           result.truncated ? " (truncated)" : ""))
+        }
         let size = base.bounds.size
         controller.frame(ts: ts, width: Int(size.width.rounded()), height: Int(size.height.rounded()),
-                         density: Double(base.screen.scale), nodes: result.nodes)
+                         density: Double(base.screen.scale), nodes: result.nodes, truncated: result.truncated)
     }
 
     /// App windows back to front, excluding keyboard / text-effects windows (they can show typed text).

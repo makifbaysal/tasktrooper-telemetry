@@ -65,8 +65,19 @@ final class UIKitWireframeMapper {
         let descend = emit(v, frame: frame, visible: visible, alpha: alpha, unmask: unmask)
         if Self.isHostingView(v) {
             collectMarkers(v, frame: frame, depth: 0)
-            mapLayers(of: v, clip: visible, alpha: alpha)
-            mapAccessibility(of: v, clip: visible, alpha: alpha, unmask: unmask)
+            // SwiftUI text and images are layers with contents (no strings). The accessibility tree has the strings,
+            // but SwiftUI builds it only while an assistive technology (VoiceOver, UI automation) runs, and walking
+            // it is expensive (> 12 ms for a List on the iOS 26 simulator). So it is consulted only when a string
+            // could be shown unmasked; masked output is the same with or without VoiceOver. Its nodes are collected
+            // first so the layer placeholders are used only without them.
+            let base = nodes.count
+            if !maskAllText || unmask || unmaskRects.contains(where: { $0.1 }) {
+                mapAccessibility(of: v, clip: visible, alpha: alpha, unmask: unmask)
+            }
+            let axNodes = Array(nodes[base...])
+            nodes.removeSubrange(base...)
+            mapLayers(of: v, clip: visible, alpha: alpha, contents: axNodes.isEmpty)
+            nodes.append(contentsOf: axNodes)
             unmaskRects.removeAll()
         }
         guard descend else { return }
@@ -84,12 +95,14 @@ final class UIKitWireframeMapper {
         var bg = Self.rgba(v.backgroundColor, traits)
         let border = v.layer.borderWidth > 0 ? v.layer.borderColor.flatMap { Self.rgba(UIColor(cgColor: $0), traits) } : nil
         if bg == nil, let c = v.layer.backgroundColor { bg = Self.rgba(UIColor(cgColor: c), traits) }
+        if let b = bg, WireColor.isTransparent(b) { bg = nil } // `.clear` draws nothing (else empty `view` nodes)
         let radius = Double(v.layer.cornerRadius)
         var kind: String
         var text: String?
         var input = false, secure = false
         var fg: UInt32?
         var descend = true
+        var checked: Bool?
 
         switch v {
         case let tf as UITextField:
@@ -107,7 +120,7 @@ final class UIKitWireframeMapper {
             text = l.attributedText?.string ?? l.text
             if (text ?? "").isEmpty, bg == nil { return true }
         case let s as UISwitch:
-            kind = "switch"; descend = false
+            kind = "switch"; descend = false; checked = s.isOn
             if s.isOn { bg = Self.rgba(s.onTintColor ?? .systemGreen, traits) }
         case is UISegmentedControl, is UIButton:
             kind = "button"
@@ -122,19 +135,20 @@ final class UIKitWireframeMapper {
         }
         let m = Masking.apply(text, input: input, secure: secure, maskAll: maskAllText, unmask: unmask)
         append(id: Self.id(v), frame: frame, visible: visible, kind: kind, bg: bg, fg: fg, radius: radius, border: border,
-               text: m.text, masked: m.masked, alpha: alpha)
+               text: m.text, masked: m.masked, alpha: alpha, checked: checked)
         return descend
     }
 
     private func append(id: Int, frame: CGRect, visible: CGRect, kind: String, bg: UInt32?, fg: UInt32?, radius: Double,
-                        border: UInt32?, text: String?, masked: Bool, alpha: CGFloat) {
+                        border: UInt32?, text: String?, masked: Bool, alpha: CGFloat, checked: Bool? = nil) {
         let clipped = visible.minX > frame.minX + 0.5 || visible.minY > frame.minY + 0.5
             || visible.maxX < frame.maxX - 0.5 || visible.maxY < frame.maxY - 0.5
         nodes.append(WireNode(
             id: id, x: Double(frame.minX), y: Double(frame.minY), w: Double(frame.width), h: Double(frame.height), kind: kind,
             bg: bg.flatMap { WireColor.isTransparent($0) ? nil : $0 }, fg: fg, radius: radius, border: border,
             text: text, masked: masked, alpha: Double(alpha),
-            clip: clipped ? [Double(visible.minX), Double(visible.minY), Double(visible.width), Double(visible.height)] : nil))
+            clip: clipped ? [Double(visible.minX), Double(visible.minY), Double(visible.width), Double(visible.height)] : nil,
+            checked: kind == "switch" ? checked : nil))
     }
 
     // MARK: - SwiftUI (best effort)
@@ -159,8 +173,10 @@ final class UIKitWireframeMapper {
         return best?.unmask
     }
 
-    /// Fills and borders of the hosting view's own (non-view) sublayers.
-    private func mapLayers(of host: UIView, clip: CGRect, alpha: CGFloat) {
+    /// Fills and borders of the hosting view's own (non-view) sublayers. With `contents`, layers that draw
+    /// content become nodes too: SwiftUI text (`CGDrawingLayer`) → masked `text` placeholder (the string is not
+    /// available; length estimated from the width), bitmaps (`ImageLayer`, SF Symbols) → `image` / `icon`.
+    private func mapLayers(of host: UIView, clip: CGRect, alpha: CGFloat, contents: Bool) {
         guard let window = host.window else { return }
         var count = 0
         func walk(_ layer: CALayer, depth: Int) {
@@ -170,19 +186,50 @@ final class UIKitWireframeMapper {
                 count += 1
                 let bg = sub.backgroundColor.flatMap { Self.rgba(UIColor(cgColor: $0), host.traitCollection) }
                 let border = sub.borderWidth > 0 ? sub.borderColor.flatMap { Self.rgba(UIColor(cgColor: $0), host.traitCollection) } : nil
-                if bg.map({ !WireColor.isTransparent($0) }) == true || border != nil {
+                let filled = bg.map({ !WireColor.isTransparent($0) }) == true || border != nil
+                let content = contents && sub.contents != nil ? Self.contentKind(layerClass: NSStringFromClass(type(of: sub))) : nil
+                if filled || content != nil {
                     let r = sub.convert(sub.bounds, to: window.layer).offsetBy(dx: window.frame.minX, dy: window.frame.minY)
                     let visible = r.intersection(clip)
                     if !visible.isNull, visible.width > 0, visible.height > 0 {
-                        append(id: Self.id(sub), frame: r, visible: visible, kind: "view", bg: bg, fg: nil,
-                               radius: Double(sub.cornerRadius), border: border, text: nil, masked: false,
-                               alpha: alpha * CGFloat(sub.opacity))
+                        let a = alpha * CGFloat(sub.opacity)
+                        if filled {
+                            append(id: Self.id(sub), frame: r, visible: visible, kind: "view", bg: bg, fg: nil,
+                                   radius: Double(sub.cornerRadius), border: border, text: nil, masked: false, alpha: a)
+                        }
+                        switch content {
+                        case .text?:
+                            append(id: Self.id(sub) ^ 1, frame: r, visible: visible, kind: "text", bg: nil, fg: nil, radius: 0,
+                                   border: nil, text: Self.placeholderText(width: r.width, height: r.height), masked: true, alpha: a)
+                        case .image?:
+                            append(id: Self.id(sub) ^ 1, frame: r, visible: visible,
+                                   kind: r.width <= 48 && r.height <= 48 ? "icon" : "image", bg: nil, fg: nil,
+                                   radius: Double(sub.cornerRadius), border: nil, text: nil, masked: false, alpha: a)
+                        case nil: break
+                        }
                     }
                 }
                 walk(sub, depth: depth + 1)
             }
         }
         walk(host.layer, depth: 0)
+    }
+
+    enum LayerContent { case text, image }
+
+    /// What a SwiftUI layer with `contents` draws: `CGDrawingLayer` holds rasterized text (and vector paths),
+    /// everything else (`ImageLayer`, plain `CALayer` with a CGImage) a bitmap.
+    static func contentKind(layerClass name: String) -> LayerContent {
+        name.contains("DrawingLayer") ? .text : .image
+    }
+
+    /// Masked stand-in for text whose string is unknown: one `•` per ~half line height of width, one line per
+    /// line height (multi-line text keeps its shape).
+    static func placeholderText(width: CGFloat, height: CGFloat) -> String {
+        let lineHeight: CGFloat = min(max(height, 8), 22)
+        let lines = max(1, min(Int((height / lineHeight).rounded()), 12))
+        let perLine = max(1, min(Int((width / (lineHeight * 0.5)).rounded()), Masking.maxText / lines))
+        return Array(repeating: String(repeating: "•", count: perLine), count: lines).joined(separator: " ")
     }
 
     /// Text / buttons / images from the accessibility elements SwiftUI exposes (frames are in screen points).
@@ -219,20 +266,48 @@ final class UIKitWireframeMapper {
         let label = el.accessibilityLabel
         let kind: String
         var input = false
-        if t.contains(.searchField) || t.contains(.keyboardKey) { kind = "input"; input = true }
+        var checked: Bool?
+        if #available(iOS 17.0, tvOS 17.0, macCatalyst 17.0, *), t.contains(.toggleButton) {
+            kind = "switch"; checked = WireToggle.checked(accessibilityValue: el.accessibilityValue)
+        }
+        else if t.contains(.searchField) || t.contains(.keyboardKey) { kind = "input"; input = true }
+        else if t.contains(.button), let c = WireToggle.checked(accessibilityValue: el.accessibilityValue) {
+            kind = "switch"; checked = c // SwiftUI Toggle before iOS 17: button trait + "1"/"0" value
+        }
         else if t.contains(.button) || t.contains(.link) || t.contains(.tabBar) { kind = "button" }
         else if t.contains(.adjustable) { kind = "switch" }
         else if t.contains(.image) { kind = frame.width <= 48 && frame.height <= 48 ? "icon" : "image" }
         else if let label, !label.isEmpty { kind = "text" }
         else { return }
         let um = markerUnmask(for: frame) ?? unmask
+        if kind == "switch", let label, !label.isEmpty, frame.width > Self.toggleSize.width * 2 {
+            // Labelled SwiftUI Toggle row: label as `text`, the toggle as a `switch` at the trailing edge (contracts.md §23).
+            let m = Masking.apply(label, input: false, secure: false, maskAll: maskAllText, unmask: um)
+            let tf = CGRect(x: frame.minX, y: frame.minY, width: frame.width - Self.toggleSize.width - 8, height: frame.height)
+            let tv = tf.intersection(clip)
+            if !tv.isNull, tv.width > 0 {
+                append(id: Self.id(el), frame: tf, visible: tv, kind: "text", bg: nil, fg: nil, radius: 0, border: nil,
+                       text: m.text, masked: m.masked, alpha: alpha)
+            }
+            let sf = CGRect(x: frame.maxX - Self.toggleSize.width, y: frame.midY - Self.toggleSize.height / 2,
+                            width: Self.toggleSize.width, height: Self.toggleSize.height)
+            let sv = sf.intersection(clip)
+            if !sv.isNull, sv.width > 0, sv.height > 0 {
+                append(id: Self.id(el) ^ 0x2000_0000, frame: sf, visible: sv, kind: "switch", bg: nil, fg: nil, radius: 0,
+                       border: nil, text: nil, masked: false, alpha: alpha, checked: checked)
+            }
+            return
+        }
         let text = kind == "image" || kind == "icon" ? nil : label
         let m = Masking.apply(text, input: input, secure: false, maskAll: maskAllText, unmask: um)
         append(id: Self.id(el), frame: frame, visible: visible, kind: kind, bg: nil, fg: nil, radius: 0, border: nil,
-               text: m.text, masked: m.masked, alpha: alpha)
+               text: m.text, masked: m.masked, alpha: alpha, checked: checked)
     }
 
     // MARK: - Helpers
+
+    /// UISwitch's intrinsic size, used for the toggle area of labelled SwiftUI toggles.
+    static let toggleSize = CGSize(width: 51, height: 31)
 
     static func id(_ o: AnyObject) -> Int { Int(truncatingIfNeeded: UInt(bitPattern: ObjectIdentifier(o).hashValue) >> 4) & 0x7fff_ffff }
 

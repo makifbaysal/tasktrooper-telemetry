@@ -18,6 +18,8 @@ struct WireNode: Equatable, Sendable {
     var alpha: Double = 1
     /// Visible part `[x, y, w, h]` when clipped by an ancestor; nil when fully visible.
     var clip: [Double]? = nil
+    /// Toggle state, only for `switch` nodes; nil when unknown.
+    var checked: Bool? = nil
 
     func write(_ j: inout JSONText) {
         j.beginObject()
@@ -39,10 +41,22 @@ struct WireNode: Equatable, Sendable {
             for v in clip { j.number(Self.round1(v)) }
             j.endArray()
         }
+        if let checked { j.key("checked"); j.bool(checked) }
         j.endObject()
     }
 
     static func round1(_ v: Double) -> Double { (v * 10).rounded() / 10 }
+}
+
+enum WireToggle {
+    /// Toggle state from an accessibility value (SwiftUI `Toggle` exposes "1"/"0"); nil when not a toggle value.
+    static func checked(accessibilityValue v: String?) -> Bool? {
+        switch v {
+        case "1": return true
+        case "0": return false
+        default: return nil
+        }
+    }
 }
 
 enum WireColor {

@@ -46,6 +46,18 @@ final class WireframeTests: XCTestCase {
         WireNode(id: 1, x: 0, y: 0, w: 1, h: 1, kind: "view").write(&p)
         let plain = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(p.text.utf8)) as? [String: Any])
         XCTAssertEqual(Set(plain.keys), ["id", "x", "y", "w", "h", "kind"])
+
+        var s = JSONText()
+        WireNode(id: 2, x: 0, y: 0, w: 51, h: 31, kind: "switch", checked: false).write(&s)
+        let sw = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(s.text.utf8)) as? [String: Any])
+        XCTAssertEqual(sw["checked"] as? Bool, false)
+    }
+
+    func testToggleAccessibilityValue() {
+        XCTAssertEqual(WireToggle.checked(accessibilityValue: "1"), true)
+        XCTAssertEqual(WireToggle.checked(accessibilityValue: "0"), false)
+        XCTAssertNil(WireToggle.checked(accessibilityValue: "On"))
+        XCTAssertNil(WireToggle.checked(accessibilityValue: nil))
     }
 
     func testStringEscaping() throws {

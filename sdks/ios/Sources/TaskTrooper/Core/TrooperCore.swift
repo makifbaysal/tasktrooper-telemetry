@@ -98,12 +98,23 @@ final class TrooperCore: @unchecked Sendable {
     // MARK: - Events (queue-confined)
 
     private func base(_ type: RumEventType, ts: Int64, session: SessionManager.Session) -> RumEvent {
+        if let x = externalContext {
+            // Hybrid app: session, anonymous id, view (unless a native view is open) and user come from JS/Dart.
+            let v = views.current
+            return RumEvent(type: type, tsMs: ts, sessionId: x.sessionId, viewId: v?.id ?? x.viewId, viewName: v?.name ?? x.viewName,
+                            anonymousId: x.anonymousId.isEmpty ? anonymousId : x.anonymousId,
+                            user: user ?? x.userId.map { RumUser(id: $0) }, connection: connection.current)
+        }
         let v = views.current
         return RumEvent(type: type, tsMs: ts, sessionId: session.id, viewId: v?.id, viewName: v?.name,
                         anonymousId: anonymousId, user: user, connection: connection.current)
     }
 
     private func currentSession(ts: Int64, touch: Bool) -> SessionManager.Session {
+        if let x = externalContext {
+            // Adopted (external) session: owned by JS/Dart, never rotated or started natively (contracts.md §9).
+            return SessionManager.Session(id: x.sessionId, startMs: ts, lastActivityMs: ts, sampled: x.sampled ?? true)
+        }
         if !touch, let s = sessions.current { return s }
         let (session, isNew) = sessions.touch(nowMs: ts)
         if isNew {
@@ -247,7 +258,8 @@ final class TrooperCore: @unchecked Sendable {
     private func updateCrashContext() {
         guard config.trackCrashes else { return }
         if let x = externalContext {
-            CrashReporter.setContext(sessionId: x.sessionId, viewId: x.viewId, viewName: x.viewName, userId: x.userId)
+            CrashReporter.setContext(sessionId: x.sampled == false ? CrashReporter.unsampledSession : x.sessionId,
+                                     viewId: x.viewId, viewName: x.viewName, userId: x.userId)
             return
         }
         guard let s = sessions.current else { return }
@@ -312,6 +324,7 @@ extension TrooperCore {
 extension TrooperCore {
     func nativeContext() -> TrooperHybridContext? {
         queue.sync {
+            if let x = externalContext { return x }
             let s = currentSessionSnapshot()
             guard let s else { return nil }
             let v = currentViewSnapshot()
@@ -321,7 +334,16 @@ extension TrooperCore {
 
     func setExternalContext(_ ctx: TrooperHybridContext?) {
         queue.async {
-            self.externalContext = ctx
+            var adopted = ctx
+            if var x = adopted, x.sampled == nil {
+                // No decision from JS/Dart: keep one per adopted session (re-adopting the same id keeps it).
+                x.sampled = (self.externalContext?.sessionId == x.sessionId ? self.externalContext?.sampled : nil)
+                    ?? self.sessionSampled.current
+                adopted = x
+            }
+            self.externalContext = adopted
+            if let s = adopted?.sampled { self.sessionSampled.set(s) }
+            else if let s = self.currentSessionSnapshot() { self.sessionSampled.set(s.sampled) } // handed back
             self.refreshCrashContext()
         }
     }

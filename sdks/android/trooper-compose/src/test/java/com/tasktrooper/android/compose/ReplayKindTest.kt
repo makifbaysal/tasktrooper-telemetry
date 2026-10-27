@@ -1,6 +1,7 @@
 package com.tasktrooper.android.compose
 
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.state.ToggleableState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -21,6 +22,15 @@ class ReplayKindTest {
         assertEquals("icon", kind(desc = true, w = 24f, h = 24f))
         assertEquals("list", kind(scroll = true))
         assertEquals("text", kind(text = true))
+    }
+
+    @Test fun mapsToggleStateToChecked() {
+        assertEquals(true, replayChecked(ToggleableState.On, null))
+        assertEquals(false, replayChecked(ToggleableState.Off, null))
+        assertEquals(false, replayChecked(ToggleableState.Indeterminate, null))
+        assertEquals(true, replayChecked(null, true))
+        assertEquals(false, replayChecked(null, false))
+        assertNull(replayChecked(null, null))
     }
 
     @Test fun plainContainersAreNotDrawn() {

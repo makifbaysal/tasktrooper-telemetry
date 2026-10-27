@@ -1,0 +1,56 @@
+# Runnable iOS app + UI tests for the sample (the SwiftPM package only compile-checks the sources):
+#   xcodegen generate && xcodebuild -project TrooperSample.xcodeproj -scheme TrooperSampleApp \
+#     -destination 'platform=iOS Simulator,name=iPhone 17' test
+# The UI tests drive the session replay screens (UIKit form, alert, table, SwiftUI list) against a local ingest-gw.
+name: TrooperSample
+options:
+  bundleIdPrefix: dev.tasktrooper
+  deploymentTarget:
+    iOS: "15.0"
+packages:
+  TaskTrooper:
+    path: ../..
+targets:
+  TrooperSampleApp:
+    type: application
+    platform: iOS
+    sources: [Sources/TrooperSample]
+    dependencies:
+      - package: TaskTrooper
+        product: TaskTrooper
+      - package: TaskTrooper
+        product: TaskTrooperSwiftUI
+      - package: TaskTrooper
+        product: TaskTrooperReplay
+    info:
+      path: Generated/Info.plist
+      properties:
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.tasktrooper.sample
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGNING_ALLOWED: NO
+  TrooperSampleUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: TrooperSampleApp
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGNING_ALLOWED: NO
+schemes:
+  TrooperSampleApp:
+    build:
+      targets:
+        TrooperSampleApp: all
+        TrooperSampleUITests: [test]
+    test:
+      targets: [TrooperSampleUITests]

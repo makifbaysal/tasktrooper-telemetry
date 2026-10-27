@@ -65,6 +65,8 @@ final class UIKitMapperTests: XCTestCase {
         XCTAssertEqual(node(r, icon)?.kind, "icon")
         XCTAssertEqual(node(r, toggle)?.kind, "switch")
         XCTAssertNotNil(node(r, toggle)?.bg)
+        XCTAssertEqual(node(r, toggle)?.checked, true)
+        XCTAssertNil(node(r, button)?.checked)
         XCTAssertEqual(node(r, button)?.kind, "button")
         XCTAssertFalse(r.nodes.contains { $0.text == "Pay now" }, "button titles are masked by default")
         // Back to front: parent before child.
@@ -156,6 +158,19 @@ final class UIKitMapperTests: XCTestCase {
         let r = map(w, maxNodes: 20)
         XCTAssertTrue(r.truncated)
         XCTAssertEqual(r.nodes.count, 20)
+    }
+
+    /// Regression: a `.clear` container (e.g. UIKit's sheet dimming view) produced an empty `view` node.
+    func testClearBackgroundIsNotDrawn() {
+        let w = window()
+        let clear = UIView(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+        clear.backgroundColor = .clear
+        let clearLayer = UIView(frame: CGRect(x: 0, y: 200, width: 100, height: 100))
+        clearLayer.layer.backgroundColor = UIColor.clear.cgColor
+        [clear, clearLayer].forEach(w.addSubview)
+        let r = map(w)
+        XCTAssertNil(node(r, clear))
+        XCTAssertNil(node(r, clearLayer))
     }
 
     func testSystemWindowsAreExcludedByName() {

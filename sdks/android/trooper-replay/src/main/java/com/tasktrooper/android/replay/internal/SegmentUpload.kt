@@ -7,8 +7,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Locale
 import java.util.Random
-import java.util.concurrent.Executors
-import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 
 /**
@@ -106,15 +105,20 @@ internal interface ReplayScheduler {
 }
 
 internal class ExecutorReplayScheduler(name: String) : ReplayScheduler {
-    private val executor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { r ->
+    private val executor = ScheduledThreadPoolExecutor(1) { r ->
         Thread(r, name).apply { isDaemon = true; priority = Thread.MIN_PRIORITY }
-    }
+    }.apply { executeExistingDelayedTasksAfterShutdownPolicy = false }
+
+    /** Runs the tasks already queued, drops delayed ones (timers, upload retries: the files stay on disk). */
+    fun shutdown() { try { executor.shutdown() } catch (_: Throwable) {} }
 
     override fun execute(task: () -> Unit) {
+        if (executor.isShutdown) return
         try { executor.execute { Guard.run("replay.task", Unit, task) } } catch (t: Throwable) { Guard.report("replay.execute", t) }
     }
 
     override fun schedule(delayMs: Long, task: () -> Unit) {
+        if (executor.isShutdown) return
         try { executor.schedule({ Guard.run("replay.task", Unit, task) }, delayMs, TimeUnit.MILLISECONDS) }
         catch (t: Throwable) { Guard.report("replay.schedule", t) }
     }

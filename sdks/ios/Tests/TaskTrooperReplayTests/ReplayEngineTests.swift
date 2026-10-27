@@ -95,6 +95,21 @@ final class ReplayEngineTests: XCTestCase {
         XCTAssertEqual(EngineHarness.types(h.segments[0]), ["screen", "frame", "frame"])
     }
 
+    /// Regression: a capture that hit the time budget (seen live with accessibility on) replaced a full frame with a
+    /// partial one (14 of 58 nodes), so the UI flickered. Truncated frames only count when nothing better exists.
+    func testTruncatedFramesDoNotReplaceCompleteOnes() {
+        let h = EngineHarness()
+        h.engine.onFrame(ts: h.now, width: 390, height: 844, density: 3, nodes: [node(1)], truncated: true) // first: kept
+        h.now += 500
+        h.frame(node(1), node(2)) // complete
+        h.now += 500
+        h.engine.onFrame(ts: h.now, width: 390, height: 844, density: 3, nodes: [node(1)], truncated: true) // dropped
+        h.now += 500
+        h.engine.onFrame(ts: h.now, width: 844, height: 390, density: 3, nodes: [node(1)], truncated: true) // new screen: kept
+        h.engine.flush()
+        XCTAssertEqual(EngineHarness.types(h.segments[0]), ["screen", "frame", "frame", "screen", "frame"])
+    }
+
     func testSegmentsSealAfterFiveSecondsAndStartWithScreen() {
         let h = EngineHarness()
         h.frame(node(1, "a"))

@@ -13,7 +13,9 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.RadioButton
 import android.widget.ScrollView
+import android.widget.Switch
 import android.widget.TextView
 import androidx.test.core.app.ApplicationProvider
 import com.tasktrooper.android.replay.trooperMask
@@ -82,7 +84,13 @@ class ViewMapperTest {
         assertEquals("input", e.kind); assertEquals("•".repeat(14), e.text); assertTrue(e.masked)
         assertEquals("•••••", nodes.byId(hint)!!.text)
         assertEquals("button", nodes.byId(button)!!.kind)
-        assertEquals("switch", nodes.byId(check)!!.kind)
+        // Labelled CheckBox: label as text, the box as a separate switch node on its left (as iOS UISwitch).
+        val label = nodes.byId(check)!!
+        assertEquals("text", label.kind); assertEquals("••••••••", label.text)
+        val toggle = nodes.first { it.id == System.identityHashCode(check) xor ViewMapper.TOGGLE_ID_SALT }
+        assertEquals("switch", toggle.kind)
+        assertTrue(toggle.x + toggle.w <= label.x + 0.5f)
+        assertTrue(toggle.w < 100f / 3f * 2)
         assertEquals("image", nodes.byId(photo)!!.kind)
         assertEquals("icon", nodes.byId(icon)!!.kind)
         val c = nodes.byId(card)!!
@@ -152,9 +160,54 @@ class ViewMapperTest {
         assertEquals(20, r.nodes.size)
     }
 
+    @Test fun timeBudgetTruncationIsFlaggedAsTimedOut() {
+        val root = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        repeat(200) { root.addView(TextView(ctx).apply { text = "row $it" }, LinearLayout.LayoutParams(1080, 10)) }
+        var t = 0L
+        val r = ViewMapper(true, budgetNs = 1_000_000L, nanoTime = { t += 400_000L; t }).map(listOf(layout(root)), 3f)
+        assertTrue(r.truncated)
+        assertTrue(r.timedOut)
+        assertFalse(ViewMapper(true, maxNodes = 20).map(listOf(root), 3f).timedOut) // node cap: deterministic, kept
+    }
+
+    @Test fun togglesCarryCheckedState() {
+        val root = FrameLayout(ctx)
+        val check = CheckBox(ctx).apply { text = "Remember"; isChecked = true }.at(0, 0, 300, 120)
+        val sw = Switch(ctx).at(0, 200, 200, 120) // unlabelled: the whole View is the switch node
+        val radio = RadioButton(ctx).apply { isChecked = true }.at(0, 400, 120, 120)
+        listOf(check, sw, radio).forEach { root.addView(it) }
+        val nodes = map(layout(root)).nodes
+        assertEquals(true, nodes.first { it.id == System.identityHashCode(check) xor ViewMapper.TOGGLE_ID_SALT }.checked)
+        assertNull(nodes.byId(check)!!.checked) // the label text node
+        val s = nodes.byId(sw)!!
+        assertEquals("switch", s.kind); assertEquals(false, s.checked)
+        assertEquals(true, nodes.byId(radio)!!.checked)
+
+        val json = Json().also { nodes.byId(radio)!!.write(it) }.toString()
+        assertTrue(json, json.contains("\"checked\":true"))
+    }
+
+    @Test fun customMapperCheckedOnlyForSwitchNodes() {
+        class HostView(c: android.content.Context) : FrameLayout(c)
+        val mapper = object : ReplayViewMapper {
+            override fun map(view: View, sink: ReplayNodeSink): Boolean {
+                if (view !is HostView) return false
+                sink.node(1, 0f, 0f, 90f, 90f, "switch", checked = true)
+                sink.node(2, 0f, 100f, 90f, 190f, "button", checked = true)
+                return true
+            }
+        }
+        val root = FrameLayout(ctx).apply { addView(HostView(ctx).at(0, 0, 300, 300)) }
+        val byId = ViewMapper(true, mapper).map(listOf(layout(root)), 3f).nodes.associateBy { it.id xor ViewMapper.COMPOSE_ID_SALT }
+        assertEquals(true, byId[1]!!.checked)
+        assertNull(byId[2]!!.checked)
+    }
+
     @Test fun customMapperNodesAreClippedMaskedAndInheritUnmask() {
+        class HostView(c: android.content.Context) : FrameLayout(c)
         val composeLike = object : ReplayViewMapper {
             override fun map(view: View, sink: ReplayNodeSink): Boolean {
+                if (view !is HostView) return false
                 sink.node(1, 0f, 0f, 300f, 90f, "text", text = "Secret")
                 sink.node(2, 0f, 100f, 300f, 190f, "text", text = "Public", unmask = true)
                 sink.node(3, 0f, 200f, 300f, 290f, "input", text = "typed", input = true, unmask = true)
@@ -163,11 +216,10 @@ class ViewMapperTest {
                 return true
             }
         }
-        class HostView(c: android.content.Context) : FrameLayout(c)
         val root = FrameLayout(ctx)
         val host = HostView(ctx).at(0, 0, 300, 300)
         root.addView(host)
-        val nodes = ViewMapper(true, composeLike, composeViewClass = HostView::class.java.name).map(listOf(layout(root)), 3f).nodes
+        val nodes = ViewMapper(true, composeLike).map(listOf(layout(root)), 3f).nodes
         val byId = nodes.associateBy { it.id xor ViewMapper.COMPOSE_ID_SALT }
         assertEquals("••••••", byId[1]!!.text)
         assertEquals("Public", byId[2]!!.text)
@@ -178,7 +230,33 @@ class ViewMapperTest {
 
         // Unmask on the host View is inherited by mapper nodes that do not decide themselves.
         host.trooperUnmask()
-        val again = ViewMapper(true, composeLike, composeViewClass = HostView::class.java.name).map(listOf(root), 3f).nodes
+        val again = ViewMapper(true, composeLike).map(listOf(root), 3f).nodes
         assertEquals("Secret", again.first { (it.id xor ViewMapper.COMPOSE_ID_SALT) == 1 }.text)
+    }
+
+    @Test fun backgroundTintReplacesDrawableColor() {
+        // Framework/AppCompat buttons: white shape tinted gray by android:backgroundTint.
+        val root = FrameLayout(ctx)
+        val b = View(ctx).apply {
+            background = GradientDrawable().apply { setColor(Color.WHITE) }
+            backgroundTintList = android.content.res.ColorStateList.valueOf(Color.rgb(0xd6, 0xd7, 0xd7))
+        }.at(0, 0, 300, 120)
+        root.addView(b)
+        assertEquals(Color.rgb(0xd6, 0xd7, 0xd7), map(layout(root)).nodes.byId(b)!!.bg)
+    }
+
+    @Test fun dialogWindowDimsTheScreenBehindIt() {
+        val activityRoot = layout(FrameLayout(ctx).apply { background = ColorDrawable(Color.WHITE) })
+        val dialogRoot = FrameLayout(ctx).apply { background = ColorDrawable(Color.WHITE) }
+        dialogRoot.layoutParams = android.view.WindowManager.LayoutParams().apply {
+            flags = flags or android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND; dimAmount = 0.5f
+        }
+        layout(dialogRoot, 900, 600)
+        val nodes = ViewMapper(true).map(listOf(activityRoot, dialogRoot), 3f).nodes
+        val dim = nodes.first { it.id == System.identityHashCode(dialogRoot) xor ViewMapper.DIM_ID_SALT }
+        assertEquals(360f, dim.w, 0.01f); assertEquals(800f, dim.h, 0.01f)
+        assertEquals("#0000007f", Colors.hex(dim.bg!!))
+        assertTrue(nodes.indexOf(dim) < nodes.indexOf(nodes.byId(dialogRoot))) // behind the dialog, above the activity
+        assertTrue(nodes.indexOf(dim) > nodes.indexOf(nodes.byId(activityRoot)))
     }
 }

@@ -12,6 +12,7 @@ import android.text.InputType
 import android.text.method.PasswordTransformationMethod
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.webkit.WebView
 import android.widget.AbsListView
 import android.widget.Button
@@ -40,16 +41,16 @@ internal class ViewMapper(
     private val maxNodes: Int = 1500,
     private val budgetNs: Long = 12_000_000L,
     private val nanoTime: () -> Long = System::nanoTime,
-    /** Class handed to [composeMapper] (tests substitute their own). */
-    private val composeViewClass: String = ReplayViewMapper.COMPOSE_VIEW,
 ) : ReplayNodeSink {
-    class Result(val nodes: List<WireNode>, val truncated: Boolean, val costNs: Long)
+    /** [timedOut]: truncated by the time budget (not the node cap): the frame misses part of the UI. */
+    class Result(val nodes: List<WireNode>, val truncated: Boolean, val costNs: Long, val timedOut: Boolean = false)
 
     private var density = 1f
     private var nodes = ArrayList<WireNode>()
     private var started = 0L
     private var checks = 0
     private var truncated = false
+    private var timedOut = false
     private val loc = IntArray(2)
 
     // Context of the View currently handed to the compose mapper (sink callbacks).
@@ -66,23 +67,32 @@ internal class ViewMapper(
     fun map(roots: List<View>, density: Float): Result {
         this.density = if (density > 0f) density else 1f
         nodes = ArrayList(256)
-        started = nanoTime(); checks = 0; truncated = false
+        started = nanoTime(); checks = 0; truncated = false; timedOut = false
+        var screenW = 0f; var screenH = 0f
         for (root in roots) {
             if (!hasBudget) break
             Guard.run("replay.mapRoot", Unit) {
                 root.getLocationOnScreen(loc)
                 val l = loc[0].toFloat(); val t = loc[1].toFloat()
+                if (screenW == 0f) { screenW = l + root.width; screenH = t + root.height }
+                // Dialogs dim the windows behind them (FLAG_DIM_BEHIND): a translucent full-screen node.
+                val lp = root.layoutParams as? WindowManager.LayoutParams
+                if (lp != null && root !== roots[0] && (lp.flags and WindowManager.LayoutParams.FLAG_DIM_BEHIND) != 0 && lp.dimAmount > 0f) {
+                    val dim = Colors.withAlpha(0xff000000.toInt(), lp.dimAmount)
+                    add(System.identityHashCode(root) xor DIM_ID_SALT, 0f, 0f, screenW, screenH, 0f, 0f, screenW, screenH,
+                        "view", dim, null, 0f, null, null, false, 1f)
+                }
                 visit(root, l, t, l, t, l + root.width, t + root.height, 1f, false, 0)
             }
         }
-        return Result(nodes, truncated, nanoTime() - started)
+        return Result(nodes, truncated, nanoTime() - started, timedOut)
     }
 
     override val hasBudget: Boolean
         get() {
             if (truncated) return false
             if (nodes.size >= maxNodes) { truncated = true; return false }
-            if ((++checks and 31) == 0 && nanoTime() - started > budgetNs) { truncated = true; return false }
+            if ((++checks and 31) == 0 && nanoTime() - started > budgetNs) { truncated = true; timedOut = true; return false }
             return true
         }
 
@@ -105,7 +115,9 @@ internal class ViewMapper(
         if (v is WebView) return // content is a black box (never recorded)
 
         val cm = composeMapper
-        if (cm != null && v.javaClass.name == composeViewClass) {
+        if (cm != null && v is ViewGroup) {
+            // The mapper recognizes its host itself (type check): class names are renamed by R8 in minified
+            // apps, so matching on "androidx.compose.ui.platform.AndroidComposeView" loses all Compose content.
             curClipL = vl; curClipT = vt; curClipR = vr; curClipB = vb; curAlpha = alpha; curUnmask = unmask
             Guard.run("replay.compose", false) { cm.map(v, this) }
         }
@@ -151,6 +163,10 @@ internal class ViewMapper(
             }
             is TextView -> {
                 kind = when (v) { is CompoundButton -> "switch"; is Button -> "button"; else -> "text" }
+                if (v is CompoundButton && !v.text.isNullOrEmpty()) {
+                    emitLabeledToggle(v, left, top, right, bottom, vl, vt, vr, vb, alpha, unmask)
+                    return
+                }
                 fg = v.currentTextColor
                 text = v.text
                 password = isPassword(v)
@@ -168,12 +184,48 @@ internal class ViewMapper(
             }
         }
         val (shown, masked) = Masking.apply(text, input, password, maskAllText, unmask)
-        add(System.identityHashCode(v), left, top, right, bottom, vl, vt, vr, vb, kind, bgColor, fg, bgRadius, bgBorder, shown, masked, alpha)
+        add(System.identityHashCode(v), left, top, right, bottom, vl, vt, vr, vb, kind, bgColor, fg, bgRadius, bgBorder, shown, masked, alpha,
+            (v as? CompoundButton)?.isChecked)
+    }
+
+    /**
+     * A Switch / CheckBox / RadioButton with a label: the label as `text` over the whole View and the toggle as a
+     * `switch` node in the compound-drawable area (right for switches, left for check boxes), like iOS's UISwitch.
+     */
+    private fun emitLabeledToggle(
+        v: CompoundButton, left: Float, top: Float, right: Float, bottom: Float,
+        vl: Float, vt: Float, vr: Float, vb: Float, alpha: Float, unmask: Boolean,
+    ) {
+        val (shown, masked) = Masking.apply(v.text, false, false, maskAllText, unmask)
+        val id = System.identityHashCode(v)
+        val padR = (v.compoundPaddingRight - v.paddingRight).toFloat()
+        val padL = (v.compoundPaddingLeft - v.paddingLeft).toFloat()
+        val onRight = padR >= padL
+        val area = if (onRight) padR else padL
+        val textL = if (onRight) left + v.paddingLeft else left + v.compoundPaddingLeft
+        val textR = if (onRight) right - v.compoundPaddingRight else right - v.paddingRight
+        if (bgColor != null || bgBorder != null) {
+            add(id xor TOGGLE_BG_ID_SALT, left, top, right, bottom, vl, vt, vr, vb, "view", bgColor, null, bgRadius, bgBorder, null, false, alpha)
+        }
+        if (textR > textL) {
+            add(id, textL, top, textR, bottom, maxOf(vl, textL), vt, minOf(vr, textR), vb, "text", null, v.currentTextColor, 0f, null, shown, masked, alpha)
+        }
+        if (area <= 0f) return
+        val h = minOf(bottom - top, area * 0.6f)
+        val cy = (top + bottom) / 2
+        val tl = if (onRight) right - v.paddingRight - area else left + v.paddingLeft
+        val tr = tl + area
+        val tt = cy - h / 2; val tb = cy + h / 2
+        val cl = maxOf(vl, tl); val ct = maxOf(vt, tt); val cr = minOf(vr, tr); val cb = minOf(vb, tb)
+        if (cr <= cl || cb <= ct) return
+        add(id xor TOGGLE_ID_SALT, tl, tt, tr, tb, cl, ct, cr, cb, "switch", null, null, 0f, null, null, false,
+            alpha, v.isChecked)
     }
 
     private fun add(
         id: Int, left: Float, top: Float, right: Float, bottom: Float, vl: Float, vt: Float, vr: Float, vb: Float,
         kind: String, bg: Int?, fg: Int?, radiusPx: Float, border: Int?, text: String?, masked: Boolean, alpha: Float,
+        checked: Boolean? = null,
     ) {
         val d = density
         val clipped = vl > left + 0.5f || vt > top + 0.5f || vr < right - 0.5f || vb < bottom - 0.5f
@@ -182,6 +234,7 @@ internal class ViewMapper(
             bg = bg?.takeUnless { Colors.isTransparent(it) }, fg = fg, radius = radiusPx / d, border = border,
             text = text, masked = masked, alpha = alpha,
             clip = if (clipped) floatArrayOf(vl / d, vt / d, (vr - vl) / d, (vb - vt) / d) else null,
+            checked = checked,
         ))
     }
 
@@ -189,14 +242,15 @@ internal class ViewMapper(
 
     override fun node(
         id: Int, left: Float, top: Float, right: Float, bottom: Float, kind: String, text: String?, input: Boolean,
-        unmask: Boolean?, bg: Int?, fg: Int?, radiusPx: Float,
+        unmask: Boolean?, bg: Int?, fg: Int?, radiusPx: Float, checked: Boolean?,
     ) {
         if (!hasBudget || right <= left || bottom <= top) return
         val vl = maxOf(left, curClipL); val vt = maxOf(top, curClipT); val vr = minOf(right, curClipR); val vb = minOf(bottom, curClipB)
         if (vr <= vl || vb <= vt) return
         val (shown, masked) = Masking.apply(text, input, false, maskAllText, unmask ?: curUnmask)
         // Offset keeps semantics ids apart from View identity hashes.
-        add(id xor COMPOSE_ID_SALT, left, top, right, bottom, vl, vt, vr, vb, kind, bg, fg, radiusPx, null, shown, masked, curAlpha)
+        add(id xor COMPOSE_ID_SALT, left, top, right, bottom, vl, vt, vr, vb, kind, bg, fg, radiusPx, null, shown, masked, curAlpha,
+            if (kind == "switch") checked else null)
     }
 
     // ------------------------------------------------------------------ helpers
@@ -223,6 +277,14 @@ internal class ViewMapper(
         bgColor = null; bgRadius = 0f; bgBorder = null
         Guard.run("replay.bg", Unit) {
             if (!readDrawable(v.background, v, 0)) readCardView(v)
+            // `android:backgroundTint` / AppCompat tint (default mode SRC_IN) replaces the drawable's own color.
+            val c = bgColor
+            if (c != null) v.backgroundTintList?.let { tint ->
+                val mode = v.backgroundTintMode
+                if (mode == null || mode == android.graphics.PorterDuff.Mode.SRC_IN || mode == android.graphics.PorterDuff.Mode.SRC_ATOP) {
+                    bgColor = Colors.withAlpha(stateColor(tint, v), ((c ushr 24) and 0xff) / 255f)
+                }
+            }
         }
     }
 
@@ -284,6 +346,9 @@ internal class ViewMapper(
         const val MAX_DEPTH = 96
         const val ICON_MAX_DP = 48f
         const val COMPOSE_ID_SALT = 0x5a000000
+        const val DIM_ID_SALT = 0x2d000000
+        const val TOGGLE_ID_SALT = 0x3c000000
+        const val TOGGLE_BG_ID_SALT = 0x4b000000
         private const val MATERIAL_SHAPE = "com.google.android.material.shape.MaterialShapeDrawable"
         private const val CARD_VIEW = "androidx.cardview.widget.CardView"
         private val LIST_CLASS_NAMES = setOf(

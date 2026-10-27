@@ -215,4 +215,23 @@ class ReplayEngineTest {
         assertNull(engine.sessionId)
         assertTrue(h.segments.isEmpty())
     }
+
+    @Test fun stopSealsOpenSegmentAndIgnoresLaterInput() {
+        val h = Harness()
+        h.frame(node(1, "a"))
+        h.engine.onTouch(h.now, 1f, 2f, "down")
+        h.engine.stop()
+        assertEquals(1, h.segments.size)
+        assertEquals(listOf("screen", "frame", "touch"), types(h.segments[0]))
+        assertFalse(h.engine.isCapturing)
+        h.advance(10_000); h.frame(node(2, "b")); h.engine.onTouch(h.now, 1f, 2f, "down"); h.engine.onError(h.now, false)
+        h.engine.stop(); h.engine.flush()
+        assertEquals(1, h.segments.size)
+        // A new engine (install after stop) continues the session's segment numbering.
+        val again = ReplayEngine(ReplayOptions(sampleRate = 1.0), { h.now }, h.store, { _, _ -> }, { h.ctx },
+            { ReplayEngine.ResourceInfo("shop-android", "production", "1.4.0", "0.1.0") })
+        again.refreshSession()
+        assertEquals(1, again.segment)
+        assertTrue(again.isCapturing)
+    }
 }
