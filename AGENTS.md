@@ -39,7 +39,7 @@ Dört ana yetenek:
 ```
 apps/web/               Dashboard (React 19 + Vite + TypeScript)
 services/               Go servisleri: pkg, ingest (gw + writer), api, alerting (engine + notifier), collector, integrations (trooper-cloud), symbolicator
-sdks/                   go, jvm, dotnet, js/packages (browser, react, vue, angular, react-native), android, ios, flutter
+sdks/                   go, jvm, dotnet, js/packages (browser, react, vue, angular, react-native, node), android, ios, flutter
 tools/                  demo (canlı demo dünyası, `make demo`), trooper-cli (sourcemap/dSYM/mapping upload)
 proto/                  RUM wire şeması
 deploy/                 docker-compose + ClickHouse/Postgres şemaları
@@ -91,7 +91,7 @@ Backend: `docker compose -f deploy/docker-compose.yml up -d` (altyapı), `make m
 - [x] KPI (SLO) + burn-rate alert'leri ve kök neden analizi UI'ı (mock, `src/lib/rca.ts`)
 - [x] Altyapı (compose), ClickHouse/Postgres şemaları, RUM proto, sözleşme (`contracts.md`)
 - [x] Backend servisleri: ingest (gw + writer), api (90 endpoint, `services/api/openapi.yaml`), alerting (engine + notifier), collector (`trooper-agent`)
-- [x] SDK'lar: Go, JVM (agent, Spring Boot, Quarkus, Ktor), .NET, JS (browser/react/vue/angular/RN), Android, iOS, Flutter
+- [x] SDK'lar: Go, JVM (agent, Spring Boot, Quarkus, Ktor), .NET, JS (browser/react/vue/angular/RN/node), Android, iOS, Flutter
 - [x] UI'ın `src/data/*` fonksiyonları api'ye bağlı (`VITE_DATA=api`; default mock) — ADR-013
 - [x] Cloud entegrasyonları: AWS, Google Cloud, Neon, Vercel (`services/integrations`, Integrations ekranı) — ADR-012
 - [x] Symbolication servisi + `trooper-cli`; canlı demo (`make demo`)

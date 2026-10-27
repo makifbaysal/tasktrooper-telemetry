@@ -10,14 +10,15 @@ import org.eclipse.microprofile.config.ConfigProvider;
 
 /**
  * {@code quarkus.otel.propagators=tracecontext,trooper}: W3C baggage that also writes {@code tt.svc=<service>} on
- * outgoing calls.
+ * outgoing calls; extraction also reads the message attempt ({@code tt-attempt}, {@code x-delivery-count} ...) for
+ * {@link TrooperAttemptSpanProcessor}.
  */
 public class TrooperPropagatorProvider implements ConfigurablePropagatorProvider {
     public static final String NAME = "trooper";
 
     @Override
     public TextMapPropagator getPropagator(ConfigProperties config) {
-        return TrooperBaggagePropagator.create(serviceName());
+        return TrooperAttemptPropagator.wrap(TrooperBaggagePropagator.create(serviceName()));
     }
 
     static String serviceName() {

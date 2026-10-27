@@ -1,4 +1,4 @@
-# TaskTrooper Telemetry — JavaScript client SDKs (RUM)
+# TaskTrooper Telemetry — JavaScript SDKs (RUM + Node.js)
 
 Browser and React Native SDKs that send RUM events as JSON to `POST /v1/rum` (ADR-011, `.ai/contracts.md` §2, §9).
 Wire schema: [`proto/rum/v1/rum.proto`](../../proto/rum/v1/rum.proto) — snake_case field names, enums as strings.
@@ -11,6 +11,7 @@ Wire schema: [`proto/rum/v1/rum.proto`](../../proto/rum/v1/rum.proto) — snake_
 | [`@trooper/vue`](packages/vue) | Vue 3 plugin, `errorHandler`, vue-router templates |
 | [`@trooper/angular`](packages/angular) | `provideTrooper()`, `TrooperErrorHandler`, Router templates |
 | [`@trooper/react-native`](packages/react-native) | ErrorUtils, Hermes rejections, XHR, AppState flush, react-navigation screens, app start, native bridge |
+| [`@trooper/node`](packages/node) | Backend: OpenTelemetry distribution for Node.js (OTLP/HTTP protobuf to `/v1/traces`, `/v1/metrics`, `/v1/logs`; `trooper.*` conventions, express/fastify/koa/Hono/NestJS routes, kafkajs/amqplib/BullMQ consumers, pino/winston) — not RUM |
 
 ```ts
 import { init, identify, track } from '@trooper/browser';

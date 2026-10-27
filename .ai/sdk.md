@@ -18,16 +18,16 @@ attribute'ları). Client SDK'ları kendi hafif RUM katmanıdır ve `POST /v1/rum
 | `github.com/tasktrooper/telemetry-go` (+ `integrations/*` ayrı modüller) | `sdks/go` | Go | net/http (ServeMux pattern), gin, fiber, echo, chi, grpc, franz-go, sarama, amqp091, database/sql, pgx, go-redis, slog/zap |
 | `trooper-javaagent` (OTel agent + extension) | `sdks/jvm` | JVM (kod değişikliği yok) | OTel Java agent'ın tüm auto-instrumentation'ı + trooper preset'leri |
 | `trooper-spring-boot-starter` | `sdks/jvm` | Spring Boot 3 | MVC/WebFlux route template, `@KafkaListener`/`@RabbitListener` process adı |
-| `trooper-quarkus` | `sdks/jvm` | Quarkus 3 | quarkus-opentelemetry config'i, JAX-RS route template, reactive messaging |
+| `trooper-quarkus` | `sdks/jvm` | Quarkus 3 | quarkus-opentelemetry config'i, JAX-RS route template, reactive messaging (SmallRye Kafka/RabbitMQ consumer'larında `trooper.consumer.attempt` otomatik: `trooper` propagator'ı extract sırasında `tt-attempt` → `kafka_deliveryAttempt` → `x-delivery-count`+1 → `x-death`+1 → `delayed-retry-count`+1 okur) |
 | `trooper-ktor` + `trooper-kotlin` | `sdks/jvm` | Kotlin / Ktor 3 | server + client plugin, coroutine context |
 | `TaskTrooper.Telemetry` (+ `.AspNetCore`, `.Kafka`, `.RabbitMQ`, `.MassTransit`, `.EntityFrameworkCore`, `.Redis`) | `sdks/dotnet` | .NET 8+ | ASP.NET Core, HttpClient, SqlClient/EF Core, Npgsql, Redis, gRPC, Confluent.Kafka, RabbitMQ, MassTransit |
+| `@trooper/node` | `sdks/js/packages/node` | Node.js ≥ 22.15 | `@opentelemetry/sdk-node` + OTLP/HTTP protobuf (traces/metrics/logs); http, undici, express, koa, NestJS, kafkajs, amqplib, pg, mysql2, mongodb, ioredis/redis, pino/winston log bridge; route template helper'ları (express, fastify, koa, Hono, NestJS interceptor), BullMQ processor wrapper'ı, `tt-attempt` okuma/yazma |
 | `@trooper/core` + `@trooper/browser` | `sdks/js/packages` | Web | page view, SPA route, Web Vitals, fetch/XHR + traceparent, JS error, click (rage/dead), sendBeacon, offline kuyruk |
 | `@trooper/react`, `@trooper/vue`, `@trooper/angular` | `sdks/js/packages` | Web framework'leri | ErrorBoundary/errorHandler, router entegrasyonu (react-router, Next.js, TanStack Router, vue-router, Angular Router) → route template view adı |
 | `@trooper/react-native` | `sdks/js/packages` | React Native | react-navigation ekranları, app start, JS hataları, network, AppState flush |
 | `trooper-android` (+ `-okhttp`, `-compose`) | `sdks/android` | Android | Activity/Fragment/Compose ekranları, app start, crash, ANR, frozen frame, OkHttp |
 | `TaskTrooper` (SPM + CocoaPods) | `sdks/ios` | iOS | UIKit/SwiftUI ekranları, app start, crash (signal + NSException), hang, URLSession |
 | `trooper_flutter` (+ `trooper_dio`) | `sdks/flutter` | Flutter | Navigator/go_router, Flutter/Dart hataları, http/dio, frame timing, app start |
-| `@trooper/node` (faz 2) | — | Node.js | OTel Node auto-instrumentation üzerine preset |
 | `trooper-python` (faz 2) | — | Python | django, fastapi, flask, celery, sqlalchemy, requests |
 
 Kütüphane başına özel kod sadece OTel'in vermediği bilgi için yazılır: route template (`trooper.route`), consumer process adı,
@@ -38,6 +38,7 @@ Kütüphane başına özel kod sadece OTel'in vermediği bilgi için yazılır: 
 ### Node
 
 ```ts
+// ESM: node --import @trooper/node/register app.mjs   (CJS: --require; env'den init eder)
 import { init } from '@trooper/node';
 
 init({
@@ -45,19 +46,33 @@ init({
   service: 'orders-api',
   environment: 'production',
   version: process.env.GIT_SHA,           // deploy marker
-  sampleRate: 1.0,
-  logs: { capture: ['pino'] },
+  sampleRate: 1.0,                        // ParentBased(TraceIdRatio); kök span tracestate'e tt=r:<rate> yazar
 });
 ```
+
+`init` idempotent'tir ve asla throw etmez; DSN yoksa export etmez (propagation çalışır). Config önceliği contracts.md §2:
+explicit > `OTEL_*` > `TROOPER_*`. Resource: `service.*`, `deployment.environment.name`, `telemetry.distro.name=trooper-node`.
+Span processor: local-root SERVER/CONSUMER span'ı entry olur; alt span'lara `trooper.entry.route/method` kopyalanır (route,
+framework router'ı span'dan sonra eşleştirdiği için lazy resolver / OTel `RPCMetadata` / `http.route` üzerinden çözülür),
+`trooper.caller` baggage `tt.svc`'den, `trooper.sample_rate` upstream `tt=r:`'den. URL attribute'larında query değerleri silinir.
+
+Route template helper'ları: `app.use(trooperExpress())`, `app.register(trooperFastify)`, `trooperKoa()`, `trooperHono()`,
+`app.useGlobalInterceptors(new TrooperInterceptor())` (NestJS). Elle: `setRoute('/users/:id')`.
 
 Worker/consumer için ek API:
 
 ```ts
-import { consumer } from '@trooper/node';
+import { processMessage, instrumentBullmqProcessor, withTraceContext, injectHeaders, nextAttempt, setAttemptHeader, markDlq } from '@trooper/node';
 
-consumer.wrap('orders.created', async (msg) => { ... });   // süre, sonuç, retry, lag
-consumer.reportLag({ topic, partition, lag });             // kütüphane lag vermiyorsa
+// kafkajs / amqplib: upstream OTel instrumentation + hook → trooper.consumer.attempt (tt-attempt, x-delivery-count, x-death)
+new Worker('emails', instrumentBullmqProcessor(async (job) => send(job.data)));     // attempt = attemptsStarted
+await queue.add('welcome', withTraceContext({ to }));                                // BullMQ'da header yok → job data
+await processMessage({ system: 'kafka', destination: 'orders', consumerGroup: 'billing', headers }, handler);
+producer.send({ topic: 'orders.retry', messages: [{ value, headers: setAttemptHeader(injectHeaders(), nextAttempt()) }] });
 ```
+
+Yutulan her SDK hatası `trooper.sdk.errors{component}` (meter `TaskTrooper.Telemetry`) olarak sayılır; export hataları
+`component=exporter.<signal>`.
 
 ### Browser
 
