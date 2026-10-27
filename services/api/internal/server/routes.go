@@ -104,7 +104,11 @@ func (s *Server) routes(r chi.Router) {
 	r.Route("/services/{service}", func(r chi.Router) {
 		r.Get("/", s.withQ(func(w http.ResponseWriter, r *http.Request, q store.Q) {
 			v, err := s.Store.GetService(r.Context(), q, param(r, "service"))
-			s.reply(w, r, v, err)
+			if err != nil {
+				s.fail(w, r, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, model.ServiceDetail{Service: v, HasAi: s.Store.ServiceHasAI(r.Context(), q, v.ID)})
 		}))
 		r.Get("/series", s.withQ(func(w http.ResponseWriter, r *http.Request, q store.Q) {
 			v, err := s.Store.RedSeries(r.Context(), q, store.RedFilter{Service: param(r, "service")})
@@ -404,6 +408,7 @@ func (s *Server) routes(r chi.Router) {
 
 	s.infraRoutes(r)
 	s.phase6Routes(r)
+	s.obsRoutes(r)
 	s.loadTestRoutes(r)
 	s.adminRoutes(r)
 	s.codeInsightRoutes(r)

@@ -148,6 +148,8 @@ type Span struct {
 	Attrs        map[string]string `json:"attrs,omitempty"`
 	Resource     map[string]string `json:"resource,omitempty"` // resource attributes (k8s.pod.name, host.name …)
 	Events       []SpanEvent       `json:"events,omitempty"`
+	// LLM is set on GenAI spans (gen_ai.operation.name; contracts §25).
+	LLM *SpanLLM `json:"llm,omitempty"`
 }
 
 // SpanEvent is a span event (exception, retry, log …); Ts is ms from trace start.
@@ -211,6 +213,8 @@ type ErrorDetail struct {
 	Stack        string  `json:"stack"`
 	Frames       []Frame `json:"frames"`
 	Symbolicated bool    `json:"symbolicated"`
+	// Replay of the latest sample that a session replay covers (RUM resource with the sample trace).
+	Replay *ReplayRef `json:"replay,omitempty"`
 }
 
 // ---------------------------------------------------------------- logs
@@ -291,6 +295,8 @@ type Session struct {
 	Errors     float64 `json:"errors"`
 	Entry      string  `json:"entry"`
 	Exit       string  `json:"exit"`
+	// HasReplay: a session replay was recorded (contracts §23).
+	HasReplay bool `json:"hasReplay"`
 }
 
 type RumError struct {
@@ -314,6 +320,8 @@ type RumErrorDetail struct {
 	Stack        string  `json:"stack"`
 	Frames       []Frame `json:"frames"`
 	Symbolicated bool    `json:"symbolicated"`
+	// Replay of the latest occurrence that a session replay covers.
+	Replay *ReplayRef `json:"replay,omitempty"`
 }
 
 type RumResource struct {
