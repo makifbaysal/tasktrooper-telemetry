@@ -378,6 +378,10 @@ type MonitorCondition struct {
 	MinRequests float64 `json:"minRequests,omitempty"`
 	// Window is the evaluation window ("5m" or minutes; alert engine default 5m).
 	Window any `json:"window,omitempty"`
+	// RenotifyMin re-sends a still-firing, unacknowledged incident every N minutes (0/absent = once).
+	RenotifyMin float64 `json:"renotifyMin,omitempty"`
+	// Stream evaluates the monitor on every ingested batch instead of the periodic tick (alert engine).
+	Stream bool `json:"stream,omitempty"`
 }
 
 type Monitor struct {

@@ -3500,6 +3500,8 @@ components:
         forMin: { type: number }
         minRequests: { type: number }
         window: { description: 'Evaluation window ("5m" or minutes; default 5m)', oneOf: [{ type: string }, { type: number }] }
+        renotifyMin: { type: number, description: 'Remind the channels every N minutes while firing and unacknowledged (0/absent = once)' }
+        stream: { type: boolean, description: 'Evaluate on every ingested batch instead of the periodic tick' }
     Monitor:
       type: object
       required: [id, name, kind, target, condition, severity, state, source, lastChange, channels, status, targetSpec, query, rule]
