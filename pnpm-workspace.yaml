@@ -2,4 +2,4 @@ packages:
   - apps/*
   - sdks/js/packages/*
 allowBuilds:
-  esbuild: set this to true or false
+  esbuild: true
