@@ -12,6 +12,7 @@ import { Incidents } from './screens/Incidents';
 import { ScenarioEditor } from './screens/ScenarioEditor';
 import { LoadTests } from './screens/LoadTests';
 import { LoadTestRun } from './screens/LoadTestRun';
+import { LoadTestDomains } from './screens/LoadTestDomains';
 import { CodeInsights } from './screens/CodeInsights';
 import { DatabaseDetail, Databases } from './screens/Databases';
 import { ClusterDetail, Queues } from './screens/Queues';
@@ -38,6 +39,7 @@ export const router = createBrowserRouter([
       { path: '/incidents', element: <Incidents /> },
       { path: '/load-tests', element: <LoadTests /> },
       { path: '/load-tests/runs/:runId', element: <LoadTestRun /> },
+      { path: '/load-tests/domains', element: <LoadTestDomains /> },
       { path: '/load-tests/new', element: <ScenarioEditor /> },
       { path: '/load-tests/scenarios/:scenarioId/edit', element: <ScenarioEditor /> },
       { path: '/infrastructure/databases', element: <Databases /> },

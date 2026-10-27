@@ -19,7 +19,7 @@ type RawEndpoint = Omit<Endpoint, 'sub' | 'criticality'> & { criticality: string
 type RawDependency = Omit<Dependency, 'kind'> & { kind: string };
 type RawCaller = { caller: { id: string; name: string; kind: string; via: string }; rpm: number; share: number; errorRate: number; p95: number; topEndpoint?: RawEndpoint | null };
 type RawCall = { dep: RawDependency; callsPerReq: number; msPerReq: number };
-type RawLogLine = { id: string; ts: number; level: string; service: string; message: string; traceId?: string | null; route?: string | null };
+type RawLogLine = { id: string; ts: number; level: string; service: string; message: string; traceId?: string | null; route?: string | null; source?: string | null; attrs?: Record<string, unknown> | null };
 export interface RawLogPage { lines: RawLogLine[] | null; nextBefore: number; levels: Record<string, number> | null; services: Record<string, number> | null }
 export interface RawLogPattern { id: string; pattern: string; level: string; services: string[] | null; count: number; last: number }
 export interface RawVital { id: string; label: string; value: number; good: number; poor: number; unit: string }
@@ -146,6 +146,8 @@ export function level(l: string): LogLine['level'] {
 }
 export const mapLogLine = (r: RawLogLine): LogLine => ({
   id: r.id, ts: num(r.ts), level: level(r.level), service: r.service, message: r.message ?? '', ...(r.traceId ? { traceId: r.traceId } : {}),
+  // Vercel log drains: attrs['vercel.source'] (contracts §16)
+  ...((r.source || r.attrs?.['vercel.source']) ? { source: String(r.source || r.attrs?.['vercel.source']) } : {}),
 });
 export const mapLogPage = (raw: RawLogPage | null): LogLine[] => arr(raw?.lines).map(mapLogLine);
 

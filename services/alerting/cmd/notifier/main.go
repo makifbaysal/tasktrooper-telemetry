@@ -1,4 +1,4 @@
-// Command notifier delivers the notifications outbox (Slack, PagerDuty, Opsgenie, webhook, e-mail).
+// Command notifier delivers the notifications outbox (Slack App + webhooks, PagerDuty, Opsgenie, webhook, e-mail, Teams).
 // Any number of replicas may run: rows are claimed with FOR UPDATE SKIP LOCKED.
 package main
 
@@ -45,7 +45,14 @@ func main() {
 		Password: config.String("TT_NOTIFIER_SMTP_PASSWORD", ""),
 		From:     config.String("TT_NOTIFIER_SMTP_FROM", "alerts@tasktrooper.local"),
 	})
-	w := &notify.Worker{DB: pg, D: d, Log: log, Reg: reg, Secrets: notify.NewSecretResolver(&store.Store{DB: pg}, key), Cfg: notify.WorkerConfig{
+	res := notify.NewSecretResolver(&store.Store{DB: pg}, key)
+	// Slack App targets slack:<channel id>#<name> (ADR-017): org bot token from integrations(provider='slack').
+	d.Slack = &notify.SlackApp{
+		Base:         config.String("TT_SLACK_API_URL", notify.SlackAPIBase),
+		Store:        &notify.PGSlackStore{DB: pg, Secrets: res},
+		PublicAppURL: config.String("TT_PUBLIC_APP_URL", config.String("TT_PUBLIC_URL", "")),
+	}
+	w := &notify.Worker{DB: pg, D: d, Log: log, Reg: reg, Secrets: res, Cfg: notify.WorkerConfig{
 		Poll:        config.Duration("TT_NOTIFIER_POLL", 2*time.Second),
 		Batch:       config.Int("TT_NOTIFIER_BATCH", 50),
 		MaxAttempts: config.Int("TT_NOTIFIER_MAX_ATTEMPTS", 10),

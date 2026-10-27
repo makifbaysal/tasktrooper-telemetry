@@ -203,9 +203,4 @@ func TestConnTestCloudQueues(t *testing.T) {
 			t.Errorf("%s: %d %s", k, w.Code, w.Body.String())
 		}
 	}
-	for _, p := range []string{"/suggestions", "/repos", "/inventory"} {
-		if w := do(h, "GET", "/api/v1"+p, "good", ""); w.Code != 200 || strings.TrimSpace(w.Body.String()) != "[]" {
-			t.Errorf("%s: %d %s", p, w.Code, w.Body.String())
-		}
-	}
 }

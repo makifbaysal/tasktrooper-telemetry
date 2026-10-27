@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tasktrooper/telemetry/services/api/internal/model"
@@ -227,8 +228,17 @@ func (s *Server) loadTestRoutes(r chi.Router) {
 	r.Delete("/loadtests/scenarios/{id}", func(w http.ResponseWriter, r *http.Request) {
 		s.noContent(w, r, s.Store.DeleteScenario(r.Context(), param(r, "id")))
 	})
+	r.Patch("/loadtests/scenarios/{id}", func(w http.ResponseWriter, r *http.Request) {
+		var in model.ScenarioPatch
+		if err := decode(r, &in); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		v, err := s.Store.SetScenarioState(r.Context(), param(r, "id"), in.State)
+		s.reply(w, r, v, err)
+	})
 	r.Post("/loadtests/scenarios/{id}/runs", func(w http.ResponseWriter, r *http.Request) {
-		v, err := s.Store.CreateRun(r.Context(), param(r, "id"))
+		v, err := s.Store.CreateRun(r.Context(), param(r, "id"), principalOf(r.Context()).UserID)
 		s.created(w, r, v, err)
 	})
 	r.Get("/loadtests/runs", func(w http.ResponseWriter, r *http.Request) {
@@ -242,5 +252,60 @@ func (s *Server) loadTestRoutes(r chi.Router) {
 	r.Post("/loadtests/runs/{id}/stop", func(w http.ResponseWriter, r *http.Request) {
 		v, err := s.Store.StopRun(r.Context(), param(r, "id"))
 		s.reply(w, r, v, err)
+	})
+	r.Get("/loadtests/runs/{id}/series", func(w http.ResponseWriter, r *http.Request) {
+		step := 5 * time.Second
+		if v := qs(r, "step"); v != "" {
+			d, err := time.ParseDuration(v)
+			if err != nil {
+				s.fail(w, r, store.Invalid("step must be a duration like 5s or 1m"))
+				return
+			}
+			step = d
+		}
+		v, err := s.Store.RunSeries(r.Context(), param(r, "id"), step, s.Now())
+		s.reply(w, r, v, err)
+	})
+	r.Get("/loadtests/runs/{id}/target", func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Store.RunTarget(r.Context(), param(r, "id"), qs(r, "service"), s.Now())
+		s.reply(w, r, v, err)
+	})
+
+	// ---- target domains (admin for mutations)
+	r.Group(func(r chi.Router) {
+		r.Use(s.adminWrites)
+		r.Get("/loadtests/domains", func(w http.ResponseWriter, r *http.Request) {
+			v, err := s.Store.ListDomains(r.Context())
+			s.reply(w, r, v, err)
+		})
+		r.Post("/loadtests/domains", func(w http.ResponseWriter, r *http.Request) {
+			var in model.LoadTestDomainInput
+			if err := decode(r, &in); err != nil {
+				s.fail(w, r, err)
+				return
+			}
+			v, err := s.Store.CreateDomain(r.Context(), in)
+			s.created(w, r, v, err)
+		})
+		r.Delete("/loadtests/domains/{id}", func(w http.ResponseWriter, r *http.Request) {
+			s.noContent(w, r, s.Store.DeleteDomain(r.Context(), param(r, "id")))
+		})
+		r.Post("/loadtests/domains/{id}/verify", func(w http.ResponseWriter, r *http.Request) {
+			var in struct {
+				Method string `json:"method"`
+			}
+			if r.ContentLength != 0 {
+				if err := decode(r, &in); err != nil {
+					s.fail(w, r, err)
+					return
+				}
+			}
+			v, err := s.Store.RequestDomainVerify(r.Context(), param(r, "id"), in.Method)
+			if err != nil {
+				s.fail(w, r, err)
+				return
+			}
+			writeJSON(w, http.StatusAccepted, v)
+		})
 	})
 }

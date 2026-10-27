@@ -85,6 +85,18 @@ services:
       TT_KAFKA_BROKERS: redpanda:9092
       TT_REDIS_URL: redis://redis:6379/0
       TT_LOG_LEVEL: info
+      # shared secret for platform-internal ingest (trooper-cloud, loadtest) — contracts §2
+      TT_INTERNAL_TOKEN: ${TT_INTERNAL_TOKEN:-tt_dev_internal_token}
+      TT_SECRETS_KEY: ${TT_SECRETS_KEY:-}
+      TT_PUBLIC_APP_URL: ${TT_PUBLIC_APP_URL:-http://localhost:5173}
+      # ChatOps (ADR-017) — empty means the app is not configured (endpoints return 501)
+      TT_SLACK_CLIENT_ID: ${TT_SLACK_CLIENT_ID:-}
+      TT_SLACK_CLIENT_SECRET: ${TT_SLACK_CLIENT_SECRET:-}
+      TT_SLACK_SIGNING_SECRET: ${TT_SLACK_SIGNING_SECRET:-}
+      TT_GITHUB_APP_ID: ${TT_GITHUB_APP_ID:-}
+      TT_GITHUB_APP_SLUG: ${TT_GITHUB_APP_SLUG:-}
+      TT_GITHUB_APP_PRIVATE_KEY: ${TT_GITHUB_APP_PRIVATE_KEY:-}
+      TT_GITHUB_WEBHOOK_SECRET: ${TT_GITHUB_WEBHOOK_SECRET:-}
     depends_on: [postgres, redpanda, redis]
 
   ingest-writer:
@@ -97,7 +109,14 @@ services:
     profiles: [app]
     build: { context: ../services, dockerfile: api/Dockerfile }
     ports: ["8080:8080"]
-    environment: *svc_env
+    environment:
+      <<: *svc_env
+      TT_AUTH_DEV: ${TT_AUTH_DEV:-true}
+      TT_WEB_URL: ${TT_WEB_URL:-http://localhost:5173}
+      TT_PUBLIC_API_URL: ${TT_PUBLIC_API_URL:-http://localhost:8080}
+      TT_OIDC_ISSUER: ${TT_OIDC_ISSUER:-}
+      TT_OIDC_CLIENT_ID: ${TT_OIDC_CLIENT_ID:-}
+      TT_OIDC_CLIENT_SECRET: ${TT_OIDC_CLIENT_SECRET:-}
     depends_on: [clickhouse, postgres]
 
   alert-engine:
@@ -121,8 +140,31 @@ services:
       TT_DSN: http://tt_dev_ingest_key@ingest-gw:4318/1
       TT_SECRETS_KEY: ${TT_SECRETS_KEY:-}
       TT_CLOUD_INGEST_KEYS: ${TT_CLOUD_INGEST_KEYS:-}
+      TT_INTERNAL_TOKEN: ${TT_INTERNAL_TOKEN:-tt_dev_internal_token}
       TT_LOG_LEVEL: info
     depends_on: [postgres, ingest-gw]
+
+  # Code intelligence: repo analysis, alert-as-code, GitHub webhooks (ADR-014, ADR-017)
+  codeintel:
+    profiles: [app]
+    build: { context: ../services, dockerfile: codeintel/Dockerfile }
+    ports: ["8096:8096"]
+    environment:
+      <<: *svc_env
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      TT_CODEINTEL_MODEL: ${TT_CODEINTEL_MODEL:-}
+    depends_on: [postgres, clickhouse]
+
+  # Load test controller + local runners (ADR-015)
+  loadtest:
+    profiles: [app]
+    build: { context: ../services, dockerfile: loadtest/Dockerfile }
+    ports: ["8097:8097"]
+    environment:
+      <<: *svc_env
+      TT_LOADTEST_ALLOW_LOCAL: "true"
+      TT_LOADTEST_INGEST_URL: http://ingest-gw:4318
+    depends_on: [postgres, clickhouse, ingest-gw]
 
 volumes:
   clickhouse:

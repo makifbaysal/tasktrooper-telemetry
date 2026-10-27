@@ -72,11 +72,24 @@ Font: `--font-sans` (Inter), `--font-mono` (JetBrains Mono — route, log, kod, 
 | `EmptyState`, `Meter`, `CodeBlock`, `Callout` | Yardımcılar |
 | `ChoiceChips` | Çoklu seçim (region, servis, drain tipi): `Segmented` görünümü, birden çok `aria-pressed`, dar ekranda satır kırar |
 | `CopyCode` | Kopyala butonlu `CodeBlock` (IAM policy, CloudFormation/Terraform, drain URL); `wrap` tek satırlık uzun değeri (URL, ARN) kırar |
+| `Menu`, `MenuItem`, `MenuLabel`, `MenuDivider` | Trigger'a bağlı popover menü (kullanıcı menüsü, org/proje seçici). `trigger({open, toggle})` kendi butonunu çizer; Esc / dış tık / seçim kapatır; `align` start/end, `placement` below/above, `block` tam genişlik. `MenuItem selected` → check ikonu, `danger`, `hint` ikinci satır. Stil `styles/account.css` (`--bg-raised`, `--shadow-lg`) |
+| `Avatar` | Baş harfler `--accent-soft` disk üzerinde veya IdP resmi; `sm` / `md` (= `--control-h-sm`) / `lg` |
 
 Entegrasyon kalıpları (`screens/Integrations.tsx`): `ProviderMark` (sağlayıcı kimliği — marka rengi/logosu yok, nötr kutu + kısaltma),
 `IntegrationStatusBadge` (ok → Connected, error → Error, pending → Syncing…, disabled → Disabled; hep ikon + etiket),
 `IntegrationSourceBadge` (keşfedilen DB/cluster satırında "AWS · aws-prod", tıkla → entegrasyon çekmecesi; sync hatalıysa critical ton),
 `DeployList` (deploy marker listesi: versiyon, commit mesajı, yazar, kaynak, link, build durumu).
+
+Code insights / load test kalıpları: `SuggestionCard` (`screens/CodeInsights.tsx` — öneri kartı: kritiklik + "From code" + calibrated/not calibrated badge,
+hedef, koşul mono, gerekçe, `dosya:satır` GitHub linki, Reject / Customize / Accept; kabul sonrası "Monitor created" + monitöre link),
+`ConnectRepoDrawer` (`screens/ConnectRepo.tsx` — birincil "Connect GitHub" (api'ye tam sayfa yönlendirme), dönüşte `?github=<id>` ile repo seçici:
+arama, Private/Added badge'leri, çoklu seçim; token / local path "Advanced" altında), repo satırı durumları (Analyzing… / Analyzing push… +
+`pending_paths`, Disconnected warning, Analysis failed + hata metni, "Webhook active"), `RunBlockedCallout` + `ScenarioSource`
+(`screens/LoadTests.tsx` — draft / domain / limit / api nedenli "çalışamaz" uyarısı, domain için Domains linki; Draft · needs review warning badge'i),
+`LoadTestDomains` (`screens/LoadTestDomains.tsx` — TXT kaydı ve `/.well-known/trooper-verify` talimatları `CopyCode` ile, Verify / Checking… durumu),
+run ekranı `TargetCard` (hedef servis RED: "All traffic" slot 1 vs "Load test" slot 2, ölçü başına ayrı grafik).
+
+Hesap / bildirim kalıpları: `Login` (`screens/Login.tsx`, router dışında, `.login__card`), `NotifyPicker` (`screens/NotifyPicker.tsx` — chip'li hedef girişi: Slack kanalı `#ad`, private kilit ikonu, serbest hedef mono; arama listesi `Menu` stilinde), `MonitorSourceBadge` (`code` → accent + kilit "Managed in repository", `suggestion` → accent + ✨), `LikelyCause` (özet + güven badge'i; < %30 warning tonunda "low confidence"). Rol gereği kapalı aksiyonlar gizlenir ya da `disabled` + `title` ile nedeni söylenir (`denied()`); salt okunur formlar `<fieldset disabled>`.
 
 Ekran seviyesi kalıplar (`screens/rca.tsx`):
 
@@ -95,6 +108,7 @@ Grafikler `components/charts` altında, saf SVG: `TimeSeries`, `Columns` (stacke
 `PartitionBars`: partition başına lag kolonları (tek seri, tek renk); en yüksek kolon direkt etiketli, hover'da değer. Amaç skew'i göstermek (bir uzun kolon = hot partition).
 `TimeSeries` x etiketi varsayılan saat; 5 dk'dan kısa aralıkta saniyeli; göreli zaman için `formatX` (ör. planlanan yük `+2:00`). Nokta sayısı tick sayısından azsa etiket tekrar basılmaz.
 
+- **Zaman aralıkları (topbar):** `15m` (15×1 dk), `30m` (30×1 dk), `1h` (60×1 dk), `6h` (72×5 dk), `24h` (96×15 dk), `7d` (84×2 sa) — `RANGE_POINTS` (`data/mock.ts`); api `timerange` paketi aynı bucket'ları döndürmeli, yoksa UI mock timestamp'lerine düşer.
 - **Form seçimi:** zaman → `TimeSeries` (line, tek seri ise opsiyonel `area`); zaman içinde parça-bütün → `Columns`; sıralı karşılaştırma → `BarList`; tek oran → `PropBar`; tek sayı → `StatTile` (grafik değil).
 - **Kategorik renk:** `--series-1..8`, sabit sıra (blue, orange, aqua, yellow, magenta, green, violet, red). Renk **entity'ye** bağlı, sıraya değil — servisler için `serviceSlot(id)` kullan. 8'den fazla seri → "Other" veya small multiples, asla üretilmiş renk.
 - **Scatter/çok-çiftli formlar:** en fazla ilk 3 slot.

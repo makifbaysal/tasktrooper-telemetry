@@ -26,6 +26,7 @@ type Key struct {
 	Tenant         tenant.Tenant
 	AllowedOrigins []string // empty = any origin
 	RateLimitRPS   int      // 0 = default
+	Internal       bool     // resolved from the internal service credential, not an api_keys row
 }
 
 // OriginAllowed reports whether a browser Origin may use this key. Entries may be exact origins

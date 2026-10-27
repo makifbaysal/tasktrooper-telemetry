@@ -21,7 +21,8 @@ Postgres integrations ──(30 s reload)──► runner ── per integration
 make infra migrate                      # repo root
 make run-writer & make run-gw &         # ingest pipeline
 cd services/integrations
-TT_CLOUD_INGEST_KEYS=1:tt_dev_ingest_key GOWORK=off go run ./cmd/trooper-cloud
+TT_INTERNAL_TOKEN=dev-internal GOWORK=off go run ./cmd/trooper-cloud     # ingest-gw needs the same TT_INTERNAL_TOKEN
+TT_CLOUD_INGEST_KEYS=1:tt_dev_ingest_key GOWORK=off go run ./cmd/trooper-cloud   # legacy: per-project ingest keys
 GOWORK=off go run ./cmd/trooper-cloud --once 12   # discovery + one metrics step for integration 12, then exit
 docker build -f services/integrations/Dockerfile -t trooper-cloud services/   # from the repo root
 ```
@@ -30,18 +31,22 @@ docker build -f services/integrations/Dockerfile -t trooper-cloud services/   # 
 |---|---|---|
 | `TT_POSTGRES_URL` | `postgres://trooper:trooper@localhost:5432/trooper?sslmode=disable` | integrations, secrets, discovered rows |
 | `TT_DSN` | `http://tt_dev_ingest_key@localhost:4318/1` | ingest-gw URL; its key is used for its own project |
-| `TT_CLOUD_INGEST_KEYS` | — | `projectId:ingestKey,...` — key used to send each project's metrics (see *Auth* below) |
+| `TT_INTERNAL_TOKEN` | — | internal service credential shared with ingest-gw; when set, metrics go to any integration project with `x-trooper-internal` + `x-trooper-project` (see *Auth* below) |
+| `TT_CLOUD_INGEST_KEYS` | — | `projectId:ingestKey,...` — fallback key per project (used when `TT_INTERNAL_TOKEN` is unset or ingest-gw answers 401 to it), and for Vercel `createDrain` |
 | `TT_SECRETS_KEY` | dev key + warning | base64 32-byte AES key for `secret:<id>` refs (`services/pkg/secrets`) |
 | `TT_PUBLIC_INGEST_URL` | — | public ingest-gw URL, only for `vercel.config.createDrain` |
 | `TT_CLOUD_RELOAD_INTERVAL` / `TT_CLOUD_DISCOVERY_INTERVAL` / `TT_CLOUD_METRICS_INTERVAL` | `30s` / `10m` / `60s` | |
 | `TT_LOG_LEVEL` | `info` | |
 | `TT_CLOUD_AWS_ENDPOINT`, `TT_CLOUD_GCP_ENDPOINT`, `TT_CLOUD_NEON_URL`, `TT_CLOUD_VERCEL_URL` | — | **testing only**: point providers at fakes (AWS: every service + static creds; GCP: `<base>/sql`, `/redis`, `/pubsub`, `/mon`, no auth) |
 
-**Auth to ingest-gw.** Metrics must land in the integration's project, and ingest keys are stored hashed, so
-trooper-cloud cannot look them up. For now each project needs an ingest key in `TT_CLOUD_INGEST_KEYS`
-(the project in `TT_DSN` is covered automatically). A project without a key gets `status=error`
-("no ingest key for project"). **Follow-up:** an internal service credential on ingest-gw that accepts a
-`x-trooper-project` header from trusted services.
+**Auth to ingest-gw.** Metrics must land in the integration's project. With `TT_INTERNAL_TOKEN` set (same value as
+ingest-gw's), every request carries `x-trooper-internal: <token>` + `x-trooper-project: <integration project id>`
+(contracts §16); ingest-gw resolves the org from Postgres, so no per-project key is needed and the
+`status=error` "no ingest key for project" path never triggers. If ingest-gw answers 401 (token unset/different there)
+and the project has a key in `TT_CLOUD_INGEST_KEYS` (or `TT_DSN`'s project), the batch is retried with that key.
+Without the token, each project needs an ingest key (keys are stored hashed, trooper-cloud cannot look them up);
+a project without one gets `status=error` ("no ingest key for project"). Vercel `createDrain` always needs a real
+ingest key because the drain URL is public.
 
 ## Common behaviour
 

@@ -212,8 +212,24 @@ func (d *DB) ListIntegrations(ctx context.Context) ([]model.Integration, error) 
 	return d.integrations(ctx, 0)
 }
 
+type providerKey struct{}
+
+// WithProviderFilter narrows ListIntegrations to one provider (GET /integrations?provider=).
+func WithProviderFilter(ctx context.Context, provider string) context.Context {
+	return context.WithValue(ctx, providerKey{}, provider)
+}
+
+// ProviderFilter returns the provider set by WithProviderFilter.
+func ProviderFilter(ctx context.Context) string {
+	p, _ := ctx.Value(providerKey{}).(string)
+	return p
+}
+
 func (d *DB) integrations(ctx context.Context, only int64) ([]model.Integration, error) {
 	where, args := "", []any{}
+	if p := ProviderFilter(ctx); p != "" {
+		where, args = " AND provider = $1", []any{p}
+	}
 	if only > 0 {
 		where, args = " AND id = $1", []any{only}
 	}

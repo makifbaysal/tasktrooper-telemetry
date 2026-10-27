@@ -1,4 +1,4 @@
-export type TimeRange = '1h' | '6h' | '24h' | '7d';
+export type TimeRange = '15m' | '30m' | '1h' | '6h' | '24h' | '7d';
 export type Health = 'ok' | 'warning' | 'critical';
 export type Severity = 'info' | 'warning' | 'critical';
 export type Criticality = 'critical' | 'important' | 'low';
@@ -88,6 +88,8 @@ export interface LogLine {
   service: string;
   message: string;
   traceId?: string;
+  /** platform log source, e.g. Vercel drains: build | static | external | edge | lambda | redirect | firewall */
+  source?: string;
 }
 
 export type MonitorKind =
@@ -102,7 +104,10 @@ export interface Monitor {
   condition: string;
   severity: Severity;
   state: 'ok' | 'pending' | 'firing' | 'muted';
-  source: 'manual' | 'code' | 'template';
+  /** code = alert-as-code (`.trooper/monitors/*.yaml`, read-only in the UI) · suggestion = accepted code-intel suggestion */
+  source: 'manual' | 'code' | 'template' | 'suggestion';
+  /** source = code: `repo:path` of the YAML that defines it */
+  codeRef?: string;
   lastChange: number;
   channels: string[];
   /** epoch ms; evaluated but not notified until then */

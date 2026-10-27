@@ -65,6 +65,11 @@ trooper.dsn=${TROOPER_DSN}
 A `ConfigSourceFactory` maps `trooper.*` → `quarkus.otel.exporter.otlp.*`, service, resource and sampler (ordinal 150, so
 explicit `quarkus.otel.*` wins). CDI beans add the span processor and sampler; a JAX-RS `ContainerRequestFilter` sets
 `trooper.route` from the `@Path` template; propagators become `tracecontext,trooper` (W3C baggage + `tt.svc`).
+SmallRye Reactive Messaging Kafka / RabbitMQ consumer spans get `trooper.consumer.attempt` automatically: the `trooper`
+propagator reads the attempt while the connector extracts the trace context (`tt-attempt` → `kafka_deliveryAttempt` →
+`x-delivery-count`+1 → `x-death`+1 → SmallRye `delayed-retry-count`+1, same order as the Spring starter) and the span
+processor writes it on the consumer span. This requires the `trooper` propagator to be active (the default mapping;
+if you set `quarkus.otel.propagators` yourself, keep `trooper` in the list).
 
 ### Ktor 3
 
@@ -126,7 +131,7 @@ SDK errors never propagate into the application. Exporters retry 429/502/503/504
 | `trooper.entry.method` | every span with `trooper.entry.route` | entry HTTP method (`GET` …); `CONSUME` for consumers, `GRPC` for gRPC |
 | `trooper.caller` | entry server spans | W3C baggage `tt.svc`; outgoing calls set `tt.svc=<service>` (baggage propagator wrapper) |
 | `trooper.process` | consumer spans | explicit (listener id) → `messaging.consumer.group.name` → `messaging.destination.name` |
-| `trooper.consumer.attempt` | consumer spans | `tt-attempt` header → `kafka_deliveryAttempt` → RabbitMQ `x-delivery-count`+1 (agent: captured via `otel.instrumentation.messaging.experimental.capture-headers`; starter: also `x-death`, Spring Retry) |
+| `trooper.consumer.attempt` | consumer spans | `tt-attempt` header → `kafka_deliveryAttempt` → RabbitMQ `x-delivery-count`+1 (agent: captured via `otel.instrumentation.messaging.experimental.capture-headers`; starter: also `x-death`, Spring Retry; Quarkus: also `x-death`, SmallRye `delayed-retry-count`) |
 | `trooper.sample_rate` | sampled entry spans (server/consumer, remote or no parent) | remote parent's tracestate `tt=r:<rate>`, else the configured ratio |
 
 **Sampling rate propagation:** every root span writes its ratio to the W3C `tracestate` as `tt=r:<rate>` (e.g. `tt=r:0.25`);
@@ -149,7 +154,8 @@ known), or generically `TrooperConsumer.writeAttempt((k, v) -> headers.add(k, v.
   resolved after span start.
 - Agent: `trooper.consumer.attempt` comes from captured `tt-attempt`, Spring Kafka `kafka_deliveryAttempt` (needs
   `deliveryAttemptHeader=true`) or RabbitMQ `x-delivery-count`; `x-death` and Spring Retry are only visible in the starter.
-  Quarkus does not read `tt-attempt` automatically (use `TrooperConsumer.markCurrent(..., TrooperConsumer.attemptFromHeaders(...), ...)`). `trooper.consumer.dlq` is set via `TrooperConsumer.markCurrent(...)`.
+  Quarkus reads them (plus `x-death` and SmallRye `delayed-retry-count`) through the `trooper` propagator.
+  `trooper.consumer.dlq` is set via `TrooperConsumer.markCurrent(...)`.
 - Quarkus: plain library, not a full extension (no deployment module); SmallRye Reactive Messaging consumers get
   `trooper.process` from the consumer group / destination, not the channel name. Not tested with `@QuarkusTest`
   (needs the Quarkus Gradle plugin build); covered by unit tests.
@@ -160,5 +166,5 @@ known), or generically `TrooperConsumer.writeAttempt((k, v) -> headers.add(k, v.
 `examples/` (`spring-boot-app`, `quarkus-app`, `ktor-app`) compile as part of the build and are not published.
 Tests: core (DSN, config mapping, processor, sampler, propagator, real OTLP export to a local HTTP server), extension
 (SPI via autoconfigure), javaagent (runs a tiny app with `-javaagent:trooper-javaagent.jar` against a fake ingest-gw
-and asserts the protobuf payload), Spring (MockMvc + WebTestClient), Quarkus (config source, sampler, JAX-RS template),
+and asserts the protobuf payload), Spring (MockMvc + WebTestClient), Quarkus (config source, sampler, JAX-RS template, consumer attempt from Kafka/RabbitMQ headers),
 Ktor (`testApplication`), Kotlin helpers.

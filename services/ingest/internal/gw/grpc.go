@@ -20,8 +20,6 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
-
-	"github.com/tasktrooper/telemetry/services/ingest/internal/auth"
 )
 
 // GRPCServer returns a gRPC server exposing the OTLP Trace/Metrics/Logs services. MaxRecvMsgSize bounds
@@ -84,13 +82,16 @@ func (s *Server) grpcExportInner(ctx context.Context, sig signal, msg proto.Mess
 			raw = strings.TrimSpace(a[7:])
 		}
 	}
-	key, err := s.keys.Lookup(ctx, raw)
+	// Key auth over gRPC never checked allowed_origins; a forwarded Origin (grpc-web proxies) only disqualifies the
+	// internal credential.
+	internal := strings.TrimSpace(first(md, "x-trooper-internal"))
+	origin := ""
+	if internal != "" {
+		origin = first(md, "origin")
+	}
+	key, err := s.authenticate(ctx, internal, first(md, "x-trooper-project"), origin, raw)
 	if err != nil {
-		if errors.Is(err, auth.ErrInvalidKey) {
-			return errUnauthorized
-		}
-		s.log.Error("key lookup failed", "err", err)
-		return &ingestError{status: http.StatusServiceUnavailable, msg: "auth backend unavailable", retryAfter: 5}
+		return err
 	}
 	if err := s.allow(ctx, key); err != nil {
 		return err

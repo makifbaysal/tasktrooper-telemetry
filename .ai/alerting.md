@@ -38,6 +38,8 @@ labels: { team: payments }
 ```
 
 Monitor'ler UI'dan veya repo'daki `.trooper/monitors/*.yaml` dosyalarından yönetilir (iki yönlü sync; repo kaynaklı monitor UI'da read-only).
+Repo kaynaklı monitor'ler (`monitors.source='code'`, `code_ref` = `repo:path`) motor tarafında diğerleri gibi değerlendirilir;
+bildirim payload'u `codeRef` taşır ve kanallar "Defined in code" olarak gösterir.
 
 ## Incident state machine
 
@@ -47,7 +49,10 @@ Monitor'ler UI'dan veya repo'daki `.trooper/monitors/*.yaml` dosyalarından yön
 - `pending` girişinde `pending` incident açılır, bildirim gitmez; `firing`'e geçince aynı incident yükseltilir ve bildirim gider. `pending`'den firing olmadan dönerse incident `quiet=true` ile resolve edilir (UI varsayılan listede gizler). Monitor başına tek açık incident.
 - **Mute / bakım penceresi:** `monitors.muted_until` ve `maintenance_windows` (monitor/servis kapsamlı; KPI kuralları dahil). Değerlendirme ve state kaydı sürer, sadece teslimat kuyruğa girmez; event'ler `suppressed:true` + `muted` / `maintenance:<id>` sebebi taşır, ayrıca `suppressed` event'i yazılır. Resolve sadece firing bildirimini almış kanallara gider.
 - **Hatırlatma:** `condition.renotifyMin`; n. hatırlatma incident başına bir kez (dedupe `incident:<id>:reminder-<n>:<channel>`). Acknowledged/pending incident'lara gitmez. PagerDuty/Opsgenie aynı key ile açık alert'e eklenir.
+  KPI kuralları da aynı şekilde: `kpi_alert_rules.condition.renotifyMin` (`008_alerting_r3.sql`).
 - Incident event kind'ları: `pending`, `firing`, `acknowledged`, `resolved`, `suppressed`, `reminder`.
+- Outbox (`notifications.kind`): `firing`, `resolved`, `reminder`, `acknowledged` (sadece Slack App hedefleri; ack edilen
+  incident'ın firing mesajının thread'ine yazılır).
 
 ### Değerlendirme detayları (alert-engine)
 
@@ -58,9 +63,11 @@ Monitor'ler UI'dan veya repo'daki `.trooper/monitors/*.yaml` dosyalarından yön
 | `job_missed` | `consumer_1m` (process) veya `red_1m` (route); değer = son çalışmadan beri dakika |
 | `error_new` | `errors_1h` geçmişi; stream yolunda +2 s / +6 s ClickHouse kontrolü |
 | `consumer_lag` `oldest_age` | `broker_lag_1m.oldest_age_s`; messaging system `broker_clusters.kind`'den (sqs→`aws_sqs`, pubsub→`gcp_pubsub`); Kafka cluster'da `no_data` |
-| `log_match` (stream) | `TT_ALERT_STREAM=true`; franz-go group `tt-alert-stream`, sadece leader instance; bellekte sayım, ~1 s'de firing. Stream sadece yükseltir, resolve periyodik döngüde |
+| `log_match` (stream) | `TT_ALERT_STREAM=true`; franz-go group `tt-alert-stream`, sadece shard 0'ın sahibi (stream leader) tüketir; bellekte sayım, ~1 s'de firing. Çoklu shard'da stream leader **tüm** shard'ların stream kurallarını değerlendirir; başka shard'ın monitor'ündeki eşleşme `alert_stream_hits` (unlogged) satırı + `NOTIFY tt_stream_hit` ile sahibine devredilir, sahibi `LISTEN` + 1 sn poll ile alıp (~100 ms) sadece yükseltir. Stream sadece yükseltir, resolve periyodik döngüde |
 
-KPI kurallarının state'i `kpi_alert_rules.state/state_since/last_value/last_eval_at`'te tutulur, açılışta yüklenir; KPI incident'ları `kpi_rule_id` taşır. Bilinen eksikler: çoklu shard'da stream kuralları sadece monitor'ün sahibi replica'da çalışır; KPI kurallarında hatırlatma yok. Query JSON detayları: `services/alerting/README.md`.
+KPI kurallarının state'i `kpi_alert_rules.state/state_since/last_value/last_eval_at`'te tutulur, açılışta yüklenir; KPI incident'ları `kpi_rule_id` taşır. Firing bildirimi enqueue edilmeden önce aynı transaction'da
+`incidents.root_cause` (RCA sonucu, `confidence` dahil) yazılır; payload `rootCause {summary, confidence}` ve servisin son 1 saatteki
+deploy'unu (`deploy`) taşır. Query JSON detayları: `services/alerting/README.md`.
 
 ## Kod-farkındalıklı otomatik alert
 
@@ -145,3 +152,12 @@ Kart sadece metrik belirgin değiştiğinde gösterilir: göreli değişim ≥ %
 
 Kanallar: Slack, PagerDuty, Opsgenie, e-posta, webhook, Microsoft Teams (Adaptive Card; Incoming Webhook ve Workflows URL'leri, `teams:`/`msteams:` prefix).
 Bildirim içeriği: grafik snapshot'ı, ilgili deploy (son 1 saat), örnek trace/log linki, kod referansı (dosya:satır, envanterden).
+
+**Slack App (ADR-017, contracts §17):** hedef `slack:<channel_id>#<ad>` → org'un bot token'ı ile `chat.postMessage`; ilk mesajın
+`ts`'i `notification_messages`'e yazılır, `resolved` / `reminder` / `acknowledged` aynı mesajın thread'ine cevap olarak gider ve ilk
+mesaj `chat.update` ile güncellenir (durum rengi, butonlar). Mesaj: header (durum emoji + başlık), alanlar (servis, değer vs eşik,
+süre, severity), **"Likely cause: … (NN% confidence)"** (`< %30` → "low confidence"; RCA yoksa satır yok), deploy / kod bağlamı,
+butonlar *Open incident* (`TT_PUBLIC_APP_URL`), *Ack* (`tt_ack:<incidentId>`), *Mute 1h* (`tt_mute1h:<monitorId>`) — api
+`POST /slack/interactions` işler. Hatalar: `not_in_channel` → `conversations.join` + tekrar (private kanal → kalıcı hata, "app'i
+kanala davet et"), `channel_not_found` / `invalid_auth` → kalıcı, 429 → `Retry-After`. `slack:https://hooks.slack.com/…` webhook
+hedefleri eskisi gibi çalışır.

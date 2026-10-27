@@ -1,0 +1,80 @@
+/* Menu / Avatar (components/ui/Menu.tsx), login screen and the code-managed banner. Tokens only. */
+
+/* ---------------- Menu ---------------- */
+.menu-anchor { position: relative; display: inline-flex; min-width: 0; }
+.menu-anchor--block { display: flex; width: 100%; }
+.menu-anchor--block > .menu { min-width: 0; width: 100%; }
+.menu {
+  position: absolute; z-index: 40; min-width: 240px; max-width: 320px; max-height: 70vh; overflow-y: auto;
+  padding: var(--space-1); background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg); display: flex; flex-direction: column;
+}
+.menu--below { top: calc(100% + var(--space-1)); }
+.menu--above { bottom: calc(100% + var(--space-1)); }
+.menu--start { left: 0; }
+.menu--end { right: 0; }
+.menu__item {
+  display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: var(--control-h-sm);
+  padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-sm); background: none;
+  color: var(--text-primary); font: inherit; font-size: var(--text-md); text-align: left; cursor: pointer;
+}
+.menu__item:hover:not(:disabled), .menu__item:focus-visible { background: var(--bg-hover); outline: none; }
+.menu__item:disabled { color: var(--text-muted); cursor: not-allowed; }
+.menu__item--danger { color: var(--status-critical-text); }
+.menu__icon { width: var(--space-4); flex: none; display: inline-flex; color: var(--text-muted); }
+.menu__item[aria-checked='true'] .menu__icon { color: var(--accent-text); }
+.menu__text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.menu__hint { font-size: var(--text-xs); color: var(--text-muted); }
+.menu__label {
+  padding: var(--space-2) var(--space-2) var(--space-1); font-size: var(--text-xs); font-weight: var(--weight-medium);
+  color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em;
+}
+.menu__divider { height: 1px; background: var(--divider); margin: var(--space-1) 0; }
+
+/* ---------------- Avatar ---------------- */
+.avatar {
+  display: inline-grid; place-items: center; flex: none; overflow: hidden; border-radius: var(--radius-full);
+  background: var(--accent-soft); color: var(--accent-text); font-weight: var(--weight-semibold); font-size: var(--text-xs);
+}
+.avatar img { width: 100%; height: 100%; object-fit: cover; }
+.avatar--sm { width: var(--space-6); height: var(--space-6); }
+.avatar--md { width: var(--control-h-sm); height: var(--control-h-sm); }
+.avatar--lg { width: var(--space-10); height: var(--space-10); font-size: var(--text-md); }
+.user-trigger { display: inline-flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-1); border-radius: var(--radius-full); }
+
+/* ---------------- Login ---------------- */
+.login { min-height: 100vh; display: grid; place-items: center; background: var(--bg-page); padding: var(--space-4); }
+.login__card {
+  width: min(400px, 100%); display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-8) var(--space-6);
+  background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
+}
+.login__brand { display: flex; align-items: center; gap: var(--space-2); }
+.login__title { font-size: var(--text-xl); line-height: var(--lh-xl); font-weight: var(--weight-semibold); }
+.login__or { display: flex; align-items: center; gap: var(--space-2); color: var(--text-muted); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.06em; }
+.login__or::before, .login__or::after { content: ''; flex: 1; height: 1px; background: var(--divider); }
+.login .btn { justify-content: center; }
+
+/* ---------------- Settings / editors ---------------- */
+.secret { display: flex; flex-direction: column; gap: var(--space-2); }
+.pick-list { display: flex; flex-direction: column; max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.pick-list__row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--divider); cursor: pointer; }
+.pick-list__row:last-child { border-bottom: 0; }
+.pick-list__row:hover { background: var(--bg-hover); }
+
+/* ---------------- Notify picker (screens/NotifyPicker.tsx) ---------------- */
+.notify {
+  position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1);
+  min-height: var(--control-h-md); padding: var(--space-1) var(--space-2);
+  background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+}
+.notify:focus-within { box-shadow: var(--focus-ring); }
+.notify__chip {
+  display: inline-flex; align-items: center; gap: var(--space-1); max-width: 100%;
+  padding: 0 var(--space-1) 0 var(--space-2); height: var(--space-6); border-radius: var(--radius-sm);
+  background: var(--bg-sunken); color: var(--text-primary); font-size: var(--text-sm);
+}
+.notify__chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notify__chip svg { flex: none; color: var(--text-muted); }
+.notify__chip button { display: inline-grid; place-items: center; border: 0; background: none; padding: 0; cursor: pointer; color: var(--text-muted); }
+.notify__chip button:hover { color: var(--text-primary); }
+.notify__input { flex: 1; min-width: 160px; border: 0; outline: none; background: none; color: var(--text-primary); font: inherit; font-size: var(--text-md); height: var(--space-6); }

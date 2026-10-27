@@ -35,6 +35,8 @@ type GatewayConfig struct {
 	Burst    float64 // rate-limit burst = rps × Burst
 	// MetricsAddr serves /metrics on its own listener; empty → /metrics on the HTTP port.
 	MetricsAddr string
+	// InternalToken (TT_INTERNAL_TOKEN) enables the internal service credential (contracts §16); empty = off.
+	InternalToken string
 }
 
 // GatewayFromEnv reads TT_* variables.
@@ -55,8 +57,9 @@ func GatewayFromEnv() GatewayConfig {
 			BufferBytes:     config.Int("TT_INGEST_PRODUCE_BUFFER_BYTES", 256<<20),
 			DeliveryTimeout: config.Duration("TT_INGEST_PRODUCE_TIMEOUT", 30*time.Second),
 		},
-		Burst:       2,
-		MetricsAddr: config.String("TT_INGEST_METRICS_ADDR", ""),
+		Burst:         2,
+		MetricsAddr:   config.String("TT_INGEST_METRICS_ADDR", ""),
+		InternalToken: config.String("TT_INTERNAL_TOKEN", ""),
 	}
 }
 
@@ -96,6 +99,10 @@ func RunGateway(ctx context.Context, cfg GatewayConfig, log *slog.Logger, ready 
 		cfg.GW.ServeMetrics = true
 	}
 	srv := gw.New(cfg.GW, keys, lim, sink, log)
+	if in := auth.NewInternal(cfg.InternalToken, auth.PGProjects{Pool: pool}, log); in != nil {
+		srv.SetInternal(in)
+		log.Info("internal service credential enabled")
+	}
 	if skey, err := secrets.Key(); err != nil {
 		log.Warn("TT_SECRETS_KEY invalid; drains disabled", "err", err)
 	} else {

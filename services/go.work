@@ -8,4 +8,6 @@ use (
 	./collector
 	./integrations
 	./symbolicator
+	./codeintel
+	./loadtest
 )

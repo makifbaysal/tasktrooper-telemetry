@@ -20,7 +20,8 @@ public class TrooperOtelProducers {
     @Produces
     @Singleton
     public SpanProcessor trooperSpanProcessor() {
-        return new TrooperSpanProcessor();
+        // One bean: the trooper conventions + trooper.consumer.attempt for SmallRye Reactive Messaging consumers.
+        return SpanProcessor.composite(new TrooperSpanProcessor(), new TrooperAttemptSpanProcessor());
     }
 
     @Produces

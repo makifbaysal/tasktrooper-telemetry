@@ -53,6 +53,9 @@ gerekirse küçük tutulur (tek harici bağımlılık `google.golang.org/protobu
 | ingest-gw metrics | 4318 (veya `TT_INGEST_METRICS_ADDR`) | Prometheus `GET /metrics` |
 | ingest-writer metrics | 9464 (`TT_INGEST_WRITER_METRICS_ADDR`) | Prometheus `GET /metrics` |
 
+**Internal credential:** servis içi gönderenler (trooper-cloud, loadtest-runner) `x-trooper-internal: <TT_INTERNAL_TOKEN>` +
+`x-trooper-project: <id>` gönderir (OTLP HTTP/gRPC metadata, `/v1/rum`); sabit zamanlı karşılaştırma, `Origin` varsa 403, token
+ayarlı değilse 401. Org Postgres'ten (60 sn cache).
 **Ingest auth:** `x-trooper-key: <ingest key>` header'ı, ya da `Authorization: Bearer <key>`. Browser `sendBeacon` header
 koyamadığı için `?key=` query parametresi de kabul edilir (sadece `/v1/rum`). Key Postgres `api_keys` tablosunda sha256 hash'i ile
 durur; ingest-gw 60 sn TTL'li in-memory cache tutar. Key → `(org_id, project_id)`. Browser key'lerinde `allowed_origins` kontrolü.
@@ -267,8 +270,8 @@ offline kuyruktan gelen ≤ 24 saatlik event'ler kendi zamanlarında kalır.
   Neon tüketim sayaçları custom metrik `trooper.cloud.neon.*` (`compute_time_seconds`, `active_time_seconds`,
   `cpu_used_seconds`, `written_data_bytes`, `data_transfer_bytes`, `synthetic_storage_bytes`, `logical_size_bytes`,
   `compute_active`, `compute_cu_max`) → generic `metrics` tablosu. Datapoint zamanı sağlayıcının kendi dakikasıdır.
-- **trooper-cloud ingest auth (geçici):** proje başına ingest key `TT_CLOUD_INGEST_KEYS=projectId:key,...`; `TT_DSN`'deki proje
-  otomatik. Hedef: ingest-gw'de proje header'ı kabul eden internal servis credential'ı (roadmap).
+- **trooper-cloud ingest auth:** `TT_INTERNAL_TOKEN` ayarlıysa internal credential (§2); değilse/401'de proje başına ingest key
+  `TT_CLOUD_INGEST_KEYS=projectId:key,...` (geri uyumlu). Vercel `createDrain` gerçek ingest key ister (drain URL'si public).
 - Bilinen boşluklar: Neon CPU/memory/connection metriği yok; RDS memory instance-class tablosundan (bilinmeyen sınıf →
   `config.instanceMemoryGb`); CloudWatch/GCP'den `max_connections` ve p95 yok; MSK Serverless'ta sadece lag.
 
@@ -309,3 +312,105 @@ offline kuyruktan gelen ≤ 24 saatlik event'ler kendi zamanlarında kalır.
   --app --release <path>` (`TROOPER_API_URL`, `TROOPER_API_KEY`). Exit kodları: 0 ok, 1 sunucu/ağ, 2 kullanım, 3 yetkisiz, 4 bazı
   dosyalar reddedildi. Android Gradle plugin'i (`com.tasktrooper.mapping-upload`) sadece `r8` yükler; NDK `.so` için CLI
   `upload-ndk-symbols`. iOS: `sdks/ios/Scripts/upload-dsyms.sh`.
+
+## 13. Code intelligence (`services/codeintel`, ADR-014)
+
+- Port :8096 (`/healthz`, `/metrics`, `POST /v1/webhooks/github`). Migration `deploy/postgres/005_codeintel.sql` (codeintel sahibi):
+  - `repositories` + `installation_id bigint`, `credentials_ref text`, `local_path text` (provider `local` eklenir),
+    `analyze_requested_at timestamptz`, `analyzed_at timestamptz`, `error text`, `languages text[]`, `services text[]`,
+    `webhook_secret_ref text`.
+  - `inventory_items` + `service text`, `criticality text` (critical|high|medium|low), `observed bool`, `monitored bool`,
+    `code_hash text`, `summary text`, `dead bool` (kodda var, 30 gün trafik yok), `shadow bool` (trafik var, kodda yok →
+    `repository_id` NULL olabilir), `llm jsonb` (failure_modes, loadtest_hint).
+  - `alert_suggestions` + `title text`, `kind text`, `target text`, `condition text`, `criticality text`, `code_ref text`,
+    `calibrated bool` (eşik gözlem verisiyle ayarlandı), `created_at`. `monitor_draft` = api `POST /monitors` gövdesiyle aynı şekil.
+  - `monitors` + `source text` ('manual'|'code'|'template'|'suggestion'), `code_ref text` (alert-as-code; read-only).
+  - `loadtest_scenarios` + `state text` ('draft'|'ready', default 'ready'); codeintel `source='generated', state='draft'` yazar.
+- `.trooper/config.yaml`: `services: [{ path: services/orders, name: orders-api }]`; yoksa SDK init çağrılarından tespit.
+- `.trooper/monitors/*.yaml`: alerting.md § Kural şeması formatı (name, kind, query, condition, severity, notify, labels).
+- Envanter `key` formatı: endpoint `"METHOD /route/:param"` (writer normalizasyonu ile aynı), consumer = process adı (`source` =
+  topic/queue), cron = job adı (`source` = schedule), view = route, dependency = `"<kind> · <name>"`.
+- Gözlem eşleştirme: `red_1m` (son 7 gün) route'ları ve `consumer_1m` process'leri ile; `observed`, `dead`, `shadow`.
+
+## 14. Load testing (`services/loadtest`, ADR-015)
+
+- `loadtest-ctl` :8097 (`/healthz`, `/metrics`). Migration `deploy/postgres/006_loadtest.sql` (loadtest sahibi):
+  - `loadtest_runs` + `region text`, `live jsonb` (`{ ts, vus, rps, p95, errorRate, progress }`), `abort_requested_at`,
+    `error text`, `created_at`, `requested_by bigint`.
+  - `loadtest_domains (id, project_id, host, token, verified_at, method 'dns'|'http', created_at, UNIQUE(project_id, host))`.
+  - `loadtest_usage (project_id, month date, vu_minutes numeric, PRIMARY KEY(project_id, month))`.
+- Senaryo `spec` (jsonb) = UI `ScenarioEditor` modeli: `{ target, mode: 'vus'|'rps', levels: [{durationS, target}], steps: [key],
+  weights: {key: pct}, requests: {key: {method, path, headers?, json?, checks?}}, thinkTime, regions, gate: {...},
+  thresholds: {p95Ms, errorRate}, script? }`. Şablonlar: `{{int a-b}}`, `{{pool.<name>}}`, `{{weighted a:70 b:30}}`,
+  `{{prev "KEY" .field}}`, `{{uuid}}`.
+- Runner metrikleri (OTLP, `service.name=loadtest`, attr `trooper.loadtest.run`, `trooper.loadtest.step`):
+  `trooper.loadtest.requests` (sum), `trooper.loadtest.errors` (sum), `trooper.loadtest.duration_ms` (histogram),
+  `trooper.loadtest.vus` (gauge) → generic `metrics` tablosu.
+- İstek header'ları: `traceparent`, `baggage: tt.svc=loadtest:<run_id>`, `x-trooper-loadtest-run`, `user-agent: TaskTrooper-LoadTest/1`.
+
+## 15. Kimlik, org ve yönetim API'si (ADR-016)
+
+- Migration `deploy/postgres/007_auth.sql` (api sahibi): `sessions (id text PK, user_id, created_at, expires_at, last_seen_at,
+  user_agent)`, `org_members.role` ∈ owner|admin|member|viewer, `audit_log (id, org_id, project_id, user_id, api_key_id,
+  action, target, meta jsonb, at)`, `users.oidc_subject`, `api_keys.created_by`, `api_keys.last_used_at`.
+- Uçlar (`/api/v1`):
+  - `GET /auth/config` (anonim) → `{ oidc: bool, devLogin: bool }`; `GET /auth/login?redirect=` → OIDC'ye yönlendirir;
+    `GET /auth/callback`; `POST /auth/dev-login {email}`; `POST /auth/logout`; `GET /me` → `{ user, orgs: [{id, name, role,
+    projects: [{id, name}]}], currentProjectId }`.
+  - `GET/POST /orgs/{org}/members`, `PATCH/DELETE /orgs/{org}/members/{user}` (rol), `GET/POST /projects`,
+    `GET/POST /api-keys` (POST cevabı key'i **bir kez** döner), `DELETE /api-keys/{id}`, `GET /audit-log?limit=`.
+- CORS: cookie'li istekler için `Access-Control-Allow-Credentials: true` ve tam origin (wildcard değil).
+
+## 16. Faz 4–5 api uçları ve diğer açık işler
+
+- Code intelligence (api, Postgres'ten okur/yazar):
+  - `GET /repos` → UI `Repo[]`; `POST /repos {provider, fullName, defaultBranch?, token? | installationId? | localPath?}`;
+    `DELETE /repos/{id}`; `POST /repos/{id}/analyze` (→ `analyze_requested_at`).
+  - `GET /inventory?repoId=&kind=&service=` → UI `InventoryItem[]` (+ `dead`, `shadow`, `summary`).
+  - `GET /suggestions?state=proposed` → UI `Suggestion[]`; `POST /suggestions/{id}/accept` (monitor oluşturur, `source=suggestion`)
+    ; `POST /suggestions/{id}/reject`.
+  - `PUT/PATCH/DELETE /monitors/{id}` `source='code'` ise 409 "managed in repository".
+- Load test (api): mevcut uçlar + `GET /loadtests/runs/{id}/series?step=5s` (`{ ts[], vus[], rps[], p95[], errorRate[] }`,
+  `metrics` tablosundan) ve `GET /loadtests/runs/{id}/target?service=` (hedef servisin aynı penceredeki RED'i, caller
+  `loadtest:<id>` ayrımı ile); `GET/POST /loadtests/domains`, `POST /loadtests/domains/{id}/verify`, `DELETE /loadtests/domains/{id}`.
+- Range: `15m`, `30m` eklenir (`timerange` + UI `TimeRange`).
+- Logs: `GET /logs?source=` → `attrs['vercel.source']` filtresi (build|static|external|edge|lambda|redirect|firewall).
+- Ingest internal credential: `x-trooper-internal: <TT_INTERNAL_TOKEN>` + `x-trooper-project: <id>` başlıkları; ingest-gw
+  token eşleşirse key aramaz. trooper-cloud ve loadtest-runner bunu kullanır (`TT_CLOUD_INGEST_KEYS` geri uyumlu kalır).
+- KPI kuralları: `kpi_alert_rules.condition jsonb` (`renotifyMin`) — migration `008_alerting_r3.sql` (alerting sahibi).
+
+## 17. Slack App (ADR-017)
+
+- Env (api + notifier): `TT_SLACK_CLIENT_ID`, `TT_SLACK_CLIENT_SECRET`, `TT_SLACK_SIGNING_SECRET`, `TT_PUBLIC_API_URL`
+  (OAuth redirect + interactivity URL tabanı), `TT_PUBLIC_APP_URL` (mesajlardaki linkler).
+- Postgres (`009_slack_github.sql`, api sahibi): `integrations.provider` += `slack`, `github`; Slack kurulumu
+  `integrations(provider='slack', config={teamId, teamName, botUserId}, credentials_ref=secret:<bot token>)`, org başına bir
+  tane (project_id = kurulumu yapan proje; okumada org geneli). `notification_messages (id, incident_id, channel, provider,
+  external_id /*slack ts*/, external_channel, created_at)`.
+- api uçları: `GET /integrations/slack/install` → Slack OAuth'a yönlendirir (state imzalı); `GET /integrations/slack/callback`;
+  `GET /integrations/slack/channels?q=` → `[{id, name, isPrivate, isMember}]` (cache 5 dk); `DELETE /integrations/slack`;
+  `POST /slack/interactions` (Ack / Mute 1h butonları; imza doğrulaması; Slack kullanıcısını e-posta ile `users`'a eşler).
+- Bildirim kind'ları: `firing | resolved | reminder | acknowledged`; ack bildirimini **alert-engine** kuyruğa koyar (api koymaz;
+  dedupe `incident:<id>:acknowledged:<channel>`). Buton action id'leri: `tt_ack:<incidentId>`, `tt_mute1h:<monitorId>`.
+  `not_in_channel` → `conversations.join` (scope `channels:join`) + bir kez tekrar; private kanal → kalıcı "uygulamayı davet et"
+  hatası. Test için `TT_SLACK_API_URL`. Alert-engine çoklu shard: stream kuralı isabetleri `alert_stream_hits` (unlogged) +
+  `NOTIFY tt_stream_hit` ile monitor'ün sahibi shard'a devredilir.
+- Bildirim hedefi formatı: `slack:<channel_id>#<channel_name>` (örn. `slack:C0123ABCD#payments-alerts`). notifier: bot token ile
+  `chat.postMessage`; ilk mesajın `ts`'i `notification_messages`'e; `resolved`/`reminder`/`acknowledged` → `thread_ts` ile
+  thread'e cevap + ilk mesaj `chat.update` (renk/durum). `slack:https://hooks.slack.com/...` webhook hedefleri eskisi gibi.
+- Mesaj Block Kit: header (durum emoji + başlık), alanlar (servis, değer vs eşik, süre, severity), **"Likely cause"** bölümü
+  (`incidents.root_cause` → `summary` + `round(confidence*100)%`; `< 30%` → "low confidence"), deploy context, butonlar
+  (Open incident, Ack, Mute 1h).
+
+## 18. GitHub App (ADR-017)
+
+- Env (api + codeintel): `TT_GITHUB_APP_ID`, `TT_GITHUB_APP_SLUG`, `TT_GITHUB_APP_PRIVATE_KEY` (env:/file: ref),
+  `TT_GITHUB_WEBHOOK_SECRET`. Ortak istemci `services/pkg/githubapp` (JWT, installation token cache, repo listesi, sayfalama).
+- Kurulum: `integrations(provider='github', config={installationId, account, accountType}, project_id)`; `repositories.installation_id`.
+- api uçları: `GET /integrations/github/install` → `https://github.com/apps/<slug>/installations/new?state=<imzalı>`;
+  `GET /integrations/github/callback?installation_id&setup_action&state` → integration kaydı, UI'a `/settings/integrations?github=<id>`
+  ile döner; `GET /integrations/github/{id}/repos?q=` → `[{fullName, defaultBranch, private, language, added}]`;
+  `POST /repos {provider:'github', fullName, installationId}` (mevcut uç; token gerekmez).
+- Webhook (codeintel `POST /v1/webhooks/github`, App webhook URL'si): `push` default branch → `repositories.analyze_requested_at
+  = now()` + değişen dosya listesi (`pending_paths text[]`) → incremental analiz; `installation_repositories` removed → repo
+  `status='disconnected'`; `installation` deleted → integration `status='error'`. Teslim id'si (`X-GitHub-Delivery`) ile idempotent.

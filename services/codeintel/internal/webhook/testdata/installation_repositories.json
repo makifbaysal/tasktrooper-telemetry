@@ -1,0 +1,7 @@
+{
+  "action": "removed",
+  "installation": { "id": 4242, "account": { "login": "acme" } },
+  "repository_selection": "selected",
+  "repositories_added": [],
+  "repositories_removed": [ { "id": 35129377, "name": "shop", "full_name": "acme/shop", "private": true } ]
+}

@@ -4,6 +4,9 @@ package model
 
 import (
 	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/tasktrooper/telemetry/services/api/internal/timerange"
 )
@@ -209,6 +212,8 @@ type LogLine struct {
 	Message string `json:"message"`
 	TraceID string `json:"traceId,omitempty"`
 	Route   string `json:"route,omitempty"`
+	// Source is attrs['vercel.source'] for Vercel drain lines (build|static|external|edge|lambda|redirect|firewall).
+	Source string `json:"source,omitempty"`
 }
 
 type LogPage struct {
@@ -364,7 +369,7 @@ type Monitor struct {
 	Condition  string     `json:"condition"` // human readable
 	Severity   string     `json:"severity"`
 	State      string     `json:"state"`  // ok | pending | firing | muted
-	Source     string     `json:"source"` // manual | code | template
+	Source     string     `json:"source"` // manual | code | template | suggestion
 	LastChange int64      `json:"lastChange"`
 	Channels   []string   `json:"channels"`
 	Queue      *QueueRule `json:"queue,omitempty"`
@@ -377,6 +382,8 @@ type Monitor struct {
 	LastValue  *float64         `json:"lastValue,omitempty"`
 	// MutedUntil (unix ms) silences notifications until then; State reads "muted" while it is in the future.
 	MutedUntil int64 `json:"mutedUntil,omitempty"`
+	// CodeRef is "repo:path" of an alert-as-code monitor (source = code; read-only through the api).
+	CodeRef string `json:"codeRef,omitempty"`
 }
 
 // MonitorPatch changes parts of a monitor. mutedUntil: unix ms; 0 or null unmutes.
@@ -858,22 +865,41 @@ type CollectorConfig struct {
 // ---------------------------------------------------------------- load tests
 
 type LoadTestScenario struct {
-	ID       string          `json:"id"`
-	Name     string          `json:"name"`
-	Target   string          `json:"target"`
-	Source   string          `json:"source"`
-	Steps    int             `json:"steps"`
-	PeakVus  float64         `json:"peakVus"`
-	Duration float64         `json:"duration"` // seconds
-	Regions  []string        `json:"regions"`
-	LastRun  string          `json:"lastRun,omitempty"`
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Target   string   `json:"target"`
+	Source   string   `json:"source"`
+	Steps    int      `json:"steps"`
+	PeakVus  float64  `json:"peakVus"`
+	Duration float64  `json:"duration"` // seconds
+	Regions  []string `json:"regions"`
+	LastRun  string   `json:"lastRun,omitempty"`
+	// State: draft (generated, needs review; cannot run) | ready.
+	State string `json:"state"`
+	// Services are the target service ids from spec.services (when the scenario names them).
+	Services []string        `json:"services,omitempty"`
 	Spec     json.RawMessage `json:"spec"`
 }
 
 type ScenarioInput struct {
 	Name   string          `json:"name"`
 	Source string          `json:"source,omitempty"`
+	State  string          `json:"state,omitempty"` // draft | ready (create default ready; update keeps it)
 	Spec   json.RawMessage `json:"spec"`
+}
+
+type ScenarioPatch struct {
+	State string `json:"state"`
+}
+
+// RunLive is loadtest_runs.live, refreshed by the runner every 5 s.
+type RunLive struct {
+	Ts        int64   `json:"ts"`
+	Vus       float64 `json:"vus"`
+	Rps       float64 `json:"rps"`
+	P95       float64 `json:"p95"`
+	ErrorRate float64 `json:"errorRate"`
+	Progress  float64 `json:"progress"`
 }
 
 type Threshold struct {
@@ -882,17 +908,76 @@ type Threshold struct {
 }
 
 type LoadTestRun struct {
-	ID         string      `json:"id"`
-	ScenarioID string      `json:"scenarioId"`
-	State      string      `json:"state"` // queued | running | passed | failed | aborted
-	StartedAt  int64       `json:"startedAt"`
-	FinishedAt int64       `json:"finishedAt,omitempty"`
-	Progress   float64     `json:"progress"`
-	Rps        float64     `json:"rps"`
-	P95        float64     `json:"p95"`
-	ErrorRate  float64     `json:"errorRate"`
-	Vus        float64     `json:"vus"`
-	Thresholds []Threshold `json:"thresholds"`
+	ID         string   `json:"id"`
+	ScenarioID string   `json:"scenarioId"`
+	State      string   `json:"state"`     // queued | running | passed | failed | aborted | error
+	StartedAt  int64    `json:"startedAt"` // createdAt until the runner starts
+	FinishedAt int64    `json:"finishedAt,omitempty"`
+	CreatedAt  int64    `json:"createdAt"`
+	Region     string   `json:"region,omitempty"`
+	Error      string   `json:"error,omitempty"`
+	Live       *RunLive `json:"live,omitempty"`
+	// AbortRequestedAt is set by POST /stop; loadtest-ctl then stops the runners.
+	AbortRequestedAt int64 `json:"abortRequestedAt,omitempty"`
+	ThresholdsPassed *bool `json:"thresholdsPassed,omitempty"`
+	// Steps / StatusCodes are passed through from the runner summary (per-step stats, status code counts).
+	Steps       json.RawMessage `json:"steps,omitempty"`
+	StatusCodes json.RawMessage `json:"statusCodes,omitempty"`
+	Progress    float64         `json:"progress"`
+	Rps         float64         `json:"rps"`
+	P95         float64         `json:"p95"`
+	ErrorRate   float64         `json:"errorRate"`
+	Vus         float64         `json:"vus"`
+	Thresholds  []Threshold     `json:"thresholds"`
+}
+
+// RunSeries is GET /loadtests/runs/{id}/series (one value per step; Source = metrics | live).
+type RunSeries struct {
+	Ts        []int64   `json:"ts"`
+	Vus       []float64 `json:"vus"`
+	Rps       []float64 `json:"rps"`
+	P95       []float64 `json:"p95"`
+	ErrorRate []float64 `json:"errorRate"`
+	StepMs    int64     `json:"stepMs"`
+	Source    string    `json:"source"`
+}
+
+type RedTotals struct {
+	Requests  float64 `json:"requests"`
+	ErrorRate float64 `json:"errorRate"`
+	P95       float64 `json:"p95"`
+}
+
+// RunTarget is GET /loadtests/runs/{id}/target: the target service during the run, all traffic vs the run's
+// (caller loadtest:<id>). Series: rpm, rpmLoadtest, errorRate, errorRateLoadtest, p95, p95Loadtest (1-minute buckets).
+type RunTarget struct {
+	SeriesSet
+	Service  string    `json:"service"`
+	Caller   string    `json:"caller"`
+	From     int64     `json:"from"`
+	To       int64     `json:"to"`
+	Total    RedTotals `json:"total"`
+	Loadtest RedTotals `json:"loadtest"`
+	Other    RedTotals `json:"other"` // requests not from the run (p95 / error rate not separable from the rollups)
+}
+
+type LoadTestDomain struct {
+	ID                string `json:"id"`
+	Host              string `json:"host"`
+	Token             string `json:"token"`
+	Method            string `json:"method"` // dns | http
+	Verified          bool   `json:"verified"`
+	VerifiedAt        int64  `json:"verifiedAt,omitempty"`
+	VerifyRequestedAt int64  `json:"verifyRequestedAt,omitempty"`
+	CreatedAt         int64  `json:"createdAt"`
+	// DNSRecord is the TXT value to publish; HTTPURL must serve the token.
+	DNSRecord string `json:"dnsRecord"`
+	HTTPURL   string `json:"httpUrl"`
+}
+
+type LoadTestDomainInput struct {
+	Host   string `json:"host"`
+	Method string `json:"method,omitempty"`
 }
 
 // ---------------------------------------------------------------- root cause baseline
@@ -944,7 +1029,7 @@ type EndpointRca struct {
 	Children     []RcaChild `json:"children"`
 }
 
-// ---------------------------------------------------------------- code insights (no backend yet: empty lists)
+// ---------------------------------------------------------------- code insights (ADR-014, contracts §13/§16)
 
 type CodeSuggestion struct {
 	ID          string  `json:"id"`
@@ -952,33 +1037,97 @@ type CodeSuggestion struct {
 	Kind        string  `json:"kind"` // monitor kind
 	Target      string  `json:"target"`
 	Condition   string  `json:"condition"`
-	Criticality string  `json:"criticality"`
+	Criticality string  `json:"criticality"` // critical | important | low
 	Confidence  float64 `json:"confidence"`
 	Rationale   string  `json:"rationale"`
 	CodeRef     string  `json:"codeRef"`
 	Calibrated  bool    `json:"calibrated"`
+	State       string  `json:"state"` // proposed | accepted | rejected
+	CreatedAt   int64   `json:"createdAt"`
+	// MonitorID is the monitor created on accept.
+	MonitorID string `json:"monitorId,omitempty"`
+	// MonitorDraft is the POST /monitors body accept creates.
+	MonitorDraft json.RawMessage `json:"monitorDraft"`
+}
+
+// SuggestionAccept optionally overrides the draft on accept.
+type SuggestionAccept struct {
+	Name     string   `json:"name,omitempty"`
+	Severity string   `json:"severity,omitempty"`
+	Channels []string `json:"channels,omitempty"`
+	Status   string   `json:"status,omitempty"`
+}
+
+type SuggestionAccepted struct {
+	Suggestion CodeSuggestion `json:"suggestion"`
+	Monitor    Monitor        `json:"monitor"`
 }
 
 type Repo struct {
-	ID         string   `json:"id"`
-	Name       string   `json:"name"`
-	Branch     string   `json:"branch"`
-	Sha        string   `json:"sha"`
-	AnalyzedAt int64    `json:"analyzedAt"`
-	Services   []string `json:"services"`
-	Language   string   `json:"language"`
-	Status     string   `json:"status"` // ready | analyzing | error
+	ID                 string   `json:"id"`
+	Name               string   `json:"name"` // full name (owner/repo)
+	Provider           string   `json:"provider"`
+	Branch             string   `json:"branch"`
+	Sha                string   `json:"sha"`
+	AnalyzedAt         int64    `json:"analyzedAt"`
+	AnalyzeRequestedAt int64    `json:"analyzeRequestedAt,omitempty"`
+	Services           []string `json:"services"`
+	Language           string   `json:"language"`
+	Languages          []string `json:"languages"`
+	Status             string   `json:"status"` // ready | analyzing | error | disconnected
+	Error              string   `json:"error,omitempty"`
+	InstallationID     string   `json:"installationId,omitempty"`
+	LocalPath          string   `json:"localPath,omitempty"`
+	LastAnalyzedSha    string   `json:"lastAnalyzedSha"`
+	// PendingPaths are files changed by pushes since the last analysis (incremental analysis queue).
+	PendingPaths []string `json:"pendingPaths"`
+	// WebhookActive: the repo is connected through the GitHub App, so pushes trigger analyses.
+	WebhookActive bool `json:"webhookActive"`
+}
+
+// RepoInput connects a repository: token (sealed), GitHub App installationId, or a local path (provider local).
+type RepoInput struct {
+	Provider       string  `json:"provider"`
+	FullName       string  `json:"fullName"`
+	DefaultBranch  string  `json:"defaultBranch,omitempty"`
+	Token          string  `json:"token,omitempty"`
+	InstallationID FlexInt `json:"installationId,omitempty"`
+	LocalPath      string  `json:"localPath,omitempty"`
+}
+
+// FlexInt accepts a JSON number or a numeric string (ids from GitHub are numbers, the UI sends strings).
+type FlexInt int64
+
+func (f *FlexInt) UnmarshalJSON(b []byte) error {
+	s := strings.Trim(string(b), `"`)
+	if s == "" || s == "null" {
+		*f = 0
+		return nil
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return fmt.Errorf("not an integer: %s", b)
+	}
+	*f = FlexInt(n)
+	return nil
 }
 
 type InventoryItem struct {
 	ID          string `json:"id"`
+	RepoID      string `json:"repoId,omitempty"`
 	Kind        string `json:"kind"` // endpoint | consumer | cron | view | dependency
 	Key         string `json:"key"`
 	Source      string `json:"source,omitempty"`
 	Service     string `json:"service"`
 	File        string `json:"file"`
 	Line        int    `json:"line"`
-	Criticality string `json:"criticality"`
+	Criticality string `json:"criticality"` // critical | important | low
 	Observed    bool   `json:"observed"`
 	Monitored   bool   `json:"monitored"`
+	// Dead: in code, no traffic for 30 days. Shadow: traffic, not in code.
+	Dead    bool   `json:"dead"`
+	Shadow  bool   `json:"shadow"`
+	Summary string `json:"summary,omitempty"`
+	// Analysis is the LLM interpretation (failure_modes, loadtest_hint) when present.
+	Analysis json.RawMessage `json:"analysis,omitempty"`
 }

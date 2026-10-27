@@ -29,6 +29,12 @@ type fakeStore struct {
 	svcErr  error
 	lag     rules.LagInputs
 	monitor *model.Monitor
+	audit   []store.AuditRecord
+}
+
+func (f *fakeStore) WriteAudit(_ context.Context, a store.AuditRecord) error {
+	f.audit = append(f.audit, a)
+	return nil
 }
 
 func (f *fakeStore) ListServices(ctx context.Context, q store.Q) ([]model.Service, error) {

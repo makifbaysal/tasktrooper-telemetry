@@ -11,7 +11,7 @@ func TestParse(t *testing.T) {
 		want    Range
 		wantErr bool
 	}{
-		{"", R1h, false}, {"1h", R1h, false}, {"6h", R6h, false}, {"24h", R24h, false}, {"7d", R7d, false},
+		{"", R1h, false}, {"15m", R15m, false}, {"30m", R30m, false}, {"1h", R1h, false}, {"6h", R6h, false}, {"24h", R24h, false}, {"7d", R7d, false},
 		{"30d", "", true}, {"1H", "", true},
 	} {
 		got, err := Parse(tc.in)
@@ -30,6 +30,8 @@ func TestWindowBuckets(t *testing.T) {
 		last   time.Time
 		hourly bool
 	}{
+		{R15m, 15, time.Minute, time.Date(2026, 10, 25, 13, 47, 0, 0, time.UTC), false},
+		{R30m, 30, time.Minute, time.Date(2026, 10, 25, 13, 47, 0, 0, time.UTC), false},
 		{R1h, 60, time.Minute, time.Date(2026, 10, 25, 13, 47, 0, 0, time.UTC), false},
 		{R6h, 72, 5 * time.Minute, time.Date(2026, 10, 25, 13, 45, 0, 0, time.UTC), false},
 		{R24h, 96, 15 * time.Minute, time.Date(2026, 10, 25, 13, 45, 0, 0, time.UTC), false},

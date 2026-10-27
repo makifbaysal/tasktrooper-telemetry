@@ -57,8 +57,10 @@ type Deliverer struct {
 	// PagerDutyURL / OpsgenieURL default to the public APIs; channel config "url" overrides (tests, EU region).
 	PagerDutyURL string
 	OpsgenieURL  string
-	Now          func() time.Time
-	sendMail     func(addr string, a smtp.Auth, from string, to []string, msg []byte) error
+	// Slack delivers slack:<channel id> targets through the Slack App (nil: such targets fail permanently).
+	Slack    *SlackApp
+	Now      func() time.Time
+	sendMail func(addr string, a smtp.Auth, from string, to []string, msg []byte) error
 }
 
 // NewDeliverer returns a deliverer with a 10 s HTTP timeout.
@@ -86,11 +88,13 @@ func secret(cfg map[string]any, keys ...string) string {
 	return ""
 }
 
-// Deliver sends p (notification kind firing|resolved|reminder) to ch.
+// Deliver sends p (notification kind firing|resolved|reminder|acknowledged) to ch.
 func (d *Deliverer) Deliver(ctx context.Context, ch Channel, kind string, p Payload) error {
 	switch kind {
 	case "resolved":
 		p.State, p.Reminder = "resolved", 0
+	case "acknowledged":
+		p.State, p.Reminder = "acknowledged", 0
 	case "reminder":
 		p.State = "firing"
 		if p.Reminder <= 0 {
@@ -100,6 +104,10 @@ func (d *Deliverer) Deliver(ctx context.Context, ch Channel, kind string, p Payl
 		p.Reminder = 0
 	}
 	switch ch.Type {
+	case "slack_app":
+		id, _ := ch.Config["channelId"].(string)
+		name, _ := ch.Config["channelName"].(string)
+		return d.Slack.Deliver(ctx, ch.Name, id, name, kind, p)
 	case "slack":
 		url := secret(ch.Config, "webhookUrl", "webhook_url", "url")
 		if url == "" {

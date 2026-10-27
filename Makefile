@@ -5,7 +5,7 @@
 COMPOSE  := docker compose -f deploy/docker-compose.yml
 CH       := $(COMPOSE) exec -T clickhouse clickhouse-client --user trooper --password trooper --multiquery
 PSQL     := $(COMPOSE) exec -T -e PGOPTIONS=--client-min-messages=warning postgres psql -U trooper -d trooper -v ON_ERROR_STOP=1 -q
-MODULES  := pkg ingest api alerting collector integrations symbolicator
+MODULES  := pkg ingest api alerting collector integrations symbolicator codeintel loadtest
 
 .PHONY: infra infra-down migrate build test run-gw run-writer e2e-ingest bench-ingest
 

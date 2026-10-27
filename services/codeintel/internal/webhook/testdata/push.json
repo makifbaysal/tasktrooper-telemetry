@@ -1,0 +1,16 @@
+{
+  "ref": "refs/heads/main",
+  "before": "6113728f27ae82c7b1a177c8d03f9e96e0adf246",
+  "after": "59b20b8d5c6ff8d09518454d4dd8b7b30f095ab5",
+  "created": false,
+  "deleted": false,
+  "forced": false,
+  "repository": { "id": 35129377, "full_name": "Acme/Shop", "default_branch": "main", "private": true },
+  "pusher": { "name": "octo" },
+  "installation": { "id": 4242 },
+  "commits": [
+    { "id": "1", "message": "add checkout", "added": ["services/orders/checkout.go"], "removed": [], "modified": ["services/orders/main.go"] },
+    { "id": "2", "message": "drop legacy", "added": [], "removed": ["services/orders/legacy.go"], "modified": ["services/orders/main.go"] }
+  ],
+  "head_commit": { "id": "59b20b8d5c6ff8d09518454d4dd8b7b30f095ab5" }
+}

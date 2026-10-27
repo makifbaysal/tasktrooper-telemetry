@@ -86,7 +86,9 @@ export function Integrations() {
   const openId = params.get('id');
   const open = integrationOf(openId ?? undefined);
   const setOpen = (id: string | null) => setParams((p) => { const n = new URLSearchParams(p); if (id) n.set('id', id); else n.delete('id'); return n; }, { replace: true });
-  const broken = integrations.filter((i) => i.status === 'error');
+  // Slack / GitHub installs (ADR-017) live in the same api list but have their own cards
+  const cloud = integrations.filter((i) => PROVIDERS.includes(i.provider));
+  const broken = cloud.filter((i) => i.status === 'error');
 
   return (
     <>
@@ -109,11 +111,11 @@ export function Integrations() {
         </Section>
       )}
 
-      <Section title="Connected" subtitle={`${integrations.length} integration${integrations.length === 1 ? '' : 's'} · click for resources and actions`}>
-        {integrations.length === 0
+      <Section title="Connected" subtitle={`${cloud.length} integration${cloud.length === 1 ? '' : 's'} · click for resources and actions`}>
+        {cloud.length === 0
           ? <Card><EmptyState icon={<Plug />} title="No cloud integrations yet">Connect a provider below to pull managed database, queue and deploy data.</EmptyState></Card>
           : <Card flush>
-              <Table rows={integrations} rowKey={(i) => i.id} onRowClick={(i) => setOpen(i.id)} defaultSort={{ key: 'status', dir: 'desc' }} columns={[
+              <Table rows={cloud} rowKey={(i) => i.id} onRowClick={(i) => setOpen(i.id)} defaultSort={{ key: 'status', dir: 'desc' }} columns={[
                 { key: 'name', header: 'Integration', sortValue: (i) => i.name, render: (i) => (
                   <div className="row" style={{ gap: 'var(--space-3)', whiteSpace: 'nowrap' }}>
                     <ProviderMark provider={i.provider} size="sm" />

@@ -116,9 +116,15 @@ func (s *Server) adminRoutes(r chi.Router) {
 		s.noContent(w, r, s.Store.DeleteNotificationChannel(r.Context(), param(r, "id")))
 	})
 
-	// ---- cloud integrations (ADR-012)
+	// ---- cloud integrations (ADR-012): admin for mutations
+	r = r.With(s.adminWrites)
 	r.Get("/integrations", func(w http.ResponseWriter, r *http.Request) {
-		v, err := s.Store.ListIntegrations(r.Context())
+		p := qs(r, "provider")
+		if p != "" && !store.Providers[p] && p != "slack" && p != "github" {
+			s.fail(w, r, store.Invalid("provider must be aws|gcp|vercel|neon|slack|github"))
+			return
+		}
+		v, err := s.Store.ListIntegrations(store.WithProviderFilter(r.Context(), p))
 		s.reply(w, r, v, err)
 	})
 	r.Post("/integrations", func(w http.ResponseWriter, r *http.Request) {
@@ -172,10 +178,58 @@ func (s *Server) adminRoutes(r chi.Router) {
 	})
 }
 
-// codeInsightRoutes: code intelligence (repo analysis → inventory → monitor suggestions) has no backend yet. The
-// endpoints exist with their final shapes so the UI can call them; they return empty lists.
+// codeInsightRoutes: code intelligence (ADR-014). services/codeintel analyzes; the api registers repos, queues
+// analyses and turns suggestions into monitors.
 func (s *Server) codeInsightRoutes(r chi.Router) {
-	r.Get("/suggestions", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, http.StatusOK, []model.CodeSuggestion{}) })
-	r.Get("/repos", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, http.StatusOK, []model.Repo{}) })
-	r.Get("/inventory", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, http.StatusOK, []model.InventoryItem{}) })
+	r.Get("/repos", func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Store.ListRepos(r.Context())
+		s.reply(w, r, v, err)
+	})
+	r.Post("/repos", func(w http.ResponseWriter, r *http.Request) {
+		var in model.RepoInput
+		if err := decode(r, &in); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		v, err := s.Store.CreateRepo(r.Context(), in)
+		s.created(w, r, v, err)
+	})
+	r.Get("/repos/{id}", func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Store.GetRepo(r.Context(), param(r, "id"))
+		s.reply(w, r, v, err)
+	})
+	r.Delete("/repos/{id}", func(w http.ResponseWriter, r *http.Request) {
+		s.noContent(w, r, s.Store.DeleteRepo(r.Context(), param(r, "id")))
+	})
+	r.Post("/repos/{id}/analyze", func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Store.AnalyzeRepo(r.Context(), param(r, "id"))
+		if err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, v)
+	})
+	r.Get("/inventory", func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Store.ListInventory(r.Context(), store.InventoryFilter{RepoID: qs(r, "repoId"), Kind: qs(r, "kind"), Service: qs(r, "service")})
+		s.reply(w, r, v, err)
+	})
+	r.Get("/suggestions", func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Store.ListSuggestions(r.Context(), qs(r, "state"))
+		s.reply(w, r, v, err)
+	})
+	r.Post("/suggestions/{id}/accept", func(w http.ResponseWriter, r *http.Request) {
+		var o model.SuggestionAccept
+		if r.ContentLength != 0 {
+			if err := decode(r, &o); err != nil {
+				s.fail(w, r, err)
+				return
+			}
+		}
+		v, err := s.Store.AcceptSuggestion(r.Context(), param(r, "id"), o)
+		s.reply(w, r, v, err)
+	})
+	r.Post("/suggestions/{id}/reject", func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Store.RejectSuggestion(r.Context(), param(r, "id"))
+		s.reply(w, r, v, err)
+	})
 }

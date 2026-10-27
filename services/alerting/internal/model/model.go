@@ -41,6 +41,9 @@ type Monitor struct {
 	MutedUntil *time.Time
 	// ClusterKind is broker_clusters.kind (kafka|rabbitmq|sqs|pubsub) of query.clusterId, for consumer_lag.
 	ClusterKind string
+	// Source is monitors.source (manual|code|template|suggestion…); CodeRef is monitors.code_ref ("repo:path") of
+	// alert-as-code monitors. Both are informational: code monitors evaluate like any other.
+	Source, CodeRef string
 }
 
 // Target is monitors.target: { service, endpoint?, process?, view? }.
@@ -336,6 +339,8 @@ type KpiRule struct {
 	Threshold   float64
 	Severity    string
 	Channels    []string
+	// Renotify is kpi_alert_rules.condition.renotifyMin (0 = no reminders).
+	Renotify time.Duration
 	// persisted state (kpi_alert_rules.state/state_since)
 	State      State
 	StateSince time.Time

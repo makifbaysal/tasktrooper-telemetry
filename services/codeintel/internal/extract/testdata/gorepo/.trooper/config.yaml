@@ -1,0 +1,3 @@
+services:
+  - path: services/payments
+    name: payments-api

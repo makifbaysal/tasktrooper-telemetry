@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 import { Bell, ExternalLink, ListTree } from 'lucide-react';
 import { Columns, TimeSeries } from '@/components/charts';
@@ -8,6 +8,7 @@ import {
 } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
 import { allLogs, logsFor, series, services, timestamps, type LogLine, type TimeRange } from '@/data';
+import { can } from '@/data/auth';
 import { ago, clock, compact, dateTime, int } from '@/lib/format';
 
 type Level = LogLine['level'];
@@ -83,13 +84,16 @@ export function LogExplorer({ serviceId }: { serviceId?: string }) {
   const [q, setQ] = useState('');
   const [levels, setLevels] = useState<Set<Level>>(new Set(['info', 'warn', 'error']));
   const [svc, setSvc] = useState<string | null>(null);
+  const [src, setSrc] = useState<string | null>(null);
   const [view, setView] = useState<View>('lines');
   const lineDrawer = useDrawer<LogLine>();
   const patternDrawer = useDrawer<Pattern>();
   const ts = timestamps(range);
 
   const rows = useMemo(() => logs.filter((l) =>
-    levels.has(l.level) && (!svc || l.service === svc) && (!q || l.message.toLowerCase().includes(q.toLowerCase()))), [logs, q, levels, svc]);
+    levels.has(l.level) && (!svc || l.service === svc) && (!src || l.source === src) && (!q || l.message.toLowerCase().includes(q.toLowerCase()))), [logs, q, levels, svc, src]);
+  // platform sources (Vercel drains: lambda, edge, static, build …) — the facet only shows when lines carry one
+  const sources = useMemo(() => [...new Set(logs.map((l) => l.source).filter((x): x is string => !!x))].sort(), [logs]);
   const patterns = useMemo(() => groupPatterns(rows), [rows]);
   const allPatterns = useMemo(() => groupPatterns(logs), [logs]);
   const patternOf = (l: LogLine) => allPatterns.find((p) => p.id === `${l.level}|${maskPattern(l.message)}`)!;
@@ -111,7 +115,7 @@ export function LogExplorer({ serviceId }: { serviceId?: string }) {
             <div style={{ flex: 1 }}>
               <SearchInput mono placeholder={serviceId ? 'level:error "timeout"' : 'service:payments-api level:error "provider timeout"'} value={q} onChange={(e) => setQ(e.target.value)} />
             </div>
-            {serviceId && <Button icon={<Bell size={14} />} onClick={() => nav('/alerts/new?kind=log_match')}>Alert on this query</Button>}
+            {serviceId && can('write') && <Button icon={<Bell size={14} />} onClick={() => nav('/alerts/new?kind=log_match')}>Alert on this query</Button>}
           </div>
           <Columns timestamps={ts} height={110} format={(v) => compact(v)} series={[
             { id: 'info', label: 'info', data: series(`log-info-${seed}`, range, { base: 1800 * scale }), color: 'var(--series-1)' },
@@ -133,6 +137,16 @@ export function LogExplorer({ serviceId }: { serviceId?: string }) {
                 <span className="spacer" />
                 <span className="muted num">{logs.filter((x) => x.level === l).length}</span>
               </label>
+            ))}
+            {sources.length > 0 && <div className="field__label" style={{ marginTop: 'var(--space-3)' }}>Source</div>}
+            {sources.map((x) => (
+              <button key={x} className="sidebar__link" aria-current={src === x ? 'page' : undefined}
+                style={{ border: 0, background: src === x ? undefined : 'none', width: '100%', cursor: 'pointer', height: 'var(--space-6)' }}
+                onClick={() => setSrc(src === x ? null : x)}>
+                <span className="mono truncate">{x}</span>
+                <span className="spacer" />
+                <span className="muted num">{logs.filter((l) => l.source === x).length}</span>
+              </button>
             ))}
             {!serviceId && <div className="field__label" style={{ marginTop: 12 }}>Service</div>}
             {!serviceId && logServices.map((s) => (
@@ -165,6 +179,7 @@ export function LogExplorer({ serviceId }: { serviceId?: string }) {
                   <span className="muted num" style={{ flex: 'none' }}>{clock(l.ts, true)}</span>
                   <span style={{ flex: 'none', width: 52 }}><Badge tone={LEVEL_TONE[l.level]}>{l.level}</Badge></span>
                   {!serviceId && <span className="secondary truncate" style={{ flex: 'none', width: 160 }}>{l.service}</span>}
+                  {sources.length > 0 && <span style={{ flex: 'none', width: 'calc(var(--space-12) + var(--space-6))' }}>{l.source && <Badge>{l.source}</Badge>}</span>}
                   <span className="truncate" style={{ flex: 1, minWidth: 0 }}>{l.message}</span>
                   {l.traceId && <ListTree size={14} className="muted" aria-label="Has trace" style={{ flex: 'none' }} />}
                 </div>
@@ -184,7 +199,7 @@ export function LogExplorer({ serviceId }: { serviceId?: string }) {
 
       <LineDrawer line={lineDrawer.item} onClose={lineDrawer.close} ts={ts} range={range}
         pattern={lineDrawer.item ? patternOf(lineDrawer.item) : null}
-        onSurrounding={(l) => { lineDrawer.close(); setQ(''); if (!serviceId) setSvc(l.service); setLevels(new Set(LEVELS)); setView('lines'); }}
+        onSurrounding={(l) => { lineDrawer.close(); setQ(''); setSrc(null); if (!serviceId) setSvc(l.service); setLevels(new Set(LEVELS)); setView('lines'); }}
         onPattern={(p) => { lineDrawer.close(); patternDrawer.open(p); }} />
       <PatternDrawer pattern={patternDrawer.item} onClose={patternDrawer.close} ts={ts} range={range}
         onLine={(l) => { patternDrawer.close(); lineDrawer.open(l); }}
@@ -225,6 +240,7 @@ function LineDrawer({ line, pattern, onClose, ts, range, onSurrounding, onPatter
           ['Timestamp', <span className="mono">{new Date(line.ts).toISOString()}</span>],
           ['Level', <Badge tone={LEVEL_TONE[line.level]}>{line.level}</Badge>],
           ['Service', line.service],
+          ...(line.source ? [['Source', <Badge>{line.source}</Badge>] as [string, ReactNode]] : []),
           ['Trace id', line.traceId ? <span className="mono">{line.traceId}</span> : <span className="muted">—</span>],
           ['Span id', ctx.spanId ? <span className="mono">{ctx.spanId}</span> : <span className="muted">—</span>],
           ['Host', <span className="mono">{ctx.host}</span>],
@@ -254,7 +270,7 @@ function PatternDrawer({ pattern, onClose, ts, range, onLine, onAlert }: {
     <Drawer open onClose={onClose} width={680}
       title={<span className="row" style={{ gap: 8 }}><Badge tone={LEVEL_TONE[pattern.level]}>{pattern.level}</Badge>Log pattern</span>}
       subtitle={<>{int(pattern.lines.length)} lines · {pattern.services.join(', ')} · last {ago(pattern.last)}</>}
-      actions={<Button size="sm" icon={<Bell size={14} />} onClick={onAlert}>Alert on pattern</Button>}>
+      actions={can('write') && <Button size="sm" icon={<Bell size={14} />} onClick={onAlert}>Alert on pattern</Button>}>
       <DrawerSection title="Pattern" aside="variable parts masked">
         <CodeBlock>{pattern.pattern}</CodeBlock>
       </DrawerSection>

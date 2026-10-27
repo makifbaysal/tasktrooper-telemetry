@@ -20,7 +20,6 @@ import (
 	"github.com/tasktrooper/telemetry/services/api/internal/store"
 	"github.com/tasktrooper/telemetry/services/api/internal/symbolicate"
 	"github.com/tasktrooper/telemetry/services/api/internal/timerange"
-	"github.com/tasktrooper/telemetry/services/pkg/tenant"
 )
 
 // Store is everything the handlers need; *store.DB implements it.
@@ -126,8 +125,28 @@ type Store interface {
 	DeleteScenario(ctx context.Context, id string) error
 	ListRuns(ctx context.Context, scenarioID string) ([]model.LoadTestRun, error)
 	GetRun(ctx context.Context, id string) (*model.LoadTestRun, error)
-	CreateRun(ctx context.Context, scenarioID string) (*model.LoadTestRun, error)
+	SetScenarioState(ctx context.Context, id, state string) (*model.LoadTestScenario, error)
+	CreateRun(ctx context.Context, scenarioID string, requestedBy int64) (*model.LoadTestRun, error)
 	StopRun(ctx context.Context, id string) (*model.LoadTestRun, error)
+	RunSeries(ctx context.Context, id string, step time.Duration, now time.Time) (model.RunSeries, error)
+	RunTarget(ctx context.Context, id, service string, now time.Time) (model.RunTarget, error)
+	ListDomains(ctx context.Context) ([]model.LoadTestDomain, error)
+	CreateDomain(ctx context.Context, in model.LoadTestDomainInput) (*model.LoadTestDomain, error)
+	DeleteDomain(ctx context.Context, id string) error
+	RequestDomainVerify(ctx context.Context, id, method string) (*model.LoadTestDomain, error)
+	// code intelligence
+	ListRepos(ctx context.Context) ([]model.Repo, error)
+	GetRepo(ctx context.Context, id string) (*model.Repo, error)
+	CreateRepo(ctx context.Context, in model.RepoInput) (*model.Repo, error)
+	DeleteRepo(ctx context.Context, id string) error
+	AnalyzeRepo(ctx context.Context, id string) (*model.Repo, error)
+	ListInventory(ctx context.Context, f store.InventoryFilter) ([]model.InventoryItem, error)
+	ListSuggestions(ctx context.Context, state string) ([]model.CodeSuggestion, error)
+	AcceptSuggestion(ctx context.Context, id string, o model.SuggestionAccept) (*model.SuggestionAccepted, error)
+	RejectSuggestion(ctx context.Context, id string) (*model.CodeSuggestion, error)
+
+	IdentityStore
+	ChatOpsStore
 }
 
 var _ Store = (*store.DB)(nil)
@@ -152,6 +171,27 @@ type Server struct {
 	Now          func() time.Time
 	// Ready reports dependency health for /healthz (nil = always ok).
 	Ready func(ctx context.Context) error
+
+	// OIDC enables /auth/login + /auth/callback (nil = off, TT_OIDC_ISSUER empty).
+	OIDC *auth.OIDC
+	// DevLogin enables POST /auth/dev-login (TT_AUTH_DEV=true).
+	DevLogin bool
+	// SessionTTL is the sliding session lifetime (default 7 days).
+	SessionTTL time.Duration
+	// WebURL is the dashboard base URL login redirects go to (TT_WEB_URL, default http://localhost:5173).
+	WebURL string
+	// CookieSecure forces Secure cookies (they are Secure whenever the request is https anyway).
+	CookieSecure bool
+
+	// Slack / GitHub enable the App integrations (nil = 501 on their endpoints).
+	Slack  *SlackApp
+	GitHub *GitHubApp
+	// PublicAPIURL is this api as reachable by browsers and Slack (OAuth redirect URIs; TT_PUBLIC_API_URL).
+	PublicAPIURL string
+	// StateKey signs install states (derived from TT_SECRETS_KEY).
+	StateKey []byte
+
+	channels channelCache
 }
 
 // Handler builds the router.
@@ -163,8 +203,14 @@ func (s *Server) Handler() http.Handler {
 	r.Use(middleware.RequestID, s.recoverer, s.requestLog, s.cors, middleware.Compress(5, "application/json"))
 	r.Get("/healthz", s.healthz)
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(s.authenticate)
-		s.routes(r)
+		s.authRoutes(r)          // anonymous
+		s.chatOpsPublicRoutes(r) // signed state / Slack signature
+		r.Group(func(r chi.Router) {
+			r.Use(s.authenticate, s.guard)
+			s.identityRoutes(r)
+			s.chatOpsRoutes(r)
+			s.routes(r)
+		})
 	})
 	return r
 }
@@ -218,8 +264,9 @@ func (s *Server) cors(next http.Handler) http.Handler {
 			h := w.Header()
 			h.Set("Access-Control-Allow-Origin", o)
 			h.Add("Vary", "Origin")
+			h.Set("Access-Control-Allow-Credentials", "true") // tt_session cookie; the origin is echoed exactly, never "*"
 			h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, "+projectHeader)
 			h.Set("Access-Control-Max-Age", "600")
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
@@ -249,26 +296,6 @@ func OriginAllowed(allowed []string, origin string) bool {
 	return false
 }
 
-func (s *Server) authenticate(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		key, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if !ok || strings.TrimSpace(key) == "" {
-			writeJSON(w, http.StatusUnauthorized, apiError{Error: "missing bearer api key"})
-			return
-		}
-		t, err := s.Auth.Resolve(r.Context(), strings.TrimSpace(key))
-		if errors.Is(err, auth.ErrUnauthorized) {
-			writeJSON(w, http.StatusUnauthorized, apiError{Error: "invalid api key"})
-			return
-		}
-		if err != nil {
-			s.fail(w, r, err)
-			return
-		}
-		next.ServeHTTP(w, r.WithContext(tenant.With(r.Context(), t)))
-	})
-}
-
 // ---------------------------------------------------------------- helpers
 
 type apiError struct {
@@ -291,7 +318,10 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 // fail maps store errors to HTTP statuses.
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	var inv store.ErrInvalid
+	var conflict store.ConflictMsg
 	switch {
+	case errors.As(err, &conflict):
+		writeJSON(w, http.StatusConflict, apiError{Error: conflict.Msg})
 	case errors.Is(err, store.ErrNotFound):
 		writeJSON(w, http.StatusNotFound, apiError{Error: "not found"})
 	case errors.As(err, &inv):

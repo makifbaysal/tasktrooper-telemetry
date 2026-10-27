@@ -1,6 +1,7 @@
-// Package timerange maps the UI's TimeRange (1h|6h|24h|7d) to bucketed query windows and builds zero-filled series.
+// Package timerange maps the UI's TimeRange (15m|30m|1h|6h|24h|7d) to bucketed query windows and builds zero-filled series.
 //
 // Bucket sizes match apps/web/src/data/mock.ts RANGE_POINTS: 1h → 60×1m, 6h → 72×5m, 24h → 96×15m, 7d → 84×2h.
+// 15m → 15×1m and 30m → 30×1m: the rollups (red_1m, callers_1m, …) are per minute, so a minute is the finest bucket.
 // Buckets are aligned to the step; the last bucket contains "now" (it is partial).
 package timerange
 
@@ -14,6 +15,8 @@ import (
 type Range string
 
 const (
+	R15m Range = "15m"
+	R30m Range = "30m"
 	R1h  Range = "1h"
 	R6h  Range = "6h"
 	R24h Range = "24h"
@@ -26,6 +29,8 @@ type spec struct {
 }
 
 var specs = map[Range]spec{
+	R15m: {15, time.Minute},
+	R30m: {30, time.Minute},
 	R1h:  {60, time.Minute},
 	R6h:  {72, 5 * time.Minute},
 	R24h: {96, 15 * time.Minute},
@@ -39,7 +44,7 @@ func Parse(s string) (Range, error) {
 	}
 	r := Range(s)
 	if _, ok := specs[r]; !ok {
-		return "", fmt.Errorf("invalid range %q (want 1h|6h|24h|7d)", s)
+		return "", fmt.Errorf("invalid range %q (want 15m|30m|1h|6h|24h|7d)", s)
 	}
 	return r, nil
 }

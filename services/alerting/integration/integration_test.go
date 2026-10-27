@@ -71,10 +71,16 @@ type span struct {
 
 func insertSpans(t *testing.T, ctx context.Context, ch driver.Conn, s span, from time.Time, minutes, perMin int) {
 	t.Helper()
+	insertSpansIn(t, ctx, ch, pid, s, from, minutes, perMin)
+}
+
+// insertSpansIn is insertSpans for another org/project (org id = project id).
+func insertSpansIn(t *testing.T, ctx context.Context, ch driver.Conn, project uint32, s span, from time.Time, minutes, perMin int) {
+	t.Helper()
 	q := `INSERT INTO telemetry.spans (org_id, project_id, ts, duration_ns, trace_id, span_id, parent_span_id, service, env, version, kind, name,
 		is_entry, sample_weight, route, http_method, status_code, is_error, entry_route, entry_method, caller, caller_kind, dep, dep_kind, dep_service,
 		topic, consumer_group, dlq)
-	SELECT 9201, 9201, toDateTime64(?, 6) + toIntervalMillisecond(number * ?), toUInt64(? * 1000000),
+	SELECT ?, ?, toDateTime64(?, 6) + toIntervalMillisecond(number * ?), toUInt64(? * 1000000),
 		toFixedString(unhex(leftPad(hex(number), 32, '0')), 16), toFixedString(unhex(leftPad(hex(number), 16, '0')), 8), toFixedString(unhex('0000000000000000'), 8),
 		?, 'production', ?, ?, ?, ?, 1, ?, ?,
 		if(? > 0 AND number % ? = 0, 500, 200), if(? > 0 AND number % ? = 0, 1, 0),
@@ -84,7 +90,7 @@ func insertSpans(t *testing.T, ctx context.Context, ch driver.Conn, s span, from
 	if s.entry {
 		entry = 1
 	}
-	err := ch.Exec(ctx, q,
+	err := ch.Exec(ctx, q, project, project,
 		from.Unix(), 60000/perMin, s.durMs,
 		s.service, s.version, s.kind, s.method+" "+s.route, entry, s.route, s.method,
 		s.errEvery, s.errEvery, s.errEvery, s.errEvery,
