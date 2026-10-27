@@ -86,6 +86,19 @@ Yazan: ingest-writer (`trooper.host|container|process|k8s|faas.*` OTLP gauge'lar
 - eBPF (OBI) span'ları normal `spans` yolundan gelir; kaynak `resource_attrs['telemetry.sdk.name'] IN
   ('opentelemetry-ebpf-instrumentation', 'beyla')`.
 
+### Replay, profil ve LLM (ADR-021/022/023, `deploy/clickhouse/005_replay_profiles_llm.sql`)
+
+| Tablo | Satır | Not | TTL |
+|---|---|---|---|
+| `replay_segments` | oturum + segment | blob S3'te (`blob_key`), burada indeks + sayaçlar | 30 gün |
+| `replay_sessions` (MV, Aggregating) | oturum | liste ekranı: süre, segment, tıklama/hata, ilk view | 30 gün |
+| `profile_stacks` | profil + tip + route + stack | `stack Array(LowCardinality(String))` root önce; flame graph `GROUP BY stack` | 14 gün |
+| `profiles` | profil + tip | toplam değer, pencere → CPU core serisi | 14 gün |
+| `llm_1m` / `llm_1h` (MV, `spans`'tan) | provider, model, operation, servis, entry route, dakika | çağrı, hata, token'lar, süre/TTFT digest'i; maliyet api'de | 30 gün / 13 ay |
+| `llm_content` | LLM span'ı | prompt/completion (`captureContent`), alan ≤ 32 KB | 7 gün |
+
+Detay ve kolonlar: contracts §23–25. `user_id` replay indeksinde var (oturum araması), rollup'larda yok.
+
 ## PostgreSQL (metadata)
 
 ```
@@ -110,6 +123,7 @@ inventory_items(id, repository_id, kind endpoint|consumer|cron|view|dependency, 
 alert_suggestions(id, inventory_item_id, monitor_draft jsonb, rationale text, confidence real, state proposed|accepted|rejected)
 databases(id, project_id, name, engine postgres|mysql|redis|mongodb, host, collector agent|cloud|direct,
           credentials_ref, cloud_resource_id, created_at)      -- credentials secret store'da, burada sadece ref
+llm_prices(org_id, provider, model, input_per_mtok, output_per_mtok, cache_read_per_mtok, cache_write_per_mtok)  -- org override, default'lar api'de
 broker_clusters(id, project_id, name, kind kafka|rabbitmq, endpoint, vhost, auth jsonb, credentials_ref, created_at)
 loadtest_scenarios(id, project_id, name, spec jsonb, source manual|generated)
 loadtest_runs(id, scenario_id, state, started_at, finished_at, summary jsonb, thresholds_passed bool)
