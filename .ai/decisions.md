@@ -272,7 +272,7 @@ ve mobil session replay sunuyor. "Kapsam dışı (v1)" listesindeydi.
   `data-trooper-block` öğesi yer tutucu, canvas / cross-origin iframe / network gövdesi kaydedilmez. Mobilde metin maskeli,
   görseller sadece kutu, input her zaman maskeli. Unmask açıkça (`data-trooper-unmask` / `trooperUnmask()`).
 - **Örnekleme:** oturum başına karar: `sampleRate` (default 0.1) kaydeder; `onErrorSampleRate` (default 1.0) bellekte son 60 sn'yi
-  tutar, hata olunca flush edip kayda devam eder. Karar oturum boyunca sabit (web: sessionStorage).
+  tutar, hata olunca flush edip kayda devam eder. Karar oturum boyunca sabit (web: localStorage, sekmeler arası ortak).
 - **Taşıma:** segment'ler (≤ 5 sn veya ≤ 256 KB) `POST /v1/replay` → `tt.replay` → writer blob'u **S3**'e (`tt-replays` bucket),
   indeksi ClickHouse `replay_segments`'e yazar. Retention 30 gün. Oturum meta verisi (kullanıcı, cihaz, hatalar, view'lar)
   `rum_events`'ten gelir; replay ayrı bir oturum kavramı getirmez (`session_id` ortak).

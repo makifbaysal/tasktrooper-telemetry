@@ -76,12 +76,14 @@ Durum: servisler (`ingest`, `api`, `alerting`, `collector`, `integrations` = `tr
 - [ ] Gerçek EKS/AKS, Lambda CloudWatch metrikleri ve Azure hesabıyla doğrulama (hesap gerektirir)
 - [ ] NVIDIA dışı GPU'lar, cgroup v1 host'larında Docker/Podman'sız container metrikleri, gerçek Windows node testi
 
-## Faz 7 — Session replay, continuous profiling, AI monitoring (New Relic parity)
-- [ ] Sözleşme: ADR-021/022/023, contracts §23–25, ClickHouse `005_replay_profiles_llm.sql`, Postgres `012_llm_prices.sql`
-- [ ] ingest: `/v1/replay` → `tt.replay` → S3 + `replay_segments`; `/v1/profiles` → `tt.profiles` → `profile_stacks`/`profiles`;
-  GenAI span'ları → `dep_kind=ai`, `llm_1m`, `llm_content`
-- [ ] api: `/replays*`, `/profiles/*`, `/ai/*` + fiyat tablosu; sessions `hasReplay`, error `replay`, trace span `llm`
-- [ ] SDK: `@trooper/replay` (rrweb), Android/iOS wireframe replay; Go/JVM/Node profiling; Node/Go/JVM/.NET LLM span'ları
-- [ ] UI: Replays sekmesi + oynatıcı, Profiling sekmesi + flame graph/diff, AI monitoring ekranı + servis AI sekmesi
-- [ ] Demo: replay, profil ve LLM trafiği
-- [ ] Sonra: Flutter/RN replay, .NET/Python profiling, LLM alert'leri (maliyet/saat, token), OTLP profiles sinyali
+## Faz 7 — Session replay, continuous profiling, AI monitoring (New Relic parity) ✅
+- [x] Sözleşme: ADR-021/022/023, contracts §23–25, ClickHouse `005_replay_profiles_llm.sql`, Postgres `012_llm_prices.sql`
+- [x] ingest: `/v1/replay` → `tt.replay` → S3 + `replay_segments`; `/v1/profiles` → `tt.profiles` → `profile_stacks`/`profiles`;
+  GenAI span'ları → `dep_kind=ai`, `llm_1m`, `llm_content` (OpenLLMetry ve Vercel AI SDK adları dahil)
+- [x] api: `/replays*`, `/profiles/*`, `/ai/*` + fiyat tablosu; sessions `hasReplay`, error `replay`, trace span `llm`
+- [x] SDK: `@trooper/replay` (rrweb), Android/iOS wireframe replay; Go/JVM (JFR)/Node profiling; Node/Go/JVM/.NET LLM span'ları
+- [x] UI: Replays sekmesi + oynatıcı, Profiling sekmesi + flame graph/diff, AI monitoring ekranı + servis AI sekmesi
+- [x] Demo: replay (web rrweb + mobil wireframe), profil (iki versiyon, diff hikâyeleri), LLM trafiği (Anthropic/OpenAI/Gemini)
+- [ ] Gerçek cihazda mobil replay doğrulaması (main thread maliyeti, Compose/SwiftUI çıktısı)
+- [ ] Sonra: Flutter/RN replay, .NET/Python profiling, LLM alert'leri (maliyet/saat, token), OTLP profiles sinyali,
+  çoklu sekmede buffer modundaki sekmenin paylaşılan karar değişimini `storage` event'iyle alması

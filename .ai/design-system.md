@@ -31,6 +31,11 @@ değişirse bu dosya ve `tokens.css` aynı PR'da güncellenir.
 | `--brand-mark`, `--accent-warm` | Logo kutusu (iki temada sabit), seçim rengi |
 | `--scrollbar-thumb(-hover)`, `--scrollbar-track` | İnce, yuvarlak, temaya göre scrollbar (8px) |
 
+### Diff (diverging çift)
+`--diff-increase` (turuncu, pay büyüdü) · `--diff-decrease` (mavi, pay küçüldü) — light + dark ayrı adımlar. Sadece karşılaştırma
+grafiklerinde (profil diff flame graph, "Biggest changes" swatch'ı). Status renkleri diff için **kullanılmaz**; şiddet
+`color-mix(in srgb, var(--diff-*) N%, var(--bg-surface))` ile (oklch'de karıştırma hue'yu magentaya kaydırır). Değişmeyen = `--bg-sunken`.
+
 ### Status (dark temada TaskTrooper `.dark` adımları; `-soft` arka plan, `-text` metin)
 `--status-good` · `--status-warning` · `--status-serious` · `--status-critical` (+ `-soft` arka plan, `-text` metin)
 
@@ -95,6 +100,21 @@ Altyapı / K8s kalıpları (`screens/k8sShared.tsx`): `InfraStatusBadge` (ok/war
 
 AI kullanım / serverless kalıpları: `AiQuotaBanner` (`screens/Usage.tsx` — sayfa üstü `Callout`, warning/critical ton badge + metin + View usage + kapat; ay ve eşik başına kapatılır), `AiCapEditor` (üye tavanı: `Meter` + "used / cap" veya "No cap", kalem → inline sayı input'u, Enter kaydeder / Esc vazgeçer; Usage ve Members tablosunda), kredi formatı `credits()` (100 altı 2 ondalık). `FaasStatusBadge` (`screens/Serverless.tsx` — ok/warning/critical `StatusBadge`, `idle` / `missing` nötr "Idle" / "Missing"), maliyet her yerde `usd()` + "est." etiketi; fonksiyon detayında birim başına ayrı grafik (sayılar, ms, concurrency, cold start kolonları), hata serisi `--series-8`.
 
+AI monitoring kalıpları (`screens/AiMonitoring.tsx`, ADR-023 — "AI usage" (kota) ile karıştırma): `AiMonitoringBody` (`/ai` ve servis **AI** sekmesi aynı gövde, `service` kapsamı), `ProviderBadge` (sağlayıcı kimliği nötr `Badge` — marka/status rengi yok), maliyet hücresi (`usd()` / tek çağrı için `aiUsd()` 4 ondalık, her yerde "est."; fiyat yoksa muted **price unknown** → `AiPricesDrawer`, toplamlar "partial"), model renkleri sayfadaki alfabetik model listesine göre `LINE_SLOTS` (maliyet `Columns` stacked, "Other" `--text-muted`), dört `MetricCard` (maliyet, token input/output, çağrı + hata `--series-8`, p95 + TTFT hint'te). `AiCallDrawer` (meta, token/maliyet, hata `Callout`, OTel GenAI mesajları rol bazlı `.llm-msg` kartları — tool call / tool result `CodeBlock`; içerik yoksa "Content capture is off" `EmptyState` + Node/Go snippet; "Open trace" → `/traces/:id?span=`), `AiPricesDrawer` (fiyat tablosu USD / 1M token, Default / "Org override" badge, admin+ düzenle / sıfırla, viewer salt okunur `Callout`), `AiSetup` (LLM verisi yokken SDK başına `Segmented` + `CopyCode`), `LlmSpanSection` (trace span panelinde model, token, maliyet, TTFT + prompt çekmecesi). Stil `styles/aimon.css`.
+
+Session replay (`components/replay`, ADR-021): `ReplayPlayer` (web, `@rrweb/replay` 2.2.0 Replayer, kayıt boyutunu sığdıracak şekilde
+ölçeklenen sahne; segment'ler geldikçe `addEvent`; imleç tıklama halkası `--accent-warm`) ve `WireframePlayer` (mobil, SVG: düğüm türüne göre
+kutu, kayıttaki bg/fg/radius/border; maskeli etiket = kelime başına çubuk, maskeli input = nokta, görsel = yer tutucu kutu + glif; dokunma
+`--accent-warm` halka + iz, klavye nötr panel; cihaz çerçevesi `--border-strong`). İkisi de aynı `PlaybackProps`'u alır (playing, speed,
+skipInactive, seek, onTime, onEnded). Ekran (`screens/ReplayDetail.tsx`): oynatıcı + kontroller (play/pause, 1×/2×/4×/8× `Segmented`, "Skip
+inactivity" `Toggle`) + scrubber (oynatılan `--accent`, yüklenen `--bg-active`, boş/inaktif aralık taralı; işaretler: view `--series-1`,
+tıklama `--series-3`, hata `--series-8`, başarısız istek `--series-2`, legend ile) + sağda olay listesi (aktif satır `--accent-soft` + sol
+ray, gelecektekiler soluk; hata → stack çekmecesi, `traceId` → trace linki). Başlıkta kilit ikonlu "Text and inputs are masked".
+
+Profiling ekranı (`screens/Profiling.tsx`): tip `Segmented`, host / versiyon `Select`, Profile / Compare; host başına `TimeSeries` (core),
+`FlameGraph`, Top functions `Table` (satıra tıkla → flame graph'ta arama), Compare: versiyon↔versiyon veya zaman penceresi, diff flame graph +
+"Biggest changes" (swatch + `±x pp`). Profil yoksa `ProfilingSetup` (`TROOPER_PROFILING=true` `CopyCode`), endpoint sayfasında kompakt `Callout`.
+
 Ekran seviyesi kalıplar (`screens/rca.tsx`):
 
 | Kalıp | Not |
@@ -125,6 +145,12 @@ Grafikler `components/charts` altında, saf SVG: `TimeSeries`, `Columns` (stacke
 - **Metin seri rengi giymez.** Değer/etiket ink token'larında; kimlik yanındaki renkli işaretten gelir.
 - **Hover default:** line/area → crosshair + tooltip; columns → kolon bazlı tooltip.
 - **Eşik çizgisi:** `--status-critical` kesikli + etiket (`threshold` prop). Deploy/olay: `events` prop (`{ ts, label, detail? }` — dikey kesikli çizgi + etiket; `detail` hover tooltip'inde, ör. deploy commit mesajı · yazar · kaynak). Deploy marker'ları `deployEvents(service, from)` ile verilir.
+- **Time spent kategorileri** (`TIME_CATEGORIES`): App code 1, Database 2, Cache 3, External HTTP 7, Queue publish 5, AI / LLM 6 (dep_kind `ai`, ADR-023).
+- **FlameGraph** (`components/charts/FlameGraph.tsx`, ADR-022): icicle (kök üstte), DOM blokları, satır 20px. Renk paket/modül başına sabit
+  (`framePackage()` → hash → `--series-1..8`, metin okunsun diye `color-mix` ile %32 tint; `all` / `[pruned]` / `(root)` gibi özel frame'ler
+  `--bg-sunken`). Tıkla → zoom (atalar üstte soluk tam genişlik satır), breadcrumb + Reset, arama (eşleşmeyen soluk, eşleşen `--accent-warm`
+  çerçeve, "x% of total matches"), hover tooltip: total / self değeri + toplam payı (+ zoom'lu düğüm payı). Diff modu (`baseTotal` + düğümlerde
+  `baseValue`): renk = toplamdaki pay farkı, `--diff-*` çifti, `FlameDiffLegend` ile. Snapshot tipleri (heap, goroutine) profil başına gösterilir.
 - **Status renkleri seri olarak kullanılmaz.** 5xx/error serisi için `--series-8` (red) kullanılır, `--status-critical` değil.
 - Durum eşikleri (Web Vitals vb.) tabloda `StatusBadge` ile gösterilir; iyi değer düz sayı.
 
