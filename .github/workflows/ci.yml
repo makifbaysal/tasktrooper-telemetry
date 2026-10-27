@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "24" # LTS
+  PNPM_VERSION: "12" # matches pnpm-lock.yaml (lockfileVersion 9.0)
+
+jobs:
+  go:
+    name: go / ${{ matrix.module }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [pkg, ingest, api, alerting, collector, integrations, symbolicator]
+    defaults:
+      run:
+        working-directory: services # go.work lives here; matrix strings are repo literals
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: services/go.work
+          cache-dependency-path: services/**/go.sum
+      - name: gofmt (fail on diff)
+        run: |
+          files=$(gofmt -l "${{ matrix.module }}")
+          if [ -n "$files" ]; then
+            echo "needs gofmt: $files"
+            gofmt -d $files
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./${{ matrix.module }}/...
+      - name: go test (unit only)
+        run: go test ./${{ matrix.module }}/...
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: typecheck
+        working-directory: apps/web
+        run: pnpm exec tsc -b
+      - name: build
+        working-directory: apps/web
+        run: pnpm exec vite build
+
+  sdk-js:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: build
+        run: pnpm -r --filter "./sdks/js/packages/**" build
+      - name: vitest
+        run: pnpm -r --filter "./sdks/js/packages/**" test # package script: vitest run
