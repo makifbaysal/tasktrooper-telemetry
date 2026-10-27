@@ -38,7 +38,7 @@ Dört ana yetenek:
 
 ```
 apps/web/               Dashboard (React 19 + Vite + TypeScript)
-services/               Go servisleri: pkg, ingest (gw + writer), api, alerting (engine + notifier), collector, integrations (trooper-cloud), symbolicator
+services/               Go servisleri: pkg, ingest (gw + writer), api, alerting (engine + notifier), collector, integrations (trooper-cloud), symbolicator, codeintel, loadtest (ctl + runner)
 sdks/                   go, jvm, dotnet, js/packages (browser, react, vue, angular, react-native, node), android, ios, flutter
 tools/                  demo (canlı demo dünyası, `make demo`), trooper-cli (sourcemap/dSYM/mapping upload)
 proto/                  RUM wire şeması
@@ -53,7 +53,7 @@ Detay: [`.ai/architecture.md`](.ai/architecture.md#monorepo).
 - **Frontend:** React 19, Vite, TypeScript (strict), react-router, plain CSS + design token'ları (CSS custom properties). Grafikler: kendi SVG chart komponentlerimiz (`apps/web/src/components/charts`).
 - **Backend:** Go 1.26. HTTP için `net/http` + chi, gRPC/OTLP için `go.opentelemetry.io/collector` bileşenleri.
 - **Veri:** ClickHouse (telemetri: metrik, span, log, RUM event), PostgreSQL (metadata: org, proje, alert, kullanıcı), Redpanda (Kafka API, ingest buffer), Redis (rate limit, cache).
-- **Load test motoru:** k6 (Go kütüphanesi olarak gömülü), runner'lar Kubernetes Job.
+- **Load test motoru:** kendi Go motorumuz (ADR-015), runner'lar local process veya Kubernetes Job.
 - **LLM:** Claude API (kod analizi ve alert önerisi). Model ID'leri sabit kodlanmaz, config'ten gelir.
 - **Paket yöneticisi:** pnpm (JS), Go modules.
 
@@ -95,6 +95,8 @@ Backend: `docker compose -f deploy/docker-compose.yml up -d` (altyapı), `make m
 - [x] UI'ın `src/data/*` fonksiyonları api'ye bağlı (`VITE_DATA=api`; default mock) — ADR-013
 - [x] Cloud entegrasyonları: AWS, Google Cloud, Neon, Vercel (`services/integrations`, Integrations ekranı) — ADR-012
 - [x] Symbolication servisi + `trooper-cli`; canlı demo (`make demo`)
-- [ ] Paket yayınlama, OIDC auth, code intelligence (Faz 4), load test runner (Faz 5)
+- [x] OIDC auth + takım yönetimi (ADR-016), code intelligence (Faz 4, ADR-014), load test runner (Faz 5, ADR-015)
+- [x] Slack App (alert + kök neden/confidence, ack/mute) ve GitHub App (repo ekleme, push webhook → incremental analiz) — ADR-017
+- [ ] Paket yayınlama
 
 Sıradaki işler: [`.ai/roadmap.md`](.ai/roadmap.md).

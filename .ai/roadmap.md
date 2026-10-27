@@ -24,35 +24,38 @@ Durum: servisler (`ingest`, `api`, `alerting`, `collector`, `integrations` = `tr
   (deploy + drain) + Integrations ekranı
 - [x] Symbolication: sourcemap, R8/ProGuard, dSYM, NDK, Dart + `trooper-cli`
 - [ ] Paket yayınlama (Maven Central, NuGet, npm, pub.dev, CocoaPods) — hesap gerektirir
-- [ ] Quarkus `tt-attempt` otomatik okuma; `@trooper/node`
-- [ ] ingest-gw internal servis credential'ı (trooper-cloud için `TT_CLOUD_INGEST_KEYS` yerine)
+- [x] Quarkus `tt-attempt` otomatik okuma; `@trooper/node`
+- [x] ingest-gw internal servis credential'ı (`TT_INTERNAL_TOKEN`, contracts §2)
 - [ ] Gerçek AWS/GCP/Neon/Vercel hesaplarıyla doğrulama (şu an fake sunucularla test edildi)
-- [ ] Auth (OIDC), org/proje/API key yönetimi UI'ı
-- [ ] api: 1 saatten kısa range'ler (`15m`, `30m`)
+- [x] Auth (OIDC + dev login, ADR-016), org/proje/üye/API key yönetimi + audit log
+- [x] api: 1 saatten kısa range'ler (`15m`, `30m`)
 
 ## Faz 2 — RUM + Logs ✅
 - [x] `@trooper/browser`, `/v1/rum`, `rum_events` + MV'ler, frontend ekranları gerçek veriye
 - [x] Log ingestion + pattern + Logs ekranı
 - [x] `@trooper/react-native`
-- [ ] Vercel log kaynağı (`vercel.source`) Logs ekranında filtre
+- [x] Vercel log kaynağı (`vercel.source`) Logs ekranında filtre
 
 ## Faz 3 — Alerting ✅
 - [x] `alert-engine` (threshold, latency, log_match, error_new, anomaly, composite, job_missed, consumer_lag/oldest_age, kpi_burn) +
   `notifier` (Slack, PagerDuty, Opsgenie, e-posta, webhook, Teams); stream kuralları; mute, bakım pencereleri, hatırlatma
 - [x] KPI'lar (SLO) + burn-rate alert'leri
 - [x] Kök neden analizi (`rca` endpoint, incident `rootCause`)
-- [ ] Alert-as-code (`.trooper/monitors`)
-- [ ] AlertEditor'da anomaly/composite/job_missed/error_new formları (backend hazır)
-- [ ] KPI kurallarında hatırlatma; çoklu shard'da stream kuralları
+- [x] Alert-as-code (`.trooper/monitors`, codeintel senkronlar)
+- [x] AlertEditor'da anomaly/composite/job_missed/error_new formları
+- [x] Slack App: alert mesajı kök neden + confidence ile kanala, thread reply, ack/mute butonları (ADR-017)
+- [x] KPI kurallarında hatırlatma; çoklu shard'da stream kuralları
 
-## Faz 4 — Code intelligence
-- [ ] GitHub App, repo sync
-- [ ] TS/JS + Go extractor'ları
-- [ ] LLM zenginleştirme, kritiklik skoru, alert önerileri, kapsama metriği
-- [ ] Diff tabanlı incremental analiz
+## Faz 4 — Code intelligence ✅
+- [x] GitHub App kurulum, repo seçimi, push webhook → incremental analiz (30 sn debounce)
+- [x] TS/JS + Go extractor'ları
+- [x] LLM zenginleştirme (opsiyonel), kritiklik skoru, alert önerileri, kapsama metriği
+- [x] Webhook path'leriyle incremental analiz
+- [ ] `last_analyzed_sha` git-diff tabanlı incremental (manuel istek şu an full scan)
+- [ ] GitLab / Bitbucket kaynakları
 
-## Faz 5 — Load testing
-- [x] Senaryo/run CRUD (api + UI) — run'lar `queued` kalır, runner henüz yok
-- [ ] `loadtest-ctl` + `loadtest-runner` (k6 embed)
-- [ ] Domain doğrulama, limitler
-- [ ] Envanter/trafikten senaryo üretimi, canlı run ekranı
+## Faz 5 — Load testing ✅
+- [x] Senaryo/run CRUD (api + UI)
+- [x] `loadtest-ctl` + `loadtest-runner` (kendi Go motoru, ADR-015)
+- [x] Domain doğrulama, limitler
+- [x] Envanter/trafikten senaryo üretimi, canlı run ekranı
