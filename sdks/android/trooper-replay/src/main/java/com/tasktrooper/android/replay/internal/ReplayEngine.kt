@@ -60,14 +60,18 @@ internal class ReplayEngine(
     private var lastFrameKey: String? = null
     private var lastKeyboard: Boolean? = null
 
+    @Volatile var stopped = false
+        private set
+
     /** True when the UI should be captured at all (recording or buffering for errors). */
-    val isCapturing: Boolean get() = mode != Mode.OFF
+    val isCapturing: Boolean get() = mode != Mode.OFF && !stopped
 
     // ------------------------------------------------------------------ session
 
     /** Re-reads the RUM context; starts a new replay session (new sampling decision) when the id changed. */
     @Synchronized
     fun refreshSession(): Mode {
+        if (stopped) return Mode.OFF
         val ctx = Guard.run("replay.context", null) { context() }
         if (ctx == null) {
             // SDK not initialized (yet): nothing to attribute segments to.
@@ -140,7 +144,7 @@ internal class ReplayEngine(
 
     @Synchronized
     fun onTouch(ts: Long, xDp: Float, yDp: Float, phase: String) {
-        if (mode == Mode.OFF) return
+        if (mode == Mode.OFF || stopped) return
         if (phase == "down") clicks++
         add(Ev(ts, WireEvents.touch(ts, xDp, yDp, phase), TOUCH))
         maybeSeal(ts)
@@ -149,6 +153,7 @@ internal class ReplayEngine(
     /** RUM ERROR of the current session. On crash ([isCrash]) everything is written synchronously. */
     @Synchronized
     fun onError(ts: Long, isCrash: Boolean) {
+        if (stopped) return
         when (mode) {
             Mode.OFF -> return
             Mode.BUFFER -> {
@@ -167,12 +172,25 @@ internal class ReplayEngine(
     /** Timer (≈1 s): seals segments that are due, trims the ring buffer. */
     @Synchronized
     fun tick() {
+        if (stopped) return
         val now = clock()
         when (mode) {
             Mode.RECORD -> maybeSeal(now)
             Mode.BUFFER -> trim(now)
             Mode.OFF -> {}
         }
+    }
+
+    /**
+     * Replay stopped: seals and sends the open segment (on-error buffer is dropped) and ignores all later input.
+     * The session's decision and segment counter stay persisted, so a later install continues the numbering.
+     */
+    @Synchronized
+    fun stop() {
+        if (stopped) return
+        if (mode == Mode.RECORD) seal(sync = false)
+        resetBuffer()
+        stopped = true
     }
 
     /** App went to background: send what is recorded (buffered on-error data stays in memory). */

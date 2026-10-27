@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tasktrooper/telemetry/services/api/internal/llmprice"
 	"github.com/tasktrooper/telemetry/services/api/internal/model"
 	"github.com/tasktrooper/telemetry/services/api/internal/timerange"
+	"github.com/tasktrooper/telemetry/services/pkg/llmprice"
 )
 
 // AI / LLM monitoring (ADR-023, contracts §25): llm_1m / llm_1h rollups, LLM spans (attrs gen_ai.*) and llm_content.

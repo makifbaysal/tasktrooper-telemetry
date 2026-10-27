@@ -533,7 +533,12 @@ func (e *Engine) link(incidentID int64) string {
 
 func (e *Engine) fire(ctx context.Context, m *model.Monitor, res eval.Result, cond model.Condition, ms *store.MonitorState, now time.Time) error {
 	service, route, method, env := m.Scope()
-	root := e.analyze(ctx, m.OrgID, m.ProjectID, service, route, method, env, rcaUnit(m), now)
+	var root *rca.Result
+	if m.Kind == "llm" {
+		root = llmCause(res) // the contributing model / service, not the call tree
+	} else {
+		root = e.analyze(ctx, m.OrgID, m.ProjectID, service, route, method, env, rcaUnit(m), now)
+	}
 	endpoint := strings.TrimSpace(method + " " + route)
 	mid := m.ID
 	inc := store.Incident{
@@ -552,7 +557,11 @@ func (e *Engine) fire(ctx context.Context, m *model.Monitor, res eval.Result, co
 			"severity": m.Severity, "state": "firing", "service": service, "endpoint": endpoint,
 			"value": res.Value, "op": cond.Op, "threshold": cond.Threshold, "startedAt": started.UnixMilli(), "link": e.link(id),
 		}
-		addRCA(p, root)
+		if m.Kind == "llm" && root != nil {
+			addCause(p, root.Summary, nil) // the summary already carries the contributor's share
+		} else {
+			addRCA(p, root)
+		}
 		addMonitorRefs(p, m)
 		if deploy != nil {
 			p["deploy"] = deploy

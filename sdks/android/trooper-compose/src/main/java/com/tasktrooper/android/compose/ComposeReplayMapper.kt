@@ -10,6 +10,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.state.ToggleableState
 import com.tasktrooper.android.spi.ReplayNodeSink
 import com.tasktrooper.android.spi.ReplayViewMapper
 
@@ -72,6 +73,9 @@ class ComposeReplayMapper : ReplayViewMapper {
                     id = node.id, left = b.left + dx, top = b.top + dy, right = b.right + dx, bottom = b.bottom + dy,
                     kind = kind, text = shown,
                     input = isInput || c.getOrNull(SemanticsProperties.Password) != null, unmask = unmask,
+                    checked = if (kind == "switch") {
+                        replayChecked(c.getOrNull(SemanticsProperties.ToggleableState), c.getOrNull(SemanticsProperties.Selected))
+                    } else null,
                 )
             }
         }
@@ -95,4 +99,11 @@ internal fun replayKind(
     isScrollable -> "list"
     hasText -> "text"
     else -> null
+}
+
+/** `checked` for a `switch` node: toggleable state (switch/checkbox; indeterminate = off) or selection (radio). */
+internal fun replayChecked(state: ToggleableState?, selected: Boolean?): Boolean? = when (state) {
+    ToggleableState.On -> true
+    ToggleableState.Off, ToggleableState.Indeterminate -> false
+    null -> selected
 }

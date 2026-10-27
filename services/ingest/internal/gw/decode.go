@@ -28,7 +28,7 @@ func isJSON(contentType string, def bool) bool {
 	return def
 }
 
-// unmarshalOTLPJSON decodes OTLP/JSON. OTLP/JSON encodes trace/span ids as hex while protojson expects
+// unmarshalOTLPJSON decodes OTLP/JSON. OTLP/JSON encodes trace/span/profile ids as hex while protojson expects
 // base64 for bytes fields, so ids are rewritten first.
 func unmarshalOTLPJSON(body []byte, m proto.Message) error {
 	if needsIDFix(body) {
@@ -41,7 +41,7 @@ func unmarshalOTLPJSON(body []byte, m proto.Message) error {
 	return jsonUnmarshal.Unmarshal(body, m)
 }
 
-var idKeys = [][]byte{[]byte(`"traceId"`), []byte(`"spanId"`), []byte(`"parentSpanId"`), []byte(`"trace_id"`), []byte(`"span_id"`), []byte(`"parent_span_id"`)}
+var idKeys = [][]byte{[]byte(`"traceId"`), []byte(`"spanId"`), []byte(`"parentSpanId"`), []byte(`"trace_id"`), []byte(`"span_id"`), []byte(`"parent_span_id"`), []byte(`"profileId"`), []byte(`"profile_id"`)}
 
 func needsIDFix(b []byte) bool {
 	for _, k := range idKeys {
@@ -68,7 +68,7 @@ func walkIDs(v any) {
 	case map[string]any:
 		for k, e := range x {
 			switch k {
-			case "traceId", "spanId", "parentSpanId", "trace_id", "span_id", "parent_span_id":
+			case "traceId", "spanId", "parentSpanId", "trace_id", "span_id", "parent_span_id", "profileId", "profile_id":
 				if s, ok := e.(string); ok && (len(s) == 32 || len(s) == 16) {
 					if b, err := hex.DecodeString(s); err == nil {
 						x[k] = base64.StdEncoding.EncodeToString(b)

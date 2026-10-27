@@ -30,7 +30,7 @@ attribute'ları). Client SDK'ları kendi hafif RUM katmanıdır ve `POST /v1/rum
 | `trooper-android` (+ `-okhttp`, `-compose`) | `sdks/android` | Android | Activity/Fragment/Compose ekranları, app start, crash, ANR, frozen frame, OkHttp |
 | `TaskTrooper` (SPM + CocoaPods) | `sdks/ios` | iOS | UIKit/SwiftUI ekranları, app start, crash (signal + NSException), hang, URLSession |
 | `trooper_flutter` (+ `trooper_dio`) | `sdks/flutter` | Flutter | Navigator/go_router, Flutter/Dart hataları, http/dio, frame timing, app start |
-| `trooper-python` (faz 2) | — | Python | django, fastapi, flask, celery, sqlalchemy, requests |
+| `tasktrooper` (PyPI, ADR-024) | `sdks/python` | Python ≥ 3.9 | OTel dağıtımı (django, fastapi, flask, celery, sqlalchemy, requests, httpx — OTel contrib extras), route template, profiling, `instrument_openai` / `instrument_anthropic` |
 
 Kütüphane başına özel kod sadece OTel'in vermediği bilgi için yazılır: route template (`trooper.route`), consumer process adı,
 çağıran servis (`tt.svc` baggage). Geri kalan her şey OTel instrumentation'ından gelir.
@@ -107,6 +107,9 @@ init({ dsn, service: 'shop-web', integrations: [
 `@trooper/replay` `@rrweb/record`'u sarar (ayrı paket; `@trooper/browser` boyutu değişmez). CDN: `trooper-replay.iife.js`
 `window.TrooperReplay`. Oturum ve hata bilgisini `@trooper/browser`'ın integration kancalarından alır.
 
+React Native: `import { startReplay } from '@trooper/react-native'; startReplay({ sampleRate: 0.1 })` (native SDK gerekir).
+Flutter: `TaskTrooper.init(config, appRunner: …, replay: const TrooperReplayOptions(sampleRate: 0.1))` — Dart tarafı wireframe; unmask `TrooperUnmask(child: …)`.
+
 Mobil (wireframe, ekran görüntüsü yok):
 - Android: `TrooperReplay.install(context, ReplayOptions(sampleRate = 0.1, onErrorSampleRate = 1.0))` (`trooper-replay` modülü; offline kuyruk ≤ 2 MB, dolunca yeni segment düşer);
   Compose için `trooper-compose` semantics üzerinden. Unmask: `view.trooperUnmask()`, `Modifier.trooperUnmask()`.
@@ -123,7 +126,9 @@ Varsayılan kapalı; `TROOPER_PROFILING=true` veya kodda:
   `trooper.profiling.enabled`. Sürekli örnekleme (CPU 20 ms; `CPU_DURATION` yok sayılır), default tipler `cpu,alloc_space,lock`
   (JFR'de in-use heap yok). Thread → entry span eşlemesiyle route etiketi (`# trooper.route=`).
 - Node: `init({ profiling: true })` — `node:inspector` CPU + sampling heap profiler, folded formatta.
-- .NET / Python: henüz yok.
+- .NET: `TaskTrooper.Telemetry.Profiling` paketi, `services.AddTaskTrooperProfiling()` (EventPipe, süreç içi).
+- Python: `tasktrooper.init(profiling=True)` (örnekleyici thread; `TROOPER_PROFILING=true`).
+- Herhangi bir dil: OTLP profiles (`/v1development/profiles`) — ör. OTel eBPF profiler / Collector.
 
 ### AI / LLM (ADR-023, contracts §25)
 

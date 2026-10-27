@@ -10,6 +10,17 @@ export interface Spec extends TurboModule {
   getContext(): Promise<Object | null>;
   /** Unix epoch ms of OS process start; available even without the native SDK (null if unknown). */
   getProcessStartTime(): Promise<number | null>;
+  /**
+   * Installs the native SDK's wireframe session replay (contracts.md §23 "Hibrit uygulamalar") with
+   * {sampleRate?, onErrorSampleRate?, maskAllText?}. Resolves false when the native SDK / its replay module is absent.
+   */
+  startReplay(options: Object): Promise<boolean>;
+  /** Stops native replay for the rest of the process. Resolves false when the native SDK cannot stop it. */
+  stopReplay(): Promise<boolean>;
+  /** True while the current session is recorded (not just buffered for errors). */
+  isReplayRecording(): Promise<boolean>;
+  /** A JS ERROR was captured: native replay flushes its on-error buffer and keeps recording (like a native ERROR). */
+  notifyReplayError(): void;
 }
 
 export default TurboModuleRegistry.get<Spec>('TrooperRum');

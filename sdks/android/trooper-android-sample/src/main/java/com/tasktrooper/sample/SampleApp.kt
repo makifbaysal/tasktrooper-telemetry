@@ -23,6 +23,12 @@ class SampleApp : Application() {
         )
         // Wireframe session replay (no screenshots): record every session in the sample; text is masked
         // except where `Modifier.trooperUnmask()` / `view.trooperUnmask()` opts in.
-        TrooperReplay.install(this, ReplayOptions(sampleRate = 1.0, onErrorSampleRate = 1.0))
+        // `adb shell setprop debug.trooper.replay off` turns it off (overhead comparisons, also in release builds).
+        val replayOn = sysprop("debug.trooper.replay") != "off"
+        TrooperReplay.install(this, ReplayOptions(sampleRate = 1.0, onErrorSampleRate = 1.0, enabled = replayOn))
     }
+
+    private fun sysprop(name: String): String? = try {
+        Class.forName("android.os.SystemProperties").getMethod("get", String::class.java).invoke(null, name) as String
+    } catch (_: Throwable) { null }
 }

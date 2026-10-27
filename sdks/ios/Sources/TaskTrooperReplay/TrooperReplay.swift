@@ -68,10 +68,41 @@ public enum TrooperReplay {
     /// True while the current session is recorded (not just buffered for errors).
     public static var isRecording: Bool { controller.current?.isRecording.current ?? false }
 
+    /// An ERROR recorded outside this SDK (hybrid apps: a React Native JS error): flushes the on-error buffer and keeps
+    /// recording, like a native ERROR. No-op before `install` or when the session is not captured.
+    public static func notifyError() {
+        guard let c = controller.current else { return }
+        let ts = Int64((Date().timeIntervalSince1970 * 1000).rounded())
+        c.queue.async {
+            c.engine.onError(ts: ts)
+            c.publish()
+        }
+    }
+
     /// Seals the current segment and uploads pending segments; `completion` runs on a background queue.
     public static func flush(completion: (@Sendable () -> Void)? = nil) {
         guard let c = controller.current else { completion?(); return }
         c.flush(completion: completion)
+    }
+
+    /// Stops recording: no more captures, touches or keyboard events (the `UIWindow.sendEvent` hook stays installed
+    /// as a pass-through), the open segment is sealed and sent. Idempotent; `isRecording` is false afterwards and
+    /// `install` (or `TaskTrooper.start(_:replay:)`) starts again, continuing the session's segment numbering.
+    /// `completion` runs on a background queue once pending segments were handed to the uploader.
+    public static func stop(completion: (@Sendable () -> Void)? = nil) {
+        let stopped = controller.withLock { (c: inout ReplayController?) -> ReplayController? in
+            defer { c = nil }
+            return c
+        }
+        guard let stopped else { completion?(); return }
+        #if canImport(UIKit) && os(iOS)
+        if Thread.isMainThread {
+            MainActor.assumeIsolated { ReplayRecorder.uninstall(controller: stopped) }
+        } else {
+            DispatchQueue.main.async { ReplayRecorder.uninstall(controller: stopped) }
+        }
+        #endif
+        stopped.stop(completion: completion)
     }
 }
 
@@ -89,6 +120,8 @@ final class ReplayController: @unchecked Sendable {
     let isRecording = ReplayLock(false)
     private var timer: DispatchSourceTimer?
     private var observing = false
+    /// Set by `stop()` (queue-confined): input arriving afterwards is ignored.
+    private var stopped = false
 
     init?(options: TrooperReplayOptions, defaults: UserDefaults = .standard, directory: URL? = SegmentStore.defaultDirectory(),
           session: URLSession = URLSession(configuration: .ephemeral)) {
@@ -116,7 +149,7 @@ final class ReplayController: @unchecked Sendable {
         queue.async {
             let t = DispatchSource.makeTimerSource(queue: self.queue)
             t.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(250))
-            t.setEventHandler { self.tick() } // the controller lives for the process
+            t.setEventHandler { self.tick() } // cancelled by `stop()`
             t.resume()
             self.timer = t
             self.engine.refreshSession()
@@ -129,7 +162,7 @@ final class ReplayController: @unchecked Sendable {
         if !observing {
             observing = TrooperReplayBridge.addErrorObserver { [weak self] ts in
                 guard let self else { return }
-                self.queue.async { self.engine.onError(ts: ts); self.publish() }
+                self.queue.async { guard !self.stopped else { return }; self.engine.onError(ts: ts); self.publish() }
             }
         }
         engine.tick()
@@ -143,30 +176,46 @@ final class ReplayController: @unchecked Sendable {
 
     func refreshSession(_ done: @escaping @Sendable (Bool) -> Void) {
         queue.async {
+            guard !self.stopped else { return done(false) }
             self.engine.refreshSession()
             self.publish()
             done(self.engine.isCapturing)
         }
     }
 
-    func frame(ts: Int64, width: Int, height: Int, density: Double, nodes: [WireNode]) {
+    func frame(ts: Int64, width: Int, height: Int, density: Double, nodes: [WireNode], truncated: Bool = false) {
         queue.async {
-            self.engine.onFrame(ts: ts, width: width, height: height, density: density, nodes: nodes)
+            guard !self.stopped else { return }
+            self.engine.onFrame(ts: ts, width: width, height: height, density: density, nodes: nodes, truncated: truncated)
             self.publish()
         }
     }
 
     func touch(ts: Int64, x: Double, y: Double, phase: String) {
-        queue.async { self.engine.onTouch(ts: ts, x: x, y: y, phase: phase) }
+        queue.async { if !self.stopped { self.engine.onTouch(ts: ts, x: x, y: y, phase: phase) } }
     }
 
     func keyboard(ts: Int64, visible: Bool) {
-        queue.async { self.engine.onKeyboard(ts: ts, visible: visible) }
+        queue.async { if !self.stopped { self.engine.onKeyboard(ts: ts, visible: visible) } }
     }
 
     func flush(completion: (@Sendable () -> Void)? = nil) {
         queue.async {
             self.engine.flush()
+            self.uploader.drain { completion?() }
+        }
+    }
+
+    /// Seals the open segment, stops the timer and ignores further input; pending segments are still uploaded.
+    func stop(completion: (@Sendable () -> Void)? = nil) {
+        queue.async {
+            guard !self.stopped else { completion?(); return }
+            self.stopped = true
+            self.timer?.cancel()
+            self.timer = nil
+            self.engine.flush()
+            self.isCapturing.set(false)
+            self.isRecording.set(false)
             self.uploader.drain { completion?() }
         }
     }

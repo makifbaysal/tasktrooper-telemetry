@@ -293,6 +293,55 @@ describe('shared state across tabs', () => {
     expect(stored(sdk.client.sessionId())).toEqual({ m: 'session', n: 1 });
   });
 
+  it('a storage event switching this session to `session` makes a buffering tab flush and keep recording', async () => {
+    random(0.5);
+    const { sdk, integration, sent, settle } = track$(setup({ sampleRate: 0.1, onErrorSampleRate: 1 }));
+    const sid = sdk.client.sessionId();
+    emit(CLICK());
+    const storage = (key: string | null, newValue: string | null) =>
+      window.dispatchEvent(new StorageEvent('storage', { key, newValue, storageArea: localStorage }));
+    // Ignored: other session, other key, cleared storage, unparsable or non-session values.
+    storage(KEY_PREFIX + 'other-session', JSON.stringify({ m: 'session', n: 1 }));
+    storage('tt_session', 'x');
+    storage(null, null);
+    localStorage.setItem(KEY_PREFIX + sid, '{');
+    storage(KEY_PREFIX + sid, '{');
+    localStorage.setItem(KEY_PREFIX + sid, JSON.stringify({ m: 'buffer', n: 0 }));
+    storage(KEY_PREFIX + sid, JSON.stringify({ m: 'buffer', n: 0 }));
+    await settle();
+    expect(integration.getMode()).toBe('buffer');
+    expect(sent).toHaveLength(0);
+    // Another tab hit an ERROR and wrote the shared decision (and sealed segment 0).
+    localStorage.setItem(KEY_PREFIX + sid, JSON.stringify({ m: 'session', n: 1 }));
+    storage(KEY_PREFIX + sid, JSON.stringify({ m: 'session', n: 1 }));
+    await settle();
+    expect(integration.getMode()).toBe('session');
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.payload).toMatchObject({ session_id: sid, segment: 1, has_full_snapshot: true, stats: { clicks: 1, errors: 0 } });
+    expect(sent[0]!.payload.events.map((e: any) => e.type).slice(0, 2)).toEqual([4, 2]); // Meta + FullSnapshot first
+    emit(CLICK());
+    await integration.flush();
+    await settle();
+    expect(sent.map((s) => s.payload.segment)).toEqual([1, 2]);
+    expect(stored()).toEqual({ m: 'session', n: 3 });
+    storage(KEY_PREFIX + sid, JSON.stringify({ m: 'session', n: 3 })); // already recording: no-op
+    await settle();
+    expect(sent).toHaveLength(2);
+  });
+
+  it('stops listening to storage events after stop()', async () => {
+    random(0.5);
+    const { sdk, integration, sent, settle } = setup({ sampleRate: 0.1, onErrorSampleRate: 1 });
+    const sid = sdk.client.sessionId();
+    emit(CLICK());
+    await integration.stop();
+    localStorage.setItem(KEY_PREFIX + sid, JSON.stringify({ m: 'session', n: 0 }));
+    window.dispatchEvent(new StorageEvent('storage', { key: KEY_PREFIX + sid, newValue: JSON.stringify({ m: 'session', n: 0 }) }));
+    await settle();
+    expect(sent).toHaveLength(0);
+    expect(integration.getMode()).toBe('off');
+  });
+
   it('removes entries of old sessions on start', () => {
     localStorage.setItem(KEY_PREFIX + 'old-1', JSON.stringify({ m: 'session', n: 9 }));
     localStorage.setItem('unrelated', '1');

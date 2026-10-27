@@ -5,11 +5,13 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	colmetricspb "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
+	colprofilespb "go.opentelemetry.io/proto/otlp/collector/profiles/v1development"
 	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
@@ -20,12 +22,16 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
+
+	"github.com/tasktrooper/telemetry/services/pkg/topics"
 )
 
-// GRPCServer returns a gRPC server exposing the OTLP Trace/Metrics/Logs services. MaxRecvMsgSize bounds
-// the decompressed message size as well (gzip bombs are rejected with ResourceExhausted).
+// GRPCServer returns a gRPC server exposing the OTLP Trace/Metrics/Logs/Profiles services. MaxRecvMsgSize bounds
+// the decompressed message size as well (gzip bombs are rejected with ResourceExhausted); it is the larger of the OTLP
+// and the profile body limits, and messages of the other signals above MaxBodyBytes are refused in the handler.
 func (s *Server) GRPCServer() *grpc.Server {
-	g := grpc.NewServer(grpc.MaxRecvMsgSize(int(s.cfg.MaxBodyBytes)))
+	g := grpc.NewServer(grpc.MaxRecvMsgSize(int(max(s.cfg.MaxBodyBytes, s.cfg.ProfileMaxBodyBytes))))
+	colprofilespb.RegisterProfilesServiceServer(g, profilesSvc{s: s})
 	coltracepb.RegisterTraceServiceServer(g, traceSvc{s: s})
 	colmetricspb.RegisterMetricsServiceServer(g, metricsSvc{s: s})
 	collogspb.RegisterLogsServiceServer(g, logsSvc{s: s})
@@ -62,7 +68,8 @@ func (l logsSvc) Export(ctx context.Context, req *collogspb.ExportLogsServiceReq
 func (s *Server) grpcExport(ctx context.Context, sig signal, msg proto.Message) error {
 	start := time.Now()
 	endpoint := "grpc:" + sig.topic
-	err := s.grpcExportInner(ctx, sig, msg)
+	size := proto.Size(msg)
+	err := s.grpcExportInner(ctx, sig, msg, size)
 	var ie *ingestError
 	code := http.StatusOK
 	if errors.As(err, &ie) {
@@ -70,11 +77,11 @@ func (s *Server) grpcExport(ctx context.Context, sig signal, msg proto.Message) 
 	} else if err != nil {
 		code = http.StatusInternalServerError
 	}
-	observe(endpoint, code, ie, proto.Size(msg), start)
+	observe(endpoint, code, ie, size, start)
 	return toStatus(err)
 }
 
-func (s *Server) grpcExportInner(ctx context.Context, sig signal, msg proto.Message) error {
+func (s *Server) grpcExportInner(ctx context.Context, sig signal, msg proto.Message, size int) error {
 	md, _ := metadata.FromIncomingContext(ctx)
 	raw := first(md, "x-trooper-key")
 	if raw == "" {
@@ -96,6 +103,9 @@ func (s *Server) grpcExportInner(ctx context.Context, sig signal, msg proto.Mess
 	if err := s.allow(ctx, key); err != nil {
 		return err
 	}
+	if sig.topic != topics.Profiles && int64(size) > s.cfg.MaxBodyBytes {
+		return &ingestError{status: http.StatusRequestEntityTooLarge, msg: "message exceeds " + strconv.FormatInt(s.cfg.MaxBodyBytes, 10) + " bytes"}
+	}
 	m := meta{tenant: key.Tenant, receivedAt: s.now()}
 	if p, ok := peer.FromContext(ctx); ok && p.Addr != nil {
 		if host, _, err := net.SplitHostPort(p.Addr.String()); err == nil {
@@ -104,6 +114,9 @@ func (s *Server) grpcExportInner(ctx context.Context, sig signal, msg proto.Mess
 	}
 	if xff := first(md, "x-forwarded-for"); xff != "" {
 		m.clientIP = strings.TrimSpace(strings.Split(xff, ",")[0])
+	}
+	if req, ok := msg.(*colprofilespb.ExportProfilesServiceRequest); ok {
+		return s.publishOTLPProfiles(req, nil, nil, m)
 	}
 	return s.publishMsg(sig, msg, m)
 }

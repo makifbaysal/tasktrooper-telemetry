@@ -83,4 +83,14 @@ class TrooperHybridBridgeTest {
         val start = TrooperHybridBridge.getProcessStartTime()
         assertTrue(start in 1..System.currentTimeMillis())
     }
+
+    @Test fun setContextCarriesTheSamplingDecision() {
+        TaskTrooper.init(app, TrooperConfig(dsn = "http://k@127.0.0.1:9/1", app = "robo", trackAnr = false, sampleRate = 1.0))
+        TrooperHybridBridge.setContext(mapOf("session_id" to "s-rn", "sampled" to false))
+        val core = TaskTrooper.core!!
+        assertEquals(false, core.sessions.peek()?.sampled)
+        assertEquals(true, core.sessions.peek()?.external)
+        TrooperHybridBridge.setContext(mapOf("session_id" to "s-rn", "sampled" to "true")) // string from a loose bridge
+        assertEquals(true, core.sessions.peek()?.sampled)
+    }
 }

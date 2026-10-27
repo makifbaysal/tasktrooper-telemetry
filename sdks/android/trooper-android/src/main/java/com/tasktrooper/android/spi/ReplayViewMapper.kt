@@ -11,6 +11,7 @@ import android.view.View
 interface ReplayViewMapper {
     /**
      * Emits [view]'s content into [sink] (back to front). Returns false when [view] is not handled.
+     * Called for every visible ViewGroup: recognize the host by type (not by class name — R8 renames it), cheaply.
      * Child Views (e.g. Compose `AndroidView` interop) are still traversed by the caller afterwards.
      * Runs on the main thread inside a time budget: keep it allocation-light.
      */
@@ -18,7 +19,6 @@ interface ReplayViewMapper {
 
     companion object {
         const val COMPOSE = "com.tasktrooper.android.compose.ComposeReplayMapper"
-        const val COMPOSE_VIEW = "androidx.compose.ui.platform.AndroidComposeView"
     }
 }
 
@@ -29,11 +29,12 @@ interface ReplayNodeSink {
      * @param text raw text (masked by the sink unless unmasked); inputs are always masked.
      * @param unmask true/false when the node (or an ancestor node) opts in/out; null inherits from the View.
      * @param bg / [fg] ARGB colors, null when unknown.
+     * @param checked toggle state for `switch` nodes (null when unknown / not a toggle).
      */
     fun node(
         id: Int, left: Float, top: Float, right: Float, bottom: Float, kind: String,
         text: String? = null, input: Boolean = false, unmask: Boolean? = null,
-        bg: Int? = null, fg: Int? = null, radiusPx: Float = 0f,
+        bg: Int? = null, fg: Int? = null, radiusPx: Float = 0f, checked: Boolean? = null,
     )
 
     /** False once the frame's node or time budget is spent: stop traversing. */

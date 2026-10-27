@@ -179,7 +179,7 @@ var llmTokenKeys = [...]struct {
 	{attrGenAIInTokens, []string{attrGenAIInTokens, "gen_ai.usage.prompt_tokens", "llm.usage.prompt_tokens", "ai.usage.promptTokens", "ai.usage.inputTokens"}},
 	{attrGenAIOutTokens, []string{attrGenAIOutTokens, "gen_ai.usage.completion_tokens", "llm.usage.completion_tokens", "ai.usage.completionTokens", "ai.usage.outputTokens"}},
 	{attrGenAICacheRead, []string{attrGenAICacheRead, "gen_ai.usage.cache_read_input_tokens", "llm.usage.cache_read_input_tokens"}},
-	{attrGenAICacheWrite, []string{attrGenAICacheWrite, "gen_ai.usage.cache_creation_input_tokens", "llm.usage.cache_creation_input_tokens"}},
+	{attrGenAICacheWrite, []string{attrGenAICacheWrite, "gen_ai.usage.cache_write.input_tokens", "gen_ai.usage.cache_creation_input_tokens", "llm.usage.cache_creation_input_tokens"}},
 }
 
 // legacyUsageKey: names normalized into the canonical token keys (not stored twice).
@@ -189,7 +189,8 @@ func legacyUsageKey(k string) bool {
 	}
 	switch k {
 	case "gen_ai.usage.prompt_tokens", "gen_ai.usage.completion_tokens",
-		"gen_ai.usage.cache_read_input_tokens", "gen_ai.usage.cache_creation_input_tokens":
+		"gen_ai.usage.cache_read_input_tokens", "gen_ai.usage.cache_creation_input_tokens",
+		"gen_ai.usage.cache_write.input_tokens":
 		return true
 	}
 	return false
@@ -434,6 +435,12 @@ func genAIAttrs(kvs []*commonpb.KeyValue, a attrIndex, info llmInfo, extra int) 
 				if f, ok := a.float("ai.response.msToFirstChunk"); ok && finite(f) && f >= 0 {
 					putAttr(m, attrTTFT, strconv.FormatFloat(f, 'f', -1, 64), MaxAttrValueLen)
 				}
+			}
+		}
+		// Anthropic SDK / .NET native GenAI spans: time to first chunk in seconds.
+		if _, ok := m[attrTTFT]; !ok {
+			if f, ok := a.float("gen_ai.response.time_to_first_chunk"); ok && finite(f) && f >= 0 {
+				putAttr(m, attrTTFT, strconv.FormatFloat(f*1000, 'f', -1, 64), MaxAttrValueLen)
 			}
 		}
 		for _, tk := range llmTokenKeys {

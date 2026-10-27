@@ -15,6 +15,7 @@ import (
 
 	"github.com/tasktrooper/telemetry/services/ingest/internal/flatten"
 	"github.com/tasktrooper/telemetry/services/ingest/internal/geo"
+	"github.com/tasktrooper/telemetry/services/ingest/internal/obs"
 	"github.com/tasktrooper/telemetry/services/ingest/internal/profiling"
 	"github.com/tasktrooper/telemetry/services/ingest/internal/replay"
 	"github.com/tasktrooper/telemetry/services/pkg/rumpb"
@@ -200,6 +201,9 @@ func (b *Batches) addReplay(r *kgo.Record, m recordMeta) error {
 // addProfile parses a pprof / folded profile (metadata in the headers) into profile_stacks + profiles rows.
 func (b *Batches) addProfile(r *kgo.Record, m recordMeta) error {
 	h := m.extra
+	if h[topics.HeaderFormat] == profiling.FormatOTLP {
+		return b.addOTLPProfiles(r, m)
+	}
 	start, err1 := strconv.ParseInt(h[topics.HeaderStart], 10, 64)
 	end, err2 := strconv.ParseInt(h[topics.HeaderEnd], 10, 64)
 	if err1 != nil || err2 != nil || start <= 0 || end < start {
@@ -216,6 +220,26 @@ func (b *Batches) addProfile(r *kgo.Record, m recordMeta) error {
 	meta := flatten.ProfileMeta{Service: h[topics.HeaderService], Env: h[topics.HeaderEnv], Version: h[topics.HeaderVersion],
 		Host: h[topics.HeaderHost], Runtime: h[topics.HeaderRuntime], Start: time.UnixMilli(start).UTC(), End: time.UnixMilli(end).UTC()}
 	b.ProfileStacks, b.Profiles = flatten.Profiles(m.tenant, meta, series, b.ProfileStacks, b.Profiles)
+	return nil
+}
+
+// addOTLPProfiles opens an ExportProfilesServiceRequest (format=otlp): identity and window come from each resource and
+// Profile (contracts §24 "OTLP profiles"), not from the headers.
+func (b *Batches) addOTLPProfiles(r *kgo.Record, m recordMeta) error {
+	req, err := profiling.DecodeOTLP(r.Value, maxProfileBytes)
+	if err != nil {
+		return err
+	}
+	res := profiling.ConvertOTLP(req, m.receivedAt)
+	for _, p := range res.Profiles {
+		meta := flatten.ProfileMeta{Service: p.Service, Env: p.Env, Version: p.Version, Host: p.Host, Runtime: p.Runtime,
+			Start: p.Start, End: p.End}
+		b.ProfileStacks, b.Profiles = flatten.Profiles(m.tenant, meta, []profiling.Series{p.Series}, b.ProfileStacks, b.Profiles)
+	}
+	obs.WriterOTLPProfiles.WithLabelValues("written").Add(float64(len(res.Profiles)))
+	obs.WriterOTLPProfiles.WithLabelValues("skipped_type").Add(float64(res.Unsupported))
+	obs.WriterOTLPProfiles.WithLabelValues("skipped_empty").Add(float64(res.Empty))
+	obs.WriterOTLPProfiles.WithLabelValues("no_service").Add(float64(res.NoService))
 	return nil
 }
 

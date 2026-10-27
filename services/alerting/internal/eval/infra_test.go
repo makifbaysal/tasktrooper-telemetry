@@ -181,6 +181,10 @@ func TestTemplates(t *testing.T) {
 			if !slices.Contains(FaaSMetrics, q.Metric) {
 				t.Errorf("%s: metric %s", tp.ID, q.Metric)
 			}
+		case "llm":
+			if !slices.Contains(LLMMetrics, q.Metric) {
+				t.Errorf("%s: metric %s", tp.ID, q.Metric)
+			}
 		default:
 			t.Errorf("%s: kind %s", tp.ID, tp.Kind)
 		}
@@ -188,7 +192,7 @@ func TestTemplates(t *testing.T) {
 			t.Errorf("%s: condition %+v", tp.ID, c)
 		}
 	}
-	if !seen["faas-near-timeout"] || !seen["k8s-pod-crashloop"] {
+	if !seen["faas-near-timeout"] || !seen["k8s-pod-crashloop"] || !seen["llm-cost-per-hour"] || !seen["llm-token-spike"] {
 		t.Error("missing templates")
 	}
 }

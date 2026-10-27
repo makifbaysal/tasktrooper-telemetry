@@ -13,9 +13,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/tasktrooper/telemetry/services/api/internal/auth"
 	"github.com/tasktrooper/telemetry/services/api/internal/blob"
-	"github.com/tasktrooper/telemetry/services/api/internal/llmprice"
 	"github.com/tasktrooper/telemetry/services/api/internal/model"
 	"github.com/tasktrooper/telemetry/services/api/internal/store"
+	"github.com/tasktrooper/telemetry/services/pkg/llmprice"
 	"github.com/tasktrooper/telemetry/services/pkg/tenant"
 )
 

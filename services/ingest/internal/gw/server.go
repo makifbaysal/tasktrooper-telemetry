@@ -128,6 +128,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/v1/rum", s.endpoint(sigRUM))
 	mux.Handle("/v1/replay", s.replayEndpoint())
 	mux.Handle("/v1/profiles", s.profilesEndpoint())
+	mux.Handle(OTLPProfilesPath, s.otlpProfilesEndpoint())
 	mux.Handle("/v1/drains/vercel", s.vercelDrain())
 	if s.cfg.ServeMetrics {
 		mux.Handle("/metrics", obs.Handler())

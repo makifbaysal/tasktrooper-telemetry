@@ -85,5 +85,12 @@ Durum: servisler (`ingest`, `api`, `alerting`, `collector`, `integrations` = `tr
 - [x] UI: Replays sekmesi + oynatıcı, Profiling sekmesi + flame graph/diff, AI monitoring ekranı + servis AI sekmesi
 - [x] Demo: replay (web rrweb + mobil wireframe), profil (iki versiyon, diff hikâyeleri), LLM trafiği (Anthropic/OpenAI/Gemini)
 - [ ] Gerçek cihazda mobil replay doğrulaması (main thread maliyeti, Compose/SwiftUI çıktısı)
-- [ ] Sonra: Flutter/RN replay, .NET/Python profiling, LLM alert'leri (maliyet/saat, token), OTLP profiles sinyali,
-  çoklu sekmede buffer modundaki sekmenin paylaşılan karar değişimini `storage` event'iyle alması
+
+## Faz 7b — Tamamlayıcılar
+- [x] Flutter (Dart Element ağacı) ve React Native (native SDK köprüsü) replay
+- [x] .NET (`TaskTrooper.Telemetry.Profiling`, EventPipe) ve Python profiling
+- [x] Python SDK `tasktrooper` (ADR-024): OTel dağıtımı + profiling + LLM
+- [x] LLM alert'leri (monitor kind `llm`, şablonlar, editör), fiyat tablosu `services/pkg/llmprice`
+- [x] OTLP profiles sinyali (`/v1development/profiles`, gRPC)
+- [x] Web replay: buffer sekmesi `storage` event'i
+- [x] Mobil replay emülatör/simulator doğrulaması

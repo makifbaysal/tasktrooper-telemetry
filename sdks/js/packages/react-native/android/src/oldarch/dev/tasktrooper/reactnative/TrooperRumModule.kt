@@ -24,4 +24,24 @@ class TrooperRumModule(reactContext: ReactApplicationContext) : ReactContextBase
   fun getProcessStartTime(promise: Promise) {
     promise.resolve(TrooperRumImpl.getProcessStartTime()?.toDouble())
   }
+
+  @ReactMethod
+  fun startReplay(options: ReadableMap?, promise: Promise) {
+    promise.resolve(startReplayFromJs(reactApplicationContext, options))
+  }
+
+  @ReactMethod
+  fun stopReplay(promise: Promise) {
+    promise.resolve(TrooperRumImpl.stopReplay())
+  }
+
+  @ReactMethod
+  fun isReplayRecording(promise: Promise) {
+    promise.resolve(TrooperRumImpl.isReplayRecording())
+  }
+
+  @ReactMethod
+  fun notifyReplayError() {
+    TrooperRumImpl.notifyReplayError()
+  }
 }

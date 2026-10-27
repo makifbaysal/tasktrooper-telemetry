@@ -50,6 +50,20 @@ class MainActivity : ComponentActivity() {
                             Button(onClick = { nav.navigate("product/42") }, modifier = Modifier.trooperAction("open_product")) {
                                 Text("Open product")
                             }
+                            val ctx = androidx.compose.ui.platform.LocalContext.current
+                            Button(onClick = { ctx.startActivity(android.content.Intent(ctx, ViewsActivity::class.java)) }) {
+                                Text("Classic views")
+                            }
+                            var dialog by remember { mutableStateOf(false) }
+                            Button(onClick = { dialog = true }) { Text("Compose dialog") }
+                            if (dialog) {
+                                androidx.compose.material3.AlertDialog(
+                                    onDismissRequest = { dialog = false },
+                                    confirmButton = { androidx.compose.material3.TextButton({ dialog = false }) { Text("OK") } },
+                                    title = { Text("Delete account?") },
+                                    text = { Text("This removes jane@example.com") },
+                                )
+                            }
                             Button(onClick = { fetch() }, modifier = Modifier.trooperAction("fetch")) { Text("HTTP request") }
                             Button(onClick = { TaskTrooper.track("checkout_started", mapOf("plan" to "pro"), 120.0) }) {
                                 Text("Track custom event")

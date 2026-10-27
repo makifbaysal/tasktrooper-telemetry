@@ -46,12 +46,22 @@ class RumTransport {
     try {
       final raw = utf8.encode(jsonBody);
       final compressed = gzip ? gzipBytes(raw) : null;
+      return sendBytes(dsn.endpoint, compressed ?? raw, gzipped: compressed != null);
+    } catch (_) {
+      return const SendRetry();
+    }
+  }
+
+  /// POSTs an already encoded JSON body to [url] (e.g. replay segments to `/v1/replay`) with the same auth and
+  /// result classification as [send].
+  Future<SendResult> sendBytes(Uri url, List<int> body, {bool gzipped = false}) async {
+    try {
       final headers = <String, String>{
         'content-type': 'application/json',
         'x-trooper-key': dsn.key,
-        if (compressed != null) 'content-encoding': 'gzip',
+        if (gzipped) 'content-encoding': 'gzip',
       };
-      final resp = await _http.post(dsn.endpoint, headers: headers, body: compressed ?? raw).timeout(timeout);
+      final resp = await _http.post(url, headers: headers, body: body).timeout(timeout);
       final code = resp.statusCode;
       if (code >= 200 && code < 300) return const SendOk();
       if (code == 429 || code == 408 || code >= 500) {

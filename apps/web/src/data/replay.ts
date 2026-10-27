@@ -70,6 +70,8 @@ export interface WireNode {
   bg?: string; fg?: string; radius?: number; border?: string;
   text?: string; masked?: boolean; alpha?: number;
   clip?: [number, number, number, number];
+  /** Toggle state, `switch` nodes only. */
+  checked?: boolean;
 }
 export type WireEvent =
   | { type: 'screen'; ts: number; width: number; height: number; density: number; name: string }
@@ -715,7 +717,7 @@ function buildMobile(sessionId: string, appId: string, seed: number, s: Session,
       n('image', 28, 127 + i * 104, 72, 72, { bg: C.imgs[i + 1], radius: 8 }),
       txt(112, 131 + i * 104, 170, 18, 'Product name here'),
       txt(112, 177 + i * 104, 64, 18, '₺1.750', { fg: C.brand }),
-      n('switch', 300, 170 + i * 104, 62, 28, { bg: C.field, radius: 14 }),
+      n('switch', 316, 170 + i * 104, 46, 28, { checked: i === 0 }),
     ]),
     n('view', 0, 744, MW, 100, { bg: C.surface, border: C.line }),
     txt(16, 712, 60, 20, 'Total'), txt(290, 712, 84, 20, '₺3.040'),
@@ -738,7 +740,7 @@ function buildMobile(sessionId: string, appId: string, seed: number, s: Session,
     n('icon', 171, 260, 48, 48, { fg: C.brand }),
     txt(95, 330, 200, 26, 'Order confirmed'),
     txt(60, 368, 270, 16, 'We will notify you when it ships.', { fg: C.sub }),
-    n('button', 16, 420, 358, 48, { bg: C.surface, border: C.line, radius: 12, fg: C.ink, text: maskDot('Track order'), masked: true }),
+    n('button', 16, 420, 358, 48, { radius: 12, fg: C.ink, text: maskDot('Track order'), masked: true }),
   ];
 
   const frame = (nodes: WireNode[], at = t) => events.push({ type: 'frame', ts: Math.round(at), nodes });

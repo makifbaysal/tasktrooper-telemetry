@@ -4,7 +4,7 @@ Two binaries (Go module `github.com/tasktrooper/telemetry/services/ingest`), fol
 
 | Binary | Does |
 |---|---|
-| `cmd/ingest-gw` | OTLP/HTTP `:4318` (`/v1/traces`, `/v1/metrics`, `/v1/logs`: protobuf or JSON, optional gzip), RUM `POST /v1/rum` (JSON or protobuf), session replay `POST /v1/replay`, profiles `POST /v1/profiles`, Vercel drains `POST /v1/drains/vercel`, OTLP/gRPC `:4317`, `GET /healthz`, `GET /metrics`. Authenticates ingest keys, rate-limits per project, validates the payload and publishes it as protobuf to Redpanda. Stateless. |
+| `cmd/ingest-gw` | OTLP/HTTP `:4318` (`/v1/traces`, `/v1/metrics`, `/v1/logs`: protobuf or JSON, optional gzip), RUM `POST /v1/rum` (JSON or protobuf), session replay `POST /v1/replay`, profiles `POST /v1/profiles` + OTLP `POST /v1development/profiles`, Vercel drains `POST /v1/drains/vercel`, OTLP/gRPC `:4317`, `GET /healthz`, `GET /metrics`. Authenticates ingest keys, rate-limits per project, validates the payload and publishes it as protobuf to Redpanda. Stateless. |
 | `cmd/ingest-writer` | Consumer group `tt-ingest-writer` over the 6 topics. Flattens payloads into ClickHouse rows (`spans`, `logs`, `metrics`, `rum_events`, `llm_content`, `replay_segments` (+ segment blob in S3), `profile_stacks`, `profiles`, `db_1m`, `db_queries_1m`, `broker_*_1m`, `hosts_1m`, `containers_1m`, `processes_1m`, `k8s_*_1m`, `faas_1m`, `gpus_1m`) and batch-inserts them; Kafka offsets are committed only after the insert succeeded (at-least-once). |
 
 ## Run
@@ -42,7 +42,9 @@ and GenAI spans (chat span + its HTTP child + content), then checks `replay_segm
 (bucket `tt-replays-e2e`, endpoint `TT_S3_ENDPOINT` or `http://localhost:9002`), `profiles`, `profile_stacks`, `spans`
 (`dep_kind='ai'`, HTTP child without dep, no content attrs), `llm_content`, `llm_1m` and `edges_1m`. Data uses the service prefix
 `ingest2-e2e-<rand>` / `blobs-e2e-<rand>` and is deleted at the end. **Stop any other `ingest-writer` first** — it shares the consumer group
-and would consume the test records without the test's GeoIP db.
+and would consume the test records without the test's GeoIP db. `TestOTLPProfiles` (`e2e/profiles_otlp_test.go`) sends OTLP profiles over HTTP
+protobuf (gzip), HTTP JSON and gRPC (eBPF-profiler shape) and checks `profiles` / `profile_stacks`; its writer uses a throwaway
+consumer group committed at the end of `tt.profiles`, so it runs next to another `ingest-writer`.
 
 ## Configuration
 
@@ -175,6 +177,39 @@ Common (`services/pkg/config`): `TT_POSTGRES_URL`, `TT_CLICKHOUSE_URL`, `TT_KAFK
   `['[other]']` (one per route/method). One `profiles` row per type (`total`, `stacks`); `profile_stacks.stack_hash` is
   `DEFAULT cityHash64(stack)` (computed by ClickHouse).
 
+
+### OTLP profiles
+
+- `POST /v1development/profiles` (OTLP/HTTP: protobuf, or JSON with `Content-Type: application/json` — hex `profileId`
+  accepted; `Content-Encoding: gzip`) and gRPC `opentelemetry.proto.collector.profiles.v1development.ProfilesService/Export`
+  on `:4317`. Auth / rate limit as the other OTLP endpoints (key header / Bearer / internal credential, no `?key=`, no CORS),
+  body limits of `/v1/profiles` (4 MiB wire / 32 MiB decompressed; the gRPC `MaxRecvMsgSize` is the larger of the OTLP and
+  profile limits, other gRPC signals above `TT_INGEST_MAX_BODY_BYTES` get `InvalidArgument`). gw decodes the request (400 on
+  garbage, an empty request is a no-op 200) and publishes **one** `tt.profiles` record per request: header `format=otlp`,
+  value = `ExportProfilesServiceRequest` protobuf (the gzip'ed wire bytes when sent gzip'ed, gzip'ed by gw above 256 KiB,
+  ≤ 8 MiB). No service / time headers.
+- Proto: `go.opentelemetry.io/proto/otlp/profiles/v1development` + `.../collector/profiles/v1development` **v0.4.1** (OTLP
+  1.10 dictionary layout: request-level `ProfilesDictionary` with `string_table`, `function_table`, `location_table`,
+  `mapping_table`, `attribute_table`, `stack_table`; one `sample_type` per `Profile`) — the version OTel Collector
+  `pdata/pprofile` v0.164 (`otlpexporter` / `otlphttpexporter`) uses. Since `go.opentelemetry.io/proto/otlp` v1.8 the profiles
+  packages live in these separate modules.
+- Writer (`profiling.ConvertOTLP`): per `ResourceProfiles` → `ScopeProfiles` → `Profile` one `profiles` row (+ stacks), with the
+  pprof path's aggregation, limits and frame naming. Identity from resource attributes (inline or `key_strindex` /
+  `string_value_strindex`, as Collector 0.164 sends them): `service.name` (missing → `unknown_service` or
+  `unknown_service:<process.executable.name>`, OTel's default; counted), `deployment.environment.name` (fallback
+  `deployment.environment`), `service.version`, `host.name`, `process.runtime.name` → `go` | `jvm` (java/jvm/…JDK…) | `node`
+  (node/nodejs) | `dotnet` (dotnet/.NET…) | `python` (cpython/python/pypy), else empty. Window = `time_unix_nano` +
+  `duration_nano` (missing parts from sample timestamps, else the receive time; ≤ 1 h). Sample type via the pprof mapping;
+  `samples/count` with a `cpu/nanoseconds` period → `cpu` (× period) unless the resource has a `cpu/nanoseconds` profile at
+  the same time (pprof-converted CPU profiles carry both). Sample value = sum of `values`, or the number of
+  `timestamps_unix_nano` (eBPF profiler). Stack = `stack_table` locations (leaf first on the wire → root first), each
+  location's `lines` expanded caller first (inline frames); unsymbolized = `[<mapping basename>]`. Sample attributes (profile
+  attributes as default) `trooper.route` / `trooper.method` → route / method. Index 0 of every table is looked up like any
+  other index (Collector 0.164's pprof conversion stores real stacks there). Profiles with an unmapped sample type or no
+  non-zero sample are skipped (`tt_ingest_writer_otlp_profiles_total{outcome}`).
+- Verified against `otel/opentelemetry-collector-contrib:0.164.0` (`pprof` receiver → `otlp_grpc` + `otlp_http` exporters,
+  `--feature-gates=service.profilesSupport`): totals match `go tool pprof`.
+
 ## AI / LLM spans (contracts §25)
 
 - LLM span = `gen_ai.operation.name`, or OpenLLMetry `llm.request.type` (chat / completion → text_completion / embedding(s) /
@@ -232,5 +267,5 @@ gw: `tt_ingest_gw_requests_total{endpoint,status}`, `_request_bytes_total`, `_re
 `_rows_inserted_total{table}`, `_clickhouse_errors_total{table}`, `_insert_duration_seconds{table}`,
 `_batch_duration_seconds`, `_consumer_lag{topic,partition}`, `_tail_sampling_spans_total{decision}`,
 `_replay_blobs_total`, `_replay_blob_bytes_total`, `_replay_blob_errors_total`, `_replay_blob_upload_seconds`,
-`tt_writer_replay_disabled` (gauge, contracts §23) + Go/process metrics. gw endpoints `/v1/replay` and `/v1/profiles` use the
+`_otlp_profiles_total{outcome=written|skipped_type|skipped_empty|no_service}`, `tt_writer_replay_disabled` (gauge, contracts §23) + Go/process metrics. gw endpoints `/v1/replay`, `/v1/profiles` and `/v1development/profiles` (gRPC `grpc:tt.profiles`) use the
 same request / auth / rate-limit metrics.

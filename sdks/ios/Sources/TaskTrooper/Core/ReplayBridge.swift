@@ -39,7 +39,7 @@ public enum TrooperReplayBridge {
         return c.queue.sync {
             if let x = c.externalContext {
                 // Hybrid app: the JS/Dart layer owns the session.
-                return Context(sessionId: x.sessionId, sampled: c.sessionSampled.current, anonymousId: x.anonymousId,
+                return Context(sessionId: x.sessionId, sampled: x.sampled ?? c.sessionSampled.current, anonymousId: x.anonymousId,
                                userId: x.userId, viewId: x.viewId, viewName: x.viewName)
             }
             let s = c.replaySession()

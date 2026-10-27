@@ -245,9 +245,15 @@ func (d *DB) ProfileSeries(ctx context.Context, w timerange.Window, f ProfileFil
 	cond, ca := f.conds(false)
 	val := "toFloat64(sum(total)) / ?"
 	vargs := []any{w.StepMinutes()}
-	if f.Type == "cpu" || f.Type == "wall" {
+	switch f.Type {
+	case "cpu", "wall":
 		// average cores of the profiles in the bucket, summed over a host's processes (services on one host)
 		val = "toFloat64(sum(total / greatest(1, dateDiff('millisecond', ts, end_ts)) / 1e6) / greatest(1, uniqExact(toStartOfMinute(ts))))"
+		vargs = nil
+	case "alloc_space", "alloc_objects", "lock", "block":
+		// rate types: normalise each profile by its own window (SDKs that profile 10 s of every 60 s — .NET,
+		// Python — would otherwise read ~6× low), then per minute; summed over processes, averaged over minutes
+		val = "toFloat64(sum(total / greatest(1, dateDiff('millisecond', ts, end_ts)) * 60000) / greatest(1, uniqExact(toStartOfMinute(ts))))"
 		vargs = nil
 	}
 	rows, err := d.ch.Query(ctx, `SELECT host, `+w.BucketExpr("ts")+` AS b, `+val+` FROM profiles

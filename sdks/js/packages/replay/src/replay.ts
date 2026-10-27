@@ -1,7 +1,7 @@
 import { record } from '@rrweb/record';
 import type { IntegrationClient, RumEvent } from '@trooper/browser';
 import { rrwebPrivacyOptions, type PrivacyOptions } from './privacy';
-import { ReplayStore } from './store';
+import { KEY_PREFIX, ReplayStore } from './store';
 import { KEEPALIVE_LIMIT, ReplayTransport } from './transport';
 
 export const SDK_NAME = '@trooper/replay';
@@ -140,11 +140,14 @@ export class Replay {
     this.teardown.push(this.ic.onEvent((e) => this.safe('event', () => this.onRumEvent(e))));
     const onHide = () => this.safe('hide', () => (document.visibilityState === 'hidden' ? this.flushKeepalive() : undefined));
     const onPageHide = () => this.safe('pagehide', () => this.flushKeepalive());
+    const onStorage = (e: StorageEvent) => this.safe('storage', () => this.onStorage(e));
     addEventListener('visibilitychange', onHide);
     addEventListener('pagehide', onPageHide);
+    addEventListener('storage', onStorage);
     this.teardown.push(() => {
       removeEventListener('visibilitychange', onHide);
       removeEventListener('pagehide', onPageHide);
+      removeEventListener('storage', onStorage);
     });
     this.onSession(this.ic.sessionId());
   }
@@ -275,19 +278,31 @@ export class Replay {
     if (this.mode === 'off' || (e.session_id && e.session_id !== this.sessionId)) return;
     if (e.type === 'ERROR') {
       (this.seg ??= this.newSegment()).errors++;
-      if (this.mode === 'buffer') this.onError();
+      if (this.mode === 'buffer') this.toSession(true);
     } else if (e.type === 'ACTION' && e.action?.rage) {
       (this.seg ??= this.newSegment()).rage++;
     }
   }
 
-  /** Buffer mode → ERROR: send the last ≥ 60 s and keep recording this session. */
-  private onError(): void {
+  /**
+   * Another tab of this session switched the shared decision to `session` (an ERROR there; `storage` events only come from
+   * other tabs): this buffering tab sends its window too and keeps recording, like on its own ERROR.
+   */
+  private onStorage(e: StorageEvent): void {
+    if (this.mode === 'buffer' && e.key === KEY_PREFIX + this.sessionId && this.store.get(this.sessionId)?.m === 'session') this.toSession(false);
+  }
+
+  /**
+   * Buffer mode → session: send the last ≥ 60 s (each window starts with a FullSnapshot) and keep recording this session.
+   * `persist`: our own ERROR writes the shared decision; a decision read from another tab is already stored.
+   */
+  private toSession(persist: boolean): void {
     this.mode = 'session';
-    this.safe('store', () => {
-      const cur = this.store.get(this.sessionId);
-      this.store.set(this.sessionId, { m: 'session', n: cur?.n ?? 0 });
-    });
+    if (persist)
+      this.safe('store', () => {
+        const cur = this.store.get(this.sessionId);
+        this.store.set(this.sessionId, { m: 'session', n: cur?.n ?? 0 });
+      });
     const segs = [this.prev, this.seg];
     this.prev = this.seg = undefined;
     for (const s of segs) if (s?.events.length) for (const part of split(s, SEGMENT_BYTES)) this.send(part, false);

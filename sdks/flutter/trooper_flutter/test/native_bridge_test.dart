@@ -62,7 +62,7 @@ void main() {
 
     expect(calls.single.method, 'setContext');
     final args = (calls.single.arguments as Map).cast<String, Object?>();
-    expect(args.keys, containsAll(['session_id', 'anonymous_id', 'view_id', 'view_name', 'user_id']));
+    expect(args.keys, containsAll(['session_id', 'anonymous_id', 'view_id', 'view_name', 'user_id', 'sampled']));
     expect(args['anonymous_id'], 'test-anon');
     await c.close();
   });

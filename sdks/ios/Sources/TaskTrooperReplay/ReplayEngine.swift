@@ -129,7 +129,9 @@ final class ReplayEngine {
     // MARK: - Input
 
     /// A full wireframe; recorded only when it differs from the previous frame.
-    func onFrame(ts: Int64, width: Int, height: Int, density: Double, nodes: [WireNode]) {
+    /// `truncated` (capture budget hit): the frame lacks its front-most nodes; it is dropped when a complete frame of
+    /// the same screen exists (the player keeps showing that one instead of a half-drawn UI).
+    func onFrame(ts: Int64, width: Int, height: Int, density: Double, nodes: [WireNode], truncated: Bool = false) {
         guard refreshSession() != .off else { return }
         let screen = Screen(width: width, height: height, density: density, name: lastContext?.viewName)
         if screen != lastScreen {
@@ -137,6 +139,7 @@ final class ReplayEngine {
             lastFrameKey = nil
             add(Event(ts: ts, json: WireEvents.screen(ts: ts, width: width, height: height, density: density, name: screen.name), type: .screen))
         }
+        if truncated, lastFrameKey != nil { return maybeSeal(now: ts) }
         let key = WireEvents.nodesKey(nodes)
         if key != lastFrameKey {
             lastFrameKey = key

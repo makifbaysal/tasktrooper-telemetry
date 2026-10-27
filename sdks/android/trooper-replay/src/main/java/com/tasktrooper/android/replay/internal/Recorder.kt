@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.os.Trace
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewTreeObserver
@@ -33,13 +34,16 @@ internal class Recorder(
     private var current: WeakReference<Activity>? = null
     /** Root → the ViewTreeObserver our listeners are on (a re-attached window gets a new one). */
     private val observed = WeakHashMap<View, ViewTreeObserver>()
-    private val wrappedWindows = WeakHashMap<Window, Boolean>()
+    private val wrappedWindows = WeakHashMap<Window, TouchCallback>()
+    private val startedActivities = WeakHashMap<Activity, Boolean>()
+    private var running = false
     private var dirty = true
     private var scheduled = false
     private var lastCaptureUptime = 0L
     private var lastSessionCheck = 0L
     private var lastMoveUptime = 0L
-    private var startedActivities = 0
+    /** The previous capture ran out of time and was dropped (retried once before a partial frame is kept). */
+    private var droppedTimedOut = false
 
     /** Current throttle; grows when captures are slow so replay stays within a few ms of main thread per second. */
     var minIntervalMs = MIN_INTERVAL_MS
@@ -51,12 +55,45 @@ internal class Recorder(
     private val layoutListener = ViewTreeObserver.OnGlobalLayoutListener { markDirty() }
     private val captureRunnable = Runnable { capture() }
 
-    fun start() {
+    /**
+     * Main thread. [resumed]: an activity that is already resumed (late install, e.g. React Native after
+     * `MainActivity.onResume`): seeded as started + current and its window is wrapped for touches right away.
+     */
+    fun start(resumed: Activity? = null) {
+        if (running) return
+        running = true
         app.registerActivityLifecycleCallbacks(this)
+        if (resumed != null && !resumed.isFinishing) {
+            startedActivities[resumed] = true
+            onActivityResumed(resumed)
+        }
         main.post { markDirty() }
     }
 
+    /** Main thread. Detaches every hook (lifecycle, tree observers, window callbacks); idempotent. */
+    fun stop() {
+        if (!running) return
+        running = false
+        app.unregisterActivityLifecycleCallbacks(this)
+        main.removeCallbacks(captureRunnable)
+        scheduled = false
+        for ((root, vto) in observed.entries.toList()) Guard.run("replay.unobserve", Unit) {
+            val live = if (vto.isAlive) vto else root.viewTreeObserver
+            live.removeOnDrawListener(drawListener)
+            live.removeOnGlobalLayoutListener(layoutListener)
+        }
+        observed.clear()
+        for ((window, cb) in wrappedWindows.entries.toList()) Guard.run("replay.unwrap", Unit) {
+            cb.enabled = false // stays a pass-through when someone wrapped the callback after us
+            if (window.callback === cb) window.callback = cb.delegate
+        }
+        wrappedWindows.clear()
+        startedActivities.clear()
+        current = null
+    }
+
     fun markDirty() {
+        if (!running) return
         dirty = true
         if (scheduled) return
         scheduled = true
@@ -79,19 +116,39 @@ internal class Recorder(
         dirty = false
         val activity = current?.get()
         val decor = activity?.window?.peekDecorView()
-        val roots = RootViews.visible().ifEmpty { listOfNotNull(decor) }
+        val all = RootViews.visible().ifEmpty { listOfNotNull(decor) }
+        for (r in all) {
+            observe(r)
+            // Dialogs, popups and an activity resumed before we started: their Window.Callback sees the touches.
+            if (r !== decor) RootViews.windowOf(r)?.let { wrapWindow(it) }
+        }
+        // Not laid out yet (first frame, rotation): skip; the coming layout marks the tree dirty again.
+        val roots = all.filter { it.width > 0 && it.height > 0 }
         if (roots.isEmpty()) return@run
-        for (r in roots) observe(r)
         val density = app.resources.displayMetrics.density
         val ts = System.currentTimeMillis()
-        val result = mapper.map(roots, density)
+        // Visible in Perfetto / systrace as "trooper.replay.capture".
+        Trace.beginSection("trooper.replay.capture")
+        val result = try { mapper.map(roots, density) } finally { Trace.endSection() }
         lastCaptureUptime = SystemClock.uptimeMillis()
         lastCostNs = result.costNs
-        // Budget: ≈ 1% of main-thread time (cost × 100), never faster than 2 fps, never slower than 0.2 fps.
+        // costNs is main-thread CPU time (CpuClock). Budget: ≈ 1% of main-thread time (cost × 100), never faster than 2 fps, never slower than 0.2 fps.
         val costMs = result.costNs / 1_000_000L
         minIntervalMs = (costMs * 100).coerceIn(MIN_INTERVAL_MS, MAX_INTERVAL_MS).let { if (result.truncated) maxOf(it, 2_000L) else it }
-        if (TrooperSpi.isDebug && result.truncated) TrooperSpi.debug("replay: frame truncated (${result.nodes.size} nodes, ${costMs} ms)")
-        val base = decor?.takeIf { it.width > 0 } ?: roots.first()
+        if (result.timedOut && !droppedTimedOut) {
+            // A partial frame would show half the screen until the next capture (time budget hit by JIT warm-up,
+            // GC, a new window's first traversal). Drop it and retry once after the backoff; keep the next one.
+            droppedTimedOut = true
+            if (TrooperSpi.isDebug) TrooperSpi.debug("replay: capture over budget (${costMs} ms), retrying in $minIntervalMs ms")
+            markDirty()
+            return@run
+        }
+        droppedTimedOut = false
+        if (TrooperSpi.isDebug) {
+            TrooperSpi.debug("replay: capture ${result.nodes.size} nodes, ${result.costNs / 1_000} µs, ${roots.size} window(s), next ≥ $minIntervalMs ms" +
+                if (result.truncated) " (truncated)" else "")
+        }
+        val base = decor?.takeIf { it.width > 0 && it.height > 0 } ?: roots.first()
         val widthDp = Math.round(base.width / density)
         val heightDp = Math.round(base.height / density)
         val keyboard = keyboardVisible(base)
@@ -138,29 +195,29 @@ internal class Recorder(
         }
     }
 
-    private fun wrapWindow(activity: Activity) {
-        val window = activity.window ?: return
-        if (wrappedWindows[window] == true) return
+    private fun wrapWindow(window: Window) {
+        if (wrappedWindows[window]?.let { it === window.callback } == true) return
         val cb = window.callback ?: return
         if (cb is TouchCallback) return
-        window.callback = TouchCallback(cb) { ev -> Guard.run("replay.touch", Unit) { onTouch(ev) } }
-        wrappedWindows[window] = true
+        val wrapper = TouchCallback(cb) { ev -> Guard.run("replay.touch", Unit) { onTouch(ev) } }
+        window.callback = wrapper
+        wrappedWindows[window] = wrapper
     }
 
     // ------------------------------------------------------------------ lifecycle
 
     override fun onActivityResumed(activity: Activity) = Guard.run("replay.resumed", Unit) {
         current = WeakReference(activity)
-        wrapWindow(activity)
+        activity.window?.let { wrapWindow(it) }
         activity.window?.peekDecorView()?.let { observe(it) }
         markDirty()
     }
 
-    override fun onActivityStarted(activity: Activity) { startedActivities++ }
+    override fun onActivityStarted(activity: Activity) { startedActivities[activity] = true }
 
     override fun onActivityStopped(activity: Activity) {
-        startedActivities = (startedActivities - 1).coerceAtLeast(0)
-        if (startedActivities == 0) Guard.run("replay.background", Unit) { onBackground() }
+        startedActivities.remove(activity)
+        if (startedActivities.isEmpty()) Guard.run("replay.background", Unit) { onBackground() }
     }
 
     override fun onActivityPaused(activity: Activity) {}
@@ -180,6 +237,26 @@ internal class Recorder(
 
 /** All window roots of the process (activities, dialogs, popups) via `WindowManagerGlobal.mViews`; empty if unavailable. */
 internal object RootViews {
+    private var windowField: Field? = null
+    @Volatile private var windowFailed = false
+
+    /** The [Window] of a `DecorView` root (`DecorView.mWindow`, API 24+); null for popups (no Window) or if blocked. */
+    fun windowOf(root: View): Window? {
+        if (windowFailed || Build.VERSION.SDK_INT < 24) return null
+        return try {
+            val f = windowField ?: run {
+                if (root.javaClass.name != DECOR_VIEW) return null
+                root.javaClass.getDeclaredField("mWindow").apply { isAccessible = true }.also { windowField = it }
+            }
+            if (!f.declaringClass.isInstance(root)) null else f.get(root) as? Window
+        } catch (t: Throwable) {
+            windowFailed = true
+            null
+        }
+    }
+
+    private const val DECOR_VIEW = "com.android.internal.policy.DecorView"
+
     private var global: Any? = null
     private var field: Field? = null
     @Volatile private var failed = false
@@ -202,10 +279,29 @@ internal object RootViews {
 }
 
 /** Forwards every Window.Callback call; observes touches first. Never alters dispatch. */
-internal class TouchCallback(private val delegate: Window.Callback, private val onTouch: (MotionEvent) -> Unit) :
+internal class TouchCallback(val delegate: Window.Callback, private val onTouch: (MotionEvent) -> Unit) :
     Window.Callback by delegate {
+    @Volatile var enabled = true
+
     override fun dispatchTouchEvent(event: MotionEvent?): Boolean {
-        if (event != null) try { onTouch(event) } catch (_: Throwable) {}
+        if (event != null && enabled) try { onTouch(event) } catch (_: Throwable) {}
         return delegate.dispatchTouchEvent(event)
+    }
+}
+
+/**
+ * Main-thread CPU time for the capture budget: wall time also counts preemption (busy device, emulator), which
+ * would truncate frames (half the UI missing in the replay) for work we did not do.
+ */
+internal object CpuClock {
+    @Volatile private var unsupported = false
+
+    fun nanos(): Long {
+        if (!unsupported) {
+            val t = try { android.os.Debug.threadCpuTimeNanos() } catch (_: Throwable) { -1L }
+            if (t >= 0) return t
+            unsupported = true
+        }
+        return System.nanoTime()
     }
 }

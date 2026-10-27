@@ -1,8 +1,11 @@
 package llmprice
 
 import (
+	"context"
+	"errors"
 	"math"
 	"testing"
+	"time"
 )
 
 func f(v float64) *float64 { return &v }
@@ -84,5 +87,45 @@ func TestListOverridesDefaults(t *testing.T) {
 	}
 	if Updated() == "" {
 		t.Error("defaults.json has no updated date")
+	}
+}
+
+func TestCache(t *testing.T) {
+	calls := 0
+	fail := false
+	c := NewCache(func(_ context.Context, org int64) ([]Price, error) {
+		calls++
+		if fail {
+			return nil, errors.New("pg down")
+		}
+		return []Price{{Provider: "acme", Model: "m", InputPerMTok: float64(org)}}, nil
+	}, time.Minute)
+	now := time.Unix(1_700_000_000, 0)
+	c.now = func() time.Time { return now }
+	tb, err := c.Table(context.Background(), 7)
+	if err != nil || calls != 1 {
+		t.Fatalf("first load: %v calls=%d", err, calls)
+	}
+	if p, ok := tb.Lookup("acme", "m"); !ok || p.InputPerMTok != 7 {
+		t.Errorf("org row: %+v %v", p, ok)
+	}
+	if _, _ = c.Table(context.Background(), 7); calls != 1 {
+		t.Errorf("cached: calls=%d", calls)
+	}
+	now = now.Add(2 * time.Minute)
+	fail = true
+	tb, err = c.Table(context.Background(), 7)
+	if err == nil || calls != 2 {
+		t.Errorf("reload error: %v calls=%d", err, calls)
+	}
+	if _, ok := tb.Lookup("acme", "m"); !ok {
+		t.Error("stale table not kept on error")
+	}
+	tb, err = c.Table(context.Background(), 8)
+	if err == nil || tb == nil {
+		t.Fatal("unknown org on error: want defaults + error")
+	}
+	if _, ok := tb.Lookup("anthropic", "claude-sonnet-4-5"); !ok {
+		t.Error("defaults missing")
 	}
 }

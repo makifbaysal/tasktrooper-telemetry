@@ -18,6 +18,7 @@
 | `kpi_burn` | "Homepage loads fast" KPI'ının error budget'ı 1 saatte 6× hızlı yanıyor | Periyodik, `sli_1m`; multi-window burn rate (aşağıda) |
 | `infra` | Pod 10 dk'da 3'ten fazla restart etti; node NotReady; host CPU > %90; workload'da eksik replika | Periyodik, `hosts_1m` / `containers_1m` / `k8s_*_1m` (ADR-019) |
 | `faas` | Lambda/Azure fonksiyonunda error rate > %5, throttle, p95 timeout'un %80'ini aştı | Periyodik, `faas_1m` + cold start için `spans` (ADR-020) |
+| `llm` | Saatlik tahmini LLM maliyeti > $20; `gpt-5` hata oranı > %5; Anthropic p95 > 20 sn; token patlaması | Periyodik, `llm_1m`/`llm_1h` + fiyat tablosu (ADR-023, contracts §25) |
 
 ## Kural şeması (alert-as-code ile aynı)
 

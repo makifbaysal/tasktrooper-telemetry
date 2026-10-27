@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tasktrooper/telemetry/services/api/internal/llmprice"
+	"github.com/tasktrooper/telemetry/services/pkg/llmprice"
 )
 
 func TestFinishReason(t *testing.T) {

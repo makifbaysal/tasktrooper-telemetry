@@ -68,7 +68,9 @@ Default is "show the layout, hide the content":
 - **Sampling** — decided once per session (`sampleRate`, else `onErrorSampleRate` → buffer mode, else off) and stored
   in `localStorage` under `tt_replay:<session_id>` as `{ m: mode, n: next segment }` — shared by every tab of the session,
   like the RUM session, and kept across page loads (fallback: `sessionStorage`, then memory). An ERROR in any buffering tab
-  switches the shared decision to `session`. Entries of older sessions are removed when a session starts or rotates.
+  switches the shared decision to `session`; the other buffering tabs of the session see it through the `window` `storage`
+  event (only for their own session's key), send their buffered window (which starts with a FullSnapshot) and keep recording
+  in session mode, exactly as on their own ERROR. Entries of older sessions are removed when a session starts or rotates.
 - **Segment numbers** — taken with a read-increment-write of the shared counter right at the moment a segment is sealed, so
   tabs of one session interleave their numbers instead of overwriting each other. Every tab still starts its own recording
   with a FullSnapshot (its first segment has `has_full_snapshot: true`).

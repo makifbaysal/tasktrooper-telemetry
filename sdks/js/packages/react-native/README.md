@@ -50,3 +50,34 @@ supported. JS looks up `TurboModuleRegistry.get('TrooperRum')`, then `NativeModu
   (resolved by reflection — no compile dependency; a consumer ProGuard rule keeps it). Otherwise context calls are no-ops.
 - **iOS:** forwarded to the `TaskTrooper` pod when this pod can import it (`#if canImport(TaskTrooper)`); run
   `TROOPER_RN_NATIVE_SDK=1 pod install` to make `trooper-react-native` depend on `TaskTrooper/Core`. Otherwise no-ops.
+
+## Session replay
+
+React Native draws native views, so the native SDKs' **wireframe** replay (ADR-021, contracts.md §23 — no screenshots or
+pixels) records RN screens as they are. It is started from JS through the `TrooperRum` native module and needs the native SDK:
+
+```ts
+import { init, startReplay, stopReplay, isReplayRecording } from '@trooper/react-native';
+
+init({ dsn, app: 'courier-app' });
+const started = await startReplay({ sampleRate: 0.1, onErrorSampleRate: 1.0, maskAllText: true }); // all optional
+```
+
+- **Android:** add `trooper-android` (`TaskTrooper.init` in `Application.onCreate`) **and** `trooper-replay` to the app.
+  The module finds `com.tasktrooper.android.replay.TrooperReplay` by reflection (no compile dependency; consumer ProGuard
+  rules keep it) and calls `TrooperReplay.install(currentActivity, ReplayOptions(...))`.
+- **iOS:** `TROOPER_RN_NATIVE_SDK=1 pod install` makes `trooper-react-native` depend on `TaskTrooper/Core` **and**
+  `TaskTrooper/Replay` (and defines `TROOPER_RN_REPLAY`); start the native SDK with `TaskTrooper.start(config)` in the
+  AppDelegate. `TROOPER_RN_REPLAY=0` keeps the native SDK without replay.
+- Options are the native ones (missing keys = native defaults: `sampleRate` 0.1, `onErrorSampleRate` 1.0, `maskAllText`
+  true; inputs are always masked). Out-of-range values are ignored. A replay already installed natively
+  (`TrooperReplay.install` / `TaskTrooper.start(config, replay:)`) keeps its options — later installs are no-ops.
+- **Session:** segments use the RUM session of the JS layer — it is pushed with `setContext` (see above), so the replay,
+  the JS events and native crashes share one `session_id`. Call `startReplay()` after `init()`.
+- **JS errors** (global handler, Hermes unhandled rejections, `captureError`) of a sampled session also call
+  `notifyReplayError()` on the native module, so on-error sessions upload their last 60 s for JS errors too (the native
+  replay only observes native errors by itself).
+- **Without the native SDK / replay module** `startReplay()` is a no-op: it resolves `false` and logs one console warning.
+  `isReplayRecording()` resolves `true` only while the session is recorded (not when it is just buffered for errors).
+  `stopReplay()` resolves `true` when the native SDK stopped recording; the current native replay modules have no stop API
+  yet, so it resolves `false` there. Nothing here ever throws or rejects.

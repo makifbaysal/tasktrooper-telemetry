@@ -162,12 +162,22 @@ TrooperReplay.install(this, ReplayOptions(sampleRate = 0.1, onErrorSampleRate = 
   `Password` always; images are boxes; WebView content is a black box. Opt in per subtree with `view.trooperUnmask()`
   (or `view.setTag(R.id.trooper_unmask, true)`) / `Modifier.trooperUnmask()`; `view.trooperMask()` forces masking.
 - **Cost:** captures on the main thread only after a draw/layout, at most 2 fps; the throttle grows with capture cost
-  (≈ 1% of main-thread time), traversal stops at 1500 nodes / 12 ms. Unchanged frames are not recorded. Touches
-  (down / move ≤ 10/s / up) via a `Window.Callback` wrapper, keyboard visibility from window insets.
+  (≈ 1% of main-thread time), traversal stops at 1500 nodes / 12 ms of main-thread **CPU** time (wall time would count
+  preemption). A frame cut by the time budget is dropped and retried once (no half-empty frames); unchanged frames
+  are not recorded. Measured on an emulator (release, speed-profile): Views ≈ 0.3 ms for 25 nodes, Compose ≈ 0.3–0.8 ms
+  for 23 nodes; capture shows as `trooper.replay.capture` in Perfetto, `debug = true` logs every capture's cost.
+- **Touches** (down / move ≤ 10/s / up) via a `Window.Callback` wrapper on every window root (activities, dialogs);
+  keyboard visibility from window insets. Install from `Application.onCreate` (or pass the resumed `Activity` as
+  `context` when installing later, e.g. React Native) so the first activity's touches are seen.
+- **Stop:** `TrooperReplay.stop()` detaches all hooks, seals and uploads the open segment; `install` works again
+  (same session → segment numbering continues). `TrooperReplay.notifyError()` = an ERROR from a hybrid layer.
 - **Delivery:** segments of ≤ 5 s or ≤ 256 KB, gzip, same auth/backoff as `/v1/rum`; offline segments are kept up to
   `maxQueueBytes` (2 MB) and newer ones are dropped beyond that.
 - Dialogs/popups are found through `WindowManagerGlobal` (reflection); if that is blocked only the resumed activity's
-  window is recorded. Compose nodes have bounds, role and text but no colors.
+  window is recorded. A dialog's dim (`FLAG_DIM_BEHIND`) is a translucent full-screen `view` node. A labelled
+  `Switch` / `CheckBox` / `RadioButton` becomes a `text` node plus a `switch` node for the toggle (no on/off state).
+- Compose nodes have bounds, role and text but no colors (buttons and dialog surfaces have no fill). The Compose host
+  is recognized by type (`RootForTest`), so R8-minified apps work (`AndroidComposeView` is renamed there).
 
 ## Native crashes (`trooper-ndk`)
 

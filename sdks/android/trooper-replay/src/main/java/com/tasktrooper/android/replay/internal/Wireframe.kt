@@ -22,6 +22,8 @@ internal class WireNode(
     @JvmField val alpha: Float = 1f,
     /** Visible part [x, y, w, h] in dp when the node is clipped by an ancestor; null when fully visible. */
     @JvmField val clip: FloatArray? = null,
+    /** Toggle state, only for `switch` nodes; null when unknown. */
+    @JvmField val checked: Boolean? = null,
 ) {
     fun write(j: Json) {
         j.beginObject()
@@ -42,6 +44,7 @@ internal class WireNode(
             for (v in c) j.value(round1(v))
             j.endArray()
         }
+        if (checked != null) j.name("checked").value(checked)
         j.endObject()
     }
 

@@ -1,5 +1,5 @@
 -- AI / LLM monitoring (ADR-023, contracts §25): org overrides of the LLM price table. Owner: services/api
--- (defaults: services/api/internal/llmprice/defaults.json). Additive and idempotent.
+-- (defaults: services/pkg/llmprice/defaults.json). Additive and idempotent.
 
 -- Prices are USD per 1M tokens. provider = gen_ai.provider.name or a price family (openai, anthropic, google …);
 -- model = exact model or a prefix (lower case; longest prefix wins). NULL cache prices = input price.

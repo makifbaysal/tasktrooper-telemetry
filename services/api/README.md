@@ -84,7 +84,7 @@ npx @redocly/cli lint openapi.yaml
 | `internal/symbolicate` | symbolicator client (forwards the caller's `Authorization`) |
 | `internal/conntest` | real connection tests: Postgres login + `pg_stat_statements` check, Redis PING, Kafka metadata + groups (franz-go), RabbitMQ management API; MySQL/MongoDB TCP only |
 | `internal/flame` | flame graph / diff tree building (root `all`, < 0.05 % → `[pruned]` child, ≤ 5000 nodes by a largest-share-first expansion), top functions (recursion counted once) |
-| `internal/llmprice` | LLM price table (`defaults.json`, embedded) + org overrides, provider family / model normalization, cost |
+| `services/pkg/llmprice` | LLM price table (`defaults.json`, embedded) + org overrides, provider family / model normalization, cost (shared with alert-engine) |
 | `internal/blob` | read-only S3 client for replay segments |
 
 ## Data sources
@@ -156,13 +156,17 @@ npx @redocly/cli lint openapi.yaml
   (`attrs['gen_ai.operation.name'] != ''`) + `llm_content`. Series values are per bucket (calls, tokens, USD). Cost =
   (input − cache read − cache write, ≥ 0) × input + cache read × cacheRead + cache write × cacheWrite (missing cache
   price = input price) + output × output, per 1M tokens. `costUsd` sums priced models (`null` when none is priced);
-  `costPartial` = some calls have no price. **Prices are estimates**: `internal/llmprice/defaults.json` (list prices,
+  `costPartial` = some calls have no price. **Prices are estimates**: `services/pkg/llmprice/defaults.json` (list prices,
   `updated` date inside) — review it when providers change prices; orgs override rows with `PUT /ai/prices` (admin+,
   Postgres `llm_prices`, audit `ai_prices.update` / `ai_prices.delete`). Matching: provider → family (`azure.ai.openai`
   → openai, `gcp.*` → google, `aws.bedrock` → model vendor), model lower-cased without `vendor/` or Bedrock
   `<region>.<vendor>.` prefixes; exact row, else the longest row that is a prefix ending at a non-alphanumeric char;
   org rows first, then defaults of the family, then any default. `hasAi` on `GET /services/{id}` = `llm_1h` rows in the
   last 7 days; trace spans with `gen_ai.operation.name` carry `llm`.
+* LLM monitors (kind `llm`): `POST /monitors` validates `query {filter?: {service, provider, model, route, method,
+  operation}, metric}` (`internal/store/llm_preview.go`); `POST /monitors/preview` replays it per bucket from `llm_1m`/`llm_1h`
+  (window sums; `error_rate` = errors / calls over the window; p95 per bucket; cost with the org price table);
+  `GET /monitor-templates` lists the four llm templates (copy of alert-engine's `eval.Templates`).
 
 ## Auth, roles, audit (ADR-016)
 

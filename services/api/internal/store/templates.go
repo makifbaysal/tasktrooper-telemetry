@@ -1,6 +1,6 @@
 package store
 
-// MonitorTemplate is a ready-made monitor (contracts §20, §21): kind + query + condition as stored in monitors.
+// MonitorTemplate is a ready-made monitor (contracts §20, §21, §25): kind + query + condition as stored in monitors.
 // Create one with POST /monitors (source = 'template').
 type MonitorTemplate struct {
 	ID          string         `json:"id"`
@@ -47,4 +47,20 @@ var MonitorTemplates = []MonitorTemplate{
 		Kind: "faas", Severity: "warning",
 		Query:     map[string]any{"metric": "duration_p95", "relativeToTimeout": true, "filter": map[string]any{}},
 		Condition: map[string]any{"op": ">", "threshold": 0.8, "window": "5m", "forMin": 5}},
+	{ID: "llm-cost-per-hour", Name: "LLM cost above $20/hour", Description: "Estimated LLM spend (priced models) above $20 over the last hour",
+		Kind: "llm", Severity: "warning",
+		Query:     map[string]any{"metric": "cost_usd_per_hour", "filter": map[string]any{}},
+		Condition: map[string]any{"op": ">", "threshold": 20, "window": "1h", "forMin": 0}},
+	{ID: "llm-error-rate", Name: "LLM error rate > 5%", Description: "More than 5 % of LLM calls failed over 15 minutes (at least 20 calls)",
+		Kind: "llm", Severity: "critical",
+		Query:     map[string]any{"metric": "error_rate", "filter": map[string]any{}},
+		Condition: map[string]any{"op": ">", "threshold": 0.05, "window": "15m", "forMin": 0, "minRequests": 20}},
+	{ID: "llm-p95-slow", Name: "LLM p95 > 20 s", Description: "p95 LLM call duration above 20 seconds over 15 minutes",
+		Kind: "llm", Severity: "warning",
+		Query:     map[string]any{"metric": "p95_ms", "filter": map[string]any{}},
+		Condition: map[string]any{"op": ">", "threshold": 20000, "window": "15m", "forMin": 0, "minRequests": 20}},
+	{ID: "llm-token-spike", Name: "Token spike", Description: "More than 5M tokens (input + output) in an hour",
+		Kind: "llm", Severity: "warning",
+		Query:     map[string]any{"metric": "tokens", "filter": map[string]any{}},
+		Condition: map[string]any{"op": ">", "threshold": 5000000, "window": "1h", "forMin": 0}},
 }

@@ -2,7 +2,7 @@ package model
 
 import (
 	"github.com/tasktrooper/telemetry/services/api/internal/flame"
-	"github.com/tasktrooper/telemetry/services/api/internal/llmprice"
+	"github.com/tasktrooper/telemetry/services/pkg/llmprice"
 )
 
 // ---------------------------------------------------------------- session replay (ADR-021, contracts §23)
