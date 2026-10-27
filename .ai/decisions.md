@@ -267,7 +267,12 @@ ve mobil session replay sunuyor. "Kapsam dışı (v1)" listesindeydi.
   SDK'yı şişirmemek için, `@trooper/browser`'a integration olarak takılır). Oynatma UI'da `@rrweb/replay` 2.2.0.
 - **Mobil (Android, iOS):** piksel/ekran görüntüsü **toplanmaz**. View hiyerarşisinden **wireframe** (dikdörtgen, tür, renk,
   maskeli metin) kare kare çıkarılır, sadece değişince ve en fazla 2 kare/sn; dokunmalar ayrı event. Oynatıcı bizim (SVG).
-  Böylece görüntü içinde PII sızması yapısal olarak imkânsız. Flutter / React Native replay sonraki iş.
+  Böylece görüntü içinde PII sızması yapısal olarak imkânsız.
+- **React Native:** RN native view'larla çizer → native SDK'nın replay'i (Android `trooper-replay`, iOS `TaskTrooperReplay`)
+  aynen çalışır; `@trooper/react-native` `TrooperRum` native module'ü üzerinden başlatır, oturum JS'ten `setContext` ile gelir.
+- **Flutter:** tek bir `FlutterView` yüzeyine çizdiği için native traversal işe yaramaz; `trooper_flutter` Dart tarafında
+  **Element ağacından** wireframe çıkarır (widget tipi → kind, `Material`/`ColoredBox`/`DecoratedBox` → renk/radius,
+  `RenderBox` → global rect), aynı wire formatı.
 - **Gizlilik default:** web'de tüm metin ve input maskeli (`maskAllText`, `maskAllInputs` true), password her zaman,
   `data-trooper-block` öğesi yer tutucu, canvas / cross-origin iframe / network gövdesi kaydedilmez. Mobilde metin maskeli,
   görseller sadece kutu, input her zaman maskeli. Unmask açıkça (`data-trooper-unmask` / `trooperUnmask()`).
@@ -279,6 +284,7 @@ ve mobil session replay sunuyor. "Kapsam dışı (v1)" listesindeydi.
 - **Korelasyon:** oynatıcının zaman çizelgesi `rum_events`'ten (view, action, error, resource); resource event'lerindeki
   `trace_id` ile replay'den backend trace'ine (`/traces/:id`) geçilir. Hata detayından "Watch replay" ilgili saniyeye atlar.
 **Sonuç:** Mobilde gerçek görüntü yok (bilinçli); web'de canvas/WebGL içerik boş görünür. Detay: contracts.md §23.
+Web'de karar/sayaç localStorage'da sekmeler arası ortak; buffer modundaki sekme `storage` event'iyle `session`'a geçer.
 
 ## ADR-022 — Continuous profiling: pprof + folded stack, ClickHouse'ta stack satırları
 **Bağlam:** Endpoint yavaşladığında "where time goes" bağımlılık kırılımı veriyor ama kendi kodumuzun (`app` kategorisi) içinde
@@ -289,7 +295,13 @@ hangi fonksiyonun CPU/bellek yaktığı görünmüyor. New Relic thread profiler
   için basit; bağımlılık gerektirmez). OTLP profiles sinyali henüz stabil değil — stabil olunca gw'de kabul edilir.
 - **Go:** `runtime/pprof`; istek goroutine'ine pprof label `trooper.route` / `trooper.method` konur → flame graph endpoint
   bazında filtrelenebilir. **JVM:** JFR (`jdk.ExecutionSample`, `jdk.ObjectAllocationSample`, `jdk.JavaMonitorEnter`), native
-  agent yok. **Node:** `node:inspector` CPU profiler + sampling heap profiler. **.NET / Python:** sonraki iş.
+  agent yok. **Node:** `node:inspector` CPU profiler + sampling heap profiler. **.NET:** ayrı paket `TaskTrooper.Telemetry.Profiling`,
+  süreç içi EventPipe oturumu (`DiagnosticsClient` kendi PID'ine) + TraceEvent ile parse: SampleProfiler → `cpu`/`wall`,
+  `GCAllocationTick` → `alloc_space`, contention → `lock`; Activity → thread eşlemesiyle route etiketi.
+  **Python:** `tasktrooper` paketi (ADR-024) — `sys._current_frames()` örnekleyici thread (100 Hz) → `cpu`/`wall`, opsiyonel
+  `tracemalloc` → `inuse_space`.
+- **OTLP profiles:** gw `POST /v1development/profiles` (OTLP/HTTP protobuf + JSON) ve gRPC `ProfilesService/Export`
+  kabul eder (OTel Collector / eBPF profiler'ları doğrudan bağlanır); writer pprof yoluyla aynı tablolara açar.
 - Writer profilleri stack satırlarına açar: ClickHouse `profile_stacks` (stack = frame dizisi, root önce; değer) ve
   `profiles` (profil başına özet). Flame graph, top functions ve diff api'de `GROUP BY stack` ile hesaplanır.
 - **Diff:** iki pencere/versiyon karşılaştırması pay (değer / toplam) üzerinden — deploy öncesi/sonrası "hangi fonksiyon
@@ -319,5 +331,17 @@ sunuyor. (Not: ADR-018 bizim kendi LLM kotamızdır; bu ADR müşterinin LLM kul
   org override (Postgres `llm_prices`). Fiyatlar değişir → UI'da "est." etiketi, fiyat bilinmeyen modelde maliyet boş.
 - UI: sidebar'da **AI monitoring** (provider/model/servis/endpoint bazında çağrı, token, maliyet, hata, p95; son çağrılar +
   prompt çekmecesi), servis detayında **AI** sekmesi (LLM çağrısı varsa), trace detayında GenAI span paneli.
-**Sonuç:** Python SDK yok → Python LLM uygulamaları OpenLLMetry / OTel GenAI instrumentation'ı ile OTLP göndermeli. LLM alert'leri
-(maliyet/saat, token, hata) sonraki iş. Detay: contracts.md §25.
+**Sonuç:** Python için `tasktrooper` paketi (ADR-024) `instrument_openai` / `instrument_anthropic` verir; OpenLLMetry de çalışır.
+LLM alert'leri monitor kind `llm` (contracts §25, alerting.md). Detay: contracts.md §25.
+
+## ADR-024 — Python SDK (`tasktrooper`): OTel dağıtımı + profiling + LLM
+**Bağlam:** LLM uygulamalarının çoğu Python. Python SDK roadmap'te "faz 2" idi; AI monitoring ve profiling için gerekli.
+**Karar:**
+- PyPI paketi `tasktrooper` (`sdks/python`, Python ≥ 3.9): ADR-011'deki gibi ince OTel dağıtımı — `opentelemetry-sdk` +
+  OTLP/HTTP protobuf exporter, DSN, resource (`telemetry.distro.name=trooper-python`), ParentBased(TraceIdRatio) +
+  `tt=r:` tracestate, `trooper.entry.route/method`, `trooper.caller` (baggage `tt.svc`), `trooper.sample_rate`; config adları
+  contracts §2 (`TROOPER_DSN`, …). Framework instrumentation'ı OTel contrib paketlerinden (extras: `tasktrooper[django]`,
+  `[fastapi]`, `[flask]`, `[celery]`, `[requests]`, `[sqlalchemy]`…); route template FastAPI/Flask/Django router'ından.
+- `tasktrooper.init(...)` asla throw etmez; `tasktrooper-run` launcher + `import tasktrooper.auto`.
+- Profiling (§24) ve LLM (`instrument_openai`, `instrument_anthropic`, sync + async + stream; §25) aynı pakette, ek bağımlılık yok.
+**Sonuç:** Paket yayını diğer SDK'larla birlikte (hesap gerektirir).

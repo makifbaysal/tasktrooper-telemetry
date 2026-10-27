@@ -781,6 +781,11 @@ ayrı producer kullanır (kayıt ≤ 8 MiB). gw doğrulaması: `session_id` ≤ 
 - Mevcut uçlara ek: `GET /apps/{app}/sessions` satırlarında `hasReplay: boolean`; `GET /apps/{app}/errors/{fingerprint}` ve
   `GET /errors/{fingerprint}` cevabında üst seviye `replay?: { sessionId, offsetMs }` (replay'in kapsadığı en yeni oluşum; backend hatasında trace id taşıyan RUM resource event'i üzerinden).
 
+**Hibrit uygulamalar:** React Native → native SDK replay'i (`TrooperRum.startReplay(options)` / `stopReplay()`; native SDK yoksa
+no-op + uyarı), `resource.platform` = `android|ios`, `sdk_name` native SDK'nınki. Flutter → `trooper_flutter` Dart tarafı wireframe
+(`sdk_name` = `trooper_flutter`, `platform` = `android|ios`), native SDK varsa native replay **başlatılmaz** (çift kayıt olmasın).
+**Web sekmeleri:** buffer modundaki sekme localStorage `storage` event'inde karar `session` olursa buffer'ını flush edip kayda geçer.
+
 **UI:** `/replays/:sessionId` oynatıcı (`?t=<offsetMs>`), client app detayında **Replays** sekmesi; Sessions satırında ve hata
 çekmecesinde "Watch replay". Web oynatıcı `@rrweb/replay`; wireframe oynatıcı kendi SVG'miz.
 
@@ -812,6 +817,15 @@ ayrı producer kullanır (kayıt ≤ 8 MiB). gw doğrulaması: `session_id` ≤ 
 **Kafka:** `tt.profiles` — değer ham gövde (gzip'li olabilir); header'lar §3 + `service`, `env`, `version`, `host`, `runtime`,
 `start`, `end`, `format`, `type`, `unit`.
 
+**OTLP profiles:** gw `POST /v1development/profiles` (OTLP/HTTP; protobuf veya JSON; gzip) ve gRPC
+`opentelemetry.proto.collector.profiles.v1development.ProfilesService/Export` (:4317). Auth OTLP uçlarıyla aynı. gw istek başına
+`tt.profiles`'a tek kayıt yazar (`format=otlp`, değer = `ExportProfilesServiceRequest` protobuf; servis/zaman header'ları boş olabilir).
+Writer her `ResourceProfiles` → `ScopeProfiles` → `Profile` için: `service.name` / `deployment.environment.name` / `service.version` /
+`host.name` / `process.runtime.name` resource attribute'larından, `time_unix_nano` + `duration_nano` pencere, sample type'lar §24 pprof
+eşlemesiyle (nanosecond tipi yoksa `samples`/`count` × period → `cpu`), stack = location → function adı (inline frame'ler açılır),
+sample attribute `trooper.route`/`trooper.method` → endpoint. Proto: `go.opentelemetry.io/proto/otlp` (v1development) — kırıcı
+değişiklikte gw sürümü pinler.
+
 **Writer** (`deploy/clickhouse/005_replay_profiles_llm.sql`):
 - `profile_stacks(org_id, project_id, ts DateTime (profil start'ı), service, env, version, host, runtime, type, unit, route,
   method LowCardinality(String), stack_hash UInt64 (cityHash64(stack)), stack Array(LowCardinality(String)), value Int64)` —
@@ -837,6 +851,11 @@ ayrı producer kullanır (kayıt ≤ 8 MiB). gw doğrulaması: `session_id` ≤ 
 - `GET /api/v1/profiles/series?service=&type=&range=&env=&version=` → Seri (§8): `cpu`/`wall` için ortalama core, diğerlerinde
   dakika başına ortalama değer; host başına seri (≤ 8, fazlası "Other").
 - Endpoint sayfası route/method'u servis endpoint'inden alır; profil yoksa UI "Enable profiling" talimatını gösterir.
+
+**.NET:** `TaskTrooper.Telemetry.Profiling` paketi (`services.AddTaskTrooperProfiling()` veya `TROOPER_PROFILING=true` + paket
+referansı), default tipler `cpu,alloc_space,lock`, runtime `dotnet`, folded format + route bölümleri. **Python:** `tasktrooper`
+`init(profiling=True)`, default `cpu`, opsiyonel `wall`, `inuse_space` (tracemalloc, overhead uyarısı), runtime `python`, route etiketi
+entry span'ının thread'i üzerinden (asyncio'da task başına değil, thread başına — not edilir).
 
 **SDK config:** `TROOPER_PROFILING` (`true|false`, default false), `TROOPER_PROFILING_TYPES` (virgüllü; default
 `cpu,alloc_space,inuse_space` + Go'da `goroutines`), `TROOPER_PROFILING_PERIOD` (sn, default 60), `TROOPER_PROFILING_CPU_DURATION`
@@ -894,5 +913,13 @@ OTel log event'i `gen_ai.client.inference.operation.details` gelirse içerik ora
 - `GET /api/v1/services/{id}` cevabına `hasAi: boolean`; servis kapsamı `ai/overview?service=`.
 - `GET /api/v1/traces/{id}` span'larında LLM span'ı için `llm?: { provider, model, operation, inputTokens, outputTokens,
   costUsd, ttftMs?, hasContent }`.
+
+**Alert (monitor kind `llm`):** `query: { filter: { service?, provider?, model?, route?, method?, operation? }, metric }`,
+`metric` ∈ `cost_usd` (pencere toplamı, tahmini — fiyat kuralı yukarıda, org override dahil), `cost_usd_per_hour`, `tokens`,
+`input_tokens`, `output_tokens`, `calls`, `errors`, `error_rate`, `p95_ms`, `ttft_p95_ms`; kaynak `llm_1m` (pencere ≥ 6 saat ise
+`llm_1h`). `minRequests` oran/süre metriklerinde. Fiyat bilinmeyen modeller `cost_*`'a girmez; filtredeki tüm modeller fiyatsızsa
+`no_data`. Fiyat tablosu `services/pkg/llmprice` (api ve alert-engine ortak; default'lar gömülü JSON + Postgres `llm_prices`). Şablonlar:
+"LLM cost above $X/hour" (`cost_usd_per_hour`, 1 saat), "LLM error rate > 5%" (15 dk, minRequests 20), "LLM p95 > 20 s" (15 dk),
+"Token spike" (`tokens` eşik). UI: AI monitoring ekranında model/servis satırından "Create alert" → `/alerts/new?kind=llm&service=&model=`.
 
 **SDK yüzeyi:** bkz. sdk.md § AI / LLM. Ortak config: `TROOPER_LLM_CAPTURE_CONTENT` (`true|false`, default false).
