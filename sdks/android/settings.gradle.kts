@@ -14,4 +14,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "tasktrooper-android"
-include(":trooper-android", ":trooper-ndk", ":trooper-okhttp", ":trooper-compose", ":trooper-android-sample")
+include(":trooper-android", ":trooper-ndk", ":trooper-okhttp", ":trooper-compose", ":trooper-replay", ":trooper-android-sample")

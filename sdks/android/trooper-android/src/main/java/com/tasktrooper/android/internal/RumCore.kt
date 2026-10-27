@@ -43,6 +43,9 @@ internal class RumCore(
     val frames = FrameStats()
     private val rage = RageTapDetector()
 
+    /** Notified after an ERROR (handled, ANR, crash) of a sampled session is recorded (trooper-replay on-error buffer). */
+    val errorListeners = java.util.concurrent.CopyOnWriteArrayList<com.tasktrooper.android.spi.TrooperSpi.ErrorListener>()
+
     /** Receives the session/view/user whenever it changes (native crash handler, per-process records). */
     @Volatile var contextListener: ((CrashContext) -> Unit)? = null
     @Volatile private var lastContext: CrashContext? = null
@@ -206,8 +209,10 @@ internal class RumCore(
         emit(EventType.APP_START, RumPayload.AppStart(kind, durationMs),
             if (startReference != null) mapOf("start_reference" to startReference) else emptyMap())
 
-    fun error(t: Throwable, source: String, attributes: Map<String, String>, thread: String? = Thread.currentThread().name) =
+    fun error(t: Throwable, source: String, attributes: Map<String, String>, thread: String? = Thread.currentThread().name) {
         emit(EventType.ERROR, errorPayload(t, source, false, thread), attributes)
+        notifyError(false)
+    }
 
     fun anr(mainStack: Array<StackTraceElement>) {
         val stack = mainStack.joinToString("\n") { "\tat $it" }
@@ -215,6 +220,15 @@ internal class RumCore(
             type = "ANR",
             message = "Application Not Responding: main thread blocked for ≥ ${config.anrThresholdMs} ms",
             stack = "ANR\n$stack", source = "anr", isCrash = false, thread = "main"))
+        notifyError(false)
+    }
+
+    /** Runs listeners on the calling thread; for crashes that is the crashing thread (listeners persist synchronously). */
+    private fun notifyError(isCrash: Boolean) {
+        if (errorListeners.isEmpty()) return
+        if (sessions.peek()?.sampled != true) return
+        val ts = clock.nowMs()
+        for (l in errorListeners) Internal.guard("errorListener", Unit) { l.onError(ts, isCrash) }
     }
 
     /**
@@ -223,6 +237,7 @@ internal class RumCore(
      */
     fun crash(thread: Thread, t: Throwable) = Internal.guard("crash", Unit) {
         flushPendingActions()
+        notifyError(true)
         val json = build(EventType.ERROR, errorPayload(t, "crash", true, thread.name), emptyMap(), true, null) ?: run {
             pipeline.persist(); return@guard
         }
@@ -267,6 +282,12 @@ internal class RumCore(
             }
             pipeline.add(event.toJson())
         }
+
+    /**
+     * Session for session replay: rotates an expired session (emitting SESSION_START like any event) but does
+     * not extend it, so a recording alone never keeps a session alive.
+     */
+    fun replaySession(): SessionManager.Session = touchSession(false).first
 
     /** Current context for crash attribution (does not start or extend a session). */
     fun crashContext(): CrashContext? {

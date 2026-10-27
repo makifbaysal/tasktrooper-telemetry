@@ -21,6 +21,8 @@ final class TrooperCore: @unchecked Sendable {
     let anonymousId: String
 
     let connection = Locked("unknown")
+    /// Called (on `queue`) after an ERROR of the current, sampled session is recorded — session replay's on-error buffer.
+    let errorObservers = Locked<[@Sendable (Int64) -> Void]>([])
     let sessionSampled = Locked(true)
     let frameStats = Locked(FrameStats())
 
@@ -114,12 +116,23 @@ final class TrooperCore: @unchecked Sendable {
     }
 
     /// Builds and buffers one event. Must run on `queue`.
-    func emit(_ type: RumEventType, ts: Int64, touchSession: Bool = true, _ fill: (inout RumEvent) -> Void) {
+    func emit(_ type: RumEventType, ts: Int64, touchSession: Bool = true, notifyErrors: Bool = true, _ fill: (inout RumEvent) -> Void) {
         let session = currentSession(ts: ts, touch: touchSession)
         guard session.sampled else { return }
         var e = base(type, ts: ts, session: session)
         fill(&e)
         append(e)
+        if type == .error, notifyErrors {
+            for observer in errorObservers.current { observer(ts) }
+        }
+    }
+
+    /// Session for session replay: rotates an expired session (SESSION_START like any event) without extending
+    /// an active one, so recording alone never keeps a session alive. Must run on `queue`.
+    func replaySession() -> SessionManager.Session {
+        let now = clock.nowMs()
+        if let s = sessions.current, !sessions.isExpired(s, nowMs: now) { return s }
+        return currentSession(ts: now, touch: true)
     }
 
     private func append(_ event: RumEvent) {
@@ -247,7 +260,8 @@ final class TrooperCore: @unchecked Sendable {
     func emitCrash(_ report: CrashReport) {
         guard report.sessionId != CrashReporter.unsampledSession else { return }
         queue.async {
-            self.emit(.error, ts: report.tsMs, touchSession: false) { e in
+            // A crash of a previous process: not an error of the session being replayed now.
+            self.emit(.error, ts: report.tsMs, touchSession: false, notifyErrors: false) { e in
                 if !report.sessionId.isEmpty { e.sessionId = report.sessionId }
                 e.viewId = report.viewId.isEmpty ? nil : report.viewId
                 e.viewName = report.viewName.isEmpty ? nil : report.viewName

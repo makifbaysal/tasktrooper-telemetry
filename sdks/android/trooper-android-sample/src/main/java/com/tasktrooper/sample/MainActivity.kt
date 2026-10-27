@@ -9,7 +9,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.NavHost
@@ -18,6 +24,7 @@ import androidx.navigation.compose.rememberNavController
 import com.tasktrooper.android.TaskTrooper
 import com.tasktrooper.android.compose.TrooperNavigationTracking
 import com.tasktrooper.android.compose.trooperAction
+import com.tasktrooper.android.compose.trooperUnmask
 import com.tasktrooper.android.okhttp.TrooperInterceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -35,7 +42,11 @@ class MainActivity : ComponentActivity() {
                 NavHost(nav, startDestination = "home") {
                     composable("home") {
                         Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Text("TaskTrooper sample")
+                            // Static UI copy is safe to show in session replay; everything else stays masked.
+                            Text("TaskTrooper sample", Modifier.trooperUnmask())
+                            var password by remember { mutableStateOf("") }
+                            OutlinedTextField(password, { password = it }, label = { Text("Password") },
+                                visualTransformation = PasswordVisualTransformation()) // always masked in replay
                             Button(onClick = { nav.navigate("product/42") }, modifier = Modifier.trooperAction("open_product")) {
                                 Text("Open product")
                             }

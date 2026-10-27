@@ -182,6 +182,33 @@ Extensions usually have no view controllers worth tracking — set `trackViews =
   that still declare 13/14 with older Xcode versions; with Xcode 27 the effective minimum is raised to 15
   automatically. No 13/14-only API paths were removed, but they are only exercised by older Xcodes.
 
+## Session replay (`TaskTrooperReplay`)
+
+Wireframe replay (iOS only): window hierarchies become rectangles with kind, colors, corner radius and **masked**
+text — never pixels or screenshots. SPM product `TaskTrooperReplay` / pod `TaskTrooper/Replay`.
+
+```swift
+import TaskTrooper
+import TaskTrooperReplay   // SPM only
+
+TaskTrooper.start(config, replay: .init(sampleRate: 0.1, onErrorSampleRate: 1.0))
+```
+
+- **Sampling** per RUM session (unsampled RUM sessions are never recorded): `sampleRate` records from the start;
+  otherwise `onErrorSampleRate` keeps the last 60 s in memory and uploads it (then keeps recording) on the first ERROR
+  (handled error, hang, network error). Crashes cannot flush the buffer (signal handler); in recorded sessions only
+  the last ≤ 5 s segment is lost.
+- **Privacy:** all text masked by default (`•`, length kept); `UITextField` / `UITextView` / secure entry always (their
+  subviews are never read); images are boxes; `WKWebView` is a black box; keyboard windows are skipped. Opt in with
+  `view.trooperUnmask = true` (subtree; `false` forces masking) or SwiftUI `.trooperUnmask()`.
+- **SwiftUI** is best effort: CALayer fills/borders of hosting views plus the accessibility elements SwiftUI exposes
+  (text, buttons, images). Embedded UIKit views (e.g. `TextField`'s `UITextField`) are mapped normally.
+- **Cost:** a main run loop observer marks the UI dirty; captures at most 2 fps (trailing capture after a burst), throttle
+  grows with capture cost (≈ 1% of main-thread time), traversal stops at 1500 nodes / 12 ms; unchanged frames are not
+  recorded. Touches via a `UIWindow.sendEvent(_:)` hook (observe only), keyboard via UIKit notifications.
+- **Delivery:** segments of ≤ 5 s or ≤ 256 KB, gzip, `POST /v1/replay` with the RUM key/backoff; offline segments kept up
+  to `maxQueueBytes` (2 MB), newer ones dropped beyond that. No-op in app extensions and on tvOS.
+
 ## Hybrid apps (Flutter / React Native)
 
 `TaskTrooper.hybridContext()`, `TaskTrooper.setHybridContext(_:)` and `TaskTrooper.processStartTimeMs()` implement
