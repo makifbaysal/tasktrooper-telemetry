@@ -76,6 +76,7 @@ func refParam(r *http.Request) *store.EndpointRef {
 }
 
 func (s *Server) routes(r chi.Router) {
+	r.Post("/ai/incident-summary", s.incidentSummary)
 	// ---- APM
 	r.Get("/overview/series", s.withQ(func(w http.ResponseWriter, r *http.Request, q store.Q) {
 		v, err := s.Store.RedSeries(r.Context(), q, store.RedFilter{})

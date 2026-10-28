@@ -177,6 +177,8 @@ okuma/health → low; `ANY` method'da DB yazma ifadesi yazma sayılır; consumer
 
 ## Çıktılar
 
+Yerel geliştirme kopyasında Code insights çekmecesi envanter zenginleştirme, monitor önerisi ve yük testi taslağı için `/local-ai/*` mock uç noktalarını çağırır. Bu çağrılar `services/api/cmd/ai-playground` ile sunulur, kredi harcamaz ve gerçek codeintel analizinden bağımsızdır. Üretim akışındaki codeintel kotası yukarıdaki `aiquota` kurallarıyla yönetilir.
+
 - **Envanter** (`inventory_items`, Code insights ekranı): öğe, servis, dosya:satır, kritiklik, `observed`, `monitored`, `dead`
   (kodda var, 30 gün trafik yok; servis hiç enstrümante değilse işaretlenmez), `shadow` (trafik var, kodda yok; `repository_id` NULL),
   `summary`, `llm`, `meta.stats` (7 gün count/errors/p95/rpm/errorRate).

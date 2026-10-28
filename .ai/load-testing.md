@@ -83,6 +83,8 @@ teknik olarak engellenemez — bilinen açık).
 
 ## Senaryo üretimi
 
+Lokal mock UI'da HTTP endpoint envanter detayındaki `Draft load test` aksiyonu, doğrulanmış staging hedefi placeholder'ı içeren YAML taslağı gösterir. Taslak bir run başlatmaz.
+
 - **Envanterden:** codeintel'in çıkardığı endpoint'ler + `loadtest_hint` (payload şeması) → seçilen endpoint'ler için taslak.
 - **Gerçek trafikten:** son 7 günün route dağılımı ve RUM akışları (sayfa geçiş olasılıkları) → gerçekçi trafik karışımı. "Production trafiğinin 3 katı" gibi hedefler.
 - Üretilen senaryo her zaman `draft`; kullanıcı onayı olmadan koşmaz.

@@ -1,8 +1,9 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { AlertOctagon, ArrowRight, Sparkles } from 'lucide-react';
 import { Sparkline, TimeSeries } from '@/components/charts';
 import {
-  Badge, Button, Card, Drawer, DrawerSection, KeyValues, Meter, MetricCard, PageHeader, Section, StatusBadge, Table, useDrawer,
+  Badge, Button, Card, Drawer, DrawerSection, KeyValues, Meter, MetricCard, PageHeader, Section, Select, StatusBadge, Table, useDrawer,
 } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
 import {
@@ -23,6 +24,11 @@ export function Overview() {
   const { range, env } = useApp();
   const nav = useNavigate();
   const inc = useDrawer<Incident>();
+  const [askOpen, setAskOpen] = useState(false);
+  const [question, setQuestion] = useState('health');
+  const [answer, setAnswer] = useState('');
+  const [askError, setAskError] = useState('');
+  const [asking, setAsking] = useState(false);
   const ts = timestamps(range);
   const backend = services.filter((s) => s.type === 'http' || s.type === 'consumer' || s.type === 'worker');
   const rpm = backend.reduce((a, s) => a + s.rpm, 0);
@@ -59,9 +65,28 @@ export function Overview() {
   const open = incidents.filter((i) => i.state !== 'resolved');
   const ordered = [...backend].sort((a, b) => ['critical', 'warning', 'ok'].indexOf(a.status) - ['critical', 'warning', 'ok'].indexOf(b.status) || b.rpm - a.rpm);
 
+  const askTelemetry = async () => {
+    setAsking(true);
+    setAskError('');
+    try {
+      const response = await fetch('/local-ai/ask-telemetry', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, rpm, errorRate: err, p95: p95Now, openIncidents: open.length }),
+      });
+      if (!response.ok) throw new Error(`Local mock server returned HTTP ${response.status}`);
+      const result = await response.json() as { answer: string };
+      setAnswer(result.answer);
+    } catch (cause) {
+      setAskError(cause instanceof Error ? cause.message : 'Could not reach the local mock server.');
+    } finally {
+      setAsking(false);
+    }
+  };
+
   return (
     <>
-      <PageHeader title="Overview" subtitle={`shop-platform · ${env} · last ${range}`} />
+      <PageHeader title="Overview" subtitle={`shop-platform · ${env} · last ${range}`}
+        actions={<Button icon={<Sparkles size={14} />} onClick={() => setAskOpen(true)}>Ask telemetry</Button>} />
 
       {open.length > 0 && (
         <Card flush title={<span className="row"><AlertOctagon size={16} color="var(--status-critical)" aria-hidden />{open.length} open incidents</span>}
@@ -151,6 +176,21 @@ export function Overview() {
       </div>
 
       {inc.item && <IncidentDrawer incident={inc.item} onClose={inc.close} />}
+      <Drawer open={askOpen} onClose={() => setAskOpen(false)} title="Ask telemetry" subtitle="Read-only questions about the current overview">
+        <DrawerSection title="Question" aside="Offline mock · 0 tokens">
+          <div className="stack" style={{ gap: 'var(--space-3)' }}>
+            <Select aria-label="Telemetry question" value={question} onChange={(event) => { setQuestion(event.target.value); setAnswer(''); }}
+              options={[
+                { value: 'health', label: 'How is the project doing now?' },
+                { value: 'errors', label: 'What is happening with errors?' },
+                { value: 'latency', label: 'What is happening with latency?' },
+              ]} />
+            <div><Button variant="primary" disabled={asking} onClick={() => void askTelemetry()}>{asking ? 'Checking…' : 'Ask'}</Button></div>
+            {answer && <p className="secondary" style={{ margin: 0 }}>{answer}</p>}
+            {askError && <p role="alert" className="secondary" style={{ margin: 0 }}>{askError}</p>}
+          </div>
+        </DrawerSection>
+      </Drawer>
     </>
   );
 }
@@ -176,7 +216,7 @@ function IncidentDrawer({ incident, onClose }: { incident: Incident; onClose: ()
   return (
     <Drawer open onClose={onClose} title={incident.title}
       subtitle={<><StatusBadge status={incident.state === 'acknowledged' ? 'acknowledged' : incident.state === 'pending' ? 'pending' : 'firing'} /><span className="muted">started {ago(incident.startedAt)}</span></>}
-      actions={kpi ? <Button size="sm" onClick={() => nav(`/kpis/${kpi.id}`)}>Open KPI <ArrowRight size={14} /></Button> : svc && <Button size="sm" onClick={() => nav(`/services/${svc.id}`)}>Open {svc.name} <ArrowRight size={14} /></Button>}>
+      actions={<Button size="sm" onClick={() => nav(`/incidents?id=${encodeURIComponent(incident.id)}`)}>Open incident <ArrowRight size={14} /></Button>}>
       {cause && (
         <section className="card rca" style={{ padding: 'var(--space-4)' }}>
           <div className="stack" style={{ gap: 8 }}>

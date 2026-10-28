@@ -50,12 +50,22 @@ service of `deploy/docker-compose.yml` (profile `app`).
 | `TT_AI_PRICES` | built-in table | LLM prices per model, `<model>=<in>/<out>,...` (USD per 1M tokens → credits; `services/pkg/aiquota`). Invalid value = startup error |
 | `TT_AI_DEFAULT_PRICE` | aiquota default | `<in>/<out>` for models missing from `TT_AI_PRICES` |
 | `TT_AI_PLAN_CREDITS` | `free=100,team=5000,enterprise=-1` | monthly AI credits per plan (`-1` = unlimited); org override via `PUT /orgs/{org}/ai-quota` |
+| `TT_AI_PROVIDER` | `mock` | Incident-summary provider: `mock`, `meta`, or `baseten`. Mock makes no external request. |
+| `TT_AI_ALLOW_PAID` | unset | Must be exactly `true` before the incident-summary route can use a paid provider. |
+| `MODEL_API_KEY` / `BASETEN_API_KEY` | unset | Server-side key for the selected provider; a key alone does not enable paid calls. |
+| `TT_AI_MODEL` | provider default | Optional incident-summary model override. |
 | `TT_FAAS_LAMBDA_REQUEST_PRICE` | `0.20` | USD per 1M Lambda requests (serverless cost estimate) |
 | `TT_FAAS_LAMBDA_GBS_PRICE`, `TT_FAAS_LAMBDA_GBS_PRICE_ARM64` | `0.0000166667`, `0.0000133334` | USD per GB-second (x86_64 / arm64) |
 | `TT_FAAS_AZURE_GBS_PRICE`, `TT_FAAS_AZURE_REQUEST_PRICE` | `0.000016`, `0.20` | Azure Functions consumption plan: USD per GB-s, per 1M executions |
 | `TT_AZURE_LOGIN_URL`, `TT_AZURE_ARM_URL` | `https://login.microsoftonline.com`, `https://management.azure.com` | Azure endpoints for `POST /integrations/test` (tests / sovereign clouds) |
 | `TT_S3_ENDPOINT`, `TT_S3_ACCESS_KEY`, `TT_S3_SECRET_KEY`, `TT_S3_REGION` | –, –, –, `us-east-1` | S3-compatible store of session replay segments (contracts §12, §23; dev SeaweedFS `http://localhost:9002`, `trooper` / `trooper-secret`). Unset endpoint = `GET /replays/{id}/segments/{n}` answers 503 (index endpoints still work) |
 | `TT_REPLAY_S3_BUCKET` | `tt-replays` | replay bucket (read only; the ingest writer creates it) |
+
+## Local AI development
+
+`POST /api/v1/ai/incident-summary` is an authenticated, explicit integration route. The default provider is a deterministic offline mock with zero token usage. `GOWORK=off go run ./cmd/ai-demo` tests it without Docker. For the dashboard's contextual AI buttons, run `GOWORK=off go run ./cmd/ai-playground` from `services/api` alongside the Vite web server; those `/local-ai/*` routes are also offline mocks.
+
+The incident-summary route can use Meta or Baseten only when `TT_AI_PROVIDER`, `TT_AI_ALLOW_PAID=true`, and the corresponding server-side key are set. It has bounded input, a 300-token output cap, a 15-second timeout, and no retry. The team's `aiquota` system currently covers code-intelligence enrichment; this standalone incident-summary route does **not** reserve credits through it yet. Keep this route in mock mode until quota accounting is wired in for production use.
 
 ## Test
 
