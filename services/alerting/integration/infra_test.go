@@ -121,11 +121,11 @@ func TestInfraFaaS(t *testing.T) {
 		caller: "web", durMs: 40, errEvery: 2}, to.Add(-10*time.Minute), 10, 20)
 
 	type mon struct {
-		id                     int64
+		id                    int64
 		kind, target, q, cond string
-		want                   string
-		value                  float64
-		top                    string // detail.entities[0].id
+		want                  string
+		value                 float64
+		top                   string // detail.entities[0].id
 	}
 	mons := []mon{
 		{9601101, "infra", `{}`, `{"entity":"pod","metric":"restarts"}`, `{"op":">","threshold":3,"window":"10m"}`, "firing", 4, "shop/api-1"},
