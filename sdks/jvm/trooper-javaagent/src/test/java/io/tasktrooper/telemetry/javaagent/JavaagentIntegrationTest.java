@@ -91,6 +91,74 @@ class JavaagentIntegrationTest {
         }
     }
 
+    /** {@code TROOPER_PROFILING=true}: JFR runs inside the agent and uploads folded profiles with route sections. */
+    @Test
+    void uploadsProfilesWithRouteSections() throws Exception {
+        List<String[]> profiles = new CopyOnWriteArrayList<>();
+        List<ExportTraceServiceRequest> traces = new CopyOnWriteArrayList<>();
+        HttpServer ingest = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        ingest.createContext("/", ex -> {
+            byte[] body = ex.getRequestBody().readAllBytes();
+            if ("gzip".equalsIgnoreCase(ex.getRequestHeaders().getFirst("Content-Encoding"))) {
+                body = new GZIPInputStream(new java.io.ByteArrayInputStream(body)).readAllBytes();
+            }
+            String path = ex.getRequestURI().getPath();
+            if (path.equals("/v1/profiles")) {
+                profiles.add(new String[] {ex.getRequestURI().getRawQuery(), new String(body, java.nio.charset.StandardCharsets.UTF_8),
+                        ex.getRequestHeaders().getFirst("x-trooper-key")});
+            } else if (path.equals("/v1/traces")) {
+                traces.add(ExportTraceServiceRequest.parseFrom(body));
+            }
+            ex.sendResponseHeaders(200, -1);
+            ex.close();
+        });
+        ingest.start();
+        try {
+            String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
+            Path log = Files.createTempFile("profiledapp", ".log");
+            ProcessBuilder pb = new ProcessBuilder(java, "-javaagent:" + AGENT, "-cp",
+                    System.getProperty("trooper.testAppClasspath"), "io.tasktrooper.telemetry.testapp.ProfiledApp", "17")
+                    .redirectErrorStream(true)
+                    .redirectOutput(log.toFile());
+            pb.environment().put("TROOPER_DSN", "http://agent_test_key@127.0.0.1:" + ingest.getAddress().getPort() + "/1");
+            pb.environment().put("TROOPER_SERVICE", "profiled-app");
+            pb.environment().put("TROOPER_ENV", "test");
+            pb.environment().put("TROOPER_PROFILING", "true");
+            pb.environment().put("TROOPER_PROFILING_PERIOD", "5");
+            pb.environment().put("OTEL_METRICS_EXPORTER", "none");
+            pb.environment().put("OTEL_LOGS_EXPORTER", "none");
+            pb.environment().put("OTEL_BSP_SCHEDULE_DELAY", "100");
+            Process p = pb.start();
+            assertThat(p.waitFor(120, TimeUnit.SECONDS)).as("app finished").isTrue();
+            String output = Files.readString(log);
+            assertThat(output).contains("requests=");
+
+            assertThat(profiles).as("profiles uploaded; app output:\n" + output).isNotEmpty();
+            // JFR's execution sampler density varies by platform (sparse on macOS), so any profile type will do here;
+            // cpu attribution itself is covered by TrooperProfilerTest in trooper-otel-core
+            assertThat(profiles).allSatisfy(u -> assertThat(u[0]).containsAnyOf("type=cpu&unit=nanoseconds",
+                    "type=alloc_space&unit=bytes", "type=lock&unit=nanoseconds"));
+            String[] labelled = profiles.stream().filter(u -> u[1].contains("# trooper.route=/burn"))
+                    .findFirst().orElseThrow(() -> new AssertionError("no profile with a /burn section in "
+                            + profiles.stream().map(u -> u[0]).toList()));
+            assertThat(labelled[0]).contains("format=folded", "service=profiled-app", "env=test", "runtime=jvm", "start=", "end=");
+            assertThat(labelled[2]).isEqualTo("agent_test_key");
+            String section = labelled[1].substring(labelled[1].indexOf("# trooper.route=/burn"));
+            assertThat(section).startsWith("# trooper.route=/burn trooper.method=GET\n");
+            assertThat(section).contains("io.tasktrooper.telemetry.testapp.ProfiledApp.lambda$main$0");
+
+            // the profile uploads themselves are not traced as application HTTP calls
+            List<Span> spans = traces.stream().flatMap(r -> r.getResourceSpansList().stream())
+                    .flatMap(rs -> rs.getScopeSpansList().stream()).flatMap(ss -> ss.getSpansList().stream())
+                    .collect(Collectors.toList());
+            assertThat(spans).isNotEmpty();
+            assertThat(spans).noneMatch(s -> s.getAttributesList().stream()
+                    .anyMatch(kv -> kv.getValue().getStringValue().contains("/v1/profiles")));
+        } finally {
+            ingest.stop(0);
+        }
+    }
+
     private static Optional<String> attr(List<KeyValue> attrs, String key) {
         return attrs.stream().filter(kv -> kv.getKey().equals(key)).map(kv -> kv.getValue().getStringValue()).findFirst();
     }

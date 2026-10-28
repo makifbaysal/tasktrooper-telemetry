@@ -21,6 +21,8 @@ var MonitorKinds = map[string]bool{
 	// engine kinds (services/alerting/README.md)
 	"error_rate": true, "throughput": true, "apdex": true, "log_count": true, "log_pattern": true, "dlq": true,
 	"consumer_failures": true, "crash_rate": true,
+	// Faz 6 (contracts §20, §21), AI monitoring (§25)
+	"infra": true, "faas": true, "llm": true,
 }
 
 var severitiesOK = map[string]bool{"critical": true, "warning": true, "info": true}
@@ -35,7 +37,7 @@ type MonitorFilter struct {
 }
 
 const monitorCols = `m.id, m.name, m.kind, m.target, m.query, m.condition, m.severity, m.channels, m.source, m.status, m.state,
-  m.state_since, m.last_value, coalesce(k.name, ''), m.muted_until`
+  m.state_since, m.last_value, coalesce(k.name, ''), m.muted_until, coalesce(m.code_ref, '')`
 
 const monitorFrom = ` FROM monitors m LEFT JOIN kpis k ON k.id::text = m.target->>'kpiId' AND k.project_id = m.project_id`
 
@@ -46,7 +48,7 @@ func scanMonitor(row pgx.Row) (model.Monitor, error) {
 	var source, state, kpiName string
 	var since time.Time
 	var muted *time.Time
-	if err := row.Scan(&id, &m.Name, &m.Kind, &target, &query, &cond, &m.Severity, &m.Channels, &source, &m.Status, &state, &since, &m.LastValue, &kpiName, &muted); err != nil {
+	if err := row.Scan(&id, &m.Name, &m.Kind, &target, &query, &cond, &m.Severity, &m.Channels, &source, &m.Status, &state, &since, &m.LastValue, &kpiName, &muted, &m.CodeRef); err != nil {
 		return m, err
 	}
 	m.ID = strconv.FormatInt(id, 10)
@@ -56,9 +58,9 @@ func scanMonitor(row pgx.Row) (model.Monitor, error) {
 	if m.Channels == nil {
 		m.Channels = []string{}
 	}
-	m.Source = map[string]string{"suggested": "code"}[source]
-	if m.Source == "" {
-		m.Source = source
+	m.Source = source
+	if source == "suggested" { // pre-005 rows
+		m.Source = "suggestion"
 	}
 	mutedNow := muted != nil && muted.After(time.Now())
 	if mutedNow {
@@ -194,14 +196,15 @@ func normalizeMonitor(in *model.MonitorInput) (target, query, cond []byte, sourc
 		return nil, nil, nil, "", Invalid("status must be active|muted|draft")
 	}
 	switch in.Source {
-	case "", "manual":
-		source = "manual"
-	case "code", "suggested":
-		source = "suggested"
-	case "template":
-		source = "template"
+	case "": // create: manual; update: keep the stored source
+	case "manual", "template":
+		source = in.Source
+	case "suggestion", "suggested":
+		source = "suggestion"
+	case "code":
+		return nil, nil, nil, "", Invalid("source code is reserved for monitors managed in a repository (.trooper/monitors/*.yaml)")
 	default:
-		return nil, nil, nil, "", Invalid("source must be manual|code|template")
+		return nil, nil, nil, "", Invalid("source must be manual|template|suggestion")
 	}
 	if in.Kind == "consumer_lag" {
 		if in.Queue == nil {
@@ -220,6 +223,20 @@ func normalizeMonitor(in *model.MonitorInput) (target, query, cond []byte, sourc
 		}
 		if !json.Valid(query) || query[0] != '{' {
 			return nil, nil, nil, "", Invalid("query must be a JSON object")
+		}
+		switch in.Kind {
+		case "infra":
+			if err := validateInfraQuery(query); err != nil {
+				return nil, nil, nil, "", err
+			}
+		case "faas":
+			if err := validateFaasQuery(query); err != nil {
+				return nil, nil, nil, "", err
+			}
+		case "llm":
+			if err := validateLLMQuery(query); err != nil {
+				return nil, nil, nil, "", err
+			}
 		}
 	}
 	if in.Condition.Op == "" {
@@ -244,6 +261,9 @@ func (d *DB) CreateMonitor(ctx context.Context, in model.MonitorInput) (*model.M
 	if err != nil {
 		return nil, err
 	}
+	if source == "" {
+		source = "manual"
+	}
 	var id int64
 	if err := d.pg.QueryRow(ctx, `INSERT INTO monitors (project_id, name, kind, target, query, condition, severity, channels, source, status)
 	  VALUES ({{project}}, $1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
@@ -263,8 +283,11 @@ func (d *DB) UpdateMonitor(ctx context.Context, id string, in model.MonitorInput
 	if err != nil {
 		return nil, err
 	}
+	if err := d.ensureEditable(ctx, n); err != nil {
+		return nil, err
+	}
 	tag, err := d.pg.Exec(ctx, `UPDATE monitors SET name = $2, kind = $3, target = $4, query = $5, condition = $6, severity = $7,
-	  channels = $8, source = $9, status = $10, updated_at = now() WHERE {{tenant}} AND id = $1`,
+	  channels = $8, source = coalesce(nullif($9, ''), source), status = $10, updated_at = now() WHERE {{tenant}} AND id = $1 AND source <> 'code'`,
 		n, in.Name, in.Kind, target, query, cond, in.Severity, in.Channels, source, in.Status)
 	if err != nil {
 		return nil, err
@@ -275,13 +298,38 @@ func (d *DB) UpdateMonitor(ctx context.Context, id string, in model.MonitorInput
 	return d.GetMonitor(ctx, id)
 }
 
+// ErrManagedInRepo is the 409 for changing a source = 'code' monitor.
+const managedInRepo = "managed in repository: change the monitor's .trooper/monitors file instead"
+
+// ensureEditable fails with 409 for alert-as-code monitors and 404 for unknown ones.
+func (d *DB) ensureEditable(ctx context.Context, id int64) error {
+	var source, ref string
+	err := d.pg.QueryRow(ctx, `SELECT source, coalesce(code_ref, '') FROM monitors WHERE {{tenant}} AND id = $1`, id).Scan(&source, &ref)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if source == "code" {
+		if ref != "" {
+			return Conflict("managed in repository: change " + ref + " instead")
+		}
+		return Conflict(managedInRepo)
+	}
+	return nil
+}
+
 // DeleteMonitor removes a monitor (its incidents keep monitor_id = NULL).
 func (d *DB) DeleteMonitor(ctx context.Context, id string) error {
 	n, err := parseID(id)
 	if err != nil {
 		return err
 	}
-	tag, err := d.pg.Exec(ctx, `DELETE FROM monitors WHERE {{tenant}} AND id = $1`, n)
+	if err := d.ensureEditable(ctx, n); err != nil {
+		return err
+	}
+	tag, err := d.pg.Exec(ctx, `DELETE FROM monitors WHERE {{tenant}} AND id = $1 AND source <> 'code'`, n)
 	if err != nil {
 		return err
 	}
@@ -297,6 +345,12 @@ func (d *DB) PatchMonitor(ctx context.Context, id string, p model.MonitorPatch) 
 	n, err := parseID(id)
 	if err != nil {
 		return nil, err
+	}
+	// Alert-as-code monitors are read-only; muting (mutedUntil alone) stays possible, e.g. Slack "Mute 1h".
+	if p.Name != nil || p.Severity != nil || p.Channels != nil || p.Status != nil || p.Condition != nil {
+		if err := d.ensureEditable(ctx, n); err != nil {
+			return nil, err
+		}
 	}
 	sets := []string{"updated_at = now()"}
 	args := []any{n}
@@ -533,15 +587,18 @@ func (d *DB) TransitionIncident(ctx context.Context, id, action string) (*model.
 		return nil, err
 	}
 	var sql, kind string
+	a := ActorOf(ctx)
+	args := []any{n}
 	switch action {
 	case "ack":
-		sql, kind = `UPDATE incidents SET state = 'acknowledged', acked_at = now() WHERE {{tenant}} AND id = $1 AND state = 'firing'`, "acked"
+		sql, kind = `UPDATE incidents SET state = 'acknowledged', acked_at = now(), acked_by = $2 WHERE {{tenant}} AND id = $1 AND state = 'firing'`, "acked"
+		args = append(args, nullID(a.UserID))
 	case "resolve":
 		sql, kind = `UPDATE incidents SET state = 'resolved', resolved_at = now() WHERE {{tenant}} AND id = $1 AND state <> 'resolved'`, "resolved"
 	default:
 		return nil, Invalid("unknown action")
 	}
-	tag, err := d.pg.Exec(ctx, sql, n)
+	tag, err := d.pg.Exec(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -551,8 +608,9 @@ func (d *DB) TransitionIncident(ctx context.Context, id, action string) (*model.
 		}
 		return nil, ErrConflict
 	}
+	data, _ := json.Marshal(map[string]any{"by": a.via(), "userId": idStr(a.UserID), "email": a.Email})
 	if _, err := d.pg.Exec(ctx, `INSERT INTO incident_events (incident_id, kind, data)
-	  SELECT id, $2, '{"by": "api"}'::jsonb FROM incidents WHERE {{tenant}} AND id = $1`, n, kind); err != nil {
+	  SELECT id, $2, $3::jsonb FROM incidents WHERE {{tenant}} AND id = $1`, n, kind, data); err != nil {
 		return nil, err
 	}
 	return d.GetIncident(ctx, id)

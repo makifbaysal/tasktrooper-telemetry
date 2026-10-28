@@ -238,7 +238,7 @@ func TestAWS(t *testing.T) {
 }
 
 func TestUnknownProviderAndScrub(t *testing.T) {
-	if r := Run(context.Background(), "azure", nil, "x"); r.OK || !strings.Contains(r.Message, "unknown provider") {
+	if r := Run(context.Background(), "oracle", nil, "x"); r.OK || !strings.Contains(r.Message, "unknown provider") {
 		t.Fatalf("%+v", r)
 	}
 	if r := Run(context.Background(), "neon", json.RawMessage(`[1]`), token); r.OK || !strings.Contains(r.Message, "config") {
@@ -254,5 +254,41 @@ func TestUnknownProviderAndScrub(t *testing.T) {
 	r := Run(context.Background(), "neon", nil, token)
 	if r.OK || strings.Contains(r.Message, token) || !strings.Contains(r.Message, "[redacted]") {
 		t.Fatalf("%+v", r)
+	}
+}
+
+func TestAzure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/tenant-1/oauth2/v2.0/token":
+			_ = r.ParseForm()
+			if r.Form.Get("client_secret") != "s3cret" || r.Form.Get("client_id") != "app-1" || r.Form.Get("grant_type") != "client_credentials" {
+				w.WriteHeader(401)
+				fmt.Fprint(w, `{"error_description":"AADSTS7000215: Invalid client secret s3cret-wrong"}`)
+				return
+			}
+			fmt.Fprint(w, `{"access_token":"`+token+`"}`)
+		case r.URL.Path == "/subscriptions" && bearerOK(r):
+			fmt.Fprint(w, `{"value":[{"subscriptionId":"sub-1","displayName":"Prod","state":"Enabled"}]}`)
+		default:
+			w.WriteHeader(403)
+		}
+	}))
+	defer srv.Close()
+	oldL, oldA := AzureLoginBase, AzureARMBase
+	AzureLoginBase, AzureARMBase = srv.URL, srv.URL
+	defer func() { AzureLoginBase, AzureARMBase = oldL, oldA }()
+	cfg := json.RawMessage(`{"tenantId":"tenant-1","clientId":"app-1","subscriptionIds":["sub-1"]}`)
+	res := Run(context.Background(), "azure", cfg, "s3cret")
+	if !res.OK || len(res.Resources) != 1 || res.Resources[0].Name != "Prod" {
+		t.Fatalf("ok: %+v", res)
+	}
+	res = Run(context.Background(), "azure", cfg, "s3cret-wrong")
+	if res.OK || strings.Contains(res.Message, "s3cret-wrong") || !strings.Contains(res.Message, "AADSTS7000215") {
+		t.Fatalf("bad secret: %+v", res)
+	}
+	res = Run(context.Background(), "azure", json.RawMessage(`{"tenantId":"tenant-1","clientId":"app-1","subscriptionIds":["nope"]}`), "s3cret")
+	if res.OK {
+		t.Fatalf("unknown subscription: %+v", res)
 	}
 }

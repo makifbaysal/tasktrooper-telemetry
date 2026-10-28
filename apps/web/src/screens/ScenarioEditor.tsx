@@ -1,15 +1,16 @@
 import { useData } from '@/data/remote';
 import { useMemo, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router';
-import { ChevronDown, ChevronRight, Loader2, Play, Plus, Sparkles, Timer, Trash2, User } from 'lucide-react';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
+import { AlertTriangle, Check, ChevronDown, ChevronRight, Loader2, Play, Plus, ShieldCheck, Sparkles, Timer, Trash2, User } from 'lucide-react';
 import { TimeSeries } from '@/components/charts';
 import {
-  Badge, Button, Card, CodeBlock, EmptyState, Field, Input, PageHeader, Section, Segmented, Select, Textarea,
+  Badge, Button, Callout, Card, CodeBlock, EmptyState, Field, Input, PageHeader, Section, Segmented, Select, Textarea,
 } from '@/components/ui';
+import { RunBlocked, approveScenario, checkTarget, limitProblems, scenarioState, startRunChecked } from '@/data/loadtest';
 import { endpointsFor, scenarios, services, type Endpoint } from '@/data';
 import { compact, duration, ms, pct } from '@/lib/format';
 import {
-  DEFAULT_GATE, LEVEL_PRESETS, REGIONS, SPEC, aiRequestSpec, blankRequestSpec, levelsOf, levelsToStages, saveScenario, startRun,
+  DEFAULT_GATE, LEVEL_PRESETS, REGIONS, SPEC, aiRequestSpec, blankRequestSpec, levelsOf, levelsToStages, saveScenario,
   type Level, type LoadMode, type Progression, type RequestSpec, type ScenarioDraft,
 } from '@/lib/loadtest';
 import { MethodBadge } from '@/components/ui';
@@ -142,9 +143,36 @@ export function ScenarioEditor() {
     p95Limit, errLimit: Number(st.err || 1) / 100,
   });
   const back = params.get('service') ? `/services/${params.get('service')}?tab=loadtests` : '/load-tests';
-  const save = (run: boolean) => {
+  const isDraft = !!editing && scenarioState(editing.id) === 'draft';
+  const target = checkTarget(st.target);
+  const peakVusPlanned = st.mode === 'rps' ? Math.max(1, Math.ceil(peak * (0.2 + st.thinkTime))) : peak;
+  const limits = limitProblems(peakVusPlanned, total);
+  const runnable = target.ok && limits.length === 0 && !isDraft;
+  const [starting, setStarting] = useState(false);
+  const loc = useLocation();
+  const [runErr, setRunErr] = useState<RunBlocked | null>(() => {
+    const e = (loc.state as { runErr?: { kind: RunBlocked['kind']; message: string } } | null)?.runErr;
+    return e ? new RunBlocked(e.kind, e.message) : null;
+  });
+  const afterSave = (id: string) => (params.get('service') ? back : `/load-tests?scenario=${id}`);
+  const save = async (run: boolean) => {
     const id = saveScenario(draft(), editing?.id);
-    nav(run ? `/load-tests/runs/${startRun(id)}` : params.get('service') ? back : `/load-tests?scenario=${id}`);
+    if (!run) { nav(afterSave(id)); return; }
+    setStarting(true); setRunErr(null);
+    try {
+      nav(`/load-tests/runs/${await startRunChecked(id, true)}`);
+    } catch (e) {
+      // saved, but the server refused the run (limits, domain): stay and say why; "Create" again would duplicate
+      const err = e instanceof RunBlocked ? e : new RunBlocked('api', String(e));
+      setRunErr(err);
+      if (!editing) nav(`/load-tests/scenarios/${id}/edit`, { replace: true, state: { runErr: { kind: err.kind, message: err.message } } });
+    }
+    setStarting(false);
+  };
+  const saveApprove = async () => {
+    const id = saveScenario(draft(), editing?.id);
+    await approveScenario(id).catch((e: unknown) => setRunErr(new RunBlocked('api', e instanceof Error ? e.message : String(e))));
+    nav(afterSave(id));
   };
 
   // ---- planned profile (one point per 5% of the timeline, plus every level boundary)
@@ -197,15 +225,39 @@ export function ScenarioEditor() {
         subtitle={params.get('from') === 'traffic' && !editing ? 'Steps, mix, levels and request data were derived from the last 7 days of production traffic — review and adjust' : 'Load levels, traffic mix per endpoint and what each request carries'}
         actions={<>
           <Button onClick={() => nav(back)}>Cancel</Button>
-          <Button disabled={!valid} onClick={() => save(false)}>{editing ? 'Save' : 'Create scenario'}</Button>
-          <Button variant="primary" icon={<Play size={14} />} disabled={!valid} onClick={() => save(true)}>{editing ? 'Save & run' : 'Create & run'}</Button>
+          <Button disabled={!valid} onClick={() => void save(false)}>{editing ? 'Save' : 'Create scenario'}</Button>
+          {isDraft
+            ? <Button variant="primary" icon={<Check size={14} />} disabled={!valid} onClick={() => void saveApprove()}>Save & approve</Button>
+            : <Button variant="primary" icon={<Play size={14} />} disabled={!valid || !runnable || starting} title={!target.ok ? target.reason : limits[0]}
+                onClick={() => void save(true)}>{starting ? 'Starting…' : editing ? 'Save & run' : 'Create & run'}</Button>}
         </>} />
+
+      {isDraft && (
+        <Callout icon={<Sparkles size={16} aria-hidden />}>
+          <strong>Draft generated by code analysis.</strong> <span className="secondary">Review the target, levels and request data — it can run once approved.</span>
+        </Callout>
+      )}
+      {runErr && (
+        <Callout icon={<AlertTriangle size={16} aria-hidden />}>
+          <strong>Saved, but the run did not start.</strong> <span className="secondary">{runErr.message}</span>
+          {runErr.kind === 'domain' && <> <Link to="/load-tests/domains">Verify domain →</Link></>}
+        </Callout>
+      )}
+      {limits.length > 0 && (
+        <Callout icon={<AlertTriangle size={16} aria-hidden />}>
+          <strong>Over your plan limits.</strong> <span className="secondary">{limits.join(' ')}</span>
+        </Callout>
+      )}
 
       {/* 1 · target */}
       <Card title="Target">
         <div className="grid grid-3" style={{ gap: 'var(--space-3)' }}>
           <Field label="Name"><Input value={st.name} placeholder="e.g. Checkout flow" onChange={(e) => set({ name: e.target.value })} /></Field>
-          <Field label="Base URL"><Input mono value={st.target} onChange={(e) => set({ target: e.target.value })} /></Field>
+          <Field label="Base URL" hint={target.ok
+            ? <span className="row" style={{ gap: 4 }}><ShieldCheck size={12} aria-hidden />{target.local ? 'localhost — no verification needed' : `${target.host} is verified`}</span>
+            : <span>{target.reason} <Link to="/load-tests/domains">Domains →</Link></span>}>
+            <Input mono value={st.target} aria-invalid={!target.ok} onChange={(e) => set({ target: e.target.value })} />
+          </Field>
           <Field label="Regions">
             <div className="row" style={{ gap: 'var(--space-3)', minHeight: 'var(--control-h-md)', flexWrap: 'wrap' }}>
               {REGIONS.map((r) => (

@@ -104,7 +104,11 @@ func (s *Server) routes(r chi.Router) {
 	r.Route("/services/{service}", func(r chi.Router) {
 		r.Get("/", s.withQ(func(w http.ResponseWriter, r *http.Request, q store.Q) {
 			v, err := s.Store.GetService(r.Context(), q, param(r, "service"))
-			s.reply(w, r, v, err)
+			if err != nil {
+				s.fail(w, r, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, model.ServiceDetail{Service: v, HasAi: s.Store.ServiceHasAI(r.Context(), q, v.ID)})
 		}))
 		r.Get("/series", s.withQ(func(w http.ResponseWriter, r *http.Request, q store.Q) {
 			v, err := s.Store.RedSeries(r.Context(), q, store.RedFilter{Service: param(r, "service")})
@@ -185,6 +189,7 @@ func (s *Server) routes(r chi.Router) {
 		v, err := s.Store.SearchTraces(r.Context(), q, store.TraceFilter{
 			Service: qs(r, "service"), Ref: refParam(r), ErrorsOnly: qs(r, "errors") == "true", MinMs: minMs,
 			Slowest: qs(r, "sort") == "slowest", Limit: qint(r, "limit"),
+			Pod: qs(r, "pod"), Namespace: qs(r, "namespace"), Node: qs(r, "node"), Host: qs(r, "host"),
 		})
 		s.reply(w, r, v, err)
 	}))
@@ -219,7 +224,7 @@ func (s *Server) routes(r chi.Router) {
 	logFilter := func(r *http.Request) store.LogFilter {
 		before, _ := strconv.ParseInt(qs(r, "before"), 10, 64)
 		return store.LogFilter{Services: qlist(r, "service"), Levels: qlist(r, "level"), Text: qs(r, "q"), TraceID: strings.ToLower(qs(r, "traceId")),
-			Route: qs(r, "route"), Before: before, Limit: qint(r, "limit")}
+			Route: qs(r, "route"), Source: qs(r, "source"), Pod: qs(r, "pod"), Namespace: qs(r, "namespace"), Before: before, Limit: qint(r, "limit")}
 	}
 	r.Get("/logs", s.withQ(func(w http.ResponseWriter, r *http.Request, q store.Q) {
 		v, err := s.Store.SearchLogs(r.Context(), q, logFilter(r))
@@ -402,6 +407,8 @@ func (s *Server) routes(r chi.Router) {
 	}))
 
 	s.infraRoutes(r)
+	s.phase6Routes(r)
+	s.obsRoutes(r)
 	s.loadTestRoutes(r)
 	s.adminRoutes(r)
 	s.codeInsightRoutes(r)
@@ -482,7 +489,7 @@ func (s *Server) preview(r *http.Request, q store.Q, in model.MonitorInput) (mod
 			}
 		}
 		ev = rules.EvaluateOp(data, in.Condition.Op, in.Condition.Threshold, in.Condition.ForMin, stepMin)
-	case "log_count", "log_match", "log_pattern", "log_pattern_new", "dlq", "consumer_failures", "rum_vital", "crash_rate":
+	case "log_count", "log_match", "log_pattern", "log_pattern_new", "dlq", "consumer_failures", "rum_vital", "crash_rate", "llm":
 		vals, volume, err := s.Store.PreviewSeries(r.Context(), q, in.Kind, in.Target, in.Query, in.Condition)
 		if err != nil {
 			return out, err
@@ -501,7 +508,7 @@ func (s *Server) preview(r *http.Request, q store.Q, in model.MonitorInput) (mod
 		ev.Now = data[len(data)-1]
 	default:
 		return out, store.Invalid("preview supports consumer_lag, metric_threshold, latency, error_rate, throughput, log_count, log_match, " +
-			"log_pattern, log_pattern_new, dlq, consumer_failures, rum_vital and crash_rate monitors")
+			"log_pattern, log_pattern_new, dlq, consumer_failures, rum_vital, crash_rate and llm monitors")
 	}
 	if data == nil {
 		data = make([]float64, q.W.Points)

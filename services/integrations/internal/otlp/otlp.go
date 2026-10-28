@@ -29,9 +29,13 @@ import (
 	"github.com/tasktrooper/telemetry/services/integrations/internal/model"
 )
 
-// Sender posts to <base>/v1/metrics with a per-project ingest key.
+// Sender posts to <base>/v1/metrics. With InternalToken it authenticates with the internal service credential
+// (x-trooper-internal + x-trooper-project, contracts §16); otherwise, or when ingest-gw rejects the credential with
+// 401, it falls back to the per-project ingest key.
 type Sender struct {
 	MetricsURL string
+	// InternalToken is TT_INTERNAL_TOKEN (shared with ingest-gw); empty → ingest keys only.
+	InternalToken string
 	// Keys maps project id → ingest key (TT_CLOUD_INGEST_KEYS; TT_DSN's key for its project).
 	Keys    map[int64]string
 	Version string
@@ -150,20 +154,43 @@ func (s *Sender) Send(ctx context.Context, t Target, samples []model.Sample) err
 		return nil
 	}
 	key := s.Keys[t.ProjectID]
-	if key == "" {
+	if key == "" && s.InternalToken == "" {
 		return ErrNoKey
 	}
 	const chunk = 5000
 	for i := 0; i < len(samples); i += chunk {
 		j := min(i+chunk, len(samples))
-		if err := s.post(ctx, key, Build(t, s.Version, samples[i:j])); err != nil {
+		req := Build(t, s.Version, samples[i:j])
+		var err error
+		if s.InternalToken != "" {
+			err = s.post(ctx, internalAuth(s.InternalToken, t.ProjectID), req)
+			var he *httpErr
+			if errors.As(err, &he) && he.code == http.StatusUnauthorized && key != "" {
+				err = s.post(ctx, keyAuth(key), req) // ingest-gw without (or with another) TT_INTERNAL_TOKEN
+			}
+		} else {
+			err = s.post(ctx, keyAuth(key), req)
+		}
+		if err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *Sender) post(ctx context.Context, key string, req *colmetricspb.ExportMetricsServiceRequest) error {
+// authFn sets the authentication headers of one request.
+type authFn func(h http.Header)
+
+func keyAuth(key string) authFn { return func(h http.Header) { h.Set("x-trooper-key", key) } }
+
+func internalAuth(token string, project int64) authFn {
+	return func(h http.Header) {
+		h.Set("x-trooper-internal", token)
+		h.Set("x-trooper-project", strconv.FormatInt(project, 10))
+	}
+}
+
+func (s *Sender) post(ctx context.Context, auth authFn, req *colmetricspb.ExportMetricsServiceRequest) error {
 	raw, err := proto.Marshal(req)
 	if err != nil {
 		return err
@@ -201,7 +228,7 @@ func (s *Sender) post(ctx context.Context, key string, req *colmetricspb.ExportM
 		}
 		r.Header.Set("Content-Type", "application/x-protobuf")
 		r.Header.Set("Content-Encoding", "gzip")
-		r.Header.Set("x-trooper-key", key)
+		auth(r.Header)
 		resp, err := hc.Do(r)
 		if err != nil {
 			if ctx.Err() != nil {

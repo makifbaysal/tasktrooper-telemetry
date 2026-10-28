@@ -4,8 +4,8 @@ Two binaries (Go module `github.com/tasktrooper/telemetry/services/ingest`), fol
 
 | Binary | Does |
 |---|---|
-| `cmd/ingest-gw` | OTLP/HTTP `:4318` (`/v1/traces`, `/v1/metrics`, `/v1/logs`: protobuf or JSON, optional gzip), RUM `POST /v1/rum` (JSON or protobuf), Vercel drains `POST /v1/drains/vercel`, OTLP/gRPC `:4317`, `GET /healthz`, `GET /metrics`. Authenticates ingest keys, rate-limits per project, validates the payload and publishes it as protobuf to Redpanda. Stateless. |
-| `cmd/ingest-writer` | Consumer group `tt-ingest-writer` over the 4 topics. Flattens payloads into ClickHouse rows (`spans`, `logs`, `metrics`, `rum_events`, `db_1m`, `db_queries_1m`, `broker_*_1m`) and batch-inserts them; Kafka offsets are committed only after the insert succeeded (at-least-once). |
+| `cmd/ingest-gw` | OTLP/HTTP `:4318` (`/v1/traces`, `/v1/metrics`, `/v1/logs`: protobuf or JSON, optional gzip), RUM `POST /v1/rum` (JSON or protobuf), session replay `POST /v1/replay`, profiles `POST /v1/profiles` + OTLP `POST /v1development/profiles`, Vercel drains `POST /v1/drains/vercel`, OTLP/gRPC `:4317`, `GET /healthz`, `GET /metrics`. Authenticates ingest keys, rate-limits per project, validates the payload and publishes it as protobuf to Redpanda. Stateless. |
+| `cmd/ingest-writer` | Consumer group `tt-ingest-writer` over the 6 topics. Flattens payloads into ClickHouse rows (`spans`, `logs`, `metrics`, `rum_events`, `llm_content`, `replay_segments` (+ segment blob in S3), `profile_stacks`, `profiles`, `db_1m`, `db_queries_1m`, `broker_*_1m`, `hosts_1m`, `containers_1m`, `processes_1m`, `k8s_*_1m`, `faas_1m`, `gpus_1m`) and batch-inserts them; Kafka offsets are committed only after the insert succeeded (at-least-once). |
 
 ## Run
 
@@ -34,9 +34,17 @@ The e2e test starts gw + writer in-process (gw on random ports), sends spans wit
 ClickHouse until rows exist in `spans`, `red_1m`, `edges_1m`, `errors_1h`, `rum_events`, `rum_views_1m`, `logs`, `db_1m`, `metrics`.
 It also sends an SQS consumer span (`messaging_system`, `consumer_1m`), cloud-style broker topic / queue-age metrics
 (`broker_topics_1m`, `broker_lag_1m.oldest_age_s`), resolves RUM country through a generated GeoIP db, creates a temporary
-Vercel integration (project 1, secret via `env:` ref) and posts a signed log + speed-insights drain. Data uses the service prefix
-`ingest2-e2e-<rand>` and is deleted at the end. **Stop any other `ingest-writer` first** — it shares the consumer group
-and would consume the test records without the test's GeoIP db.
+Vercel integration (project 1, secret via `env:` ref) and posts a signed log + speed-insights drain.
+`TestInfraFamilies` (`e2e/infra_test.go`) sends host / container / process / k8s / faas metrics, a Kubernetes Warning event and
+an OBI span through the gw with the internal credential (project 9601, created if missing) and checks every typed table,
+`logs` and `spans.resource_attrs`; its rows are deleted afterwards. `TestReplayProfilesLLM` (`e2e/blobs_test.go`) posts two gzip'ed replay segments (`?key=`), a Go pprof and a folded JVM profile
+and GenAI spans (chat span + its HTTP child + content), then checks `replay_segments`, `replay_sessions`, the S3 object
+(bucket `tt-replays-e2e`, endpoint `TT_S3_ENDPOINT` or `http://localhost:9002`), `profiles`, `profile_stacks`, `spans`
+(`dep_kind='ai'`, HTTP child without dep, no content attrs), `llm_content`, `llm_1m` and `edges_1m`. Data uses the service prefix
+`ingest2-e2e-<rand>` / `blobs-e2e-<rand>` and is deleted at the end. **Stop any other `ingest-writer` first** — it shares the consumer group
+and would consume the test records without the test's GeoIP db. `TestOTLPProfiles` (`e2e/profiles_otlp_test.go`) sends OTLP profiles over HTTP
+protobuf (gzip), HTTP JSON and gRPC (eBPF-profiler shape) and checks `profiles` / `profile_stacks`; its writer uses a throwaway
+consumer group committed at the end of `tt.profiles`, so it runs next to another `ingest-writer`.
 
 ## Configuration
 
@@ -53,7 +61,12 @@ Common (`services/pkg/config`): `TT_POSTGRES_URL`, `TT_CLICKHOUSE_URL`, `TT_KAFK
 | `TT_INGEST_PRODUCE_BUFFER_BYTES` | `268435456` | same, in bytes |
 | `TT_INGEST_PRODUCE_TIMEOUT` | `30s` | per-record delivery timeout |
 | `TT_INGEST_WRITER_GROUP` | `tt-ingest-writer` | consumer group |
-| `TT_INGEST_WRITER_TOPICS` | the 4 ingest topics | |
+| `TT_INGEST_WRITER_TOPICS` | the 6 ingest topics | `tt.replay` is dropped from the list when S3 is not configured / reachable |
+| `TT_INGEST_REPLAY_MAX_BYTES` / `TT_INGEST_REPLAY_MAX_DECOMPRESSED_BYTES` | `1048576` / `10485760` | `/v1/replay` wire / decompressed limits (413) |
+| `TT_INGEST_PROFILE_MAX_BYTES` / `TT_INGEST_PROFILE_MAX_DECOMPRESSED_BYTES` | `4194304` / `33554432` | `/v1/profiles` wire / decompressed limits (413) |
+| `TT_S3_ENDPOINT` | — | writer: S3 for replay segments (dev `http://localhost:9002`; compose `http://s3:8333`). **Unset = replay off** |
+| `TT_S3_ACCESS_KEY` / `TT_S3_SECRET_KEY` / `TT_S3_REGION` | `trooper` / `trooper-secret` / `us-east-1` | path-style client (as symbolicator) |
+| `TT_REPLAY_S3_BUCKET` | `tt-replays` | created at start when missing |
 | `TT_INGEST_WRITER_BATCH_ROWS` | `50000` | flush when any table batch has this many rows… |
 | `TT_INGEST_WRITER_FLUSH_INTERVAL` | `1s` | …or when the oldest buffered record is this old |
 | `TT_INGEST_WRITER_MAX_POLL` | `5000` | records per poll |
@@ -65,6 +78,7 @@ Common (`services/pkg/config`): `TT_POSTGRES_URL`, `TT_CLICKHOUSE_URL`, `TT_KAFK
 | `TT_TAIL_SLOW_MS` | `1000` | traces with an entry span ≥ this are always kept (`0` disables the rule) |
 | `TT_GEOIP_DB` | — | path to a MaxMind GeoLite2-Country / DB-IP Country Lite `.mmdb` (not bundled) |
 | `TT_SECRETS_KEY` | dev key | AES key for `secret:<id>` drain secrets (contracts §10) |
+| `TT_INTERNAL_TOKEN` | — | internal service credential (see *Behaviour notes*); unset disables it |
 
 ## Behaviour notes
 
@@ -72,6 +86,12 @@ Common (`services/pkg/config`): `TT_POSTGRES_URL`, `TT_CLICKHOUSE_URL`, `TT_KAFK
   (`kind='ingest'`, not revoked) with 60 s TTL cache, 10 s negative cache, singleflight, stale entry served if Postgres is
   down. `last_used_at` is written asynchronously, at most every 5 min per key. Browser `Origin` is checked against
   `allowed_origins` (exact origin, host, or `*.example.com`); CORS on `/v1/rum`, `/v1/traces`, `/v1/logs`.
+- **Internal service credential** (contracts §16; trooper-cloud, loadtest-runner): `x-trooper-internal: <TT_INTERNAL_TOKEN>`
+  and `x-trooper-project: <id>` on OTLP/HTTP, OTLP/gRPC metadata and `/v1/rum`. When the internal header is present the
+  ingest key is ignored; the token is compared in constant time (sha256 digests), the project must exist in Postgres
+  (org resolved via `projects.org_id`, 60 s cache, 10 s negative cache, stale on Postgres errors). Unset token → feature
+  off (401). Requests with an `Origin` header (HTTP, or `origin` gRPC metadata) are rejected with 403, and the CORS
+  preflight never allows the header. Rate limit as for keys (`TT_INGEST_RATE_LIMIT_RPS`).
 - **Rate limit:** GCRA in Redis (Lua, shared across replicas); if Redis fails the gw switches to an in-memory token bucket
   for 5 s at a time. 429 + `Retry-After` (gRPC: `ResourceExhausted` + `RetryInfo`).
 - **Produce:** franz-go, async, zstd, key = `project_id`, headers per contracts §3. Protobuf bodies ≤ record limit are
@@ -89,14 +109,24 @@ Common (`services/pkg/config`): `TT_POSTGRES_URL`, `TT_CLICKHOUSE_URL`, `TT_KAFK
   top 5 normalized frames (or the masked message; bare 5xx → name + route). Exception type/message are copied into
   `attrs` (read by `errors_1h_mv`). Attribute maps: ≤ 64 keys, values ≤ 1 KiB (stack traces in events ≤ 16 KiB).
 - **Logs:** severity from `severity_number` (or text), `route` from `trooper.entry.route`, `pattern_id` = Drain-style
-  template hash (tokens with digits / ids / quoted values / `k=v` values masked).
+  template hash (tokens with digits / ids / quoted values / `k=v` values masked). Resource `k8s.cluster.name`,
+  `k8s.namespace.name`, `k8s.pod.name`, `k8s.node.name` are copied into `attrs` unless the record sets them (Kubernetes
+  Warning events: `service.name=k8s`, `k8s.event.*` attrs). Spans keep the whole resource in `resource_attrs`, so eBPF
+  (OBI/Beyla) spans are recognisable by `resource_attrs['telemetry.sdk.name']`.
 - **Metrics:** `trooper.db.*`, `trooper.db.query.*`, `trooper.broker.*` (incl. `trooper.broker.topic.*` →
   `broker_topics_1m`, `trooper.broker.oldest_age_s` → `broker_lag_1m.oldest_age_s`) go to the typed tables. Entity
   attributes are read from the data point first, then the resource — so trooper-cloud payloads (resource-level
   `trooper.broker.cluster`, `cloud.*`, `trooper.integration.id`) route exactly like collector ones, merged per entity and
   minute within a flush. Columns not reported are written as **`-Inf` (max columns) / `+Inf` (`hit_ratio`, min)**, not
   NaN: ClickHouse `max`/`min` over NaN is order-dependent, so NaN partial rows would corrupt merges. Readers should treat
-  non-finite values as "missing". Everything else → `metrics` (gauge/sum/histogram/exp_histogram as explicit
+  non-finite values as "missing". `trooper.host.*`, `trooper.container.*`, `trooper.process.*`, `trooper.k8s.{node,pod,workload}.*`
+  and `trooper.faas.*` (contracts §20, §21) go to `hosts_1m`, `containers_1m`, `processes_1m`, `k8s_nodes_1m`, `k8s_pods_1m`,
+  `k8s_workloads_1m`, `faas_1m` (`internal/flatten/infra.go`: one spec per table — dimension columns and the attribute each
+  comes from, data point first then resource; row key = all dimensions + minute; gauges merged with `max`, unreported
+  `-Inf`; pod `phase`/`reason` taken from the newest data point; `process.command` capped at 128 chars).
+  `trooper.host.gpu.*` (contracts §22) goes to `gpus_1m` (dims `cluster, host, gpu_index` (UInt8, from `gpu.index`),
+  `gpu_uuid`, `model`), not `hosts_1m`. Unknown names
+  under these prefixes fall through to `metrics`. Everything else → `metrics` (gauge/sum/histogram/exp_histogram as explicit
   buckets/summary with quantiles in attrs; `attrs_hash` = xxhash of sorted attrs).
 - **RUM:** protojson (proto field names, unknown fields ignored). Clock skew: if the newest event of a batch is > 5 min
   from `received_at`, the whole batch is shifted onto it. Browser/OS/device fall back to the `User-Agent` header.
@@ -115,6 +145,92 @@ Common (`services/pkg/config`): `TT_POSTGRES_URL`, `TT_CLICKHOUSE_URL`, `TT_KAFK
   The hash decision is identical across batches / replicas; the error/slow rule is best effort per flush (a trace whose
   error arrives in another flush may lose its other spans with probability 1 − rate; counts stay unbiased). Rows of a
   failed flush are not re-sampled.
+
+## Session replay (contracts §23)
+
+- `POST /v1/replay`: auth, CORS, `?key=`, internal credential and content types as `/v1/rum`; shares the per-project rate
+  limit. The body (one segment JSON, `Content-Encoding: gzip` recommended) is limited to 1 MiB on the wire and 10 MiB
+  decompressed. gw validates it (`session_id` ≤ 128 chars of `[A-Za-z0-9._-]` — it is part of the S3 key —, `segment`
+  0…999999, `format` rrweb | wireframe, `events` array) and publishes it **gzip'ed** to `tt.replay` (the wire bytes when
+  they were gzip, else compressed in gw) with headers `session_id`, `segment`.
+- writer: gunzips + re-validates, uploads the gzip blob as is to `<org>/<project>/<yyyy-mm-dd of start_ts>/<session_id>/<segment:06d>.json.gz`
+  (`Content-Type: application/json`, `Content-Encoding: gzip`) **before** inserting the `replay_segments` row; uploads are
+  retried like inserts and offsets are committed only after both (at-least-once; a redelivery overwrites the same key and
+  adds a duplicate index row — query with `argMax(…, received_at)`). A flush also starts when ≥ 64 MiB of blobs are buffered.
+- Without `TT_S3_ENDPOINT`, or when the bucket cannot be reached/created within 15 s at start, the writer does not consume
+  `tt.replay` (records wait in Redpanda, 24 h retention), logs a warning and sets `tt_writer_replay_disabled` = 1.
+
+## Profiles (contracts §24)
+
+- `POST /v1/profiles?service=&start=&end=[&env=&version=&host=&runtime=&format=pprof|folded&type=&unit=]`: key header / Bearer /
+  internal credential only (no `?key=`, no CORS; any `Origin` → 403). ≤ 4 MiB on the wire, ≤ 32 MiB decompressed — both
+  for `Content-Encoding: gzip` and for natively gzip'ed pprof (also both at once). `end - start` ≤ 1 h; folded needs
+  `type` + `unit` (unit must match the type). gw parses the profile (400 on garbage, profiles are low-rate) and publishes the
+  smaller of wire / decompressed bytes to `tt.profiles` with the query values as headers.
+- Parsing (`internal/profiling`, shared by gw and writer): pprof sample types → `cpu`, `wall`, `alloc_*`, `inuse_*`,
+  `goroutine(s)` → `goroutines`, `delay` → `lock` (`block` with `?type=block`); `samples/count` and `contentions/count` are
+  skipped (`samples` × period becomes `cpu` only when there is no `cpu/nanoseconds` and the period type is cpu). Frames
+  root first, inlined frames expanded; Go/JVM = function name, Node = `fn (file)` (`file://` stripped, `(anonymous)`),
+  unsymbolized = `[<mapping basename>]` / `[unknown]`; frame ≤ 512 bytes. Labels `trooper.route` / `trooper.method` (folded:
+  `# trooper.route=… trooper.method=…` section lines) tag stacks. Identical (route, method, stack) are summed, values ≤ 0
+  dropped, depth > 128 keeps the leaf side under `[truncated]`, > 10 000 stacks per type fold the smallest into
+  `['[other]']` (one per route/method). One `profiles` row per type (`total`, `stacks`); `profile_stacks.stack_hash` is
+  `DEFAULT cityHash64(stack)` (computed by ClickHouse).
+
+
+### OTLP profiles
+
+- `POST /v1development/profiles` (OTLP/HTTP: protobuf, or JSON with `Content-Type: application/json` — hex `profileId`
+  accepted; `Content-Encoding: gzip`) and gRPC `opentelemetry.proto.collector.profiles.v1development.ProfilesService/Export`
+  on `:4317`. Auth / rate limit as the other OTLP endpoints (key header / Bearer / internal credential, no `?key=`, no CORS),
+  body limits of `/v1/profiles` (4 MiB wire / 32 MiB decompressed; the gRPC `MaxRecvMsgSize` is the larger of the OTLP and
+  profile limits, other gRPC signals above `TT_INGEST_MAX_BODY_BYTES` get `InvalidArgument`). gw decodes the request (400 on
+  garbage, an empty request is a no-op 200) and publishes **one** `tt.profiles` record per request: header `format=otlp`,
+  value = `ExportProfilesServiceRequest` protobuf (the gzip'ed wire bytes when sent gzip'ed, gzip'ed by gw above 256 KiB,
+  ≤ 8 MiB). No service / time headers.
+- Proto: `go.opentelemetry.io/proto/otlp/profiles/v1development` + `.../collector/profiles/v1development` **v0.4.1** (OTLP
+  1.10 dictionary layout: request-level `ProfilesDictionary` with `string_table`, `function_table`, `location_table`,
+  `mapping_table`, `attribute_table`, `stack_table`; one `sample_type` per `Profile`) — the version OTel Collector
+  `pdata/pprofile` v0.164 (`otlpexporter` / `otlphttpexporter`) uses. Since `go.opentelemetry.io/proto/otlp` v1.8 the profiles
+  packages live in these separate modules.
+- Writer (`profiling.ConvertOTLP`): per `ResourceProfiles` → `ScopeProfiles` → `Profile` one `profiles` row (+ stacks), with the
+  pprof path's aggregation, limits and frame naming. Identity from resource attributes (inline or `key_strindex` /
+  `string_value_strindex`, as Collector 0.164 sends them): `service.name` (missing → `unknown_service` or
+  `unknown_service:<process.executable.name>`, OTel's default; counted), `deployment.environment.name` (fallback
+  `deployment.environment`), `service.version`, `host.name`, `process.runtime.name` → `go` | `jvm` (java/jvm/…JDK…) | `node`
+  (node/nodejs) | `dotnet` (dotnet/.NET…) | `python` (cpython/python/pypy), else empty. Window = `time_unix_nano` +
+  `duration_nano` (missing parts from sample timestamps, else the receive time; ≤ 1 h). Sample type via the pprof mapping;
+  `samples/count` with a `cpu/nanoseconds` period → `cpu` (× period) unless the resource has a `cpu/nanoseconds` profile at
+  the same time (pprof-converted CPU profiles carry both). Sample value = sum of `values`, or the number of
+  `timestamps_unix_nano` (eBPF profiler). Stack = `stack_table` locations (leaf first on the wire → root first), each
+  location's `lines` expanded caller first (inline frames); unsymbolized = `[<mapping basename>]`. Sample attributes (profile
+  attributes as default) `trooper.route` / `trooper.method` → route / method. Index 0 of every table is looked up like any
+  other index (Collector 0.164's pprof conversion stores real stacks there). Profiles with an unmapped sample type or no
+  non-zero sample are skipped (`tt_ingest_writer_otlp_profiles_total{outcome}`).
+- Verified against `otel/opentelemetry-collector-contrib:0.164.0` (`pprof` receiver → `otlp_grpc` + `otlp_http` exporters,
+  `--feature-gates=service.profilesSupport`): totals match `go tool pprof`.
+
+## AI / LLM spans (contracts §25)
+
+- LLM span = `gen_ai.operation.name`, or OpenLLMetry `llm.request.type` (chat / completion → text_completion / embedding(s) /
+  rerank), or a Vercel AI SDK provider call (`ai.operationId` or span name `ai.*.doGenerate|doStream` → chat, `ai.*.doEmbed` →
+  embeddings, with `gen_ai.system` / `ai.model.provider`; the outer `ai.generateText` wrapper is not counted). Provider =
+  `gen_ai.provider.name` ‖ `gen_ai.system` (lower-cased; Vercel ids mapped: `anthropic.messages` → anthropic, `google.*` →
+  gcp.gemini, `google.vertex*` → gcp.vertex_ai, `amazon-bedrock` → aws.bedrock, `azure*` → azure.ai.openai, `mistral` →
+  mistral_ai, `xai` → x_ai), model = response ‖ request (‖ `ai.model.id`).
+- Model calls (not `execute_tool` / `invoke_agent` / `create_agent`) get `dep_kind='ai'`, `dep='<provider> · <model>'` whatever
+  their span kind; an HTTP client span whose parent (same resource batch) is a model call gets no dep. `edges_1m_ai_mv` feeds
+  internal-kind ai spans into `edges_1m` (the original MV only reads client/producer).
+- attrs: content keys are removed (`gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions`,
+  `gen_ai.prompt[.N.*]`, `gen_ai.completion[.N.*]`, Vercel `ai.prompt[.messages]`, `ai.response.text|object|toolCalls`) and
+  written to `llm_content` (legacy N.* fields rebuilt as GenAI message arrays; each field ≤ 32 KiB with `…[truncated]`).
+  Normalized into attrs (8 of the 64 slots are reserved for them): `gen_ai.operation.name`, `gen_ai.provider.name`, token
+  counts `gen_ai.usage.{input,output}_tokens` / `cache_read.input_tokens` / `cache_creation.input_tokens` (from
+  `gen_ai.usage.prompt|completion_tokens`, `llm.usage.*`, `ai.usage.promptTokens|completionTokens`), Vercel model / TTFT
+  (`ai.response.msToFirstChunk` → `trooper.llm.ttft_ms`). `llm_1m_mv` reads these attrs.
+- Logs: a `gen_ai.client.inference.operation.details` event (`event_name` or `event.name` attr) → `llm_content` row with the
+  record's trace/span id; content attrs removed from the log row, a kvlist body is replaced by the event name.
+- Tail sampling drops the `llm_content` rows of traces it drops.
 
 ## Vercel drains
 
@@ -145,8 +261,11 @@ optional `speedInsightsUnit: "s"` if vitals arrive in seconds (default ms, web-v
 ## Prometheus metrics
 
 gw: `tt_ingest_gw_requests_total{endpoint,status}`, `_request_bytes_total`, `_request_duration_seconds`,
-`_auth_failures_total{reason=invalid_key|origin|integration|signature}`, `_rate_limited_total`, `_produced_records_total{topic}`,
+`_auth_failures_total{reason=invalid_key|origin|integration|signature|internal|internal_origin}`, `_rate_limited_total`, `_produced_records_total{topic}`,
 `_produce_errors_total{topic,reason=failed|buffer_full}`, `_produce_latency_seconds`, `_drain_events_total{provider,kind}`
 (gRPC endpoints are labelled `grpc:<topic>`). writer: `tt_ingest_writer_records_consumed_total`, `_decode_errors_total`,
 `_rows_inserted_total{table}`, `_clickhouse_errors_total{table}`, `_insert_duration_seconds{table}`,
-`_batch_duration_seconds`, `_consumer_lag{topic,partition}`, `_tail_sampling_spans_total{decision}` + Go/process metrics.
+`_batch_duration_seconds`, `_consumer_lag{topic,partition}`, `_tail_sampling_spans_total{decision}`,
+`_replay_blobs_total`, `_replay_blob_bytes_total`, `_replay_blob_errors_total`, `_replay_blob_upload_seconds`,
+`_otlp_profiles_total{outcome=written|skipped_type|skipped_empty|no_service}`, `tt_writer_replay_disabled` (gauge, contracts §23) + Go/process metrics. gw endpoints `/v1/replay`, `/v1/profiles` and `/v1development/profiles` (gRPC `grpc:tt.profiles`) use the
+same request / auth / rate-limit metrics.

@@ -1,5 +1,6 @@
 import 'package:web/web.dart' as web;
 
+import '../replay/uploader.dart';
 import '../storage.dart';
 
 /// Web: the offline queue stays in memory (lost on reload); key/value state
@@ -35,3 +36,6 @@ class _WebStorage extends MemoryStorage {
     }
   }
 }
+
+/// Web uses rrweb (`@trooper/replay`); Flutter wireframe replay is not started there.
+Future<ReplaySegmentStore> createReplaySegmentStore(int maxBytes) async => MemorySegmentStore(maxBytes: maxBytes);

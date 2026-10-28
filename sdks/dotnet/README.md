@@ -8,13 +8,14 @@ Targets `net8.0`, `net9.0`, `net10.0`. OpenTelemetry 1.20.
 
 | Package | Purpose |
 |---|---|
-| `TaskTrooper.Telemetry` | Core: `AddTaskTrooper()`, DSN, OTLP export with retry, sampler, entry route / caller propagation, HttpClient + SqlClient instrumentation; listens to Npgsql, RabbitMQ.Client 7 and MassTransit sources when present |
+| `TaskTrooper.Telemetry` | Core: `AddTaskTrooper()`, DSN, OTLP export with retry, sampler, entry route / caller propagation, HttpClient + SqlClient instrumentation; listens to Npgsql, RabbitMQ.Client 7, MassTransit and GenAI (Microsoft.Extensions.AI, OpenAI) sources when present; `TrooperLlm` manual LLM spans |
 | `TaskTrooper.Telemetry.AspNetCore` | Server spans (minimal APIs, controllers, MVC, gRPC services) with `trooper.route`, caller, exceptions; Kestrel/hosting metrics |
 | `TaskTrooper.Telemetry.Kafka` | Confluent.Kafka consumer/producer helpers (entry spans, header propagation) |
 | `TaskTrooper.Telemetry.RabbitMQ` | RabbitMQ.Client 7 consumer conventions, attempt from `x-delivery-count`/`x-death`, `tt.svc` on publish |
 | `TaskTrooper.Telemetry.MassTransit` | Maps MassTransit diagnostics to `trooper.process` (no MassTransit dependency) |
 | `TaskTrooper.Telemetry.EntityFrameworkCore` | EF Core command spans (OTel instrumentation, beta) |
 | `TaskTrooper.Telemetry.Redis` | StackExchange.Redis spans (OTel instrumentation, beta) |
+| `TaskTrooper.Telemetry.Profiling` | Continuous profiler: in-process EventPipe → `cpu` / `wall` / `alloc_space` / `lock`, per-endpoint flame graphs |
 
 ## Quick start — ASP.NET Core
 
@@ -82,6 +83,100 @@ builder.Services.AddTaskTrooper()
 
 Npgsql (8+), SqlClient and HttpClient (incl. gRPC clients) need nothing extra.
 
+## Continuous profiling (ADR-022, contracts §24)
+
+```csharp
+builder.Services.AddTaskTrooper(o => o.ServiceName = "orders-api").AddAspNetCore();
+builder.Services.AddTaskTrooperProfiling();                       // or .AddTaskTrooper(...).AddProfiling()
+// options: o => { o.Types.Add(ProfileType.Wall); o.Period = TimeSpan.FromSeconds(60); o.Duration = TimeSpan.FromSeconds(10); }
+```
+
+Without code changes: reference the `TaskTrooper.Telemetry.Profiling` package and set `TROOPER_PROFILING=true` —
+`AddTaskTrooper()` finds the package by name and registers its hosted service (it stays off unless enabled).
+
+How it works:
+- Every `Period` (default 60 s) the profiler opens an **in-process EventPipe session** (`DiagnosticsClient` on its own PID) for
+  `Duration` (default 10 s) and streams it through TraceEvent's real-time `TraceLog` (a short rundown at the start names
+  methods compiled earlier; JIT events name the rest). Profiles are uploaded as **folded** text, one per type, to
+  `POST /v1/profiles?format=folded&type=…&unit=…&service=…&env=…&version=…&host=…&runtime=dotnet&start=…&end=…`
+  (gzip, `x-trooper-key`); `start`/`end` are the window.
+- Why windows instead of a continuous stream: EventPipe's sample profiler suspends the runtime and walks every managed
+  thread at ~1 kHz (the rate is not configurable), which costs a few percent while it runs; 10 s out of 60 s keeps the average
+  well within the < 2 % budget. `Duration = Period` profiles continuously.
+- Types (`TROOPER_PROFILING_TYPES`, default `cpu,alloc_space,lock`):
+
+  | Type | Unit | Source |
+  |---|---|---|
+  | `cpu` | ns | `Microsoft-DotNETCore-SampleProfiler` samples of threads running **managed** code, each weighted by the time since that thread's previous sample (≤ 10 ms). Native / blocked time is not CPU here. |
+  | `wall` | ns | All thread samples (running or waiting). Opt-in. |
+  | `alloc_space` | bytes | `GCAllocationTick` (≈ every 100 KB per heap) weighted by the allocated amount — a sampled view of allocations in the window. |
+  | `lock` | ns | Monitor / `lock` contention: stack of `ContentionStart`, duration of `ContentionStop`. |
+
+- Frames are `Namespace.Type.Method` (no signature / IL offset / generic instantiation; `Foo+<GetAsync>d__3.MoveNext` →
+  `Foo.GetAsync`); frames without method info are `[module]` / `[native]`; stacks deeper than 128 start with `[truncated]`;
+  more than 10 000 distinct stacks per profile fold into `[other]`. The profiler's own threads are excluded.
+- **Endpoint attribution:** entry spans (local-root server / consumer spans — ASP.NET Core requests, Kafka/RabbitMQ consumers)
+  mark their ExecutionContext, which follows the request across `await`s and thread-pool hops; samples taken on a thread
+  while it runs a request's code are written under `# trooper.route=<route> trooper.method=<METHOD>`. Only sampled
+  (recorded) requests carry a route; work outside requests is unattributed.
+- Never crashes the host: if EventPipe is unavailable (`DOTNET_EnableDiagnostics=0` / `DOTNET_EnableDiagnostics_IPC=0`,
+  read-only or missing `TMPDIR` for the IPC socket, browser / mobile), no DSN, or `TROOPER_ENABLED=false`, the profiler logs
+  once and stays off. Errors are counted in `trooper.sdk.errors` (`component` = `profiler`, `exporter.profiles`). A failed
+  upload drops that profile; 429 / 5xx / network errors pause uploads with exponential backoff (1 s → 60 s, `Retry-After`).
+- Measured overhead (`samples/ProfilingOverhead`: 2 workers, ~7 000 traced requests/s with async hops, allocation and a
+  shared lock; Linux container, 11 cores): **while a window runs** ≈ +10–13 % process CPU and −5…−10 % throughput (EventPipe
+  suspensions at 1 kHz + event parsing on the profiler thread); averaged over the default 10 s / 60 s duty cycle ≈ +2 %.
+  Request-light services sit well below that; raise `Period` or lower `Duration` to trade resolution for overhead.
+
+| Option | Env | Default |
+|---|---|---|
+| `Enabled` | `TROOPER_PROFILING` | on after `AddTaskTrooperProfiling()`, else off |
+| `Types` | `TROOPER_PROFILING_TYPES` | `cpu,alloc_space,lock` (`wall` opt-in; other types are not supported on .NET) |
+| `Period` | `TROOPER_PROFILING_PERIOD` (s) | 60 s |
+| `Duration` | `TROOPER_PROFILING_CPU_DURATION` (s) | 10 s (capped at `Period`) |
+| `StartDelay` | — | 5 s |
+| `Host` | — | machine name |
+| `BufferSizeMb` | — | 64 (EventPipe drops events instead of blocking when full) |
+
+## AI / LLM monitoring (ADR-023, contracts §25)
+
+LLM calls are exported as OTel GenAI client spans (`gen_ai.operation.name`, `gen_ai.provider.name`, models,
+`gen_ai.usage.*`, `trooper.llm.ttft_ms`). `AddTaskTrooper()` listens by default (`EnableLlm`) to:
+
+| Source | Library |
+|---|---|
+| `Experimental.Microsoft.Extensions.AI` (+ `Microsoft.Extensions.AI*`) | `Microsoft.Extensions.AI`: `chatClient.AsBuilder().UseOpenTelemetry().Build()` (also embedding generators) |
+| `OpenAI.*` | OpenAI .NET SDK — the SDK turns on its `OpenAI.Experimental.EnableOpenTelemetry` AppContext switch (unless you set it) |
+| `Azure.AI.Inference*`, `Microsoft.SemanticKernel*` | emitted when those libraries' own telemetry is enabled |
+
+```csharp
+IChatClient chat = new OpenAI.Chat.ChatClient("gpt-4o-mini", key).AsIChatClient()
+    .AsBuilder().UseOpenTelemetry().Build();
+```
+
+Any other client — manual helper (`ActivitySource` `TaskTrooper.Telemetry.Llm`):
+
+```csharp
+using var call = TrooperLlm.Start("anthropic", "claude-sonnet-4-5");      // operation defaults to "chat"
+await foreach (var chunk in stream) { call.FirstToken(); /* … */ }      // trooper.llm.ttft_ms
+call.ResponseModel(model).FinishReasons("end_turn")
+    .End(new LlmUsage(inputTokens, outputTokens, CacheReadInputTokens: cached));
+// on error: call.Fail(exception);   content: call.Prompt(text) / Completion(text) / InputMessages(json)
+```
+
+**Content (prompts / completions)** — `LlmCaptureContent` / `TROOPER_LLM_CAPTURE_CONTENT`:
+- `true`: `TrooperLlm` records content, and `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true` is set (when unset) —
+  M.E.AI's default for `EnableSensitiveData`. M.E.AI reads that variable once per process, so with the env var it applies
+  from `AddTaskTrooper()` on; if a telemetry chat client could be created earlier, set `EnableSensitiveData = true` in
+  `UseOpenTelemetry(configure: …)`.
+- `false`: content tags (`gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions`, tool call
+  arguments/results, legacy `gen_ai.prompt*`/`gen_ai.completion*`) are removed from every GenAI span, even if a library
+  recorded them.
+- unset (default): nothing recorded by `TrooperLlm`; an explicit `EnableSensitiveData = true` in M.E.AI is respected.
+
+`TrooperGenAIProcessor` also fills `gen_ai.provider.name` from the older `gen_ai.system` and converts M.E.AI's
+`gen_ai.response.time_to_first_chunk` (seconds) to `trooper.llm.ttft_ms`.
+
 ## Configuration
 
 Order (later wins): environment variables → `TaskTrooper` config section (`appsettings.json`) → code delegate.
@@ -97,6 +192,8 @@ Order (later wins): environment variables → `TaskTrooper` config section (`app
 | `EnableTraces` / `EnableMetrics` / `EnableLogs` | — | `true` | Per-signal export |
 | `ExportTimeout` | — | 10 s | Per HTTP attempt |
 | `MaxExportRetries` | — | 5 | 429/5xx/network: exponential backoff 1 s → 60 s with jitter, honours `Retry-After`; other 4xx drop the batch |
+| `EnableLlm` | — | `true` | Listen to the GenAI ActivitySources above |
+| `LlmCaptureContent` | `TROOPER_LLM_CAPTURE_CONTENT` | unset | `true` / `false` / unset, see AI / LLM monitoring |
 | `ResourceAttributes`, `Sources`, `Meters` | — | — | Extra resource attributes / ActivitySources / Meters |
 
 ```json
@@ -122,4 +219,5 @@ No local `dotnet` needed — `./build.sh` runs in `mcr.microsoft.com/dotnet/sdk:
 ./build.sh pack     # NuGet packages → artifacts/
 ```
 
-Samples: `samples/MinimalApi` (ASP.NET Core) and `samples/KafkaWorker` (worker service consuming `orders.created`).
+Samples: `samples/MinimalApi` (ASP.NET Core), `samples/KafkaWorker` (worker service consuming `orders.created`) and
+`samples/ProfilingOverhead` (profiler overhead check: `dotnet run -c Release --project samples/ProfilingOverhead -- 30 4`).

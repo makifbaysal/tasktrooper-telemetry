@@ -25,6 +25,8 @@ public sealed class TrooperSpanProcessor : BaseProcessor<Activity>
                     var caller = activity.GetBaggageItem(TrooperAttributes.CallerBaggageKey);
                     if (!string.IsNullOrEmpty(caller)) activity.SetTag(TrooperAttributes.Caller, caller);
                 }
+
+                if (TrooperSpan.IsEntryKind(activity)) TrooperProfilingHooks.EntryStarted?.Invoke(activity);
                 return;
             }
 
@@ -41,7 +43,12 @@ public sealed class TrooperSpanProcessor : BaseProcessor<Activity>
     {
         try
         {
-            if (activity.GetTagItem(TrooperAttributes.EntryRoute) is not null) return;
+            if (activity.GetTagItem(TrooperAttributes.EntryRoute) is not null)
+            {
+                NotifyProfiler(activity);
+                return;
+            }
+
             var root = TrooperSpan.LocalRoot(activity);
             if (ReferenceEquals(root, activity) && activity.Kind == ActivityKind.Server &&
                 activity.GetTagItem(TrooperAttributes.Route) is null && activity.GetTagItem("http.route") is string httpRoute)
@@ -52,11 +59,18 @@ public sealed class TrooperSpanProcessor : BaseProcessor<Activity>
             // child started before the route was known (or the root itself): fill now
             var entry = TrooperSpan.EntryRouteOf(root);
             if (entry is not null) activity.SetTag(TrooperAttributes.EntryRoute, entry);
+            NotifyProfiler(activity);
         }
         catch (Exception e)
         {
             TrooperSelfDiagnostics.Error("processor.end", e);
         }
+    }
+
+    private static void NotifyProfiler(Activity activity)
+    {
+        if (TrooperProfilingHooks.EntryStopped is { } stopped && activity.Parent is null && TrooperSpan.IsEntryKind(activity))
+            stopped(activity);
     }
 }
 

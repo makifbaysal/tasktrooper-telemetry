@@ -1,8 +1,10 @@
 package trooperhttp
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"runtime/pprof"
 	"strings"
 	"testing"
 
@@ -135,5 +137,32 @@ func TestClientTransport(t *testing.T) {
 	client := h.SpanByKind(trace.SpanKindClient)
 	if got := troopertest.AttrString(client, "peer.service"); got != "billing" {
 		t.Errorf("peer.service=%q", got)
+	}
+}
+
+func TestProfileLabels(t *testing.T) {
+	troopertest.New(t, "svc")
+	trooper.EnableProfileLabels(true)
+	t.Cleanup(func() { trooper.EnableProfileLabels(false) })
+
+	var route, method string
+	var dump bytes.Buffer
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /orders/{id}", func(w http.ResponseWriter, r *http.Request) {
+		route, _ = pprof.Label(r.Context(), trooper.ProfileLabelRoute)
+		method, _ = pprof.Label(r.Context(), trooper.ProfileLabelMethod)
+		_ = pprof.Lookup("goroutine").WriteTo(&dump, 1)
+	})
+	Handler(mux).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/orders/7", nil))
+	if route != "/orders/:id" || method != "GET" {
+		t.Errorf("labels = %q %q", route, method)
+	}
+	if !strings.Contains(dump.String(), `"trooper.route":"/orders/:id"`) {
+		t.Error("request goroutine not labelled")
+	}
+	var after bytes.Buffer
+	_ = pprof.Lookup("goroutine").WriteTo(&after, 1)
+	if strings.Contains(after.String(), `"trooper.route":"/orders/:id"`) {
+		t.Error("labels not restored after the request")
 	}
 }

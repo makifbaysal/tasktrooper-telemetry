@@ -15,5 +15,7 @@
     <InternalsVisibleTo Include="TaskTrooper.Telemetry.Kafka" />
     <InternalsVisibleTo Include="TaskTrooper.Telemetry.RabbitMQ" />
     <InternalsVisibleTo Include="TaskTrooper.Telemetry.MassTransit" />
+    <InternalsVisibleTo Include="TaskTrooper.Telemetry.Profiling" />
+    <InternalsVisibleTo Include="TaskTrooper.Telemetry.Profiling.Tests" />
   </ItemGroup>
 </Project>

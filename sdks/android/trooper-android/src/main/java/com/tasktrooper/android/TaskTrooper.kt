@@ -39,6 +39,9 @@ object TaskTrooper {
     @Volatile private var targets: List<Regex> = emptyList()
     @Volatile private var ingestHost: String? = null
     @Volatile private var app: String? = null
+    /** Read by [com.tasktrooper.android.spi.TrooperSpi] (trooper-replay). */
+    @Volatile internal var dsn: Dsn? = null
+    @Volatile internal var resource: RumResource? = null
 
     /** Call once from `Application.onCreate()`. */
     @JvmStatic
@@ -68,6 +71,8 @@ object TaskTrooper {
                 targets = config.tracePropagationTargets
                 app = config.app
                 ingestHost = Internal.guard("host", null) { java.net.URL(dsn.endpoint).host }
+                this.dsn = dsn
+                this.resource = resource
                 core = c
 
                 if (config.trackCrashes) {

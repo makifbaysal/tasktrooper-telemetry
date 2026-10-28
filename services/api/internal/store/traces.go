@@ -19,6 +19,23 @@ type TraceFilter struct {
 	MinMs      float64
 	Slowest    bool
 	Limit      int
+	// Kubernetes / host placement (contracts §22): span resource_attrs k8s.pod.name, k8s.namespace.name,
+	// k8s.node.name, host.name.
+	Pod, Namespace, Node, Host string
+}
+
+// resourceConds returns the WHERE tail for the placement fields (resource attributes).
+func (f TraceFilter) resourceConds() (string, []any) {
+	where := ""
+	var args []any
+	for _, c := range []struct{ key, v string }{{"k8s.pod.name", f.Pod}, {"k8s.namespace.name", f.Namespace},
+		{"k8s.node.name", f.Node}, {"host.name", f.Host}} {
+		if c.v != "" {
+			where += " AND resource_attrs[?] = ?"
+			args = append(args, c.key, c.v)
+		}
+	}
+	return where, args
 }
 
 // ValidTraceID reports whether s is a 32-char hex trace id.
@@ -57,6 +74,9 @@ func (d *DB) SearchTraces(ctx context.Context, q Q, f TraceFilter) ([]model.Trac
 		where += " AND duration_ns >= ?"
 		args = append(args, uint64(f.MinMs*1e6))
 	}
+	rw, ra := f.resourceConds()
+	where += rw
+	args = append(args, ra...)
 	ec, ea := envCond(q.Env, "env")
 	order := "ts DESC"
 	if f.Slowest {
@@ -103,7 +123,8 @@ func (d *DB) GetTrace(ctx context.Context, id string) (*model.Trace, error) {
 		return nil, ErrNotFound
 	}
 	rows, err := d.ch.Query(ctx, `SELECT lower(hex(span_id)), lower(hex(parent_span_id)), service, name, toString(kind), toInt64(toUnixTimestamp64Micro(ts)),
-	    duration_ns, toInt64(status_code), is_error, dep, dep_kind, route, error_type, attrs
+	    duration_ns, toInt64(status_code), is_error, dep, dep_kind, route, error_type, attrs,
+	    resource_attrs, arrayMap(t -> toInt64(toUnixTimestamp64Micro(t)), events.ts), events.name, events.attrs
 	  FROM spans WHERE {{tenant}} AND trace_id = unhex(?) AND ts >= fromUnixTimestamp64Micro(?) AND ts <= fromUnixTimestamp64Micro(?)
 	  ORDER BY ts LIMIT 5000`, id, micros(start)-1, micros(finish)+1)
 	if err != nil {
@@ -119,8 +140,22 @@ func (d *DB) GetTrace(ctx context.Context, id string) (*model.Trace, error) {
 		var dur uint64
 		var isErr uint8
 		var depKind string
-		if err := rows.Scan(&s.SpanID, &s.ParentSpanID, &s.Service, &s.Name, &s.Kind, &tsUs, &dur, &st, &isErr, &s.Dep, &depKind, &s.Route, &s.ErrorType, &s.Attrs); err != nil {
+		var evTs []int64
+		var evNames []string
+		var evAttrs []map[string]string
+		if err := rows.Scan(&s.SpanID, &s.ParentSpanID, &s.Service, &s.Name, &s.Kind, &tsUs, &dur, &st, &isErr, &s.Dep, &depKind, &s.Route, &s.ErrorType, &s.Attrs,
+			&s.Resource, &evTs, &evNames, &evAttrs); err != nil {
 			return nil, err
+		}
+		for i, name := range evNames {
+			ev := model.SpanEvent{Name: name}
+			if i < len(evTs) {
+				ev.Ts = float64(evTs[i]-startUs) / 1000
+			}
+			if i < len(evAttrs) && len(evAttrs[i]) > 0 {
+				ev.Attrs = evAttrs[i]
+			}
+			s.Events = append(s.Events, ev)
 		}
 		if strings.Trim(s.ParentSpanID, "0") == "" {
 			s.ParentSpanID = ""
@@ -134,7 +169,11 @@ func (d *DB) GetTrace(ctx context.Context, id string) (*model.Trace, error) {
 		}
 		t.Spans = append(t.Spans, s)
 	}
-	return t, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	d.annotateLLM(ctx, t, start, finish)
+	return t, nil
 }
 
 // ---------------------------------------------------------------- errors

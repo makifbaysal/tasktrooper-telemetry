@@ -18,8 +18,15 @@ Pod::Spec.new do |s|
 
   # Optional: bridge to the TaskTrooper iOS SDK. The Swift helper uses `#if canImport(TaskTrooper)`, which only
   # succeeds when this pod can see the TaskTrooper module — set TROOPER_RN_NATIVE_SDK=1 for `pod install` to depend on it.
+  # That mode also pulls in session replay (`TaskTrooper/Replay`, compiled into the TaskTrooper module) and defines
+  # TROOPER_RN_REPLAY for `startReplay()`; opt out with TROOPER_RN_REPLAY=0.
   if ENV["TROOPER_RN_NATIVE_SDK"] == "1"
     s.dependency "TaskTrooper/Core"
+    if ENV["TROOPER_RN_REPLAY"] != "0"
+      s.dependency "TaskTrooper/Replay"
+      # Set before install_modules_dependencies, which merges into (not replaces) pod_target_xcconfig.
+      s.pod_target_xcconfig = { "SWIFT_ACTIVE_COMPILATION_CONDITIONS" => "$(inherited) TROOPER_RN_REPLAY" }
+    end
   end
 
   if respond_to?(:install_modules_dependencies, true)

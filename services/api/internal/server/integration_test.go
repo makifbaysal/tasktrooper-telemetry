@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -155,6 +156,9 @@ func itCleanup(t *testing.T, pool *pgxpool.Pool, ch driver.Conn) {
 	if _, err := pool.Exec(ctx, `DELETE FROM orgs WHERE id = $1`, itTenant); err != nil { // cascades to project, keys, monitors, ...
 		t.Errorf("pg cleanup: %v", err)
 	}
+	if _, err := pool.Exec(ctx, `DELETE FROM users WHERE email LIKE 'it-9101-%@example.com'`); err != nil { // cascades to sessions
+		t.Errorf("pg cleanup users: %v", err)
+	}
 	rows, err := ch.Query(ctx, `SELECT name FROM system.tables WHERE database = 'telemetry' AND engine LIKE '%MergeTree'
 	  AND name IN (SELECT table FROM system.columns WHERE database = 'telemetry' AND name = 'project_id')`)
 	if err != nil {
@@ -278,7 +282,7 @@ func TestIntegration(t *testing.T) {
 	var cloudSecret string
 	st := store.New(ch, pool)
 	srv := &Server{Store: st, Auth: auth.NewPG(pool), Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Origins: []string{"http://localhost:5173"}, Test: conntest.Run, Symbolicator: symbolicate.New(sym.URL),
+		Origins: []string{"http://localhost:5173"}, Test: conntest.Run, DevLogin: true, Symbolicator: symbolicate.New(sym.URL),
 		CloudTest: func(_ context.Context, provider string, _ json.RawMessage, secret string) model.IntegrationTestResult {
 			cloudSecret = secret // the real checks (cloudcheck) need cloud credentials; unit-tested with httptest there
 			return model.IntegrationTestResult{OK: true, Message: "fake " + provider}
@@ -926,12 +930,6 @@ func TestIntegration(t *testing.T) {
 		if lks.sum("metric") <= 0 {
 			t.Errorf("kpi metric series: %+v", lks)
 		}
-		// code insights: endpoints exist, empty lists
-		for _, p := range []string{"/suggestions", "/repos", "/inventory"} {
-			if code, b := c.do("GET", p, nil); code != 200 || strings.TrimSpace(string(b)) != "[]" {
-				t.Errorf("%s: %d %s", p, code, b)
-			}
-		}
 		if lk.Status != model.OK && lk.DegradedSince == 0 {
 			t.Errorf("degraded without degradedSince: %+v", lk)
 		}
@@ -946,20 +944,423 @@ func TestIntegration(t *testing.T) {
 		c.json("DELETE", "/kpis/"+k.ID, nil, 204, nil)
 	})
 
+	t.Run("auth", func(t *testing.T) {
+		c.t = t
+		// the api key acts as admin of org 9101: add a member, then log in as that member (dev login)
+		var m model.Member
+		c.json("POST", "/orgs/9101/members", map[string]any{"email": "it-9101-ada@example.com", "name": "Ada", "role": "member"}, 201, &m)
+		c.json("POST", "/orgs/9101/members", map[string]any{"email": "it-9101-ada@example.com", "role": "member"}, 409, nil)
+		c.json("POST", "/orgs/1/members", map[string]any{"email": "it-9101-x@example.com", "role": "member"}, 404, nil) // other org
+		jar, _ := cookiejar.New(nil)
+		sc := &http.Client{Jar: jar}
+		sess := func(method, path string, body any, hdr ...string) (int, []byte) {
+			var rd io.Reader
+			if body != nil {
+				b, _ := json.Marshal(body)
+				rd = bytes.NewReader(b)
+			}
+			req, _ := http.NewRequest(method, ts.URL+"/api/v1"+path, rd)
+			req.Header.Set("Content-Type", "application/json")
+			for i := 0; i+1 < len(hdr); i += 2 {
+				req.Header.Set(hdr[i], hdr[i+1])
+			}
+			res, err := sc.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer res.Body.Close()
+			b, _ := io.ReadAll(res.Body)
+			return res.StatusCode, b
+		}
+		if code, b := sess("POST", "/auth/dev-login", map[string]any{"email": "it-9101-ada@example.com"}); code != 200 {
+			t.Fatalf("dev login: %d %s", code, b)
+		}
+		var me model.Me
+		code, b := sess("GET", "/me", nil, "X-Trooper-Project", "9101")
+		_ = json.Unmarshal(b, &me)
+		if code != 200 || me.User == nil || me.User.Email != "it-9101-ada@example.com" || me.Role != "member" || me.CurrentProjectID != "9101" || me.Auth != "session" {
+			t.Fatalf("me: %d %s", code, b)
+		}
+		if code, _ := sess("GET", "/services?range=15m", nil, "X-Trooper-Project", "9101"); code != 200 {
+			t.Errorf("session read: %d", code)
+		}
+		if code, _ := sess("GET", "/services", nil, "X-Trooper-Project", "1"); code != 403 {
+			t.Errorf("foreign project: %d", code)
+		}
+		if code, _ := sess("GET", "/api-keys", nil, "X-Trooper-Project", "9101"); code != 403 {
+			t.Errorf("member listing api keys: %d", code)
+		}
+		if code, b := sess("POST", "/loadtests/scenarios", map[string]any{"name": "by member", "spec": map[string]any{"target": "http://localhost:8080"}}, "X-Trooper-Project", "9101"); code != 201 {
+			t.Errorf("member write: %d %s", code, b)
+		}
+		c.json("PATCH", "/orgs/9101/members/"+m.UserID, map[string]any{"role": "viewer"}, 200, nil)
+		if code, _ := sess("POST", "/loadtests/scenarios", map[string]any{"name": "by viewer", "spec": map[string]any{}}, "X-Trooper-Project", "9101"); code != 403 {
+			t.Errorf("viewer write: %d", code)
+		}
+		if code, _ := sess("POST", "/loadtests/scenarios", map[string]any{"name": "x", "spec": map[string]any{}}, "X-Trooper-Project", "9101", "Origin", "https://evil.example.com"); code != 403 && code != 401 {
+			t.Errorf("cross-origin write: %d", code)
+		}
+		var members []model.Member
+		c.json("GET", "/orgs/9101/members", nil, 200, &members)
+		if len(members) != 1 || members[0].Role != "viewer" {
+			t.Errorf("members: %+v", members)
+		}
+
+		// api keys: plaintext once, usable, revocable
+		var k model.APIKey
+		c.json("POST", "/api-keys", map[string]any{"name": "it-ci", "kind": "api"}, 201, &k)
+		if !strings.HasPrefix(k.Key, "tt_api_") || k.Prefix != k.Key[:12] {
+			t.Fatalf("key: %+v", k)
+		}
+		kc := itClient{t: t, base: ts.URL, key: k.Key}
+		kc.json("GET", "/services?range=30m", nil, 200, nil)
+		var keys []model.APIKey
+		c.json("GET", "/api-keys", nil, 200, &keys)
+		for _, x := range keys {
+			if x.Key != "" {
+				t.Errorf("list leaks plaintext: %+v", x)
+			}
+		}
+		c.json("DELETE", "/api-keys/"+k.ID, nil, 204, nil)
+		if code, _ := kc.do("GET", "/services", nil); code != 401 {
+			t.Errorf("revoked key: %d", code)
+		}
+
+		var projects []model.Project
+		c.json("GET", "/projects", nil, 200, &projects)
+		if len(projects) != 1 || projects[0].ID != "9101" {
+			t.Errorf("projects: %+v", projects)
+		}
+		c.json("DELETE", "/orgs/9101/members/"+m.UserID, nil, 204, nil)
+		if code, _ := sess("GET", "/services", nil, "X-Trooper-Project", "9101"); code != 403 {
+			t.Errorf("removed member: %d", code)
+		}
+		if code, _ := sess("POST", "/auth/logout", nil); code != 204 {
+			t.Errorf("logout: %d", code)
+		}
+		if code, _ := sess("GET", "/me", nil); code != 401 {
+			t.Errorf("after logout: %d", code)
+		}
+
+		var audit []model.AuditEntry
+		c.json("GET", "/audit-log", nil, 200, &audit)
+		actions := map[string]bool{}
+		for _, a := range audit {
+			actions[a.Action] = true
+		}
+		for _, a := range []string{"POST /orgs/{org}/members", "PATCH /orgs/{org}/members/{user}", "POST /api-keys", "DELETE /api-keys/{id}", "login"} {
+			if !actions[a] {
+				t.Errorf("audit lacks %q: %v", a, actions)
+			}
+		}
+	})
+
+	t.Run("codeintel", func(t *testing.T) {
+		c.t = t
+		var repo model.Repo
+		c.json("POST", "/repos", map[string]any{"provider": "github", "fullName": "acme/it-shop", "token": "ghp_it_secret"}, 201, &repo)
+		if repo.Status != "analyzing" || repo.Provider != "github" || repo.WebhookActive {
+			t.Errorf("repo: %+v", repo)
+		}
+		var ref string
+		_ = pool.QueryRow(ctx, `SELECT credentials_ref FROM repositories WHERE id = $1`, repo.ID).Scan(&ref)
+		if plain, err := secrets.Resolve(ctx, ref, itTenant, st.SecretsKeyOrDefault(), pgSecrets{pool}); err != nil || string(plain) != "ghp_it_secret" {
+			t.Errorf("token not sealed: %q %v", ref, err)
+		}
+		c.json("POST", "/repos", map[string]any{"provider": "github", "fullName": "acme/it-shop"}, 409, nil)
+		c.json("POST", "/repos", map[string]any{"provider": "github", "fullName": "acme/other", "installationId": 999}, 400, nil) // not this project's installation
+		if _, err := pool.Exec(ctx, `UPDATE repositories SET status = 'ready', analyzed_at = now(), analyze_requested_at = now() - interval '1 minute',
+		    last_analyzed_sha = 'abc123', languages = '{go}', services = '{it-api}' WHERE id = $1`, repo.ID); err != nil {
+			t.Fatal(err)
+		}
+		c.json("GET", "/repos/"+repo.ID, nil, 200, &repo)
+		if repo.Status != "ready" || repo.LastAnalyzedSha != "abc123" || repo.Language != "go" {
+			t.Errorf("analyzed repo: %+v", repo)
+		}
+		c.json("POST", "/repos/"+repo.ID+"/analyze", nil, 202, &repo)
+		if repo.Status != "analyzing" {
+			t.Errorf("analyze: %+v", repo)
+		}
+
+		var itemID, shadowID int64
+		if err := pool.QueryRow(ctx, `INSERT INTO inventory_items (repository_id, project_id, kind, key, file, line, service, criticality, observed, monitored, summary)
+		    VALUES ($1, 9101, 'endpoint', 'GET /orders/:id', 'orders.go', 42, 'it-api', 'high', true, false, 'reads an order') RETURNING id`, repo.ID).Scan(&itemID); err != nil {
+			t.Fatal(err)
+		}
+		if err := pool.QueryRow(ctx, `INSERT INTO inventory_items (project_id, kind, key, service, criticality, observed, shadow)
+		    VALUES (9101, 'endpoint', 'GET /legacy', 'it-api', 'low', true, true) RETURNING id`).Scan(&shadowID); err != nil {
+			t.Fatal(err)
+		}
+		var inv []model.InventoryItem
+		c.json("GET", "/inventory", nil, 200, &inv)
+		if len(inv) != 2 {
+			t.Fatalf("inventory: %+v", inv)
+		}
+		c.json("GET", "/inventory?repoId="+repo.ID, nil, 200, &inv)
+		if len(inv) != 1 || inv[0].Criticality != "important" || inv[0].Line != 42 || inv[0].Shadow {
+			t.Errorf("repo inventory: %+v", inv)
+		}
+
+		draft := `{"name": "orders p95", "kind": "latency", "severity": "critical", "target": {"service": "it-api", "endpoint": "GET /orders/:id"}, "condition": {"op": ">", "threshold": 300, "forMin": 5}}`
+		var s1, s2 string
+		for i, dst := range []*string{&s1, &s2} {
+			if err := pool.QueryRow(ctx, `INSERT INTO alert_suggestions (project_id, inventory_item_id, monitor_draft, rationale, confidence, title, kind, target, condition, criticality, code_ref, calibrated)
+			    VALUES (9101, $1, $2, 'hot path', 0.8, 'p95 on orders', $3, 'GET /orders/:id', 'p95 > 300ms', 'high', 'orders.go:42', true) RETURNING id::text`,
+				itemID, draft, []string{"latency", "error_rate"}[i]).Scan(dst); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var sugs []model.CodeSuggestion
+		c.json("GET", "/suggestions", nil, 200, &sugs)
+		if len(sugs) != 2 || sugs[0].State != "proposed" || sugs[0].Criticality != "important" || len(sugs[0].MonitorDraft) == 0 {
+			t.Fatalf("suggestions: %+v", sugs)
+		}
+		var acc model.SuggestionAccepted
+		c.json("POST", "/suggestions/"+s1+"/accept", map[string]any{"severity": "warning"}, 200, &acc)
+		if acc.Suggestion.State != "accepted" || acc.Monitor.Source != "suggestion" || acc.Monitor.Severity != "warning" || acc.Suggestion.MonitorID != acc.Monitor.ID {
+			t.Errorf("accept: %+v", acc)
+		}
+		c.json("POST", "/suggestions/"+s1+"/accept", nil, 409, nil)
+		var rej model.CodeSuggestion
+		c.json("POST", "/suggestions/"+s2+"/reject", nil, 200, &rej)
+		if rej.State != "rejected" {
+			t.Errorf("reject: %+v", rej)
+		}
+		c.json("GET", "/suggestions", nil, 200, &sugs)
+		if len(sugs) != 0 {
+			t.Errorf("proposed after accept/reject: %+v", sugs)
+		}
+		c.json("GET", "/suggestions?state=all", nil, 200, &sugs)
+		if len(sugs) != 2 {
+			t.Errorf("all suggestions: %d", len(sugs))
+		}
+
+		// alert-as-code: managed in the repository
+		if _, err := pool.Exec(ctx, `UPDATE monitors SET source = 'code', code_ref = 'acme/it-shop:trooper/monitors.yaml' WHERE id = $1`, acc.Monitor.ID); err != nil {
+			t.Fatal(err)
+		}
+		var mon model.Monitor
+		c.json("GET", "/monitors/"+acc.Monitor.ID, nil, 200, &mon)
+		if mon.Source != "code" || mon.CodeRef != "acme/it-shop:trooper/monitors.yaml" {
+			t.Errorf("code monitor: %+v", mon)
+		}
+		c.json("PUT", "/monitors/"+mon.ID, map[string]any{"name": "x", "kind": "latency", "severity": "warning",
+			"target": map[string]any{"service": "it-api", "endpoint": "GET /orders/:id"}, "condition": map[string]any{"op": ">", "threshold": 1, "forMin": 5}}, 409, nil)
+		c.json("PATCH", "/monitors/"+mon.ID, map[string]any{"severity": "info"}, 409, nil)
+		c.json("DELETE", "/monitors/"+mon.ID, nil, 409, nil)
+		c.json("PATCH", "/monitors/"+mon.ID, map[string]any{"mutedUntil": time.Now().Add(time.Hour).UnixMilli()}, 200, nil)
+		c.json("POST", "/monitors", map[string]any{"name": "fake code", "kind": "latency", "severity": "warning", "source": "code",
+			"target": map[string]any{"service": "it-api"}, "condition": map[string]any{"op": ">", "threshold": 1, "forMin": 5}}, 400, nil)
+
+		c.json("DELETE", "/repos/"+repo.ID, nil, 204, nil)
+		c.json("GET", "/repos/"+repo.ID, nil, 404, nil)
+		var nSec int
+		_ = pool.QueryRow(ctx, `SELECT count(*) FROM secrets WHERE project_id = 9101 AND $1 = 'secret:' || id::text`, ref).Scan(&nSec)
+		if nSec != 0 {
+			t.Errorf("repo token secret left behind")
+		}
+	})
+
+	t.Run("gitlab and bitbucket repositories", func(t *testing.T) {
+		c.t = t
+		for _, bad := range []map[string]any{
+			{"provider": "gitlab", "fullName": "acme"},                                                 // one segment
+			{"provider": "gitlab", "fullName": "acme/x", "baseUrl": "http://gitlab.acme.test"},         // not https
+			{"provider": "gitlab", "fullName": "acme/x", "baseUrl": "https://u:p@gitlab.acme.test"},    // credentials
+			{"provider": "bitbucket", "fullName": "ws/group/repo"},                                     // 3 segments
+			{"provider": "bitbucket", "fullName": "ws/repo", "baseUrl": "https://bitbucket.acme.test"}, // gitlab only
+			{"provider": "gitlab", "fullName": "acme/x", "defaultBranch": "-x"},                        // branch
+			{"provider": "gitlab", "fullName": "acme/x", "installationId": 1},                          // github only
+		} {
+			c.json("POST", "/repos", bad, 400, nil)
+		}
+		var gl model.Repo
+		c.json("POST", "/repos", map[string]any{"provider": "gitlab", "fullName": "acme/platform/orders", "token": "glpat-it",
+			"baseUrl": "https://GitLab.acme.test/", "defaultBranch": "develop"}, 201, &gl)
+		if gl.Provider != "gitlab" || gl.BaseURL != "https://gitlab.acme.test" || gl.URL != "https://gitlab.acme.test/acme/platform/orders" ||
+			gl.Branch != "develop" || gl.WebhookActive || gl.Webhook == nil || len(gl.Webhook.Secret) < 40 ||
+			gl.Webhook.URL != "http://localhost:8096/v1/webhooks/gitlab" {
+			t.Fatalf("gitlab repo: %+v webhook %+v", gl, gl.Webhook)
+		}
+		var cred, hook string
+		_ = pool.QueryRow(ctx, `SELECT credentials_ref, webhook_secret_ref FROM repositories WHERE id = $1`, gl.ID).Scan(&cred, &hook)
+		for ref, want := range map[string]string{cred: "glpat-it", hook: gl.Webhook.Secret} {
+			if plain, err := secrets.Resolve(ctx, ref, itTenant, st.SecretsKeyOrDefault(), pgSecrets{pool}); err != nil || string(plain) != want {
+				t.Errorf("sealed %q: %v", ref, err)
+			}
+		}
+		// The secret is shown once: reads do not carry it.
+		var again model.Repo
+		c.json("GET", "/repos/"+gl.ID, nil, 200, &again)
+		if again.Webhook != nil {
+			t.Errorf("webhook secret returned by GET")
+		}
+		// codeintel recorded a delivery → active; rotation issues a new secret, drops the old one and resets it.
+		if _, err := pool.Exec(ctx, `UPDATE repositories SET webhook_received_at = now() WHERE id = $1`, gl.ID); err != nil {
+			t.Fatal(err)
+		}
+		c.json("GET", "/repos/"+gl.ID, nil, 200, &again)
+		if !again.WebhookActive || again.WebhookReceivedAt == 0 {
+			t.Errorf("webhook not active: %+v", again)
+		}
+		var rot model.Repo
+		c.json("POST", "/repos/"+gl.ID+"/webhook-secret", nil, 200, &rot)
+		if rot.Webhook == nil || rot.Webhook.Secret == gl.Webhook.Secret || rot.WebhookActive {
+			t.Errorf("rotated: %+v %+v", rot, rot.Webhook)
+		}
+		var nOld int
+		_ = pool.QueryRow(ctx, `SELECT count(*) FROM secrets WHERE project_id = 9101 AND $1 = 'secret:' || id::text`, hook).Scan(&nOld)
+		if nOld != 0 {
+			t.Errorf("old webhook secret left behind")
+		}
+
+		var bb model.Repo
+		c.json("POST", "/repos", map[string]any{"provider": "bitbucket", "fullName": "acme-ws/shop", "token": "jane:app-pass"}, 201, &bb)
+		if bb.URL != "https://bitbucket.org/acme-ws/shop" || bb.Webhook == nil || bb.Webhook.URL != "http://localhost:8096/v1/webhooks/bitbucket" {
+			t.Errorf("bitbucket repo: %+v %+v", bb, bb.Webhook)
+		}
+		for _, id := range []string{gl.ID, bb.ID} {
+			c.json("DELETE", "/repos/"+id, nil, 204, nil)
+		}
+		var nLeft int
+		_ = pool.QueryRow(ctx, `SELECT count(*) FROM secrets WHERE project_id = 9101 AND name LIKE 'repo %'
+		  AND NOT EXISTS (SELECT 1 FROM repositories r WHERE r.project_id = 9101 AND 'secret:' || secrets.id::text IN (r.credentials_ref, r.webhook_secret_ref))`).Scan(&nLeft)
+		if nLeft != 0 {
+			t.Errorf("%d repo secrets left behind", nLeft)
+		}
+	})
+
+	t.Run("logs source and short ranges", func(t *testing.T) {
+		c.t = t
+		if err := ch.Exec(ctx, `INSERT INTO logs (org_id, project_id, ts, service, env, severity, body, attrs)
+		  SELECT 9101, 9101, now64(6) - toIntervalSecond(number * 30), 'it-api', 'prod', 'info', 'vercel lambda line', map('vercel.source', 'lambda')
+		  FROM numbers(5)`); err != nil {
+			t.Fatal(err)
+		}
+		var page struct {
+			Lines []model.LogLine `json:"lines"`
+		}
+		c.json("GET", "/logs?range=15m&source=lambda", nil, 200, &page)
+		if len(page.Lines) != 5 || page.Lines[0].Source != "lambda" {
+			t.Errorf("source filter: %d %+v", len(page.Lines), page.Lines)
+		}
+		for rg, n := range map[string]int{"15m": 15, "30m": 30} {
+			var s series
+			c.json("GET", "/services/it-api/series?range="+rg, nil, 200, &s)
+			if len(s.Timestamps) != n || s.Timestamps[1]-s.Timestamps[0] != 60000 {
+				t.Errorf("%s: %d points", rg, len(s.Timestamps))
+			}
+		}
+	})
+
 	t.Run("loadtests", func(t *testing.T) {
 		c.t = t
-		var sc struct{ ID string }
-		c.json("POST", "/loadtests/scenarios", map[string]any{"name": "orders smoke", "spec": map[string]any{"target": "http://localhost:8080", "stages": []map[string]any{{"duration": "1m", "target": 50}}}}, 201, &sc)
-		var run struct{ ID, State string }
+		var sc model.LoadTestScenario
+		c.json("POST", "/loadtests/scenarios", map[string]any{"name": "orders smoke", "state": "draft", "spec": map[string]any{"target": "http://localhost:8080",
+			"services": []string{"it-api"}, "stages": []map[string]any{{"duration": "1m", "target": 50}}}}, 201, &sc)
+		if sc.State != "draft" || len(sc.Services) != 1 || sc.Services[0] != "it-api" {
+			t.Errorf("scenario: %+v", sc)
+		}
+		c.json("POST", "/loadtests/scenarios/"+sc.ID+"/runs", nil, 409, nil) // drafts never run
+		c.json("PATCH", "/loadtests/scenarios/"+sc.ID, map[string]any{"state": "bogus"}, 400, nil)
+		c.json("PATCH", "/loadtests/scenarios/"+sc.ID, map[string]any{"state": "ready"}, 200, &sc)
+		if sc.State != "ready" {
+			t.Errorf("patched: %+v", sc)
+		}
+		var run model.LoadTestRun
 		c.json("POST", "/loadtests/scenarios/"+sc.ID+"/runs", nil, 201, &run)
+		if run.State != "queued" || run.CreatedAt == 0 {
+			t.Errorf("queued run: %+v", run)
+		}
 		c.json("POST", "/loadtests/runs/"+run.ID+"/stop", nil, 200, &run)
-		if run.State != "aborted" {
-			t.Errorf("run state: %s", run.State)
+		if run.State != "aborted" || run.AbortRequestedAt == 0 {
+			t.Errorf("stopped queued run: %+v", run)
 		}
 		c.json("POST", "/loadtests/runs/"+run.ID+"/stop", nil, 409, nil)
+
+		// a running run with runner metrics and target traffic
+		c.json("POST", "/loadtests/scenarios/"+sc.ID+"/runs", nil, 201, &run)
+		if _, err := pool.Exec(ctx, `UPDATE loadtest_runs SET state = 'running', started_at = now() - interval '2 minutes', region = 'eu',
+		    live = jsonb_build_object('ts', 1, 'vus', 10, 'rps', 20, 'p95', 30, 'errorRate', 0.01, 'progress', 0.5),
+		    summary = '{"steps": [{"key": "GET /orders/:id", "count": 10}], "statusCodes": {"200": 10}}' WHERE id = $1`, run.ID); err != nil {
+			t.Fatal(err)
+		}
+		c.json("GET", "/loadtests/runs/"+run.ID, nil, 200, &run)
+		if run.State != "running" || run.Live == nil || run.Vus != 10 || run.Region != "eu" || len(run.Steps) == 0 || len(run.StatusCodes) == 0 {
+			t.Errorf("running run: %+v", run)
+		}
+		var rs model.RunSeries
+		c.json("GET", "/loadtests/runs/"+run.ID+"/series", nil, 200, &rs)
+		if rs.Source != "live" || len(rs.Ts) != 1 {
+			t.Errorf("live fallback: %+v", rs)
+		}
+		for _, q := range []string{
+			`INSERT INTO metrics (org_id, project_id, ts, service, env, name, type, attrs, attrs_hash, value)
+			 SELECT 9101, 9101, now64(3) - toIntervalSecond(number * 10), 'loadtest', '', 'trooper.loadtest.requests', 'sum',
+			   map('trooper.loadtest.run', '` + run.ID + `', 'trooper.loadtest.region', 'eu'), 1, 100 FROM numbers(6)`,
+			`INSERT INTO metrics (org_id, project_id, ts, service, env, name, type, attrs, attrs_hash, value)
+			 SELECT 9101, 9101, now64(3) - toIntervalSecond(number * 10), 'loadtest', '', 'trooper.loadtest.errors', 'sum',
+			   map('trooper.loadtest.run', '` + run.ID + `', 'trooper.loadtest.region', 'eu'), 2, 5 FROM numbers(6)`,
+			`INSERT INTO metrics (org_id, project_id, ts, service, env, name, type, attrs, attrs_hash, value)
+			 SELECT 9101, 9101, now64(3) - toIntervalSecond(number * 10), 'loadtest', '', 'trooper.loadtest.vus', 'gauge',
+			   map('trooper.loadtest.run', '` + run.ID + `', 'trooper.loadtest.region', r), cityHash64(r), 10
+			 FROM numbers(6) ARRAY JOIN ['eu', 'us'] AS r`,
+			`INSERT INTO metrics (org_id, project_id, ts, service, env, name, type, attrs, attrs_hash, count, bucket_bounds, bucket_counts)
+			 SELECT 9101, 9101, now64(3) - toIntervalSecond(number * 10), 'loadtest', '', 'trooper.loadtest.duration_ms', 'histogram',
+			   map('trooper.loadtest.run', '` + run.ID + `'), 3, 100, [50, 100], [0, 100, 0] FROM numbers(6)`,
+			`INSERT INTO spans (org_id, project_id, ts, duration_ns, trace_id, span_id, service, env, kind, name, is_entry, route, http_method, status_code, caller, caller_kind)
+			 SELECT 9101, 9101, now64(6) - toIntervalSecond(number), 40000000, MD5(concat('lt', toString(number))), substring(MD5(concat('lt', toString(number))), 1, 8),
+			   'it-api', 'prod', 'server', 'GET /orders/:id', 1, '/orders/:id', 'GET', 200, 'loadtest:` + run.ID + `', 'loadtest'
+			 FROM numbers(60)`,
+		} {
+			if err := ch.Exec(ctx, q); err != nil {
+				t.Fatalf("%v\n%s", err, q)
+			}
+		}
+		c.json("GET", "/loadtests/runs/"+run.ID+"/series?step=10s", nil, 200, &rs)
+		var reqs, maxVus, p95 float64
+		for i := range rs.Ts {
+			reqs += rs.Rps[i] * 10
+			maxVus, p95 = max(maxVus, rs.Vus[i]), max(p95, rs.P95[i])
+		}
+		if rs.Source != "metrics" || rs.StepMs != 10000 || reqs != 600 || maxVus != 20 || p95 < 50 || p95 > 100 {
+			t.Errorf("series: reqs %v vus %v p95 %v %+v", reqs, maxVus, p95, rs)
+		}
+		c.json("GET", "/loadtests/runs/"+run.ID+"/series?step=fast", nil, 400, nil)
+		var tg struct {
+			series
+			Service  string          `json:"service"`
+			Total    model.RedTotals `json:"total"`
+			Loadtest model.RedTotals `json:"loadtest"`
+		}
+		c.json("GET", "/loadtests/runs/"+run.ID+"/target", nil, 200, &tg)
+		if tg.Service != "it-api" || tg.Loadtest.Requests != 60 || tg.Total.Requests < 60 || tg.sum("rpmLoadtest") != 60 || tg.sum("rpm") < 60 {
+			t.Errorf("target: %+v", tg)
+		}
+		c.json("POST", "/loadtests/runs/"+run.ID+"/stop", nil, 200, &run)
+		if run.State != "running" || run.AbortRequestedAt == 0 {
+			t.Errorf("stopping running run: %+v", run)
+		}
 		c.json("GET", "/loadtests/runs?scenarioId="+sc.ID, nil, 200, nil)
 		c.json("GET", "/loadtests/scenarios", nil, 200, nil)
 		c.json("DELETE", "/loadtests/scenarios/"+sc.ID, nil, 204, nil)
+
+		var dm model.LoadTestDomain
+		c.json("POST", "/loadtests/domains", map[string]any{"host": "https://Shop.Example.com:443/checkout"}, 201, &dm)
+		if dm.Host != "shop.example.com" || dm.Verified || dm.Token == "" || !strings.Contains(dm.DNSRecord, dm.Token) {
+			t.Errorf("domain: %+v", dm)
+		}
+		c.json("POST", "/loadtests/domains", map[string]any{"host": "shop.example.com"}, 409, nil)
+		c.json("POST", "/loadtests/domains/"+dm.ID+"/verify", map[string]any{"method": "http"}, 202, &dm)
+		if dm.VerifyRequestedAt == 0 || dm.Method != "http" {
+			t.Errorf("verify: %+v", dm)
+		}
+		var dms []model.LoadTestDomain
+		c.json("GET", "/loadtests/domains", nil, 200, &dms)
+		if len(dms) != 1 {
+			t.Errorf("domains: %+v", dms)
+		}
+		c.json("DELETE", "/loadtests/domains/"+dm.ID, nil, 204, nil)
 	})
 }
 

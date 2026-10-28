@@ -23,6 +23,10 @@ class TrooperOptions {
     var version: String? = null
     var sampleRate: Double? = null
     var enabled: Boolean? = null
+    /** Continuous JFR profiling (default: `TROOPER_PROFILING` / `-Dtrooper.profiling.enabled`, else off). */
+    var profiling: Boolean? = null
+    /** Record LLM prompts/completions (default: `TROOPER_LLM_CAPTURE_CONTENT`, else off). */
+    var llmCaptureContent: Boolean? = null
 
     internal fun toConfig(): TrooperConfig {
         val system = TrooperConfig.fromSystem()
@@ -33,6 +37,10 @@ class TrooperOptions {
             .version(version ?: system.version())
             .sampleRate(sampleRate ?: system.sampleRate())
             .enabled(enabled ?: system.enabled())
+            .profilingEnabled(profiling ?: system.profilingEnabled())
+            .profilingTypes(system.profilingTypes())
+            .profilingPeriodSeconds(system.profilingPeriodSeconds())
+            .llmCaptureContent(llmCaptureContent ?: system.llmCaptureContent())
             .build()
     }
 }

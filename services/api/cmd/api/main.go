@@ -15,12 +15,16 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tasktrooper/telemetry/services/api/internal/auth"
+	"github.com/tasktrooper/telemetry/services/api/internal/blob"
 	"github.com/tasktrooper/telemetry/services/api/internal/cloudcheck"
 	"github.com/tasktrooper/telemetry/services/api/internal/conntest"
 	"github.com/tasktrooper/telemetry/services/api/internal/server"
+	"github.com/tasktrooper/telemetry/services/api/internal/slack"
 	"github.com/tasktrooper/telemetry/services/api/internal/store"
 	"github.com/tasktrooper/telemetry/services/api/internal/symbolicate"
+	"github.com/tasktrooper/telemetry/services/pkg/aiquota"
 	"github.com/tasktrooper/telemetry/services/pkg/config"
+	"github.com/tasktrooper/telemetry/services/pkg/githubapp"
 	"github.com/tasktrooper/telemetry/services/pkg/logx"
 	"github.com/tasktrooper/telemetry/services/pkg/secrets"
 )
@@ -61,11 +65,18 @@ func run(cfg config.Common, log *slog.Logger) error {
 	}
 	st := store.New(ch, pool)
 	st.SecretsKey = key
+	if st.AIQuota, err = aiquota.FromEnv(); err != nil {
+		return err
+	}
 	srv := &server.Server{
 		Store:        st,
 		CloudTest:    cloudcheck.Run,
 		Symbolicator: symbolicate.New(config.String("TT_SYMBOLICATOR_URL", "http://localhost:8095")),
 		Auth:         auth.NewPG(pool),
+		DevLogin:     config.Bool("TT_AUTH_DEV", false),
+		SessionTTL:   config.Duration("TT_SESSION_TTL", 7*24*time.Hour),
+		WebURL:       config.String("TT_WEB_URL", "http://localhost:5173"),
+		CookieSecure: config.Bool("TT_COOKIE_SECURE", false),
 		Log:          log,
 		Origins:      config.List("TT_API_CORS_ORIGINS", "http://localhost:*,http://127.0.0.1:*"),
 		Test:         conntest.Run,
@@ -78,6 +89,42 @@ func run(cfg config.Common, log *slog.Logger) error {
 			}
 			return nil
 		},
+	}
+	if issuer := config.String("TT_OIDC_ISSUER", ""); issuer != "" {
+		srv.OIDC = &auth.OIDC{Issuer: issuer, ClientID: config.String("TT_OIDC_CLIENT_ID", ""),
+			ClientSecret: config.String("TT_OIDC_CLIENT_SECRET", ""),
+			RedirectURL:  config.String("TT_OIDC_REDIRECT_URL", "http://localhost:8080/api/v1/auth/callback"),
+			Scopes:       config.List("TT_OIDC_SCOPES", "openid,email,profile"),
+			HTTPClient:   &http.Client{Timeout: 10 * time.Second}}
+		if srv.OIDC.ClientID == "" {
+			return errors.New("TT_OIDC_ISSUER is set but TT_OIDC_CLIENT_ID is empty")
+		}
+	}
+	if b := blob.FromEnv(); b != nil {
+		srv.Replays = b
+	}
+	srv.StateKey = key
+	srv.PublicAPIURL = config.String("TT_PUBLIC_API_URL", "http://localhost:8080")
+	srv.PublicWebhookURL = config.String("TT_PUBLIC_WEBHOOK_URL", "http://localhost:8096")
+	if id := config.String("TT_SLACK_CLIENT_ID", ""); id != "" {
+		srv.Slack = &server.SlackApp{ClientID: id, ClientSecret: config.String("TT_SLACK_CLIENT_SECRET", ""),
+			SigningSecret: config.String("TT_SLACK_SIGNING_SECRET", ""),
+			API:           &slack.Client{BaseURL: config.String("TT_SLACK_API_URL", slack.DefaultAPIURL), HTTP: &http.Client{Timeout: 10 * time.Second}}}
+		if srv.Slack.ClientSecret == "" || srv.Slack.SigningSecret == "" {
+			return errors.New("TT_SLACK_CLIENT_ID is set but TT_SLACK_CLIENT_SECRET / TT_SLACK_SIGNING_SECRET is empty")
+		}
+	}
+	switch gh, err := githubapp.FromEnv(ctx); {
+	case err == nil:
+		srv.GitHub = &server.GitHubApp{Client: gh, Slug: config.String("TT_GITHUB_APP_SLUG", ""), WebURL: config.String("TT_GITHUB_URL", "https://github.com")}
+		if srv.GitHub.Slug == "" {
+			return errors.New("TT_GITHUB_APP_ID is set but TT_GITHUB_APP_SLUG is empty")
+		}
+	case !errors.Is(err, githubapp.ErrNotConfigured):
+		return err
+	}
+	if srv.DevLogin {
+		log.Warn("TT_AUTH_DEV=true: POST /api/v1/auth/dev-login signs anyone in by email; never enable it in production")
 	}
 	hs := &http.Server{
 		Addr:              config.String("TT_API_ADDR", ":8080"),

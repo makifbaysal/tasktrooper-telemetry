@@ -12,9 +12,10 @@ import (
 )
 
 type config struct {
-	panicPolicy trooper.PanicPolicy
-	resolver    func(*http.Request) string
-	otelOpts    []otelhttp.Option
+	panicPolicy  trooper.PanicPolicy
+	resolver     func(*http.Request) string
+	profileRoute func(*http.Request) string
+	otelOpts     []otelhttp.Option
 }
 
 // Option configures Middleware.
@@ -30,6 +31,16 @@ func WithPanicPolicy(p trooper.PanicPolicy) Option { return func(c *config) { c.
 // handler returns.
 func WithRouteResolver(f func(*http.Request) string) Option {
 	return func(c *config) { c.resolver = f }
+}
+
+// WithProfileRouteResolver returns the route template of a request *before* the wrapped handler
+// routes it. It is used only for the pprof goroutine label trooper.route while continuous
+// profiling runs (trooper.WithProfiling), because CPU samples are taken while the handler runs and
+// the regular resolver only knows the route afterwards. When next is an *http.ServeMux the default
+// asks the mux (ServeMux.Handler) — one extra route match per request, only while profiling.
+// Without a pre-route (other routers) the goroutine is labelled with trooper.method only.
+func WithProfileRouteResolver(f func(*http.Request) string) Option {
+	return func(c *config) { c.profileRoute = f }
 }
 
 // WithOtelHTTPOptions passes options to the underlying otelhttp handler.
@@ -49,10 +60,21 @@ func Handler(next http.Handler, opts ...Option) http.Handler {
 	for _, o := range opts {
 		o(c)
 	}
+	if c.profileRoute == nil {
+		if mux, ok := next.(*http.ServeMux); ok {
+			c.profileRoute = func(r *http.Request) string {
+				_, pattern := mux.Handler(r)
+				return StripPattern(pattern)
+			}
+		}
+	}
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		var r2 *http.Request
 		ctx, entry := trooper.BeginEntry(ctx, r.Method, "", func() string { return c.resolver(r2) })
+		if c.profileRoute != nil && trooper.ProfileLabelsEnabled() {
+			ctx = entry.LabelRoute(ctx, safeRoute(c.profileRoute, r.WithContext(ctx)))
+		}
 		r2 = r.WithContext(ctx)
 		span := trace.SpanFromContext(ctx)
 		finish := func() {
@@ -86,6 +108,15 @@ func Handler(next http.Handler, opts ...Option) http.Handler {
 		finish()
 	})
 	return otelhttp.NewHandler(inner, "http.server", c.otelOpts...)
+}
+
+func safeRoute(f func(*http.Request) string, r *http.Request) (route string) {
+	defer func() {
+		if recover() != nil {
+			route = ""
+		}
+	}()
+	return f(r)
 }
 
 // PatternRoute returns the path part of r.Pattern (Go 1.22+ ServeMux), stripping the method and

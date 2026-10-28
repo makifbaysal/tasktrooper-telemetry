@@ -41,6 +41,9 @@ type Monitor struct {
 	MutedUntil *time.Time
 	// ClusterKind is broker_clusters.kind (kafka|rabbitmq|sqs|pubsub) of query.clusterId, for consumer_lag.
 	ClusterKind string
+	// Source is monitors.source (manual|code|template|suggestion…); CodeRef is monitors.code_ref ("repo:path") of
+	// alert-as-code monitors. Both are informational: code monitors evaluate like any other.
+	Source, CodeRef string
 }
 
 // Target is monitors.target: { service, endpoint?, process?, view? }.
@@ -105,6 +108,36 @@ type Query struct {
 	// job_missed: expected every intervalMin, tolerated graceMin late
 	IntervalMin float64 `json:"intervalMin"`
 	GraceMin    float64 `json:"graceMin"`
+
+	// infra (contracts §20): entity host|container|pod|node|workload, agg max|avg (default avg), filter.
+	// faas (contracts §21): functionId or filter {provider, region, service}; relativeToTimeout divides
+	// duration_p95/p99 by the function's timeout (template "p95 > timeout × 0.8").
+	Entity            string      `json:"entity"`
+	Agg               string      `json:"agg"`
+	Filter            InfraFilter `json:"filter"`
+	FunctionID        string      `json:"functionId"`
+	RelativeToTimeout bool        `json:"relativeToTimeout"`
+}
+
+// InfraFilter is query.filter of infra / faas / llm monitors (llm: service, provider, model, route, method, operation).
+type InfraFilter struct {
+	Cluster   string `json:"cluster"`
+	Namespace string `json:"namespace"`
+	Host      string `json:"host"`
+	Workload  string `json:"workload"`
+	Service   string `json:"service"`
+	Provider  string `json:"provider"`
+	Region    string `json:"region"`
+	Model     string `json:"model"`
+	Route     string `json:"route"`
+	Method    string `json:"method"`
+	Operation string `json:"operation"`
+}
+
+// Function is one serverless_functions row (faas monitors: service mapping, timeout).
+type Function struct {
+	Slug, Service, Provider, Region string
+	TimeoutS                        float64 // 0 = unknown
 }
 
 // FlexInt64 decodes an id written as a JSON number or string (the UI uses string ids).
@@ -273,6 +306,9 @@ func (m *Monitor) Scope() (service, route, method, env string) {
 	if service == "" {
 		service = t.Service
 	}
+	if service == "" && m.Kind == "llm" {
+		service = q.Filter.Service
+	}
 	if env == "" {
 		env = t.Env
 	}
@@ -336,6 +372,8 @@ type KpiRule struct {
 	Threshold   float64
 	Severity    string
 	Channels    []string
+	// Renotify is kpi_alert_rules.condition.renotifyMin (0 = no reminders).
+	Renotify time.Duration
 	// persisted state (kpi_alert_rules.state/state_since)
 	State      State
 	StateSince time.Time

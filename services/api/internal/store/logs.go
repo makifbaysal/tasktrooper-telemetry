@@ -18,8 +18,13 @@ type LogFilter struct {
 	Text     string
 	TraceID  string
 	Route    string
-	Before   int64 // unix ms cursor (exclusive)
-	Limit    int
+	// Source filters on attrs['vercel.source'] (Vercel log drains: build|static|external|edge|lambda|redirect|firewall).
+	Source string
+	// Pod / Namespace filter on attrs['k8s.pod.name'] / attrs['k8s.namespace.name'] (resource placement copied by the
+	// writer; contracts §22).
+	Pod, Namespace string
+	Before         int64 // unix ms cursor (exclusive)
+	Limit          int
 }
 
 // severities maps a UI level to ClickHouse severities.
@@ -37,6 +42,9 @@ func UILevel(sev string) string {
 	}
 	return sev
 }
+
+// LogSources are the Vercel log drain sources (attrs['vercel.source']).
+var LogSources = map[string]bool{"build": true, "static": true, "external": true, "edge": true, "lambda": true, "redirect": true, "firewall": true}
 
 var token = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 
@@ -80,6 +88,21 @@ func logWhere(f LogFilter, withLevels bool) (string, []any, error) {
 		b.WriteString(" AND route = ?")
 		args = append(args, f.Route)
 	}
+	if f.Source != "" {
+		if !LogSources[f.Source] {
+			return "", nil, Invalid("source must be build|static|external|edge|lambda|redirect|firewall")
+		}
+		b.WriteString(" AND attrs['vercel.source'] = ?")
+		args = append(args, f.Source)
+	}
+	if f.Pod != "" {
+		b.WriteString(" AND attrs['k8s.pod.name'] = ?")
+		args = append(args, f.Pod)
+	}
+	if f.Namespace != "" {
+		b.WriteString(" AND attrs['k8s.namespace.name'] = ?")
+		args = append(args, f.Namespace)
+	}
 	return b.String(), args, nil
 }
 
@@ -96,7 +119,7 @@ func (d *DB) SearchLogs(ctx context.Context, q Q, f LogFilter) (model.LogPage, e
 	}
 	limit := clampLimit(f.Limit, 200, 1000)
 	rows, err := d.ch.Query(ctx, `SELECT toInt64(toUnixTimestamp64Milli(ts)), service, toString(severity), body, lower(hex(trace_id)), route,
-	    toString(cityHash64(ts, service, body))
+	    toString(cityHash64(ts, service, body)), attrs['vercel.source']
 	  FROM logs WHERE {{tenant}} AND ts >= fromUnixTimestamp64Micro(?) AND ts < fromUnixTimestamp64Micro(?)`+ec+where+`
 	  ORDER BY ts DESC LIMIT ?`, append(append(append([]any{micros(q.W.From), to}, ea...), args...), limit+1)...)
 	if err != nil {
@@ -106,7 +129,7 @@ func (d *DB) SearchLogs(ctx context.Context, q Q, f LogFilter) (model.LogPage, e
 	for rows.Next() {
 		var l model.LogLine
 		var sev string
-		if err := rows.Scan(&l.Ts, &l.Service, &sev, &l.Message, &l.TraceID, &l.Route, &l.ID); err != nil {
+		if err := rows.Scan(&l.Ts, &l.Service, &sev, &l.Message, &l.TraceID, &l.Route, &l.ID, &l.Source); err != nil {
 			rows.Close()
 			return page, err
 		}
@@ -187,6 +210,14 @@ func (d *DB) LogPatterns(ctx context.Context, q Q, f LogFilter) ([]model.LogPatt
 		}
 		where += " AND severity IN (?)"
 		args = append(args, sev)
+	}
+	if f.Source != "" { // log_patterns_1m has no attrs: keep the patterns seen in lines of that source
+		if !LogSources[f.Source] {
+			return nil, Invalid("source must be build|static|external|edge|lambda|redirect|firewall")
+		}
+		where += ` AND pattern_id IN (SELECT pattern_id FROM logs WHERE {{tenant}} AND ts >= fromUnixTimestamp64Micro(?) AND ts < fromUnixTimestamp64Micro(?)
+		  AND attrs['vercel.source'] = ?)`
+		args = append(args, micros(q.W.From), micros(q.W.To), f.Source)
 	}
 	rows, err := d.ch.Query(ctx, `SELECT toString(pattern_id), any(severity), any(sample), groupUniqArray(service), toFloat64(sum(count)) AS c, max(minute)
 	  FROM log_patterns_1m WHERE {{tenant}} AND minute >= toDateTime(?) AND minute < toDateTime(?)`+where+`

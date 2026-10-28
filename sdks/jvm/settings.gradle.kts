@@ -16,6 +16,7 @@ rootProject.name = "tasktrooper-jvm"
 include(
     "trooper-otel-core",
     "trooper-otel-extension",
+    "trooper-llm",
     "trooper-javaagent",
     "trooper-spring-boot-starter",
     "trooper-quarkus",

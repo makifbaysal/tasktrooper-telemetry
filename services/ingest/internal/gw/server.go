@@ -34,6 +34,10 @@ type Config struct {
 	MaxRecordBytes int   // Kafka record limit; larger requests are split
 	DefaultRPS     int   // per-project request rate when the key has no rate_limit_rps (≤0 disables)
 	ServeMetrics   bool  // expose Prometheus /metrics on the HTTP port (when TT_INGEST_METRICS_ADDR is unset)
+	// Session replay (contracts §23): compressed / decompressed body limits (defaults 1 MiB / 10 MiB).
+	ReplayMaxWireBytes, ReplayMaxBodyBytes int64
+	// Profiles (contracts §24): wire / decompressed limits (defaults 4 MiB / 32 MiB).
+	ProfileMaxWireBytes, ProfileMaxBodyBytes int64
 }
 
 // RateLimiter is satisfied by *ratelimit.Limiter.
@@ -49,7 +53,8 @@ type Server struct {
 	sink         Sink
 	log          *slog.Logger
 	now          func() time.Time
-	integrations Integrations // Vercel drains; nil → /v1/drains/* answers 503
+	integrations Integrations   // Vercel drains; nil → /v1/drains/* answers 503
+	internal     *auth.Internal // internal service credential; nil = off
 }
 
 // New builds a Server.
@@ -59,6 +64,18 @@ func New(cfg Config, keys auth.Lookup, lim RateLimiter, sink Sink, log *slog.Log
 	}
 	if cfg.MaxRecordBytes <= 0 {
 		cfg.MaxRecordBytes = 900 << 10
+	}
+	if cfg.ReplayMaxWireBytes <= 0 {
+		cfg.ReplayMaxWireBytes = 1 << 20
+	}
+	if cfg.ReplayMaxBodyBytes <= 0 {
+		cfg.ReplayMaxBodyBytes = 10 << 20
+	}
+	if cfg.ProfileMaxWireBytes <= 0 {
+		cfg.ProfileMaxWireBytes = 4 << 20
+	}
+	if cfg.ProfileMaxBodyBytes <= 0 {
+		cfg.ProfileMaxBodyBytes = 32 << 20
 	}
 	return &Server{cfg: cfg, keys: keys, lim: lim, sink: sink, log: log, now: time.Now}
 }
@@ -109,6 +126,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/v1/metrics", s.endpoint(sigMetrics))
 	mux.Handle("/v1/logs", s.endpoint(sigLogs))
 	mux.Handle("/v1/rum", s.endpoint(sigRUM))
+	mux.Handle("/v1/replay", s.replayEndpoint())
+	mux.Handle("/v1/profiles", s.profilesEndpoint())
+	mux.Handle(OTLPProfilesPath, s.otlpProfilesEndpoint())
 	mux.Handle("/v1/drains/vercel", s.vercelDrain())
 	if s.cfg.ServeMetrics {
 		mux.Handle("/metrics", obs.Handler())
@@ -143,19 +163,8 @@ var (
 func (s *Server) endpoint(sig signal) http.Handler {
 	return instrument(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if origin != "" && sig.cors {
-			h := w.Header()
-			h.Set("Access-Control-Allow-Origin", origin)
-			h.Add("Vary", "Origin")
-			h.Set("Access-Control-Allow-Credentials", "false")
-			h.Set("Access-Control-Expose-Headers", "Retry-After")
-			if r.Method == http.MethodOptions {
-				h.Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-				h.Set("Access-Control-Allow-Headers", "Content-Type, Content-Encoding, X-Trooper-Key, Authorization, Traceparent, Tracestate")
-				h.Set("Access-Control-Max-Age", "86400")
-				w.WriteHeader(http.StatusNoContent)
-				return
-			}
+		if origin != "" && sig.cors && corsHeaders(w, r, origin) {
+			return
 		}
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", "POST")
@@ -182,30 +191,46 @@ func (s *Server) endpoint(sig signal) http.Handler {
 	}))
 }
 
-func (s *Server) handle(r *http.Request, sig signal, origin string, jsonReq bool) error {
-	raw := requestKey(r, sig.rum)
-	key, err := s.keys.Lookup(r.Context(), raw)
-	if err != nil {
-		if errors.Is(err, auth.ErrInvalidKey) {
-			return errUnauthorized
-		}
-		s.log.Error("key lookup failed", "err", err)
-		return &ingestError{status: http.StatusServiceUnavailable, msg: "auth backend unavailable", retryAfter: 5}
+// corsHeaders sets the CORS headers of a browser request and answers a preflight (then it returns true).
+func corsHeaders(w http.ResponseWriter, r *http.Request, origin string) bool {
+	h := w.Header()
+	h.Set("Access-Control-Allow-Origin", origin)
+	h.Add("Vary", "Origin")
+	h.Set("Access-Control-Allow-Credentials", "false")
+	h.Set("Access-Control-Expose-Headers", "Retry-After")
+	if r.Method == http.MethodOptions {
+		h.Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+		h.Set("Access-Control-Allow-Headers", "Content-Type, Content-Encoding, X-Trooper-Key, Authorization, Traceparent, Tracestate")
+		h.Set("Access-Control-Max-Age", "86400")
+		w.WriteHeader(http.StatusNoContent)
+		return true
 	}
-	if origin != "" && !key.OriginAllowed(origin) {
-		return errForbidden
+	return false
+}
+
+// bodyError maps a readBody error to the HTTP answer.
+func bodyError(err error, limit int64) error {
+	switch {
+	case errors.Is(err, errTooLarge):
+		return &ingestError{status: http.StatusRequestEntityTooLarge, msg: "body exceeds " + strconv.FormatInt(limit, 10) + " bytes"}
+	case errors.Is(err, errBadEncoding):
+		return &ingestError{status: http.StatusUnsupportedMediaType, msg: err.Error()}
+	}
+	return &ingestError{status: http.StatusBadRequest, msg: "read body: " + err.Error()}
+}
+
+func (s *Server) handle(r *http.Request, sig signal, origin string, jsonReq bool) error {
+	key, err := s.authenticate(r.Context(), strings.TrimSpace(r.Header.Get(auth.HeaderInternal)), r.Header.Get(auth.HeaderProject),
+		origin, requestKey(r, sig.rum))
+	if err != nil {
+		return err
 	}
 	if err := s.allow(r.Context(), key); err != nil {
 		return err
 	}
 	body, err := readBody(r, s.cfg.MaxBodyBytes)
-	switch {
-	case errors.Is(err, errTooLarge):
-		return &ingestError{status: http.StatusRequestEntityTooLarge, msg: "body exceeds " + strconv.FormatInt(s.cfg.MaxBodyBytes, 10) + " bytes"}
-	case errors.Is(err, errBadEncoding):
-		return &ingestError{status: http.StatusUnsupportedMediaType, msg: err.Error()}
-	case err != nil:
-		return &ingestError{status: http.StatusBadRequest, msg: "read body: " + err.Error()}
+	if err != nil {
+		return bodyError(err, s.cfg.MaxBodyBytes)
 	}
 	m := meta{tenant: key.Tenant, receivedAt: s.now(), clientIP: clientIP(r)}
 	if sig.rum {
@@ -287,7 +312,7 @@ func isEmpty(m proto.Message) bool {
 	return false
 }
 
-func (s *Server) send(topic string, values [][]byte, m meta) error {
+func (s *Server) send(topic string, values [][]byte, m meta, extra ...kgo.RecordHeader) error {
 	org, project := m.tenant.Headers()
 	headers := []kgo.RecordHeader{
 		{Key: topics.HeaderOrgID, Value: []byte(org)},
@@ -300,6 +325,7 @@ func (s *Server) send(topic string, values [][]byte, m meta) error {
 	if m.userAgent != "" {
 		headers = append(headers, kgo.RecordHeader{Key: topics.HeaderUserAgent, Value: []byte(m.userAgent)})
 	}
+	headers = append(headers, extra...)
 	key := []byte(project)
 	for _, v := range values {
 		if err := s.sink.Send(&kgo.Record{Topic: topic, Key: key, Value: v, Headers: headers}); err != nil {

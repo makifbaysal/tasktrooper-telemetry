@@ -10,27 +10,28 @@ import { NOW, deploysFor, services } from './mock';
 import { databases, type Cluster, type Database } from './infra';
 import { api, hydrateList, invalidate, isApi, mutate, registerHydrator, seg } from './remote';
 
-export type IntegrationProvider = 'aws' | 'gcp' | 'vercel' | 'neon';
+export type IntegrationProvider = 'aws' | 'gcp' | 'azure' | 'vercel' | 'neon';
 export type IntegrationStatus = 'pending' | 'ok' | 'error' | 'disabled';
 
-export const PROVIDERS: IntegrationProvider[] = ['aws', 'gcp', 'vercel', 'neon'];
+export const PROVIDERS: IntegrationProvider[] = ['aws', 'gcp', 'azure', 'vercel', 'neon'];
 
 export const PROVIDER_LABEL: Record<IntegrationProvider, string> = {
-  aws: 'Amazon Web Services', gcp: 'Google Cloud', vercel: 'Vercel', neon: 'Neon',
+  aws: 'Amazon Web Services', gcp: 'Google Cloud', azure: 'Microsoft Azure', vercel: 'Vercel', neon: 'Neon',
 };
 /** Short form for badges ("AWS · aws-prod"). */
-export const PROVIDER_SHORT: Record<IntegrationProvider, string> = { aws: 'AWS', gcp: 'Google Cloud', vercel: 'Vercel', neon: 'Neon' };
+export const PROVIDER_SHORT: Record<IntegrationProvider, string> = { aws: 'AWS', gcp: 'Google Cloud', azure: 'Azure', vercel: 'Vercel', neon: 'Neon' };
 
 /** What each provider brings, in the words the UI uses. */
 export const PROVIDER_CAPABILITIES: Record<IntegrationProvider, string[]> = {
-  aws: ['RDS & Aurora metrics (CPU, memory, disk, connections, replica lag)', 'ElastiCache Redis', 'MSK broker metrics and consumer lag', 'SQS queue depth and age'],
+  aws: ['RDS & Aurora metrics (CPU, memory, disk, connections, replica lag)', 'ElastiCache Redis', 'MSK broker metrics and consumer lag', 'SQS queue depth and age', 'Lambda invocations, errors, throttles, duration'],
+  azure: ['Function Apps: executions, HTTP 5xx, response time, memory', 'Estimated cost from execution units'],
   gcp: ['Cloud SQL metrics', 'Memorystore Redis', 'Pub/Sub subscription backlog and oldest message age'],
   vercel: ['Deploy markers on every service chart', 'Runtime logs (log drain)', 'Traces (trace drain)', 'Speed Insights → Web Vitals', 'Web Analytics → page views'],
   neon: ['Projects, branches and compute endpoints as databases', 'Compute state, size and storage', 'Query stats via direct connection'],
 };
 
 export interface DiscoveredResource {
-  kind: 'database' | 'cluster' | 'project' | 'queue' | 'subscription';
+  kind: 'database' | 'cluster' | 'project' | 'queue' | 'subscription' | 'function';
   /** id of the Database / Cluster row it became, when it did */
   refId?: string;
   name: string;
@@ -56,6 +57,8 @@ export interface IntegrationDraft {
   config: Record<string, unknown>;
   /** token / access key / service-account JSON — sent once, stored encrypted, never returned */
   secret?: string;
+  /** azure (contracts §21): the client secret; the api also accepts it as `secret` */
+  credentials?: { clientSecret: string };
 }
 
 export interface IntegrationTestResult {
@@ -94,7 +97,7 @@ const DAY = 24 * 60 * MIN;
 export const integrations: Integration[] = [
   {
     id: 'int-aws', provider: 'aws', name: 'aws-prod', status: 'ok', lastSyncAt: NOW - 2 * MIN, createdAt: NOW - 40 * DAY,
-    config: { roleArn: 'arn:aws:iam::123456789012:role/TaskTrooperReadOnly', externalId: 'tt-shopco-7f3a91', regions: ['eu-central-1'], services: ['rds', 'elasticache', 'msk', 'sqs'] },
+    config: { roleArn: 'arn:aws:iam::123456789012:role/TaskTrooperReadOnly', externalId: 'tt-shopco-7f3a91', regions: ['eu-central-1', 'us-east-1'], services: ['rds', 'elasticache', 'msk', 'sqs', 'lambda'] },
     resources: [
       { kind: 'database', refId: 'orders-db', name: 'orders-db', detail: 'RDS PostgreSQL · db.r6g.2xlarge' },
       { kind: 'database', refId: 'payments-db', name: 'payments-db', detail: 'RDS PostgreSQL · db.r6g.xlarge' },
@@ -105,6 +108,19 @@ export const integrations: Integration[] = [
       { kind: 'database', refId: 'cache-bff', name: 'cache-bff', detail: 'ElastiCache Redis · 1 node' },
       { kind: 'cluster', refId: 'kafka-main', name: 'kafka-main', detail: 'MSK · 3 brokers' },
       { kind: 'cluster', refId: 'aws-sqs-eu-central-1', name: 'sqs-eu-central-1', detail: 'SQS · 3 queues' },
+      { kind: 'function', refId: 'aws-eu-central-1-checkout-webhook', name: 'checkout-webhook', detail: 'Lambda · nodejs22.x · eu-central-1' },
+      { kind: 'function', refId: 'aws-eu-central-1-order-processor', name: 'order-processor', detail: 'Lambda · python3.12 · eu-central-1' },
+      { kind: 'function', refId: 'aws-eu-central-1-image-resize', name: 'image-resize', detail: 'Lambda · nodejs22.x · eu-central-1' },
+      { kind: 'function', refId: 'aws-eu-central-1-clickstream-enricher', name: 'clickstream-enricher', detail: 'Lambda · java21 · eu-central-1' },
+      { kind: 'function', refId: 'aws-us-east-1-nightly-report', name: 'nightly-report', detail: 'Lambda · python3.12 · us-east-1' },
+    ],
+  },
+  {
+    id: 'int-azure', provider: 'azure', name: 'azure-shop', status: 'ok', lastSyncAt: NOW - 4 * MIN, createdAt: NOW - 6 * DAY,
+    config: { tenantId: '72f988bf-86f1-41af-91ab-2d7cd011db47', clientId: '0b5d1e7c-3c1a-4f7e-9a51-6c2f0e9d8a11', subscriptionIds: ['3f2a9c4e-0d6b-4b7a-8e15-9c1d2f3a4b5c'], resourceGroups: ['rg-shop-prod'] },
+    resources: [
+      { kind: 'function', refId: 'azure-shop-notifications', name: 'shop-notifications', detail: 'Function App · 3 functions · westeurope' },
+      { kind: 'function', refId: 'azure-invoice-pdf', name: 'invoice-pdf', detail: 'Function App · 2 functions · westeurope' },
     ],
   },
   {
@@ -266,6 +282,7 @@ function mockResources(d: IntegrationDraft): DiscoveredResource[] {
       elasticache: { kind: 'database' as const, name: `${d.name}-redis`, detail: `ElastiCache Redis · ${region}` },
       msk: { kind: 'cluster' as const, name: `${d.name}-msk`, detail: `MSK · 3 brokers · ${region}` },
       sqs: { kind: 'queue' as const, name: `${d.name}-jobs`, detail: `SQS · ${region}` },
+      lambda: { kind: 'function' as const, name: `${d.name}-api-handler`, detail: `Lambda · nodejs22.x · ${region}` },
     }[s] ?? { kind: 'database' as const, name: s, detail: region }));
     case 'gcp': return (c.projectIds ?? ['my-project']).flatMap((p) => (c.services ?? []).map((s) => ({
       kind: s === 'pubsub' ? 'subscription' as const : 'database' as const,
@@ -276,6 +293,9 @@ function mockResources(d: IntegrationDraft): DiscoveredResource[] {
       const map = c.projectMap && Object.keys(c.projectMap).length ? c.projectMap : { 'shop-web': '', landing: '', docs: '' };
       return Object.keys(map).map((p) => ({ kind: 'project', name: p, detail: map[p] ? `Vercel project → ${map[p]}` : 'Next.js · production' }));
     }
+    case 'azure': return ((d.config as { resourceGroups?: string[] }).resourceGroups?.length ? (d.config as { resourceGroups: string[] }).resourceGroups : ['rg-prod']).map((g) => ({
+      kind: 'function' as const, name: `${g.replace(/^rg-/, '')}-functions`, detail: `Function App · ${g} · westeurope`,
+    }));
     case 'neon': return (c.projectIds?.length ? c.projectIds : ['bold-fog-123', 'quiet-river-456']).map((p) => ({ kind: 'database', name: `${p}/main`, detail: 'Neon Postgres 17 · 0.25–2 CU' }));
   }
 }
@@ -284,10 +304,10 @@ function mockResources(d: IntegrationDraft): DiscoveredResource[] {
 export async function testIntegration(d: IntegrationDraft): Promise<IntegrationTestResult> {
   if (isApi) return api<IntegrationTestResult>('/integrations/test', { method: 'POST', body: JSON.stringify(d) });
   await wait(900);
-  if (!d.secret && d.provider !== 'aws') return { ok: false, message: d.provider === 'gcp' ? 'No service account key — paste the JSON key' : 'No token — paste an access token' };
+  if (!d.secret && d.provider !== 'aws') return { ok: false, message: d.provider === 'gcp' ? 'No service account key — paste the JSON key' : d.provider === 'azure' ? 'No client secret — paste the service principal secret' : 'No token — paste an access token' };
   if (d.provider === 'aws' && !d.secret && !String(d.config.roleArn ?? '').startsWith('arn:aws:iam::')) return { ok: false, message: 'Role ARN looks wrong — expected arn:aws:iam::<account>:role/<name>' };
   const resources = mockResources(d);
-  const what = { aws: 'AssumeRole OK · CloudWatch and Describe* readable', gcp: 'Service account OK · monitoring.viewer granted', vercel: 'Token OK · team readable', neon: 'API key OK · projects readable' }[d.provider];
+  const what = { aws: 'AssumeRole OK · CloudWatch and Describe* readable', gcp: 'Service account OK · monitoring.viewer granted', azure: 'Service principal OK · Reader + Monitoring Reader', vercel: 'Token OK · team readable', neon: 'API key OK · projects readable' }[d.provider];
   return { ok: true, message: `${what} · ${resources.length} resource${resources.length === 1 ? '' : 's'} found`, resources };
 }
 

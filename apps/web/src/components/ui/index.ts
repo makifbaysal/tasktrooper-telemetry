@@ -8,3 +8,4 @@ export * from './Field';
 export * from './misc';
 export * from './Drawer';
 export * from './Choice';
+export * from './Menu';

@@ -139,6 +139,8 @@
 .table tr:last-child td { border-bottom: 0; }
 .table th:first-child, .table td:first-child { padding-left: var(--space-4); }
 .table th:last-child, .table td:last-child { padding-right: var(--space-4); }
+/* nested row (Table childRows): indented under its parent */
+.table tr.is-child td:first-child { padding-left: calc(var(--space-4) + var(--space-6)); }
 .table .is-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .table tbody tr.is-clickable { cursor: pointer; }
 .table tbody tr:hover td { background: var(--bg-hover); }

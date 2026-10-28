@@ -3,3 +3,4 @@ packages:
   - sdks/js/packages/*
 allowBuilds:
   esbuild: true
+  protobufjs: false

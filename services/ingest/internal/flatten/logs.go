@@ -5,6 +5,7 @@ import (
 	"time"
 
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
+	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
 
 	"github.com/tasktrooper/telemetry/services/ingest/internal/norm"
@@ -36,15 +37,46 @@ func (r *LogRow) Values() []any {
 
 // Logs appends one LogRow per OTLP log record. received is used when a record carries no timestamp.
 func Logs(t tenant.Tenant, req *collogspb.ExportLogsServiceRequest, received time.Time, out []LogRow) []LogRow {
+	out, _ = LogsWithContent(t, req, received, out, nil)
+	return out
+}
+
+// LogsWithContent is Logs that also turns gen_ai.client.inference.operation.details events into llm_content rows
+// (contracts §25); their content is removed from the log row (attributes, and a kvlist body is replaced by the event name).
+func LogsWithContent(t tenant.Tenant, req *collogspb.ExportLogsServiceRequest, received time.Time, out []LogRow, content []LLMContentRow) ([]LogRow, []LLMContentRow) {
 	for _, rl := range req.GetResourceLogs() {
 		res := newResource(rl.GetResource().GetAttributes())
 		for _, sl := range rl.GetScopeLogs() {
 			for _, lr := range sl.GetLogRecords() {
-				out = append(out, logRow(t, &res, lr, received))
+				row := logRow(t, &res, lr, received)
+				if isLLMDetailsEvent(lr) {
+					c := llmContentFromLog(lr.GetAttributes(), lr.GetBody(), row.Attrs)
+					if _, kv := lr.GetBody().GetValue().(*commonpb.AnyValue_KvlistValue); kv {
+						row.Body = LLMDetailsEvent
+						row.PatternID = norm.PatternID(row.Body)
+					}
+					if !c.empty() {
+						c.OrgID, c.ProjectID, c.TS, c.TraceID, c.SpanID, c.Service = row.OrgID, row.ProjectID, row.TS, row.TraceID, row.SpanID, row.Service
+						content = append(content, c)
+					}
+				}
+				out = append(out, row)
 			}
 		}
 	}
-	return out
+	return out, content
+}
+
+func isLLMDetailsEvent(lr *logspb.LogRecord) bool {
+	if lr.GetEventName() == LLMDetailsEvent {
+		return true
+	}
+	for _, kv := range lr.GetAttributes() {
+		if kv.GetKey() == "event.name" {
+			return kv.GetValue().GetStringValue() == LLMDetailsEvent
+		}
+	}
+	return false
 }
 
 func logRow(t tenant.Tenant, res *resourceInfo, lr *logspb.LogRecord, received time.Time) LogRow {
@@ -67,9 +99,21 @@ func logRow(t tenant.Tenant, res *resourceInfo, lr *logspb.LogRecord, received t
 		r.TS = received
 	}
 	r.PatternID = norm.PatternID(r.Body)
-	r.Attrs = attrMap(lr.GetAttributes(), 0)
+	r.Attrs = attrMap(lr.GetAttributes(), len(logResourceKeys))
+	// Kubernetes placement lives on the resource (trooper-agent Warning events: service.name=k8s + k8s.cluster.name;
+	// apps with OTEL_RESOURCE_ATTRIBUTES k8s.*); logs keep no resource map, so copy it unless the record sets it.
+	if len(res.attrs) > 0 {
+		for _, k := range logResourceKeys {
+			if _, ok := r.Attrs[k]; !ok {
+				putAttr(r.Attrs, k, res.attrs[k], MaxAttrValueLen)
+			}
+		}
+	}
 	return r
 }
+
+// logResourceKeys are resource attributes copied into logs.attrs (contracts §20).
+var logResourceKeys = []string{"k8s.cluster.name", "k8s.namespace.name", "k8s.pod.name", "k8s.node.name"}
 
 // Severity maps OTLP severity number (or text when the number is unset) to the logs.severity enum.
 func Severity(n logspb.SeverityNumber, text string) string {

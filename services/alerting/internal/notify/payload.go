@@ -31,7 +31,66 @@ type Payload struct {
 	ResolvedAt int64    `json:"resolvedAt,omitempty"` // unix ms
 	Summary    string   `json:"summary,omitempty"`    // root cause sentence
 	Link       string   `json:"link,omitempty"`
+	// RootCause is the RCA result (incidents.root_cause): summary + confidence 0..1.
+	RootCause *Cause `json:"rootCause,omitempty"`
+	// Source / CodeRef: alert-as-code monitors ("repo:path").
+	Source  string `json:"source,omitempty"`
+	CodeRef string `json:"codeRef,omitempty"`
+	// Deploy is the newest deploy of the service within the hour before firing.
+	Deploy  *Deploy `json:"deploy,omitempty"`
+	AckedBy string  `json:"ackedBy,omitempty"`
+	AckedAt int64   `json:"ackedAt,omitempty"` // unix ms
+	// AI quota notifications (kind ai_quota, no incident; contracts §19): Threshold is the percent (80 | 100).
+	OrgID    int64    `json:"orgId,omitempty"`
+	Period   string   `json:"period,omitempty"` // YYYY-MM
+	Used     *float64 `json:"used,omitempty"`
+	Limit    *float64 `json:"limit,omitempty"`
+	ResetsAt int64    `json:"resetsAt,omitempty"` // unix ms
 }
+
+// Cause is payload.rootCause.
+type Cause struct {
+	Summary    string   `json:"summary"`
+	Confidence *float64 `json:"confidence,omitempty"`
+}
+
+// Deploy is payload.deploy.
+type Deploy struct {
+	Version       string `json:"version"`
+	Source        string `json:"source,omitempty"`
+	Env           string `json:"env,omitempty"`
+	At            int64  `json:"at,omitempty"` // unix ms
+	URL           string `json:"url,omitempty"`
+	CommitMessage string `json:"commitMessage,omitempty"`
+	Author        string `json:"author,omitempty"`
+}
+
+// CauseText is "summary (78% confidence)", "summary (12% confidence · low confidence)" below 30 %, the bare
+// summary without a confidence, or "" without RCA.
+func (p Payload) CauseText() string {
+	s := p.Summary
+	var conf *float64
+	if p.RootCause != nil {
+		if p.RootCause.Summary != "" {
+			s = p.RootCause.Summary
+		}
+		conf = p.RootCause.Confidence
+	}
+	if s == "" {
+		return ""
+	}
+	if conf == nil {
+		return s
+	}
+	pct := int(math.Round(*conf * 100))
+	if *conf < LowConfidence {
+		return fmt.Sprintf("%s (%d%% confidence · low confidence)", s, pct)
+	}
+	return fmt.Sprintf("%s (%d%% confidence)", s, pct)
+}
+
+// LowConfidence: root causes below this confidence are labelled "low confidence" (contracts §17).
+const LowConfidence = 0.3
 
 func fnum(v float64) string {
 	if math.Abs(v) >= 1000 || v == math.Trunc(v) {
@@ -129,8 +188,11 @@ func SlackMessage(p Payload) ([]byte, error) {
 		map[string]any{"type": "header", "text": slackText{"plain_text", truncate(head, 150)}},
 		map[string]any{"type": "section", "fields": fields},
 	}
-	if p.Summary != "" {
-		blocks = append(blocks, map[string]any{"type": "section", "text": slackText{"mrkdwn", "*Likely cause:* " + p.Summary}})
+	if c := p.CauseText(); c != "" {
+		blocks = append(blocks, map[string]any{"type": "section", "text": slackText{"mrkdwn", "*Likely cause:* " + c}})
+	}
+	if p.CodeRef != "" {
+		blocks = append(blocks, map[string]any{"type": "context", "elements": []any{slackText{"mrkdwn", "Defined in code: `" + p.CodeRef + "`"}}})
 	}
 	if p.Link != "" {
 		blocks = append(blocks, map[string]any{"type": "actions", "elements": []any{map[string]any{
@@ -181,7 +243,7 @@ func PagerDutyEvent(p Payload, routingKey string) ([]byte, error) {
 		"class":     p.Kind,
 		"custom_details": map[string]any{
 			"incidentId": p.IncidentID, "monitorId": p.MonitorID, "kpiId": p.KpiID, "value": p.Value,
-			"threshold": p.Threshold, "rootCause": p.Summary, "reminder": p.Reminder,
+			"threshold": p.Threshold, "rootCause": p.CauseText(), "reminder": p.Reminder, "codeRef": p.CodeRef,
 		},
 	}
 	if p.Link != "" {
@@ -210,7 +272,7 @@ func OpsgenieCreate(p Payload) ([]byte, error) {
 	}
 	return json.Marshal(map[string]any{
 		"message": truncate(p.Headline(), 130), "alias": OpsgenieAlias(p), "priority": prio, "source": "tasktrooper-telemetry",
-		"description": p.ValueText() + "\n" + p.Summary + "\n" + p.Link,
+		"description": p.ValueText() + "\n" + p.CauseText() + "\n" + p.Link,
 		"details":     map[string]string{"service": p.Service, "endpoint": p.Endpoint, "incidentId": fmt.Sprint(p.IncidentID)},
 	})
 }
@@ -234,8 +296,11 @@ func EmailMessage(p Payload, from string, to []string, now time.Time) []byte {
 	if p.ResolvedAt > 0 {
 		fmt.Fprintf(&b, "Resolved: %s\r\n", time.UnixMilli(p.ResolvedAt).UTC().Format(time.RFC3339))
 	}
-	if p.Summary != "" {
-		fmt.Fprintf(&b, "\r\nLikely cause: %s\r\n", p.Summary)
+	if c := p.CauseText(); c != "" {
+		fmt.Fprintf(&b, "\r\nLikely cause: %s\r\n", c)
+	}
+	if p.CodeRef != "" {
+		fmt.Fprintf(&b, "Defined in: %s\r\n", p.CodeRef)
 	}
 	if p.Link != "" {
 		fmt.Fprintf(&b, "\r\n%s\r\n", p.Link)
@@ -287,8 +352,11 @@ func TeamsMessage(p Payload) ([]byte, error) {
 		map[string]any{"type": "TextBlock", "text": truncate(p.Headline(), 200), "weight": "Bolder", "size": "Medium", "color": color, "wrap": true},
 		map[string]any{"type": "FactSet", "facts": facts},
 	}
-	if p.Summary != "" {
-		body = append(body, map[string]any{"type": "TextBlock", "text": "**Likely cause:** " + p.Summary, "wrap": true})
+	if c := p.CauseText(); c != "" {
+		body = append(body, map[string]any{"type": "TextBlock", "text": "**Likely cause:** " + c, "wrap": true})
+	}
+	if p.CodeRef != "" {
+		body = append(body, map[string]any{"type": "TextBlock", "text": "Defined in code: " + p.CodeRef, "wrap": true, "isSubtle": true})
 	}
 	card := map[string]any{
 		"$schema": "http://adaptivecards.io/schemas/adaptive-card.json",

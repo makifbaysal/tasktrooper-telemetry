@@ -104,3 +104,23 @@ func TestDescribeCondition(t *testing.T) {
 		t.Error(got)
 	}
 }
+
+func TestDescribeLLMCondition(t *testing.T) {
+	cases := []struct {
+		metric string
+		c      model.MonitorCondition
+		want   string
+	}{
+		{"cost_usd_per_hour", model.MonitorCondition{Op: ">", Threshold: 20, Window: "1h"}, "LLM cost > $20/h"},
+		{"cost_usd", model.MonitorCondition{Op: ">", Threshold: 12.5, Window: "24h"}, "LLM cost in 24h > $12.50"},
+		{"tokens", model.MonitorCondition{Op: ">", Threshold: 5e6, Window: "1h"}, "LLM tokens in 1h > 5M"},
+		{"error_rate", model.MonitorCondition{Op: ">", Threshold: 0.05, ForMin: 5}, "LLM error rate > 5% for 5m"},
+		{"p95_ms", model.MonitorCondition{Threshold: 20000}, "LLM p95 > 20000 ms"},
+		{"calls", model.MonitorCondition{Op: "<", Threshold: 10, Window: 15.0}, "LLM calls in 15m < 10"},
+	}
+	for _, tc := range cases {
+		if got := DescribeCondition("llm", tc.metric, tc.c); got != tc.want {
+			t.Errorf("%s: %q, want %q", tc.metric, got, tc.want)
+		}
+	}
+}

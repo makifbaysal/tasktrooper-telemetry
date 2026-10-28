@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import {
-  Bell, BellOff, Check, CheckCircle2, ChevronRight, CircleDashed, Code2, ExternalLink, FileCode2, Pencil, Plus, Send, Sparkles, Target, Trash2, Wrench, X,
+  Bell, BellOff, Check, CheckCircle2, ChevronRight, CircleDashed, Code2, ExternalLink, FileCode2, Lock, Pencil, Plus, Send, Sparkles, Target, Trash2, Wrench, X,
 } from 'lucide-react';
 import { Sparkline, TimeSeries } from '@/components/charts';
 import {
@@ -10,12 +10,14 @@ import {
 } from '@/components/ui';
 import {
   ApiError, NOW, endpointNode, endpointsFor, isApi, kpis, incidents, logs, monitors, mutate, qs, remote, seg, series, serviceNode, services,
-  suggestions, timestamps, useData, type Incident, type Monitor, type RcaResult, type Suggestion, type TimeRange,
+  suggestions, timestamps, useData, type Incident, type Monitor, type RcaInfraCandidate, type RcaResult, type Suggestion, type TimeRange,
 } from '@/data';
 import {
   maintenanceAvailable, maintenanceWindows, monitorInput, resolvedIncidents, type ApiIncident, type ApiMonitor, type IncidentEvent, type MaintenanceWindow,
 } from '@/data/api/ops';
 import { findRootCause } from '@/lib/rca';
+import { can, denied } from '@/data/auth';
+import { targetLabel } from '@/data/slack';
 import { WhyBlock, badLabel, badSeries, kpiRca, objectivePct } from './Kpis';
 import { ago, clock, compact, dateTime, duration, ms, pct } from '@/lib/format';
 import { CriticalityBadge } from './shared';
@@ -120,6 +122,28 @@ export const monitorOf = (i: Incident): Monitor => monitors.find((m) => m.id ===
 export const serviceIdOf = (name: string) => services.find((s) => s.name === name || s.id === name)?.id;
 export const sevTone = (s: Incident['severity']) => (s === 'critical' ? 'critical' : s === 'warning' ? 'warning' : 'accent');
 const incidentStatus = (s: Incident['state']): StatusKind => s;
+/** Notification targets for display: Slack App targets as `#name`. */
+export const channelsLabel = (m: Monitor) => m.channels.map(targetLabel).join(', ');
+
+/** Where a monitor is defined: alert-as-code (read-only), an accepted code suggestion, a template or by hand. */
+export function MonitorSourceBadge({ m }: { m: Monitor }) {
+  if (m.source === 'code') return <Badge tone="accent" icon={<Lock />}>Managed in repository</Badge>;
+  if (m.source === 'suggestion') return <Badge tone="accent" icon={<Sparkles />}>From code suggestion</Badge>;
+  return <Badge>{m.source}</Badge>;
+}
+
+/** "Likely cause" line from the engine's RCA (ADR-017): summary + confidence; < 30% is flagged as low confidence. */
+export function LikelyCause({ summary, confidence }: { summary: string; confidence?: number }) {
+  const c = confidence !== undefined && Number.isFinite(confidence) ? Math.round(confidence * 100) : undefined;
+  const low = confidence !== undefined && confidence < 0.3;
+  return (
+    <div className="row" style={{ gap: 'var(--space-2)', alignItems: 'baseline', flexWrap: 'wrap' }}>
+      <strong>Likely cause:</strong>
+      <span className="secondary" style={{ flex: 1, minWidth: 0 }}>{summary}</span>
+      {c !== undefined && <Badge tone={low ? 'warning' : 'neutral'}>{c}% confidence{low ? ' · low confidence' : ''}</Badge>}
+    </div>
+  );
+}
 
 /**
  * Why an incident is happening: KPI incidents use the KPI's call tree; error / latency monitors on
@@ -297,7 +321,7 @@ export function AlertsBody({ serviceId, endpointRef }: { serviceId?: string; end
   return (
     <>
       {/* 2 · configuration */}
-      <Section actions={serviceId ? <>
+      <Section actions={serviceId && can('write') ? <>
           <Button size="sm" variant="primary" icon={<Plus size={14} />} onClick={() => nav(`/alerts/new?service=${serviceId}${endpointRef ? `&endpoint=${encodeURIComponent(endpointRef)}` : ''}`)}>New monitor</Button>
         </> : undefined}>
         <Tabs value={tab} onChange={setTab} tabs={[
@@ -322,7 +346,7 @@ export function AlertsBody({ serviceId, endpointRef }: { serviceId?: string; end
               { key: 'state', header: 'State', width: 130, render: (m) => isMuted(m) ? <StatusBadge status="muted" /> : <StatusBadge status={m.state} label={m.state === 'ok' ? 'OK' : undefined} /> },
               { key: 'name', header: 'Monitor', render: (m) => (
                 <div style={{ minWidth: 0 }}>
-                  <div className="row" style={{ gap: 6, fontWeight: 500 }}>{m.name}{m.source === 'code' && <Code2 size={12} color="var(--accent)" aria-label="From code" />}</div>
+                  <div className="row" style={{ gap: 6, fontWeight: 500 }}>{m.name}{m.source === 'code' && <Lock size={12} color="var(--accent)" aria-label="Managed in repository" />}{m.source === 'suggestion' && <Sparkles size={12} color="var(--accent)" aria-label="From code suggestion" />}</div>
                   <div className="muted truncate" style={{ fontSize: 'var(--text-xs)' }}>{m.target}</div>
                 </div>
               ) },
@@ -344,7 +368,7 @@ export function AlertsBody({ serviceId, endpointRef }: { serviceId?: string; end
                   <div className="secondary">Scored by business impact; thresholds set from 14 days of real traffic. Click one for the reasoning.</div>
                 </div>
                 <Button onClick={() => nav('/code')}>View inventory</Button>
-                <Button variant="primary" icon={<Check size={14} />} disabled={!pending.length}
+                <Button variant="primary" icon={<Check size={14} />} disabled={!pending.length || !can('write')} title={can('write') ? undefined : denied('write')}
                   onClick={() => setDecided(Object.fromEntries(scopedSuggestions.map((s) => [s.id, decided[s.id] ?? ('accepted' as const)])))}>Accept all {pending.length}</Button>
               </div>
             </Card>
@@ -362,9 +386,9 @@ export function AlertsBody({ serviceId, endpointRef }: { serviceId?: string; end
                         <div className="muted truncate" style={{ fontSize: 'var(--text-sm)' }}>{s.target}</div>
                         <div className="row" style={{ gap: 'var(--space-2)', marginTop: 'var(--space-1)' }}>
                           <code className="mono truncate" style={{ flex: 1, fontSize: 'var(--text-xs)', background: 'var(--bg-sunken)', padding: '2px 6px', borderRadius: 'var(--radius-sm)' }}>{s.condition}</code>
-                          <Button size="sm" variant="ghost" icon={<X size={12} />}
+                          <Button size="sm" variant="ghost" icon={<X size={12} />} disabled={!can('write')}
                             onClick={(e) => { e.stopPropagation(); setDecided({ ...decided, [s.id]: 'rejected' }); }}>Dismiss</Button>
-                          <Button size="sm" variant="primary" icon={<Check size={12} />}
+                          <Button size="sm" variant="primary" icon={<Check size={12} />} disabled={!can('write')}
                             onClick={(e) => { e.stopPropagation(); setDecided({ ...decided, [s.id]: 'accepted' }); }}>Accept</Button>
                         </div>
                       </div>
@@ -400,7 +424,7 @@ export function AlertsBody({ serviceId, endpointRef }: { serviceId?: string; end
         <MonitorDrawer monitor={monitors.find((x) => x.id === monDrawer.item!.id) ?? monDrawer.item} muted={isMuted(monDrawer.item)} onClose={monDrawer.close}
           onMute={() => toggleMute(monDrawer.item!)}
           onDelete={isApi ? () => { void deleteMonitor(monDrawer.item!); monDrawer.close(); } : undefined}
-          onEdit={() => nav(`/alerts/new?kind=${monDrawer.item!.kind}${serviceId ? `&service=${serviceId}` : ''}${isApi ? `&edit=${monDrawer.item!.id}` : ''}`)} />
+          onEdit={() => nav(`/alerts/new?kind=${monDrawer.item!.kind}${serviceId ? `&service=${serviceId}` : ''}&edit=${monDrawer.item!.id}`)} />
       )}
       {sugDrawer.item && (
         <SuggestionDrawer s={sugDrawer.item} onClose={sugDrawer.close} onEdit={() => nav(`/alerts/new?kind=${sugDrawer.item!.kind}`)}
@@ -447,9 +471,9 @@ export function IncidentCard({ incident: i, state, onOpen, onAck }: { incident: 
       <div className="row" style={{ gap: 'var(--space-2)' }}>
         <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>{pending
           ? <>Condition breached · fires if it holds {forMin} min · nobody notified yet</>
-          : <>Notified {m.channels.join(', ') || 'no channel'}</>}</span>
+          : <>Notified {channelsLabel(m) || 'no channel'}</>}</span>
         <span className="spacer" />
-        {firing && <Button size="sm" icon={<Check size={12} />} onClick={(e) => { e.stopPropagation(); onAck(); }}>Acknowledge</Button>}
+        {firing && can('write') && <Button size="sm" icon={<Check size={12} />} onClick={(e) => { e.stopPropagation(); onAck(); }}>Acknowledge</Button>}
       </div>
     </section>
   );
@@ -472,7 +496,7 @@ export function IncidentDrawer({ incident: i, state, onClose, onAck, onResolve, 
   ];
   if (state !== 'pending') {
     timeline.push({ ts: i.startedAt, icon: <Bell size={14} color="var(--status-critical)" />, text: <>Firing — held for {forMin} minutes</> });
-    timeline.push({ ts: i.startedAt + 8_000, icon: <Send size={14} color="var(--text-muted)" />, text: <>Notified {m.channels.join(', ')}</> });
+    timeline.push({ ts: i.startedAt + 8_000, icon: <Send size={14} color="var(--text-muted)" />, text: <>Notified {channelsLabel(m)}</> });
   }
   if (state === 'acknowledged' || (past && (i as PastIncident).ackBy)) {
     timeline.push({ ts: ackedAt, icon: <Check size={14} color="var(--status-serious)" />, text: <>Acknowledged{(i as PastIncident).ackBy ? <> by {(i as PastIncident).ackBy}</> : isApi ? null : ' by you'}</> });
@@ -485,6 +509,11 @@ export function IncidentDrawer({ incident: i, state, onClose, onAck, onResolve, 
   const events = timeline.filter((t) => t.ts >= ts[0]).slice(0, 3).map((t, k) => ({ ts: t.ts, label: ['Pending', 'Firing', 'Notified'][k] }));
   const related = isApi ? [] : logs.filter((l) => l.service === i.service && (l.level === 'error' || l.level === 'warn')).slice(0, 6);
   const rca = past ? undefined : incidentRca(i);
+  // the engine's stored RCA (api) or the mock drill-down: one-line summary + confidence
+  const stored = (i as ApiIncident).rootCause as { summary?: string; confidence?: number; infra?: RcaInfraCandidate[] | null } | undefined;
+  const infraCauses = Array.isArray(stored?.infra) ? [...stored.infra].sort((a, b) => b.confidence - a.confidence) : [];
+  const likely = stored?.summary ? { summary: stored.summary, confidence: typeof stored.confidence === 'number' ? stored.confidence : undefined }
+    : rca ? { summary: rca.summary, confidence: rca.confidence } : undefined;
   const nav = useNavigate();
 
   return (
@@ -494,16 +523,32 @@ export function IncidentDrawer({ incident: i, state, onClose, onAck, onResolve, 
       actions={<>
         {i.kpiId && <Button size="sm" icon={<Target size={12} />} onClick={() => nav(`/kpis/${i.kpiId}`)}>Open KPI</Button>}
         {sid && <Button size="sm" icon={<ExternalLink size={12} />} onClick={() => onOpenService(sid)}>Open {i.service}</Button>}
-        {state === 'firing' && <Button size="sm" variant="primary" icon={<Check size={12} />} onClick={onAck}>Acknowledge</Button>}
-        {onResolve && !past && state !== 'resolved' && <Button size="sm" icon={<CheckCircle2 size={12} />} onClick={onResolve}>Resolve</Button>}
+        {state === 'firing' && can('write') && <Button size="sm" variant="primary" icon={<Check size={12} />} onClick={onAck}>Acknowledge</Button>}
+        {onResolve && can('write') && !past && state !== 'resolved' && <Button size="sm" icon={<CheckCircle2 size={12} />} onClick={onResolve}>Resolve</Button>}
       </>}>
       {state === 'pending' && (
         <Callout icon={<CircleDashed size={16} />}>
-          <strong>Pending.</strong> <span className="secondary">The condition is breached but has not held for {forMin} minutes yet. It fires and notifies {m.channels.join(', ') || 'its channels'} if it holds; if it clears first, it closes quietly.</span>
+          <strong>Pending.</strong> <span className="secondary">The condition is breached but has not held for {forMin} minutes yet. It fires and notifies {channelsLabel(m) || 'its channels'} if it holds; if it clears first, it closes quietly.</span>
         </Callout>
       )}
+      {likely && !rca && <Callout icon={<Sparkles size={16} color="var(--accent)" />}><LikelyCause summary={likely.summary} confidence={likely.confidence} /></Callout>}
+      {infraCauses.length > 0 && (
+        <DrawerSection title="Infrastructure candidates" aside="pods and hosts of this service">
+          <div className="list">
+            {infraCauses.map((c, k) => (
+              <div key={k} className="list__row">
+                <div className="list__main">
+                  <span className="list__title">{c.title}</span>
+                  <span className="list__meta">{c.kind === 'pod' ? 'Pod' : 'Host'} <span className="mono">{c.entity}</span>{c.cluster ? ` · ${c.cluster}` : ''}{c.node ? ` · node ${c.node}` : ''}{c.restarts ? ` · ${c.restarts} restarts` : ''}</span>
+                </div>
+                <Badge tone={c.confidence < 0.3 ? 'warning' : 'neutral'}>{Math.round(c.confidence * 100)}% confidence</Badge>
+              </div>
+            ))}
+          </div>
+        </DrawerSection>
+      )}
       {rca && (
-        <DrawerSection title="Why it's happening" aside={rca.root.service ? `root cause in ${rca.root.service}` : undefined}>
+        <DrawerSection title="Why it's happening" aside={<>{rca.root.service ? `root cause in ${rca.root.service}` : ''}{rca.confidence < 0.3 && <> <Badge tone="warning">low confidence</Badge></>}</>}>
           <WhyBlock result={rca} />
           {rca.root.evidence && rca.root.evidence.length > 0 && (
             <ul className="stack" style={{ gap: 'var(--space-2)', listStyle: 'none', margin: 0, padding: 0 }}>
@@ -541,8 +586,8 @@ export function IncidentDrawer({ incident: i, state, onClose, onAck, onResolve, 
           ['Condition', <span className="mono">{m.condition}</span>],
           ['Target', m.target],
           ['Type', KIND_LABEL[m.kind]],
-          ['Notifies', m.channels.join(', ')],
-          ['Source', m.source === 'code' ? 'Suggested from code' : m.source],
+          ['Notifies', channelsLabel(m) || '—'],
+          ['Source', <MonitorSourceBadge m={m} />],
           ['Peak value', i.value],
         ]} />
       </DrawerSection>
@@ -566,6 +611,7 @@ export function IncidentDrawer({ incident: i, state, onClose, onAck, onResolve, 
 
 function MonitorDrawer({ monitor: m, muted, onClose, onMute, onEdit, onDelete }: { monitor: Monitor; muted: boolean; onClose: () => void; onMute: () => void; onEdit: () => void; onDelete?: () => void }) {
   const { ts, data, spec } = metricSeries(m, '24h');
+  const managed = m.source === 'code';
   const mutedUntil = (m as ApiMonitor).mutedUntil;
   const changes = isApi ? [{ ts: m.lastChange, state: m.state }] : [
     { ts: m.lastChange, state: m.state },
@@ -576,11 +622,18 @@ function MonitorDrawer({ monitor: m, muted, onClose, onMute, onEdit, onDelete }:
   return (
     <Drawer open onClose={onClose} title={m.name}
       subtitle={<span className="row" style={{ gap: 'var(--space-2)' }}>{muted ? <StatusBadge status="muted" /> : <StatusBadge status={m.state} label={m.state === 'ok' ? 'OK' : undefined} />}<span className="muted">{m.target}</span></span>}
-      actions={<>
+      actions={can('write') && <>
         <Button size="sm" icon={muted ? <Bell size={12} /> : <BellOff size={12} />} onClick={onMute}>{muted ? 'Unmute' : 'Mute 1h'}</Button>
-        <Button size="sm" icon={<Pencil size={12} />} onClick={onEdit}>Edit</Button>
-        {onDelete && <Button size="sm" variant="ghost" icon={<Trash2 size={12} />} onClick={() => { if (window.confirm(`Delete monitor “${m.name}”?`)) onDelete(); }}>Delete</Button>}
+        <Button size="sm" icon={<Pencil size={12} />} onClick={onEdit} disabled={managed} title={managed ? 'Managed in repository — edit the YAML' : undefined}>Edit</Button>
+        {onDelete && <Button size="sm" variant="ghost" icon={<Trash2 size={12} />} disabled={managed} title={managed ? 'Managed in repository — remove the YAML file' : undefined}
+          onClick={() => { if (window.confirm(`Delete monitor “${m.name}”?`)) onDelete(); }}>Delete</Button>}
       </>}>
+      {managed && (
+        <Callout icon={<Code2 size={16} color="var(--accent)" />}>
+          <span className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}><MonitorSourceBadge m={m} /><span className="mono secondary" style={{ fontSize: 'var(--text-sm)' }}>{m.codeRef ?? '.trooper/monitors/*.yaml'}</span></span>
+          <div className="secondary" style={{ marginTop: 'var(--space-1)' }}>Defined in the repository; change the YAML and push to update it.</div>
+        </Callout>
+      )}
       {muted && mutedUntil && mutedUntil > Date.now() && <Callout icon={<BellOff size={16} />}>Muted until {dateTime(mutedUntil)} — it is evaluated but nobody is notified.</Callout>}
       <DrawerSection title={spec.label} aside="Last 24 hours">
         <TimeSeries timestamps={ts} height={200} area format={spec.fmt}
@@ -592,8 +645,9 @@ function MonitorDrawer({ monitor: m, muted, onClose, onMute, onEdit, onDelete }:
           ['Condition', <span className="mono">{m.condition}</span>],
           ['Type', KIND_LABEL[m.kind]],
           ['Severity', <Badge tone={sevTone(m.severity)}>{m.severity}</Badge>],
-          ['Notifies', m.channels.join(', ')],
-          ['Source', m.source === 'code' ? <Badge tone="accent" icon={<Code2 />}>From code</Badge> : m.source],
+          ['Notifies', channelsLabel(m) || '—'],
+          ['Source', <MonitorSourceBadge m={m} />],
+          ...(m.codeRef ? [['Defined in', <span className="mono">{m.codeRef}</span>] as [string, ReactNode]] : []),
           ['Target', m.target],
         ]} />
       </DrawerSection>
@@ -616,9 +670,9 @@ function SuggestionDrawer({ s, onClose, onEdit, onDecide }: { s: Suggestion; onC
     <Drawer open onClose={onClose} title={s.title}
       subtitle={<span className="row" style={{ gap: 'var(--space-2)' }}><CriticalityBadge c={s.criticality} /><span className="muted">{s.target}</span></span>}
       actions={<>
-        <Button size="sm" icon={<X size={12} />} onClick={() => onDecide('rejected')}>Dismiss</Button>
+        <Button size="sm" icon={<X size={12} />} disabled={!can('write')} onClick={() => onDecide('rejected')}>Dismiss</Button>
         <Button size="sm" icon={<Pencil size={12} />} onClick={onEdit}>Edit</Button>
-        <Button size="sm" variant="primary" icon={<Check size={12} />} onClick={() => onDecide('accepted')}>Accept</Button>
+        <Button size="sm" variant="primary" icon={<Check size={12} />} disabled={!can('write')} onClick={() => onDecide('accepted')}>Accept</Button>
       </>}>
       <DrawerSection title="Why this alert">
         <p className="secondary" style={{ margin: 0 }}>{s.rationale}</p>
@@ -710,7 +764,7 @@ export function MaintenanceWindows({ serviceId }: { serviceId?: string }) {
             options={[{ value: '', label: 'Whole project' }, ...services.map((s) => ({ value: s.id, label: s.name }))]} /></Field></div>
           <div style={{ flex: 1, minWidth: 180 }}><Field label="Starts"><Input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} /></Field></div>
           <div style={{ flex: 1, minWidth: 130 }}><Field label="For"><Select value={minutes} onChange={(e) => setMinutes(e.target.value)} options={DURATIONS} /></Field></div>
-          <Button variant="primary" icon={<Plus size={14} />} disabled={busy} onClick={() => void create()}>Schedule</Button>
+          <Button variant="primary" icon={<Plus size={14} />} disabled={busy || !can('write')} title={can('write') ? undefined : denied('write')} onClick={() => void create()}>Schedule</Button>
         </div>
         {error && <div style={{ color: 'var(--status-critical)', fontSize: 'var(--text-sm)' }}>{error}</div>}
       </Card>
@@ -720,7 +774,7 @@ export function MaintenanceWindows({ serviceId }: { serviceId?: string }) {
           { key: 'name', header: 'Window', render: (w) => <div><div style={{ fontWeight: 500 }}>{w.name}</div><div className="muted" style={{ fontSize: 'var(--text-xs)' }}>{w.scope.services?.length ? w.scope.services.map(svcName).join(', ') : w.scope.monitorIds?.length ? `${w.scope.monitorIds.length} monitors` : 'Whole project'}</div></div> },
           { key: 'start', header: 'Starts', numeric: true, sortValue: (w) => w.startsAt, render: (w) => <span className="muted" style={{ whiteSpace: 'nowrap' }}>{dateTime(w.startsAt)}</span> },
           { key: 'dur', header: 'Duration', numeric: true, render: (w) => duration((w.endsAt - w.startsAt) / 1000) },
-          { key: 'del', header: '', width: 40, render: (w) => <Button size="sm" variant="ghost" iconOnly icon={<Trash2 size={14} />} aria-label={`Delete ${w.name}`} onClick={() => void remove(w)} /> },
+          { key: 'del', header: '', width: 40, render: (w) => can('write') ? <Button size="sm" variant="ghost" iconOnly icon={<Trash2 size={14} />} aria-label={`Delete ${w.name}`} onClick={() => void remove(w)} /> : null },
         ]} />
       </Card>
     </div>
@@ -734,7 +788,7 @@ function eventRow(e: IncidentEvent, m: Monitor): { ts: number; icon: ReactNode; 
   switch (e.kind) {
     case 'pending': return { ts: e.ts, icon: <CircleDashed size={14} color="var(--status-warning)" />, text: <>Pending — condition first breached</> };
     case 'fired': return { ts: e.ts, icon: <Bell size={14} color="var(--status-critical)" />, text: <>Firing{typeof d.display === 'string' ? <> at {d.display}</> : null}</> };
-    case 'notified': return { ts: e.ts, icon: <Send size={14} color="var(--text-muted)" />, text: <>Notified {ch ?? m.channels.join(', ')}</> };
+    case 'notified': return { ts: e.ts, icon: <Send size={14} color="var(--text-muted)" />, text: <>Notified {ch ? targetLabel(ch) : channelsLabel(m)}</> };
     case 'reminder': return { ts: e.ts, icon: <Send size={14} color="var(--text-muted)" />, text: <>Reminder sent{ch ? <> to {ch}</> : null} — still firing</> };
     case 'suppressed': return { ts: e.ts, icon: <BellOff size={14} color="var(--text-muted)" />, text: <>Notification suppressed{typeof d.reason === 'string' ? <> — {d.reason}</> : ' (muted or in a maintenance window)'}</> };
     case 'acked': return { ts: e.ts, icon: <Check size={14} color="var(--status-serious)" />, text: <>Acknowledged{typeof d.by === 'string' && d.by !== 'api' ? <> by {d.by}</> : null}</> };

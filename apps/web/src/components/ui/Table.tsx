@@ -18,21 +18,24 @@ interface Props<T> {
   onRowClick?: (row: T) => void;
   defaultSort?: { key: string; dir: 'asc' | 'desc' };
   empty?: ReactNode;
+  /** Nested rows (e.g. the functions of an Azure Function App): rendered indented right below their parent, sorted the same way. */
+  childRows?: (row: T) => T[] | undefined;
 }
 
-export function Table<T>({ columns, rows, rowKey, onRowClick, defaultSort, empty }: Props<T>) {
+export function Table<T>({ columns, rows, rowKey, onRowClick, defaultSort, empty, childRows }: Props<T>) {
   const [sort, setSort] = useState(defaultSort);
-  const sorted = useMemo(() => {
-    if (!sort) return rows;
-    const col = columns.find((c) => c.key === sort.key);
-    if (!col?.sortValue) return rows;
+  const sortRows = useMemo(() => {
+    const col = sort && columns.find((c) => c.key === sort.key);
+    if (!sort || !col?.sortValue) return (xs: T[]) => xs;
     const get = col.sortValue;
-    return [...rows].sort((a, b) => {
+    return (xs: T[]) => [...xs].sort((a, b) => {
       const va = get(a), vb = get(b);
       const r = va < vb ? -1 : va > vb ? 1 : 0;
       return sort.dir === 'asc' ? r : -r;
     });
-  }, [rows, sort, columns]);
+  }, [sort, columns]);
+  const sorted = useMemo(() => sortRows(rows).flatMap((r) => [{ r, child: false }, ...sortRows(childRows?.(r) ?? []).map((c) => ({ r: c, child: true }))]),
+    [rows, sortRows, childRows]);
 
   if (rows.length === 0 && empty) return <>{empty}</>;
 
@@ -62,8 +65,9 @@ export function Table<T>({ columns, rows, rowKey, onRowClick, defaultSort, empty
           </tr>
         </thead>
         <tbody>
-          {sorted.map((r) => (
-            <tr key={rowKey(r)} className={onRowClick ? 'is-clickable' : undefined} onClick={onRowClick ? () => onRowClick(r) : undefined}>
+          {sorted.map(({ r, child }) => (
+            <tr key={rowKey(r)} className={[onRowClick && 'is-clickable', child && 'is-child'].filter(Boolean).join(' ') || undefined}
+              onClick={onRowClick ? () => onRowClick(r) : undefined}>
               {columns.map((c) => (
                 <td key={c.key} className={c.numeric ? 'is-num' : undefined}>{c.render(r)}</td>
               ))}

@@ -46,11 +46,12 @@ type sqsQueue struct {
 }
 
 type regionState struct {
-	region string
-	rds    []rdsInstance
-	caches []cacheGroup
-	msk    []mskCluster
-	queues []sqsQueue
+	region    string
+	rds       []rdsInstance
+	caches    []cacheGroup
+	msk       []mskCluster
+	queues    []sqsQueue
+	functions []lambdaFn
 }
 
 type state struct{ regions []*regionState }
@@ -77,6 +78,9 @@ func (p *Provider) Discover(ctx context.Context) (*model.Inventory, error) {
 		}
 		if p.enabled("sqs") {
 			errs = errors.Join(errs, p.discoverSQS(ctx, c, rs, inv))
+		}
+		if p.enabled("lambda") {
+			errs = errors.Join(errs, p.discoverLambda(ctx, c, rs, inv))
 		}
 	}
 	if inv.Count() == 0 && errs != nil {

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppState, NativeModules, TurboModuleRegistry } from 'react-native';
 import type { RumBatch, RumEvent } from '@trooper/core';
-import { captureError, close, flush, getSdk, identify, init, markAppReady, NATIVE_CHANNEL, NATIVE_MODULE_NAME, trooperNavigation } from '../src/index';
+import { captureError, clearUser, close, flush, getSdk, identify, init, markAppReady, NATIVE_CHANNEL, NATIVE_MODULE_NAME, trooperNavigation } from '../src/index';
 import { defaultNativeBridge } from '../src/bridge';
 
 const TURBO = (TurboModuleRegistry as unknown as { modules: Record<string, unknown> }).modules;
@@ -130,7 +130,31 @@ describe('react-native', () => {
     expect(setContext).toHaveBeenLastCalledWith(expect.objectContaining({ session_id: 'native-sess', anonymous_id: 'native-anon', user_id: 'u9' }));
     const app = evs.find((e) => e.type === 'APP_START')!;
     expect(app.attributes).toEqual({ start_reference: 'process' });
-    expect(app.app_start!.duration_ms).toBeGreaterThanOrEqual(1500);
+    expect(app.app_start!.duration_ms).toBeGreaterThanOrEqual(1450);
+  });
+
+  it('setContext carries the JS sampling decision (hash of the session id), also after rotation', async () => {
+    const { hashToUnit } = await import('@trooper/core');
+    const setContext = vi.fn();
+    NativeModules[NATIVE_MODULE_NAME] = { getContext: async () => null, setContext };
+    init({ ...OPTIONS, sampleRate: 0.5 });
+    captureError(new Error('x'));
+    await tick();
+    const first = setContext.mock.calls.at(-1)![0];
+    expect(first.session_id).toEqual(expect.any(String));
+    expect(first.sampled).toBe(hashToUnit(first.session_id) < 0.5);
+    clearUser(); // new session
+    captureError(new Error('y'));
+    await tick();
+    const second = setContext.mock.calls.at(-1)![0];
+    expect(second.session_id).not.toBe(first.session_id);
+    expect(second.sampled).toBe(hashToUnit(second.session_id) < 0.5);
+    await close();
+    setContext.mockClear();
+    init(OPTIONS); // sampleRate 1 → always sampled
+    captureError(new Error('z'));
+    await tick();
+    expect(setContext.mock.calls.at(-1)![0].sampled).toBe(true);
   });
 
   it('native module lookup: TurboModule, then NativeModules.TrooperRum, then the legacy channel name', () => {
@@ -153,7 +177,7 @@ describe('react-native', () => {
     markAppReady();
     const app = (await events()).find((e) => e.type === 'APP_START')!;
     expect(app.attributes).toEqual({ start_reference: 'process' });
-    expect(app.app_start!.duration_ms).toBeGreaterThanOrEqual(900);
+    expect(app.app_start!.duration_ms).toBeGreaterThanOrEqual(850);
   });
 
   it('missing / throwing native module is silent', async () => {

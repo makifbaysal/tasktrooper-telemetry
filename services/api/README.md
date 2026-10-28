@@ -14,6 +14,10 @@ GOWORK=off go run ./cmd/api                                 # :8080
 curl -H 'Authorization: Bearer tt_dev_api_key' 'localhost:8080/api/v1/services?range=1h'
 curl -H 'Authorization: Bearer tt_dev_api_key' 'localhost:8080/api/v1/services/checkout/endpoints/post-checkout/series?range=24h&env=production'
 curl localhost:8080/healthz
+
+# browser-style session (TT_AUTH_DEV=true): dev@tasktrooper.local is owner of org 1 (seeded by 007_auth.sql)
+curl -c /tmp/tt.jar -XPOST -H 'Content-Type: application/json' -d '{}' localhost:8080/api/v1/auth/dev-login
+curl -b /tmp/tt.jar -H 'X-Trooper-Project: 1' localhost:8080/api/v1/me
 ```
 
 Docker (build context `services/`): `docker build -f api/Dockerfile -t tasktrooper/api services/`, or the `api`
@@ -29,6 +33,29 @@ service of `deploy/docker-compose.yml` (profile `app`).
 | `TT_CLICKHOUSE_URL` | `clickhouse://trooper:trooper@localhost:9000/telemetry` | clickhouse-go DSN |
 | `TT_API_CH_MAX_CONNS` | `20` | |
 | `TT_LOG_LEVEL` | `info` | JSON slog |
+| `TT_AUTH_DEV` | `false` | enables `POST /auth/dev-login` (no IdP; logs a warning). Never in production |
+| `TT_SESSION_TTL` | `168h` | sliding session lifetime (`tt_session` cookie, httpOnly, SameSite=Lax) |
+| `TT_COOKIE_SECURE` | `false` | force `Secure` cookies (also set automatically on TLS / `X-Forwarded-Proto: https`) |
+| `TT_WEB_URL` | `http://localhost:5173` | where login / install callbacks redirect (`redirect` params may only point here or to an allowed origin) |
+| `TT_OIDC_ISSUER`, `TT_OIDC_CLIENT_ID`, `TT_OIDC_CLIENT_SECRET` | – | OIDC Authorization Code + PKCE (S256); unset issuer = OIDC disabled |
+| `TT_OIDC_REDIRECT_URL` | `http://localhost:8080/api/v1/auth/callback` | must be registered at the IdP |
+| `TT_OIDC_SCOPES` | `openid,email,profile` | |
+| `TT_PUBLIC_API_URL` | `http://localhost:8080` | public base of this api (Slack OAuth redirect URI = `<it>/api/v1/integrations/slack/callback`) |
+| `TT_PUBLIC_WEBHOOK_URL` | `http://localhost:8096` | public base of codeintel; repository webhook URLs returned by `POST /repos` = `<it>/v1/webhooks/<github\|gitlab\|bitbucket>` |
+| `TT_SLACK_CLIENT_ID`, `TT_SLACK_CLIENT_SECRET`, `TT_SLACK_SIGNING_SECRET` | – | Slack App (ADR-017); unset = Slack endpoints answer 501 |
+| `TT_SLACK_API_URL` | `https://slack.com/api` | tests / proxies |
+| `TT_GITHUB_APP_ID`, `TT_GITHUB_APP_PRIVATE_KEY` (PEM or `env:NAME` / `file:/path`), `TT_GITHUB_API_URL` | – | GitHub App (`services/pkg/githubapp`); unset = GitHub endpoints answer 501 |
+| `TT_GITHUB_APP_SLUG` | – | install page `https://github.com/apps/<slug>/installations/new` |
+| `TT_GITHUB_URL` | `https://github.com` | GitHub Enterprise |
+| `TT_AI_PRICES` | built-in table | LLM prices per model, `<model>=<in>/<out>,...` (USD per 1M tokens → credits; `services/pkg/aiquota`). Invalid value = startup error |
+| `TT_AI_DEFAULT_PRICE` | aiquota default | `<in>/<out>` for models missing from `TT_AI_PRICES` |
+| `TT_AI_PLAN_CREDITS` | `free=100,team=5000,enterprise=-1` | monthly AI credits per plan (`-1` = unlimited); org override via `PUT /orgs/{org}/ai-quota` |
+| `TT_FAAS_LAMBDA_REQUEST_PRICE` | `0.20` | USD per 1M Lambda requests (serverless cost estimate) |
+| `TT_FAAS_LAMBDA_GBS_PRICE`, `TT_FAAS_LAMBDA_GBS_PRICE_ARM64` | `0.0000166667`, `0.0000133334` | USD per GB-second (x86_64 / arm64) |
+| `TT_FAAS_AZURE_GBS_PRICE`, `TT_FAAS_AZURE_REQUEST_PRICE` | `0.000016`, `0.20` | Azure Functions consumption plan: USD per GB-s, per 1M executions |
+| `TT_AZURE_LOGIN_URL`, `TT_AZURE_ARM_URL` | `https://login.microsoftonline.com`, `https://management.azure.com` | Azure endpoints for `POST /integrations/test` (tests / sovereign clouds) |
+| `TT_S3_ENDPOINT`, `TT_S3_ACCESS_KEY`, `TT_S3_SECRET_KEY`, `TT_S3_REGION` | –, –, –, `us-east-1` | S3-compatible store of session replay segments (contracts §12, §23; dev SeaweedFS `http://localhost:9002`, `trooper` / `trooper-secret`). Unset endpoint = `GET /replays/{id}/segments/{n}` answers 503 (index endpoints still work) |
+| `TT_REPLAY_S3_BUCKET` | `tt-replays` | replay bucket (read only; the ingest writer creates it) |
 
 ## Test
 
@@ -36,6 +63,8 @@ service of `deploy/docker-compose.yml` (profile `app`).
 GOWORK=off go build ./... && GOWORK=off go vet ./... && GOWORK=off go test ./...
 # live infra: seeds org/project 9101 in Postgres + ClickHouse, calls every endpoint group, deletes what it wrote
 GOWORK=off go test -tags integration -count=1 ./internal/server/ -run Integration -v
+# replay / profiling / AI only (org 9821; needs deploy/clickhouse/005 + deploy/postgres/012 applied; uploads one blob to the dev S3)
+GOWORK=off go test -tags integration -count=1 ./internal/server/ -run IntegrationObs -v
 npx @redocly/cli lint openapi.yaml
 ```
 
@@ -45,15 +74,19 @@ npx @redocly/cli lint openapi.yaml
 |---|---|
 | `cmd/api` | wiring, graceful shutdown |
 | `internal/server` | router, middleware (request id, panic recovery, JSON request log, CORS, gzip), auth, handlers. Handlers only parse parameters and call the `Store` interface (unit tests use a fake store) |
-| `internal/store` | all SQL. `apm.go`, `traces.go`, `logs.go`, `rum.go`, `alerting.go`, `kpi.go`, `infra.go`, `loadtest.go` |
+| `internal/store` | all SQL. `apm.go`, `traces.go`, `logs.go`, `rum.go`, `alerting.go`, `kpi.go`, `infra.go`, `loadtest.go`, `replay.go`, `profiles.go`, `llm.go` |
 | `internal/tq` | tenant guard: every query must contain `{{tenant}}` / `{{tenant:alias}}` (→ `org_id = O AND project_id = P` in ClickHouse, `project_id = P` in Postgres) or `{{project}}` / `{{org}}` for inserts; queries without one are rejected |
-| `internal/timerange` | `range` → aligned buckets (1h → 60×1m, 6h → 72×5m, 24h → 96×15m, 7d → 84×2h), zero-filled series builder |
+| `internal/timerange` | `range` → aligned buckets (15m → 15×1m, 30m → 30×1m, 1h → 60×1m, 6h → 72×5m, 24h → 96×15m, 7d → 84×2h), zero-filled series builder |
 | `internal/rules` | consumer-lag rule math mirroring `apps/web/src/lib/lagAlerts.ts` (monitor preview) |
 | `internal/slo` | SLI ratio, burn rate, budget, KPI status |
-| `internal/auth` | `Authorization: Bearer <key>` → sha256 → `api_keys` (kind `api`, not revoked), 60 s cache |
+| `internal/auth` | `Authorization: Bearer <key>` → sha256 → `api_keys` (kind `api`, not revoked), 60 s cache (dropped on revoke); OIDC client (go-oidc discovery, PKCE, nonce, id-token verification) |
+| `internal/slack` | minimal Slack Web API client (oauth.v2.access, conversations.list, users.info, response_url) + request signature verification |
 | `internal/cloudcheck` | `POST /integrations/test`: minimal live provider checks (AWS STS GetCallerIdentity / AssumeRole, GCP token + Resource Manager, Vercel `/v2/user`, Neon `/projects`), 10 s timeout, secrets scrubbed from messages |
 | `internal/symbolicate` | symbolicator client (forwards the caller's `Authorization`) |
 | `internal/conntest` | real connection tests: Postgres login + `pg_stat_statements` check, Redis PING, Kafka metadata + groups (franz-go), RabbitMQ management API; MySQL/MongoDB TCP only |
+| `internal/flame` | flame graph / diff tree building (root `all`, < 0.05 % → `[pruned]` child, ≤ 5000 nodes by a largest-share-first expansion), top functions (recursion counted once) |
+| `services/pkg/llmprice` | LLM price table (`defaults.json`, embedded) + org overrides, provider family / model normalization, cost (shared with alert-engine) |
+| `internal/blob` | read-only S3 client for replay segments |
 
 ## Data sources
 
@@ -81,7 +114,90 @@ npx @redocly/cli lint openapi.yaml
 * Endpoint RCA (`/services/{s}/endpoints/{e}/rca?baseline=prev|1d|7d`): endpoint + each `edges_1m` child, range vs
   baseline, ms per request deltas. Client apps (web/mobile) get RUM-based `/services/{app}/series`; consumers list
   their topic sources as callers.
-* Code insights (`/suggestions`, `/repos`, `/inventory`): no backend yet, empty lists.
+* Code insights (ADR-014, written by `services/codeintel`): `POST /repos` seals `token` (`credentials_ref = secret:<id>`)
+  or links a GitHub App installation of the project, and stamps `analyze_requested_at`. Providers github / gitlab (group/sub/project,
+  optional self-managed `baseUrl`, https only) / bitbucket (workspace/repo) / local; formats come from `services/pkg/vcs`.
+  GitLab, Bitbucket and App-less GitHub repos get a generated webhook secret (`webhook_secret_ref`), returned once as
+  `webhook {url, secret}`; `POST /repos/{id}/webhook-secret` rotates it (contracts §18a). `webhookActive` = App installation
+  or `webhook_received_at` set by codeintel. Status is derived (`analyzing`
+  while a request is newer than `analyzed_at`). `/inventory` reads `inventory_items.project_id` (shadow items have no
+  repo); criticality critical|high|medium|low → critical|important|important|low. Accepting a suggestion creates the
+  monitor from `monitor_draft` (`source = suggestion`) in one transaction. Monitors with `source = code` are managed in
+  the repo: PUT / PATCH / DELETE → 409 (a PATCH that only sets `mutedUntil` is allowed).
+* Load tests (ADR-015): `/loadtests/runs/{id}/series` reads runner metrics (`service = loadtest`, attr
+  `trooper.loadtest.run`; delta sums per bucket, p95 from merged histogram buckets, VUs = Σ regions) and falls back to
+  `loadtest_runs.live`; `/target` compares the service's `red_1m` with `callers_1m` rows of caller `loadtest:<id>`.
+  Draft scenarios cannot run (409). Stop: queued → aborted, running → `abort_requested_at` (loadtest-ctl stops runners).
+  Domains: `verify` stamps `verify_requested_at` for loadtest-ctl.
+* Logs `?source=` filters `attrs['vercel.source']`.
+* Pod / host placement (contracts §22): `GET /traces?pod=&namespace=&node=&host=` filter span `resource_attrs`
+  (`k8s.pod.name`, `k8s.namespace.name`, `k8s.node.name`, `host.name`); `GET /logs?pod=&namespace=` filter
+  `attrs['k8s.pod.name']` / `attrs['k8s.namespace.name']` (the writer copies those resource attributes into log attrs).
+* GPUs (`gpus_1m`, contracts §22): host list/detail rows carry `gpus` (latest minute per GPU, `[]` when none; a GPU
+  that stopped reporting 3 min before its host is dropped); host detail `series.gpu` = utilization per GPU (ids
+  `gpu<index>`, label `GPU <index> · <model>`).
+* Serverless, Azure per-function rows (contracts §22): rows with `meta.parent` (the app's slug) get `parentId` (the app
+  row's id, same project); `?parent=<id|slug>` keeps those rows; an Azure app's detail has `children`.
+  **Summary rule (no double counting):** an Azure app row carries app-level totals (Azure Monitor), so in
+  `/serverless/summary` (totals and `byProvider`) every per-function row (`meta.parent` set, even when the app row
+  cannot be resolved) is left out of invocations / errors / throttles / coldStarts / costUsd; an app row that has
+  per-function rows is not counted in `functions` (its functions are). Child rows carry no execution units, so cost
+  stays on the app row. The list itself returns every row with its own metrics; Azure app rows add `appInsights`
+  (`connected|unavailable`, from `meta.appInsights`).
+
+* Session replay (ADR-021, contracts §23): list from `replay_sessions` (window: sessions overlapping the range), detail
+  segments from `replay_segments` (`argMax(…, received_at)` dedupes redeliveries), user / device / views / errors
+  joined from `rum_events` by `session_id`; timeline = the session's `rum_events` (view_start, action, error, resource,
+  vital, app_start; ≤ 2000). Segment bodies are streamed from S3 as stored (`Content-Encoding: gzip`, not re-compressed);
+  the blob key must start with `<org>/<project>/`. `hasReplay` on `/apps/{app}/sessions`; `replay` on error details =
+  newest occurrence inside a replay (RUM: the error event; backend: a RUM resource event carrying a trace of the
+  fingerprint), `offsetMs` from the replay's first segment.
+* Profiling (ADR-022, contracts §24): stacks are read as `GROUP BY stack_hash` (≤ 200k distinct stacks per tree, the
+  remainder folded into an `[other]` stack so totals stay exact) and turned into trees in Go (`internal/flame`). Diff:
+  `baseVersion` + `version` over `range` (default 24h) or explicit `baseFrom/baseTo/from/to`. Series: `cpu` / `wall`
+  → average cores (`total / profile duration` averaged per bucket minute, summed over a host's processes), other types
+  → value per minute; ≤ 8 hosts, rest `other`. Windows are limited to 14 days.
+* AI monitoring (ADR-023, contracts §25): overview from `llm_1m` (`llm_1h` for 7d), calls / call detail from `spans`
+  (`attrs['gen_ai.operation.name'] != ''`) + `llm_content`. Series values are per bucket (calls, tokens, USD). Cost =
+  (input − cache read − cache write, ≥ 0) × input + cache read × cacheRead + cache write × cacheWrite (missing cache
+  price = input price) + output × output, per 1M tokens. `costUsd` sums priced models (`null` when none is priced);
+  `costPartial` = some calls have no price. **Prices are estimates**: `services/pkg/llmprice/defaults.json` (list prices,
+  `updated` date inside) — review it when providers change prices; orgs override rows with `PUT /ai/prices` (admin+,
+  Postgres `llm_prices`, audit `ai_prices.update` / `ai_prices.delete`). Matching: provider → family (`azure.ai.openai`
+  → openai, `gcp.*` → google, `aws.bedrock` → model vendor), model lower-cased without `vendor/` or Bedrock
+  `<region>.<vendor>.` prefixes; exact row, else the longest row that is a prefix ending at a non-alphanumeric char;
+  org rows first, then defaults of the family, then any default. `hasAi` on `GET /services/{id}` = `llm_1h` rows in the
+  last 7 days; trace spans with `gen_ai.operation.name` carry `llm`.
+* LLM monitors (kind `llm`): `POST /monitors` validates `query {filter?: {service, provider, model, route, method,
+  operation}, metric}` (`internal/store/llm_preview.go`); `POST /monitors/preview` replays it per bucket from `llm_1m`/`llm_1h`
+  (window sums; `error_rate` = errors / calls over the window; p95 per bucket; cost with the org price table);
+  `GET /monitor-templates` lists the four llm templates (copy of alert-engine's `eval.Templates`).
+
+## Auth, roles, audit (ADR-016)
+
+* `Authorization: Bearer <api key>` → the key's project, acting as **admin** of its org. Otherwise the `tt_session`
+  cookie (sessions table stores sha256 of the token; sliding expiry, refreshed at most once a minute). Cookie requests
+  choose the project with `X-Trooper-Project` (must be in one of the user's orgs → else 403); state-changing cookie
+  requests must come from an allowed `Origin`.
+* Roles (`memberships.role`): viewer = GET only; member = normal writes; admin = members, api keys, integrations,
+  Slack/GitHub, load test domains, audit log; owner = granting/removing owner (the last owner cannot leave).
+* OIDC: `/auth/login?redirect=` → IdP (state + PKCE verifier + nonce in `oidc_login_states`, 10 min) →
+  `/auth/callback` → user upserted by `sub` (or linked by verified email) → cookie → redirect to the web app;
+  failures redirect to `<web>/login?error=...`.
+* Every non-GET request is written to `audit_log` (action = method + route pattern, target = last path id or created
+  id); logins and Slack actions too.
+
+## Slack App and GitHub App (ADR-017)
+
+* Install: browser (cookie) → `GET /integrations/{slack|github}/install?redirect=` (302); api-key clients →
+  `POST /integrations/{slack|github}/install-url` → `{url}`. Both carry an HMAC-signed state (org, project, user,
+  redirect; 15 min). Callbacks redirect back with `slack=connected|error` / `github=<integration id>|pending|error`.
+* Slack: one installation per org (`integrations(provider='slack')`, bot token sealed); `GET /integrations/slack/channels?q=`
+  (all pages, 5 min cache, `refresh=true`). `POST /slack/interactions` verifies `X-Slack-Signature` (±5 min) and handles
+  `tt_ack:<incidentId>` / `tt_mute1h:<monitorId>`; the Slack user is mapped by email to an org member (member+). Acks
+  do not enqueue notifications (the alert engine announces `acknowledged`).
+* GitHub: `integrations(provider='github', config.installationId)` per project; `GET /integrations/github/{id}/repos?q=`
+  lists installation repos (installation token) with `added`; `POST /repos {provider:'github', fullName, installationId}`.
 
 ## Known gaps (need contract/schema changes)
 

@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
-import { AlertTriangle, ArrowRight, Target, UserRound } from 'lucide-react';
+import { AlertTriangle, ArrowRight, PlayCircle, Target, UserRound } from 'lucide-react';
 import { BarList, PropBar, TimeSeries } from '@/components/charts';
 import {
   Badge, Button, Card, CodeBlock, Drawer, DrawerSection, KeyValues, MetricCard, Section, StatusBadge, Table, Tabs, useDrawer,
 } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
 import {
-  NOW, appApiCalls, appErrors, appSeries, isApi, vitalSeries as vitalSeriesOf, deployEvents, deploysOf, integrations, appSummary, rumPagesFor, series, sessionsFor, timestamps,
+  NOW, errorReplay, replayUrl, replaysFor, sessionHasReplay, appApiCalls, appErrors, appSeries, isApi, vitalSeries as vitalSeriesOf, deployEvents, deploysOf, integrations, appSummary, rumPagesFor, series, sessionsFor, timestamps,
   type AppApiCall, type AppSummary, type RumPage, type Service, type Session, type TimeRange,
 } from '@/data';
 import { ago, clock, compact, duration, int, ms, pct } from '@/lib/format';
@@ -16,8 +16,10 @@ import { LogExplorer } from './Logs';
 import { DeployList, IntegrationSourceBadge } from './Integrations';
 import { AlertCount, AlertsBody } from './Alerts';
 import { KpiCount, ServiceKpis } from './Kpis';
+import { ReplaysTab } from './Replays';
 
-type Tab = 'pages' | 'sessions' | 'errors' | 'api' | 'deploys' | 'kpis' | 'alerts' | 'logs';
+type Tab = 'pages' | 'sessions' | 'replays' | 'errors' | 'api' | 'deploys' | 'kpis' | 'alerts' | 'logs';
+const TAB_IDS: Tab[] = ['pages', 'sessions', 'replays', 'errors', 'api', 'deploys', 'kpis', 'alerts', 'logs'];
 type Vital = AppSummary['vitals'][number];
 
 // ---------------------------------------------------------------- vitals
@@ -169,7 +171,7 @@ export function FrontendApp({ app }: { app: Service }) {
   const nav = useNavigate();
   const [params] = useSearchParams();
   const initial = params.get('tab');
-  const [tab, setTab] = useState<Tab>(initial === 'logs' || initial === 'alerts' || initial === 'kpis' || initial === 'deploys' ? initial : 'pages');
+  const [tab, setTab] = useState<Tab>(TAB_IDS.includes(initial as Tab) ? (initial as Tab) : 'pages');
   const vitalDrawer = useDrawer<Vital>();
   const pageDrawer = useDrawer<RumPage>();
   const sessionDrawer = useDrawer<Session>();
@@ -242,6 +244,7 @@ export function FrontendApp({ app }: { app: Service }) {
         <Tabs value={tab} onChange={setTab} tabs={[
           { id: 'pages', label: <>{pageNoun}s <Badge>{pages.length}</Badge></> },
           { id: 'sessions', label: <>Sessions <Badge>{sessions.length}</Badge></> },
+          { id: 'replays', label: <>Replays <Badge>{replaysFor(app.id, { range }).length}</Badge></> },
           { id: 'errors', label: <>{mobile ? 'Crashes & errors' : 'Errors'} <Badge>{errors.length}</Badge></> },
           { id: 'api', label: <>API calls <Badge>{calls.length}</Badge></> },
           { id: 'deploys', label: <>Deploys <Badge>{deploys.length}</Badge></> },
@@ -276,6 +279,9 @@ export function FrontendApp({ app }: { app: Service }) {
               { key: 'dur', header: 'Duration', numeric: true, sortValue: (s) => s.duration, render: (s) => duration(s.duration) },
               { key: 'err', header: 'Errors', numeric: true, sortValue: (s) => s.errors, render: (s) => s.errors ? <StatusBadge status="warning" label={String(s.errors)} /> : <span className="muted">0</span> },
               { key: 'start', header: 'Started', numeric: true, sortValue: (s) => s.startedAt, render: (s) => <span className="muted">{ago(s.startedAt)}</span> },
+              { key: 'replay', header: '', render: (s) => sessionHasReplay(app.id, s)
+                ? <Button size="sm" variant="ghost" icon={<PlayCircle size={14} />} onClick={(e) => { e.stopPropagation(); nav(replayUrl(s.id)); }}>Watch replay</Button>
+                : null },
             ]} />
           </Card>
         )}
@@ -292,6 +298,7 @@ export function FrontendApp({ app }: { app: Service }) {
             ]} />
           </Card>
         )}
+        {tab === 'replays' && <ReplaysTab app={app} />}
         {tab === 'api' && (
           <Card flush subtitle="Backend endpoints this app calls, identified from the trace context the SDK adds to every request · click to open the endpoint">
             {calls.length === 0
@@ -338,7 +345,7 @@ export function FrontendApp({ app }: { app: Service }) {
       <PageDrawer app={app} page={pageDrawer.item} pages={pages} vitals={pageVitals} errors={errors} onClose={pageDrawer.close} ts={ts} range={range}
         onTrack={(p) => nav(`/kpis/new?app=${app.id}&page=${encodeURIComponent(p.path)}`)} />
       <SessionDrawer session={sessionDrawer.item} pages={pages} errors={errors} pageNoun={pageNoun} onClose={sessionDrawer.close} />
-      <ErrorDrawer error={errorDrawer.item} pages={pages} onClose={errorDrawer.close} ts={ts} range={range} />
+      <ErrorDrawer appId={app.id} error={errorDrawer.item} pages={pages} onClose={errorDrawer.close} ts={ts} range={range} onReplay={(id, off) => nav(replayUrl(id, off))} />
     </>
   );
 }
@@ -458,11 +465,15 @@ function SessionDrawer({ session, pages, errors, pageNoun, onClose }: { session:
   );
 }
 
-function ErrorDrawer({ error, pages, onClose, ts, range }: { error: JsError | null; pages: RumPage[]; onClose: () => void; ts: number[]; range: TimeRange }) {
+function ErrorDrawer({ appId, error, pages, onClose, ts, range, onReplay }: {
+  appId: string; error: JsError | null; pages: RumPage[]; onClose: () => void; ts: number[]; range: TimeRange; onReplay: (sessionId: string, offsetMs: number) => void;
+}) {
   if (!error) return null;
+  const replay = errorReplay(appId, error.id, error.message);
   const affected = pages.filter((p) => p.path === error.page || hashStr(error.id + p.id) % 4 === 0).slice(0, 4);
   return (
-    <Drawer open onClose={onClose} title={<span className="mono">{error.message}</span>} subtitle={<>{error.location} · first seen {ago(error.firstSeen)} · last seen {ago(error.lastSeen)}</>}>
+    <Drawer open onClose={onClose} title={<span className="mono">{error.message}</span>} subtitle={<>{error.location} · first seen {ago(error.firstSeen)} · last seen {ago(error.lastSeen)}</>}
+      actions={replay ? <Button size="sm" icon={<PlayCircle size={14} />} onClick={() => onReplay(replay.sessionId, Math.max(0, replay.offsetMs - 2000))}>Watch replay</Button> : undefined}>
       <KeyValues items={[
         ['Events', int(error.events)],
         ['Users affected', int(error.users)],

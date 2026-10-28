@@ -91,4 +91,34 @@ class DsnAndConfigTest {
         assertThat(TrooperSpanProcessor.deliveryAttempt(java.util.List.of("5"))).isEqualTo(5L);
         assertThat(TrooperSpanProcessor.deliveryAttempt(null)).isNull();
     }
+
+    @Test
+    void readsProfilingAndLlmSettings() {
+        TrooperConfig off = TrooperConfig.fromLookup(Map.<String, String>of()::get);
+        assertThat(off.profilingEnabled()).isFalse();
+        assertThat(off.profilingPeriodSeconds()).isEqualTo(60);
+        assertThat(off.llmCaptureContent()).isNull();
+        assertThat(off.toOtelProperties()).doesNotContainKey("otel.instrumentation.genai.capture-message-content");
+
+        // TROOPER_PROFILING maps to the short key, -Dtrooper.profiling.enabled to the long one
+        assertThat(TrooperConfig.envName(TrooperConfig.PROFILING)).isEqualTo("TROOPER_PROFILING");
+        assertThat(TrooperConfig.envName(TrooperConfig.LLM_CAPTURE_CONTENT)).isEqualTo("TROOPER_LLM_CAPTURE_CONTENT");
+        TrooperConfig on = TrooperConfig.fromLookup(Map.of(
+                "trooper.profiling", "true",
+                "trooper.profiling.types", " CPU, alloc_space ,",
+                "trooper.profiling.period", "1",
+                "trooper.llm.capture-content", "true")::get);
+        assertThat(on.profilingEnabled()).isTrue();
+        assertThat(on.profilingTypes()).containsExactly("cpu", "alloc_space");
+        assertThat(on.profilingPeriodSeconds()).isEqualTo(5); // clamped
+        assertThat(on.llmCaptureContent()).isTrue();
+        assertThat(on.toOtelProperties()).containsEntry("otel.instrumentation.genai.capture-message-content", "true");
+
+        TrooperConfig explicitOff = TrooperConfig.fromLookup(Map.of(
+                "trooper.profiling.enabled", "false", "trooper.profiling", "true",
+                "trooper.profiling.period", "abc", "trooper.llm.capture-content", "false")::get);
+        assertThat(explicitOff.profilingEnabled()).isFalse(); // the long key wins
+        assertThat(explicitOff.profilingPeriodSeconds()).isEqualTo(60);
+        assertThat(explicitOff.llmCaptureContent()).isFalse();
+    }
 }

@@ -38,8 +38,8 @@ Dört ana yetenek:
 
 ```
 apps/web/               Dashboard (React 19 + Vite + TypeScript)
-services/               Go servisleri: pkg, ingest (gw + writer), api, alerting (engine + notifier), collector, integrations (trooper-cloud), symbolicator
-sdks/                   go, jvm, dotnet, js/packages (browser, react, vue, angular, react-native), android, ios, flutter
+services/               Go servisleri: pkg, ingest (gw + writer), api, alerting (engine + notifier), collector, integrations (trooper-cloud), symbolicator, codeintel, loadtest (ctl + runner)
+sdks/                   go, jvm, dotnet, js/packages (browser, react, vue, angular, react-native, node), android, ios, flutter
 tools/                  demo (canlı demo dünyası, `make demo`), trooper-cli (sourcemap/dSYM/mapping upload)
 proto/                  RUM wire şeması
 deploy/                 docker-compose + ClickHouse/Postgres şemaları
@@ -53,7 +53,7 @@ Detay: [`.ai/architecture.md`](.ai/architecture.md#monorepo).
 - **Frontend:** React 19, Vite, TypeScript (strict), react-router, plain CSS + design token'ları (CSS custom properties). Grafikler: kendi SVG chart komponentlerimiz (`apps/web/src/components/charts`).
 - **Backend:** Go 1.26. HTTP için `net/http` + chi, gRPC/OTLP için `go.opentelemetry.io/collector` bileşenleri.
 - **Veri:** ClickHouse (telemetri: metrik, span, log, RUM event), PostgreSQL (metadata: org, proje, alert, kullanıcı), Redpanda (Kafka API, ingest buffer), Redis (rate limit, cache).
-- **Load test motoru:** k6 (Go kütüphanesi olarak gömülü), runner'lar Kubernetes Job.
+- **Load test motoru:** kendi Go motorumuz (ADR-015), runner'lar local process veya Kubernetes Job.
 - **LLM:** Claude API (kod analizi ve alert önerisi). Model ID'leri sabit kodlanmaz, config'ten gelir.
 - **Paket yöneticisi:** pnpm (JS), Go modules.
 
@@ -91,10 +91,14 @@ Backend: `docker compose -f deploy/docker-compose.yml up -d` (altyapı), `make m
 - [x] KPI (SLO) + burn-rate alert'leri ve kök neden analizi UI'ı (mock, `src/lib/rca.ts`)
 - [x] Altyapı (compose), ClickHouse/Postgres şemaları, RUM proto, sözleşme (`contracts.md`)
 - [x] Backend servisleri: ingest (gw + writer), api (90 endpoint, `services/api/openapi.yaml`), alerting (engine + notifier), collector (`trooper-agent`)
-- [x] SDK'lar: Go, JVM (agent, Spring Boot, Quarkus, Ktor), .NET, JS (browser/react/vue/angular/RN), Android, iOS, Flutter
+- [x] SDK'lar: Go, JVM (agent, Spring Boot, Quarkus, Ktor), .NET, JS (browser/react/vue/angular/RN/node), Android, iOS, Flutter
 - [x] UI'ın `src/data/*` fonksiyonları api'ye bağlı (`VITE_DATA=api`; default mock) — ADR-013
 - [x] Cloud entegrasyonları: AWS, Google Cloud, Neon, Vercel (`services/integrations`, Integrations ekranı) — ADR-012
 - [x] Symbolication servisi + `trooper-cli`; canlı demo (`make demo`)
-- [ ] Paket yayınlama, OIDC auth, code intelligence (Faz 4), load test runner (Faz 5)
+- [x] OIDC auth + takım yönetimi (ADR-016), code intelligence (Faz 4, ADR-014), load test runner (Faz 5, ADR-015)
+- [x] Slack App (alert + kök neden/confidence, ack/mute) ve GitHub App (repo ekleme, push webhook → incremental analiz) — ADR-017
+- [x] AI kullanım kotası (ADR-018), host/K8s/container izleme + opsiyonel eBPF (ADR-019), AWS Lambda + Azure Functions (ADR-020)
+- [x] Session replay (web rrweb + Android/iOS wireframe), continuous profiling (Go/JVM/Node, flame graph + diff), AI/LLM monitoring (GenAI span'ları, token/maliyet) — ADR-021/022/023
+- [ ] Paket yayınlama
 
 Sıradaki işler: [`.ai/roadmap.md`](.ai/roadmap.md).

@@ -13,6 +13,7 @@ let package = Package(
             dependencies: [
                 .product(name: "TaskTrooper", package: "ios"),
                 .product(name: "TaskTrooperSwiftUI", package: "ios"),
+                .product(name: "TaskTrooperReplay", package: "ios"),
             ]
         ),
     ]

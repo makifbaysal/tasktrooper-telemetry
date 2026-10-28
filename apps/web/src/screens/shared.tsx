@@ -25,6 +25,9 @@ export function ServiceType({ type }: { type: ServiceType }) {
   return <span className="row secondary" style={{ gap: 6 }}><m.Icon size={14} aria-hidden />{m.label}</span>;
 }
 
+/** Trace detail page (`/traces/:traceId`). */
+export const traceUrl = (id: string) => `/traces/${encodeURIComponent(id)}`;
+
 /** Fixed categorical slot per service — color follows the entity, not its rank. */
 export const serviceSlot = (id: string) => LINE_SLOTS[Math.max(0, services.findIndex((s) => s.id === id)) % LINE_SLOTS.length];
 
@@ -45,8 +48,8 @@ export function errorTone(rate: number) {
  */
 export const LINE_SLOTS = [1, 2, 3, 7, 5, 6, 8];
 
-export const DEP_KIND_LABEL: Record<'db' | 'cache' | 'http' | 'queue', string> = {
-  db: 'Database', cache: 'Cache', http: 'HTTP', queue: 'Queue',
+export const DEP_KIND_LABEL: Record<'db' | 'cache' | 'http' | 'queue' | 'ai', string> = {
+  db: 'Database', cache: 'Cache', http: 'HTTP', queue: 'Queue', ai: 'AI / LLM',
 };
 
 export const CALLER_KIND_LABEL: Record<import('@/data').CallerKind, string> = {

@@ -115,7 +115,7 @@ type fakeEngine struct {
 	applied map[int64]eval.Result
 }
 
-func (f *fakeEngine) Leader() bool                     { return true }
+func (f *fakeEngine) StreamLeader() bool               { return true }
 func (f *fakeEngine) StreamMonitors() []*model.Monitor { return f.ms }
 func (f *fakeEngine) ApplyStream(_ context.Context, m *model.Monitor, r eval.Result) {
 	f.mu.Lock()

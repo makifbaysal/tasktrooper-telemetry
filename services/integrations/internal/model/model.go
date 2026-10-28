@@ -47,17 +47,37 @@ type Broker struct {
 	Meta     map[string]any
 }
 
+// Function is a discovered `serverless_functions` row (contracts §21): one Lambda function or one Azure
+// Function App. Slug is set by the provider (aws-<region>-<name> | azure-<app>).
+type Function struct {
+	Slug     string
+	Name     string
+	App      string // Azure: function app name
+	Region   string
+	Runtime  string
+	MemoryMB *int
+	TimeoutS *int
+	Arch     string
+	Triggers []string // api, http, schedule, sqs:<queue>, kinesis:<stream>, dynamodb:<table>, ...
+	Service  string   // span service.name (tag / app setting tasktrooper.service, else name)
+	URL      string
+	Meta     map[string]any
+}
+
 // Inventory is what discovery found. Provider-specific state the metrics step needs lives in State.
 type Inventory struct {
 	Databases []Database
 	Brokers   []Broker
+	Functions []Function
 	// Other counts resources that are not stored as databases/brokers (Vercel projects).
 	Other int
 	State any
 }
 
 // Count is the number of discovered resources (integrations.resources).
-func (i *Inventory) Count() int { return len(i.Databases) + len(i.Brokers) + i.Other }
+func (i *Inventory) Count() int {
+	return len(i.Databases) + len(i.Brokers) + len(i.Functions) + i.Other
+}
 
 // Sample is one gauge data point (contracts §5 names).
 type Sample struct {
@@ -132,7 +152,25 @@ const (
 	BrokerNodeNetIn   = "trooper.broker.node.net_in"
 	TopicRetentionMs  = "trooper.broker.topic.retention_ms"
 	TopicInRate       = "trooper.broker.topic.in_rate"
+
+	// Serverless (contracts §21) → ClickHouse faas_1m.
+	FaaSInvocations    = "trooper.faas.invocations"
+	FaaSErrors         = "trooper.faas.errors"
+	FaaSThrottles      = "trooper.faas.throttles"
+	FaaSDurationAvg    = "trooper.faas.duration.avg"
+	FaaSDurationMax    = "trooper.faas.duration.max"
+	FaaSDurationP95    = "trooper.faas.duration.p95"
+	FaaSDurationP99    = "trooper.faas.duration.p99"
+	FaaSConcurrency    = "trooper.faas.concurrency"
+	FaaSIteratorAgeMs  = "trooper.faas.iterator_age_ms"
+	FaaSMemoryBytes    = "trooper.faas.memory_bytes"
+	FaaSExecutionUnits = "trooper.faas.execution_units"
 )
+
+// FaaSAttrs are the datapoint attributes of trooper.faas.* gauges (slug = serverless_functions.slug).
+func FaaSAttrs(slug, name string) map[string]string {
+	return map[string]string{"trooper.faas.id": slug, "faas.name": name}
+}
 
 // DBAttrs are the attributes of trooper.db.* gauges.
 func DBAttrs(slug, name, system, node, role string) map[string]string {

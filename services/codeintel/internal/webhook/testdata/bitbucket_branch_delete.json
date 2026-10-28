@@ -1,0 +1,4 @@
+{
+  "repository": { "full_name": "acme-ws/orders" },
+  "push": { "changes": [ { "new": null, "old": { "type": "branch", "name": "main", "target": { "hash": "1e65c05c1d5171631d92438a13901ca7dae9618c" } }, "closed": true } ] }
+}

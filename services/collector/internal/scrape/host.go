@@ -16,7 +16,7 @@ import (
 // Host reports the machine the agent runs on as trooper.db.cpu / memory / disk of a database.
 // Used in Agent mode (sidecar, DaemonSet on the DB node, or a VM next to the database), where
 // SQL cannot see OS-level resources. In a container, gopsutil reads the host's /proc only when
-// HOST_PROC / HOST_SYS are mounted (the Helm chart does this for kind=DaemonSet).
+// HOST_PROC / HOST_SYS point at the host mounts (e.g. a docker run with -v /proc:/host/proc).
 type Host struct {
 	t        config.Database
 	role     func() string

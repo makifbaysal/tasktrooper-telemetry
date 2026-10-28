@@ -18,6 +18,7 @@ import { Activity } from './activity';
 import { connection, detectEnv, localGet, localSessionStore, localSet } from './env';
 import { firstReport, toErrorPayload } from './errors';
 import { IdbOfflineStore } from './idb';
+import { Hub, integrationClient, type FetchLike, type Integration } from './integrations';
 import { BrowserTransport } from './transport';
 import { currentPath, Views } from './views';
 
@@ -45,6 +46,8 @@ export interface BrowserOptions extends CoreOptions {
   trackVitals?: boolean;
   /** Persist session/anonymous id in localStorage and the offline queue in IndexedDB. Default true. */
   persist?: boolean;
+  /** Add-ons such as `replayIntegration()` from `@trooper/replay`. Set up when the SDK starts. */
+  integrations?: Integration[];
 }
 
 export interface CaptureErrorOptions {
@@ -61,6 +64,8 @@ export class BrowserSdk {
   readonly activity = new Activity();
   private actions: Actions | undefined;
   private teardown: (() => void)[] = [];
+  private readonly hub = new Hub();
+  private readonly fetchImpl: FetchLike | undefined;
 
   constructor(readonly options: BrowserOptions) {
     const persist = options.persist !== false;
@@ -71,6 +76,8 @@ export class BrowserSdk {
       if (persist) localSet('tt_anon', anon);
     }
     const dsn = parseDsn(options.dsn);
+    // Captured before fetch is instrumented: integrations send with it.
+    this.fetchImpl = typeof fetch === 'function' ? fetch.bind(globalThis) : undefined;
     const client = new Client({
       ...options,
       platform: 'PLATFORM_WEB',
@@ -87,7 +94,9 @@ export class BrowserSdk {
       onSessionStart: (_s, first) => {
         const v = this.views?.cur;
         if (!first && v) this.views.start(v.name, v.auto);
+        if (!first) this.hub.emitSession(_s.id);
       },
+      onEvent: this.hub.emitEvent,
     });
     this.client = client;
     this.views = new Views(client, this.activity);
@@ -150,8 +159,22 @@ export class BrowserSdk {
     this.listen(window, 'pagehide', onPageHide);
     this.listen(window, 'pageshow', onPageShow as EventListener);
     this.listen(window, 'online', onOnline);
+    this.setupIntegrations();
     // Deliver batches queued in IndexedDB by a previous page load.
     setTimeout(() => void c.drain(), 1000);
+  }
+
+  private setupIntegrations(): void {
+    const list = this.options.integrations;
+    if (!list?.length) return;
+    const ic = integrationClient(this.client, this.hub, this.fetchImpl);
+    const seen = new Set<string>();
+    for (const i of list) {
+      if (!i || seen.has(i.name)) continue;
+      seen.add(i.name);
+      const off = safe('integration.setup', () => i.setup(ic));
+      if (typeof off === 'function') this.teardown.push(off);
+    }
   }
 
   private listen(t: EventTarget, type: string, fn: EventListener, capture = false): void {
@@ -324,5 +347,6 @@ export async function close(): Promise<void> {
   if (s) await s.close().catch((e) => reportInternal('close', e));
 }
 
+export type { FetchLike, Integration, IntegrationClient } from './integrations';
 export type { BeforeSend, CoreOptions, PropagationTarget, RumBatch, RumEvent } from '@trooper/core';
 export { normalizePath, stripQueryValues } from '@trooper/core';

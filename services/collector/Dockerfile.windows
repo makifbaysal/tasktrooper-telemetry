@@ -1,0 +1,17 @@
+# Windows HostProcess image (Helm windows.enabled). Build context: services/ (the collector module depends on ../pkg)
+#   docker buildx build --platform windows/amd64 -f services/collector/Dockerfile.windows -t trooper-agent:<ver>-windows services/
+FROM --platform=linux/amd64 golang:1.26 AS build
+WORKDIR /src
+ENV GOWORK=off CGO_ENABLED=0 GOOS=windows GOARCH=amd64
+COPY pkg/ pkg/
+COPY collector/go.mod collector/go.sum collector/
+RUN cd collector && go mod download
+COPY collector/ collector/
+ARG VERSION=dev
+RUN cd collector && go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/trooper-agent.exe ./cmd/trooper-agent
+
+FROM mcr.microsoft.com/oss/kubernetes/windows-host-process-containers-base-image:v1.0.0
+COPY --from=build /out/trooper-agent.exe /trooper-agent.exe
+# HostProcess containers run on the host; the image is mounted at %CONTAINER_SANDBOX_MOUNT_POINT%
+# and the entrypoint is resolved relative to it.
+ENTRYPOINT ["trooper-agent.exe"]

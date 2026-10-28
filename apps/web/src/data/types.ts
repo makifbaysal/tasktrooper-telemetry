@@ -1,4 +1,4 @@
-export type TimeRange = '1h' | '6h' | '24h' | '7d';
+export type TimeRange = '15m' | '30m' | '1h' | '6h' | '24h' | '7d';
 export type Health = 'ok' | 'warning' | 'critical';
 export type Severity = 'info' | 'warning' | 'critical';
 export type Criticality = 'critical' | 'important' | 'low';
@@ -19,6 +19,8 @@ export interface Service {
   status: Health;
   instances: number;
   lag?: number;
+  /** 'ebpf' = seen through eBPF (OBI) spans, no SDK (ADR-019, contracts §20) */
+  source?: 'sdk' | 'ebpf';
 }
 
 export interface Endpoint {
@@ -79,6 +81,8 @@ export interface Session {
   errors: number;
   entry: string;
   exit: string;
+  /** a session replay was recorded (ADR-021, contracts §23) */
+  hasReplay?: boolean;
 }
 
 export interface LogLine {
@@ -88,6 +92,8 @@ export interface LogLine {
   service: string;
   message: string;
   traceId?: string;
+  /** platform log source, e.g. Vercel drains: build | static | external | edge | lambda | redirect | firewall */
+  source?: string;
 }
 
 export type MonitorKind =
@@ -102,7 +108,10 @@ export interface Monitor {
   condition: string;
   severity: Severity;
   state: 'ok' | 'pending' | 'firing' | 'muted';
-  source: 'manual' | 'code' | 'template';
+  /** code = alert-as-code (`.trooper/monitors/*.yaml`, read-only in the UI) · suggestion = accepted code-intel suggestion */
+  source: 'manual' | 'code' | 'template' | 'suggestion';
+  /** source = code: `repo:path` of the YAML that defines it */
+  codeRef?: string;
   lastChange: number;
   channels: string[];
   /** epoch ms; evaluated but not notified until then */
@@ -210,7 +219,7 @@ export interface InventoryItem {
 }
 
 /** Where request time goes. Slot = fixed categorical color. */
-export type TimeCategory = 'app' | 'db' | 'cache' | 'http' | 'queue';
+export type TimeCategory = 'app' | 'db' | 'cache' | 'http' | 'queue' | 'ai';
 
 /** Outgoing dependency of a service (DB, cache, downstream HTTP, queue). */
 export interface Dependency {
@@ -311,7 +320,7 @@ export interface Kpi {
 
 // ---------- root cause analysis ----------
 
-export type RcaNodeKind = 'page' | 'app_start' | 'endpoint' | 'db' | 'cache' | 'http' | 'queue' | 'external' | 'code';
+export type RcaNodeKind = 'page' | 'app_start' | 'endpoint' | 'db' | 'cache' | 'http' | 'queue' | 'ai' | 'external' | 'code';
 
 /**
  * One node of the call tree behind a KPI (built from traces: page → API → service → dependency).
@@ -362,4 +371,203 @@ export interface RcaResult {
   root: RcaNode;
   /** one-line answer, e.g. "… because recommendation-api's reco-db queries got 40× slower" */
   summary: string;
+  /** engine (api): infra candidates — pod restarts / OOMKilled, saturated host (contracts §20 RCA) */
+  infra?: RcaInfraCandidate[];
+  /** engine (api): summary / confidence of the call-tree drill-down when infra candidates are also present */
+  treeSummary?: string;
+  treeConfidence?: number;
+}
+
+export interface RcaInfraCandidate {
+  kind: 'pod' | 'host';
+  entity: string;
+  cluster?: string;
+  node?: string;
+  /** OOMKilled | CrashLoopBackOff | restarts | cpu_saturated … */
+  reason: string;
+  restarts?: number;
+  value?: number;
+  title: string;
+  confidence: number;
+}
+
+// =====================================================================================================
+// Hosts, containers, processes and Kubernetes (Faz 6, ADR-019, .ai/contracts.md §20) — owned by data/hosts.ts + data/k8s.ts
+// =====================================================================================================
+
+/** Status of an infra entity (host, node, pod, workload, cluster). `stale` = no data for > 5 min. */
+export type InfraStatus = 'ok' | 'warning' | 'critical' | 'stale';
+
+/** Api SeriesSet as returned by the infra endpoints. */
+export interface InfraSeriesSet { timestamps: number[]; series: { id: string; label?: string; data: number[] }[] }
+
+/** GET /infra/hosts — one host (VM or K8s node). cpu / memory / disk are 0..1, net bytes/s. */
+export interface Host {
+  id: string;
+  hostId: string;
+  os: string;
+  arch: string;
+  /** '' = not in Kubernetes */
+  cluster: string;
+  node: string;
+  cpu: number;
+  cpuCores: number;
+  memory: number;
+  memoryBytes: number;
+  disk: number;
+  netIn: number;
+  netOut: number;
+  load1: number;
+  uptimeS: number;
+  containers: number;
+  lastSeen: number;
+  status: InfraStatus;
+  spark: { cpu: number[]; memory: number[] };
+  /** GPUs (trooper-agent nvidia-smi, latest minute; contracts §22); [] when the host has none. */
+  gpus: HostGPU[];
+}
+
+/** One GPU of a host: utilization / memory 0..1. */
+export interface HostGPU {
+  index: number;
+  model: string;
+  uuid: string;
+  utilization: number;
+  memory: number;
+  memoryBytes: number;
+  temperatureC: number;
+  powerW: number;
+}
+
+/** GET /infra/containers. cpu in cores, memory in bytes, net bytes/s, throttled 0..1. */
+export interface InfraContainer {
+  id: string;
+  name: string;
+  image: string;
+  host: string;
+  cluster: string;
+  namespace: string;
+  pod: string;
+  podUid: string;
+  service: string;
+  cpu: number;
+  cpuLimit: number;
+  memoryBytes: number;
+  memoryLimit: number;
+  restarts: number;
+  netIn: number;
+  netOut: number;
+  throttled: number;
+  status: InfraStatus;
+}
+
+export interface HostProcess { pid: number; exe: string; command: string; containerId: string; cpu: number; memoryBytes: number; threads: number; fds: number }
+
+/** GET /infra/hosts/{host}: series are already fitted to the range buckets. */
+export interface HostDetails extends Host {
+  cpuSeries: number[];
+  memorySeries: number[];
+  diskSeries: number[];
+  netInSeries: number[];
+  netOutSeries: number[];
+  /** Utilization (0..1) per GPU, id `gpu<index>`; empty without GPUs. */
+  gpuSeries: { id: string; label: string; data: number[] }[];
+  containerList: InfraContainer[];
+  processes: HostProcess[];
+  services: string[];
+}
+
+/** GET /infra/k8s/clusters. cpu in cores, memory in bytes. */
+export interface K8sCluster {
+  name: string;
+  nodes: number;
+  nodesReady: number;
+  pods: number;
+  podsRunning: number;
+  podsFailing: number;
+  namespaces: number;
+  workloads: number;
+  cpuUsed: number;
+  cpuAllocatable: number;
+  memoryUsed: number;
+  memoryAllocatable: number;
+  warningEvents: number;
+  lastSeen: number;
+  status: InfraStatus;
+}
+
+export interface K8sNode { name: string; ready: boolean; cpu: number; cpuAllocatable: number; memoryBytes: number; memoryAllocatable: number; pods: number; host: string; status?: InfraStatus }
+export interface K8sNamespace { name: string; pods: number; workloads: number; failing: number }
+
+/** GET /infra/k8s/clusters/{cluster}: `cpu` / `memory` series ids used | requested | allocatable. */
+export interface K8sClusterDetails extends K8sCluster {
+  nodeList: K8sNode[];
+  namespaceList: K8sNamespace[];
+  cpu: Record<'used' | 'requested' | 'allocatable', number[]>;
+  memory: Record<'used' | 'requested' | 'allocatable', number[]>;
+}
+
+export type K8sWorkloadKind = 'Deployment' | 'StatefulSet' | 'DaemonSet' | 'Job' | 'CronJob';
+
+export interface K8sWorkload {
+  cluster: string;
+  namespace: string;
+  kind: K8sWorkloadKind | string;
+  name: string;
+  desired: number;
+  ready: number;
+  available: number;
+  updated: number;
+  /** restarts in the selected range */
+  restarts: number;
+  cpu: number;
+  memoryBytes: number;
+  service: string;
+  status: InfraStatus;
+}
+
+export interface K8sPodContainer { name: string; image: string; cpu: number; memoryBytes: number; restarts: number }
+
+export interface K8sPod {
+  uid: string;
+  name: string;
+  namespace: string;
+  cluster: string;
+  node: string;
+  /** Pending | Running | Succeeded | Failed | Unknown */
+  phase: string;
+  /** CrashLoopBackOff, OOMKilled, ImagePullBackOff … or '' */
+  reason: string;
+  ready: boolean;
+  restarts: number;
+  restartsInRange: number;
+  cpu: number;
+  cpuRequest: number;
+  cpuLimit: number;
+  memoryBytes: number;
+  memoryRequest: number;
+  memoryLimit: number;
+  workloadKind: string;
+  workload: string;
+  service: string;
+  status: InfraStatus;
+  containers: K8sPodContainer[];
+}
+
+export interface K8sEvent { ts: number; type: string; reason: string; message: string; objectKind: string; objectName: string; namespace: string; cluster: string; count: number }
+
+/** GET /infra/k8s/pods/{uid}: series ids usage | request | limit. */
+export interface K8sPodDetails extends K8sPod {
+  cpuSeries: Record<'usage' | 'request' | 'limit', number[]>;
+  memorySeries: Record<'usage' | 'request' | 'limit', number[]>;
+  restartSeries: number[];
+  events: K8sEvent[];
+}
+
+/** GET /services/{svc}/infra */
+export interface ServiceInfra {
+  pods: K8sPod[];
+  hosts: { id: string; cpu: number; memory: number }[];
+  containers: InfraContainer[];
+  functions: { id: string; name: string; provider: string }[];
 }

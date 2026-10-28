@@ -17,6 +17,10 @@ dependencies {
 
     testImplementation(platform(libs.otel.bom))
     testImplementation(libs.otel.proto)
+
+    // ProfiledApp sets trooper.route through the OTel API (bridged to the agent at runtime)
+    "testAppImplementation"(platform(libs.otel.bom))
+    "testAppImplementation"(libs.otel.api)
 }
 
 val extensionJar = project(":trooper-otel-extension").tasks.named<Jar>("jar")

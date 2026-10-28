@@ -21,7 +21,7 @@ import (
 type AWS struct {
 	*httptest.Server
 	t testing.TB
-	// metric returns the CloudWatch value for (metric name, dimensions) or false.
+	// metric returns the CloudWatch value for (metric name, dimensions) or false. dims["_stat"] is the statistic.
 	metric func(name string, dims map[string]string) (float64, bool)
 	ts     time.Time
 
@@ -44,6 +44,8 @@ func (f *AWS) handle(w http.ResponseWriter, r *http.Request) {
 		f.cloudwatch(w, strings.TrimPrefix(r.URL.Path, "/service/GraniteServiceVersion20100801/operation/"), body)
 	case r.Header.Get("X-Amz-Target") != "":
 		f.sqs(w, r.Header.Get("X-Amz-Target"), body)
+	case isLambda(r.URL.Path):
+		f.lambda(w, r)
 	case strings.HasPrefix(r.URL.Path, "/api/v2/clusters") || strings.HasPrefix(r.URL.Path, "/v1/clusters"):
 		f.kafka(w, r)
 	default:
@@ -182,6 +184,7 @@ func (f *AWS) cloudwatch(w http.ResponseWriter, op string, body []byte) {
 					dims[str(dm["Name"])] = str(dm["Value"])
 				}
 			}
+			dims["_stat"] = str(ms["Stat"]) // lets fixtures tell Duration Average from p95
 			res := cbor.Map{"Id": qm["Id"], "StatusCode": cbor.String("Complete"), "Timestamps": cbor.List{}, "Values": cbor.List{}}
 			if v, ok := f.metric(str(m["MetricName"]), dims); ok {
 				// Newest first (ScanBy TimestampDescending), plus an older point that must be ignored.

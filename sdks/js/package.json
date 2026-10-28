@@ -1,7 +1,7 @@
 {
   "name": "@trooper/js-sdks",
   "private": true,
-  "description": "TaskTrooper Telemetry client SDKs (RUM). Workspace packages live in ./packages and are part of the root pnpm workspace.",
+  "description": "TaskTrooper Telemetry JavaScript SDKs (RUM clients + @trooper/node). Workspace packages live in ./packages and are part of the root pnpm workspace.",
   "scripts": {
     "build": "pnpm -r --filter \"./packages/**\" build",
     "test": "pnpm -r --filter \"./packages/**\" test",

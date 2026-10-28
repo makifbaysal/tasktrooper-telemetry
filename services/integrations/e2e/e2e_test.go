@@ -110,7 +110,7 @@ func TestCloudToClickHouse(t *testing.T) {
 		t.Fatal(err)
 	}
 	var awsID, vercelID int64
-	if err := st.DB.QueryRow(ctx, `INSERT INTO integrations (project_id, provider, name, config) VALUES ($1, 'aws', 'prod', '{"regions":["eu-central-1"],"sqsConsumers":{"emails":"mailer"}}') RETURNING id`, project).Scan(&awsID); err != nil {
+	if err := st.DB.QueryRow(ctx, `INSERT INTO integrations (project_id, provider, name, config) VALUES ($1, 'aws', 'prod', '{"regions":["eu-central-1"],"services":["rds","elasticache","msk","sqs"],"sqsConsumers":{"emails":"mailer"}}') RETURNING id`, project).Scan(&awsID); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.DB.QueryRow(ctx, `INSERT INTO integrations (project_id, provider, name, config, credentials_ref) VALUES ($1, 'vercel', 'team', '{"teamId":"team_1","projectMap":{"shop-web":"web"}}', $2) RETURNING id`,

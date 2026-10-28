@@ -152,7 +152,7 @@ func TestIntegrationTestEndpoint(t *testing.T) {
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"ok":true`) || gotSecret != "tok" || strings.Contains(w.Body.String(), "tok\"") {
 		t.Errorf("test: %d %s", w.Code, w.Body)
 	}
-	if w := do(h, "POST", "/api/v1/integrations/test", "good", `{"provider":"azure"}`); w.Code != 400 {
+	if w := do(h, "POST", "/api/v1/integrations/test", "good", `{"provider":"oracle"}`); w.Code != 400 {
 		t.Errorf("unknown provider: %d", w.Code)
 	}
 	if w := do(adminServer(t, &adminFake{}, nil, nil), "POST", "/api/v1/integrations/test", "good", `{"provider":"neon"}`); w.Code != 501 {
@@ -201,11 +201,6 @@ func TestConnTestCloudQueues(t *testing.T) {
 		w := do(h, "POST", "/api/v1/infra/clusters/test-connection", "good", `{"kind":"`+k+`","host":"x"}`)
 		if w.Code != 400 || !strings.Contains(w.Body.String(), "integration") {
 			t.Errorf("%s: %d %s", k, w.Code, w.Body.String())
-		}
-	}
-	for _, p := range []string{"/suggestions", "/repos", "/inventory"} {
-		if w := do(h, "GET", "/api/v1"+p, "good", ""); w.Code != 200 || strings.TrimSpace(w.Body.String()) != "[]" {
-			t.Errorf("%s: %d %s", p, w.Code, w.Body.String())
 		}
 	}
 }

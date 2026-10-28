@@ -226,7 +226,18 @@ func (d *DB) RumSessions(ctx context.Context, q Q, app string, limit int) ([]mod
 		s.StartedAt = ms(started)
 		out = append(out, s)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(out))
+	for i, s := range out {
+		ids[i] = s.ID
+	}
+	replayed := d.replayedSessions(ctx, ids)
+	for i := range out {
+		out[i].HasReplay = replayed[out[i].ID]
+	}
+	return out, nil
 }
 
 // RumErrors returns JS errors / crashes grouped by fingerprint.

@@ -10,7 +10,8 @@ import com.tasktrooper.android.internal.Internal
  * - Flutter: the `trooper_flutter` plugin's MethodChannel [CHANNEL] (`dev.tasktrooper.telemetry/rum`);
  * - React Native: the native module named [RN_MODULE] (`TrooperRum`; the JS side falls back to a module
  *   named [CHANNEL]).
- * Map keys: session_id, anonymous_id, view_id, view_name, user_id.
+ * Map keys: session_id, anonymous_id, view_id, view_name, user_id, sampled (bool: that layer's RUM sampling
+ * decision for the session; the adopted session is owned by that layer and never rotated natively).
  *
  * This module has no Flutter/RN dependency; the MethodChannel / NativeModule wrapper lives in those SDKs.
  */
@@ -26,7 +27,13 @@ object TrooperHybridBridge {
         val core = TaskTrooper.core ?: return@guard
         fun str(k: String) = (context[k] as? String)?.takeIf { it.isNotEmpty() }
         str("anonymous_id")?.let { core.sessions.adoptAnonymousId(it) }
-        str("session_id")?.let { core.sessions.adopt(it) }
+        val sampled = when (val v = context["sampled"]) {
+            is Boolean -> v
+            is String -> v.toBooleanStrictOrNull()
+            is Number -> v.toInt() != 0
+            else -> null
+        }
+        str("session_id")?.let { core.sessions.adopt(it, sampled) }
         str("user_id")?.let { if (core.user?.id != it) core.user = RumUser(it) }
         val viewId = str("view_id"); val viewName = str("view_name")
         if (viewId != null && viewName != null) core.adoptView(viewId, viewName)

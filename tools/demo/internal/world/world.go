@@ -255,6 +255,8 @@ type Runtime struct {
 	Scenarios map[string]int64  `json:"scenarios"` // name → active since (unix ms); absent = off
 	RPS       float64           `json:"rps"`
 	Debug     bool              `json:"debug"`
+	Profiling bool              `json:"profiling"` // Go SDK continuous profiling in every service process (ADR-022)
+	LLM       bool              `json:"llm"`       // simulated LLM calls in storefront-bff, catalog-api, email-worker (ADR-023)
 }
 
 // Active reports whether a scenario is on now.

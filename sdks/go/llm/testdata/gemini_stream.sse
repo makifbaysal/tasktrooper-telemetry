@@ -1,0 +1,4 @@
+data: {"candidates": [{"content": {"parts": [{"text": "Bon"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 7,"totalTokenCount": 7},"modelVersion": "gemini-2.5-flash","responseId": "r1"}
+
+data: {"candidates": [{"content": {"parts": [{"text": "jour"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 7,"candidatesTokenCount": 2,"thoughtsTokenCount": 4,"totalTokenCount": 13},"modelVersion": "gemini-2.5-flash","responseId": "r1"}
+

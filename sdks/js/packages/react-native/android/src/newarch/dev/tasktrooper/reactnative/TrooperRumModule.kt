@@ -19,4 +19,20 @@ class TrooperRumModule(reactContext: ReactApplicationContext) : NativeTrooperRum
   override fun getProcessStartTime(promise: Promise) {
     promise.resolve(TrooperRumImpl.getProcessStartTime()?.toDouble())
   }
+
+  override fun startReplay(options: ReadableMap, promise: Promise) {
+    promise.resolve(startReplayFromJs(reactApplicationContext, options))
+  }
+
+  override fun stopReplay(promise: Promise) {
+    promise.resolve(TrooperRumImpl.stopReplay())
+  }
+
+  override fun isReplayRecording(promise: Promise) {
+    promise.resolve(TrooperRumImpl.isReplayRecording())
+  }
+
+  override fun notifyReplayError() {
+    TrooperRumImpl.notifyReplayError()
+  }
 }

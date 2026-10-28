@@ -35,13 +35,20 @@ type Querier interface {
 }
 
 // Evaluator evaluates monitors.
-type Evaluator struct{ CH Querier }
+type Evaluator struct {
+	CH Querier
+	// Functions resolves serverless_functions for faas monitors (service mapping, cold starts, timeouts); nil → those
+	// faas monitors are unsupported (no_data).
+	Functions FunctionLookup
+	// Prices resolves the org's LLM price table for llm cost metrics; nil → the embedded defaults only.
+	Prices PriceTables
+}
 
 // Kinds lists every kind (and UI alias) the evaluator handles.
 var Kinds = []string{
 	"latency", "error_rate", "throughput", "throughput_change", "apdex", "metric_threshold",
 	"log_count", "log_match", "log_pattern", "log_pattern_new", "consumer_lag", "dlq", "consumer_failures",
-	"rum_vital", "crash_rate", "anomaly", "job_missed", "error_new",
+	"rum_vital", "crash_rate", "anomaly", "job_missed", "error_new", "infra", "faas", "llm",
 }
 
 // QueueSystems maps broker_clusters.kind to messaging.system.
@@ -121,6 +128,12 @@ func (e *Evaluator) Eval(ctx context.Context, m *model.Monitor, now time.Time) (
 		return e.rumVital(ctx, m, now)
 	case "crash_rate":
 		return e.crashRate(ctx, m, now)
+	case "infra":
+		return e.infra(ctx, m, now)
+	case "faas":
+		return e.faas(ctx, m, now)
+	case "llm":
+		return e.llm(ctx, m, now)
 	case "anomaly":
 		return e.anomaly(ctx, m, now)
 	case "job_missed":

@@ -25,6 +25,13 @@ type Config struct {
 	RetryMax      time.Duration // cap of the insert retry backoff
 	Sampler       TailSampler   // tail sampling of spans (Rate ≥ 1 or 0 = keep everything)
 	Geo           *geo.DB       // optional GeoIP database for RUM country
+	Blobs         BlobStore     // session replay segments (S3); nil → tt.replay must not be consumed
+	BlobWorkers   int           // parallel uploads per flush (default 16)
+}
+
+// BlobStore stores replay segment objects. Put must be idempotent (same key, same body).
+type BlobStore interface {
+	Put(ctx context.Context, key string, body []byte, contentType, contentEncoding string) error
 }
 
 // Writer consumes, flattens, inserts and commits.
@@ -58,6 +65,9 @@ func New(cfg Config, ins Inserter, log *slog.Logger) (*Writer, error) {
 	}
 	if cfg.RetryMax <= 0 {
 		cfg.RetryMax = 30 * time.Second
+	}
+	if cfg.BlobWorkers <= 0 {
+		cfg.BlobWorkers = 16
 	}
 	w := &Writer{cfg: cfg, ins: ins, log: log, b: NewBatches(), pending: map[tp]*kgo.Record{}}
 	w.b.Geo = cfg.Geo
@@ -116,7 +126,7 @@ func (w *Writer) Run(ctx context.Context) error {
 			}
 			w.pending[tp{r.Topic, r.Partition}] = r
 		})
-		due := len(w.pending) > 0 && (w.b.Rows() >= w.cfg.BatchRows || time.Since(w.first) >= w.cfg.FlushInterval)
+		due := len(w.pending) > 0 && (w.b.Rows() >= w.cfg.BatchRows || w.b.Full() || time.Since(w.first) >= w.cfg.FlushInterval)
 		var err error
 		if due {
 			err = w.flushLocked(ctx)
@@ -146,6 +156,11 @@ func (w *Writer) flushLocked(ctx context.Context) error {
 	}
 	start := time.Now()
 	w.b.Sample(w.cfg.Sampler)
+	// Replay blobs first: an index row must never point at a missing object. Failed uploads are retried like inserts
+	// and nothing is committed until every blob and row is stored (at-least-once; a redelivery rewrites the same key).
+	if err := w.uploadBlobs(ctx); err != nil {
+		return err
+	}
 	tables := w.b.tables()
 	var wg sync.WaitGroup
 	errs := make([]error, len(tables))
@@ -176,6 +191,60 @@ func (w *Writer) flushLocked(ctx context.Context) error {
 	clear(w.pending)
 	w.first = time.Time{}
 	return nil
+}
+
+func (w *Writer) uploadBlobs(ctx context.Context) error {
+	blobs := w.b.Blobs
+	if len(blobs) == 0 {
+		return nil
+	}
+	if w.cfg.Blobs == nil {
+		w.log.Warn("replay segments without a blob store dropped", "segments", len(blobs))
+		obs.WriterDecodeErrors.WithLabelValues("tt.replay").Add(float64(len(blobs)))
+		clear(w.b.Replay)
+		w.b.Replay = w.b.Replay[:0]
+		clear(w.b.Blobs)
+		w.b.Blobs = w.b.Blobs[:0]
+		w.b.blobBytes = 0
+		return nil
+	}
+	start := time.Now()
+	sem := make(chan struct{}, w.cfg.BlobWorkers)
+	var wg sync.WaitGroup
+	errs := make([]error, len(blobs))
+	for i := range blobs {
+		sem <- struct{}{}
+		wg.Go(func() {
+			defer func() { <-sem }()
+			errs[i] = w.putWithRetry(ctx, blobs[i])
+		})
+	}
+	wg.Wait()
+	if err := errors.Join(errs...); err != nil {
+		return err
+	}
+	obs.WriterBlobDuration.Observe(time.Since(start).Seconds())
+	return nil
+}
+
+func (w *Writer) putWithRetry(ctx context.Context, b Blob) error {
+	backoff := 200 * time.Millisecond
+	for attempt := 1; ; attempt++ {
+		err := w.cfg.Blobs.Put(ctx, b.Key, b.Body, "application/json", "gzip")
+		if err == nil {
+			obs.WriterBlobsStored.Inc()
+			obs.WriterBlobBytes.Add(float64(len(b.Body)))
+			return nil
+		}
+		obs.WriterBlobErrors.Inc()
+		w.log.Error("replay blob upload failed", "key", b.Key, "attempt", attempt, "retry_in", backoff.String(), "err", err)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoff):
+		}
+		backoff = min(backoff*2, w.cfg.RetryMax)
+	}
 }
 
 func (w *Writer) insertWithRetry(ctx context.Context, t tableBatch) error {

@@ -1,4 +1,4 @@
-# TaskTrooper Telemetry — JavaScript client SDKs (RUM)
+# TaskTrooper Telemetry — JavaScript SDKs (RUM + Node.js)
 
 Browser and React Native SDKs that send RUM events as JSON to `POST /v1/rum` (ADR-011, `.ai/contracts.md` §2, §9).
 Wire schema: [`proto/rum/v1/rum.proto`](../../proto/rum/v1/rum.proto) — snake_case field names, enums as strings.
@@ -7,10 +7,12 @@ Wire schema: [`proto/rum/v1/rum.proto`](../../proto/rum/v1/rum.proto) — snake_
 |---|---|
 | [`@trooper/core`](packages/core) | Platform-neutral engine: event model (mirrors rum.proto), DSN, session (30 min idle / 4 h max), batching (≤100 events / 5 s), retry/backoff, offline queue, sampling, `beforeSend`, URL scrubbing, fetch/XHR instrumentation |
 | [`@trooper/browser`](packages/browser) | Web: views (initial + SPA), Web Vitals, errors, fetch/XHR + `traceparent`, clicks / rage / dead clicks, `sendBeacon` on hide, IndexedDB offline queue |
+| [`@trooper/replay`](packages/replay) | Web session replay (`@rrweb/record` 2.2.0): `replayIntegration()` for `@trooper/browser`, masking by default, per-session sampling + 60 s error buffer, segments to `POST /v1/replay` (ADR-021, contracts §23) |
 | [`@trooper/react`](packages/react) | `TrooperProvider`, `ErrorBoundary`, `useTrooper`, router templates: `/react-router`, `/tanstack-router`, `/nextjs` |
 | [`@trooper/vue`](packages/vue) | Vue 3 plugin, `errorHandler`, vue-router templates |
 | [`@trooper/angular`](packages/angular) | `provideTrooper()`, `TrooperErrorHandler`, Router templates |
 | [`@trooper/react-native`](packages/react-native) | ErrorUtils, Hermes rejections, XHR, AppState flush, react-navigation screens, app start, native bridge |
+| [`@trooper/node`](packages/node) | Backend: OpenTelemetry distribution for Node.js (OTLP/HTTP protobuf to `/v1/traces`, `/v1/metrics`, `/v1/logs`; `trooper.*` conventions, express/fastify/koa/Hono/NestJS routes, kafkajs/amqplib/BullMQ consumers, pino/winston) — not RUM |
 
 ```ts
 import { init, identify, track } from '@trooper/browser';
@@ -42,6 +44,7 @@ pnpm install                                       # from the repo root
 pnpm -r --filter "./sdks/js/packages/**" build     # tsup: ESM + CJS + .d.ts (+ IIFE for browser)
 pnpm -r --filter "./sdks/js/packages/**" test      # vitest (happy-dom for DOM packages, mocked react-native)
 pnpm --filter @trooper/browser size                # bundle-size report, fails above 15 KB gzip
+pnpm --filter @trooper/replay size                 # replay add-on size (own code; rrweb reported separately)
 ```
 
 Tests resolve sibling packages to their sources (`vitest.shared.mjs`), so they don't need a prior build; `typecheck` does.

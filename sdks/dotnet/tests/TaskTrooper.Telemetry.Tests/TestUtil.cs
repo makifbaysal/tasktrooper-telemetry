@@ -62,7 +62,7 @@ public sealed class CaptureServer : IDisposable
             await ctx.Request.InputStream.CopyToAsync(ms);
             var headers = ctx.Request.Headers.AllKeys.Where(k => k is not null)
                 .ToDictionary(k => k!.ToLowerInvariant(), k => ctx.Request.Headers[k]!);
-            var req = new CapturedRequest(ctx.Request.HttpMethod, ctx.Request.Url!.AbsolutePath, headers, ms.ToArray());
+            var req = new CapturedRequest(ctx.Request.HttpMethod, ctx.Request.Url!.AbsolutePath, headers, ms.ToArray(), ctx.Request.Url!.Query);
             Requests.Enqueue(req);
             ctx.Response.StatusCode = respond(req);
             ctx.Response.Close();
@@ -85,7 +85,7 @@ public sealed class CaptureServer : IDisposable
     }
 }
 
-public sealed record CapturedRequest(string Method, string Path, IReadOnlyDictionary<string, string> Headers, byte[] Body)
+public sealed record CapturedRequest(string Method, string Path, IReadOnlyDictionary<string, string> Headers, byte[] Body, string Query = "")
 {
     public string? Header(string name) => Headers.TryGetValue(name.ToLowerInvariant(), out var v) ? v : null;
 

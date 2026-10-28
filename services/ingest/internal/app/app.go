@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/tasktrooper/telemetry/services/ingest/internal/auth"
+	"github.com/tasktrooper/telemetry/services/ingest/internal/blob"
 	"github.com/tasktrooper/telemetry/services/ingest/internal/geo"
 	"github.com/tasktrooper/telemetry/services/ingest/internal/gw"
 	"github.com/tasktrooper/telemetry/services/ingest/internal/obs"
@@ -35,6 +37,8 @@ type GatewayConfig struct {
 	Burst    float64 // rate-limit burst = rps × Burst
 	// MetricsAddr serves /metrics on its own listener; empty → /metrics on the HTTP port.
 	MetricsAddr string
+	// InternalToken (TT_INTERNAL_TOKEN) enables the internal service credential (contracts §16); empty = off.
+	InternalToken string
 }
 
 // GatewayFromEnv reads TT_* variables.
@@ -43,11 +47,15 @@ func GatewayFromEnv() GatewayConfig {
 	return GatewayConfig{
 		Common: c,
 		GW: gw.Config{
-			HTTPAddr:       config.String("TT_INGEST_HTTP_ADDR", ":4318"),
-			GRPCAddr:       config.String("TT_INGEST_GRPC_ADDR", ":4317"),
-			MaxBodyBytes:   int64(config.Int("TT_INGEST_MAX_BODY_BYTES", 5<<20)),
-			MaxRecordBytes: config.Int("TT_INGEST_MAX_RECORD_BYTES", 900<<10),
-			DefaultRPS:     config.Int("TT_INGEST_RATE_LIMIT_RPS", 1000),
+			HTTPAddr:            config.String("TT_INGEST_HTTP_ADDR", ":4318"),
+			GRPCAddr:            config.String("TT_INGEST_GRPC_ADDR", ":4317"),
+			MaxBodyBytes:        int64(config.Int("TT_INGEST_MAX_BODY_BYTES", 5<<20)),
+			MaxRecordBytes:      config.Int("TT_INGEST_MAX_RECORD_BYTES", 900<<10),
+			DefaultRPS:          config.Int("TT_INGEST_RATE_LIMIT_RPS", 1000),
+			ReplayMaxWireBytes:  int64(config.Int("TT_INGEST_REPLAY_MAX_BYTES", 1<<20)),
+			ReplayMaxBodyBytes:  int64(config.Int("TT_INGEST_REPLAY_MAX_DECOMPRESSED_BYTES", 10<<20)),
+			ProfileMaxWireBytes: int64(config.Int("TT_INGEST_PROFILE_MAX_BYTES", 4<<20)),
+			ProfileMaxBodyBytes: int64(config.Int("TT_INGEST_PROFILE_MAX_DECOMPRESSED_BYTES", 32<<20)),
 		},
 		Producer: gw.ProducerConfig{
 			Brokers:         c.KafkaBrokers,
@@ -55,8 +63,9 @@ func GatewayFromEnv() GatewayConfig {
 			BufferBytes:     config.Int("TT_INGEST_PRODUCE_BUFFER_BYTES", 256<<20),
 			DeliveryTimeout: config.Duration("TT_INGEST_PRODUCE_TIMEOUT", 30*time.Second),
 		},
-		Burst:       2,
-		MetricsAddr: config.String("TT_INGEST_METRICS_ADDR", ""),
+		Burst:         2,
+		MetricsAddr:   config.String("TT_INGEST_METRICS_ADDR", ""),
+		InternalToken: config.String("TT_INTERNAL_TOKEN", ""),
 	}
 }
 
@@ -96,6 +105,10 @@ func RunGateway(ctx context.Context, cfg GatewayConfig, log *slog.Logger, ready 
 		cfg.GW.ServeMetrics = true
 	}
 	srv := gw.New(cfg.GW, keys, lim, sink, log)
+	if in := auth.NewInternal(cfg.InternalToken, auth.PGProjects{Pool: pool}, log); in != nil {
+		srv.SetInternal(in)
+		log.Info("internal service credential enabled")
+	}
 	if skey, err := secrets.Key(); err != nil {
 		log.Warn("TT_SECRETS_KEY invalid; drains disabled", "err", err)
 	} else {
@@ -150,6 +163,9 @@ type WriterConfig struct {
 	HealthAddr  string
 	MetricsAddr string // Prometheus /metrics; empty disables
 	GeoIPDB     string // mmdb path (MaxMind GeoLite2-Country / DB-IP); empty → no country
+	// S3 for session replay blobs (contracts §23). Empty Endpoint (TT_S3_ENDPOINT unset) = replay off: tt.replay is
+	// not consumed and tt_writer_replay_disabled is 1.
+	S3 blob.Config
 }
 
 // WriterFromEnv reads TT_* variables.
@@ -160,7 +176,7 @@ func WriterFromEnv() WriterConfig {
 		Writer: writer.Config{
 			Brokers:       c.KafkaBrokers,
 			Group:         config.String("TT_INGEST_WRITER_GROUP", topics.WriterGroup),
-			Topics:        config.List("TT_INGEST_WRITER_TOPICS", "tt.otlp.traces,tt.otlp.metrics,tt.otlp.logs,tt.rum"),
+			Topics:        config.List("TT_INGEST_WRITER_TOPICS", "tt.otlp.traces,tt.otlp.metrics,tt.otlp.logs,tt.rum,tt.replay,tt.profiles"),
 			BatchRows:     config.Int("TT_INGEST_WRITER_BATCH_ROWS", 50_000),
 			FlushInterval: config.Duration("TT_INGEST_WRITER_FLUSH_INTERVAL", time.Second),
 			MaxPoll:       config.Int("TT_INGEST_WRITER_MAX_POLL", 5000),
@@ -173,6 +189,13 @@ func WriterFromEnv() WriterConfig {
 		HealthAddr:  config.String("TT_INGEST_WRITER_HEALTH_ADDR", ":4320"),
 		MetricsAddr: config.String("TT_INGEST_WRITER_METRICS_ADDR", ":9464"),
 		GeoIPDB:     config.String("TT_GEOIP_DB", ""),
+		S3: blob.Config{
+			Endpoint:  config.String("TT_S3_ENDPOINT", ""),
+			Bucket:    config.String("TT_REPLAY_S3_BUCKET", "tt-replays"),
+			AccessKey: config.String("TT_S3_ACCESS_KEY", "trooper"),
+			SecretKey: config.String("TT_S3_SECRET_KEY", "trooper-secret"),
+			Region:    config.String("TT_S3_REGION", "us-east-1"),
+		},
 	}
 }
 
@@ -196,6 +219,7 @@ func RunWriter(ctx context.Context, cfg WriterConfig, log *slog.Logger) error {
 		cfg.Writer.Sampler.Rate = 1
 	}
 	defer obs.Serve(cfg.MetricsAddr, log)()
+	cfg.Writer.Topics, cfg.Writer.Blobs = replayStore(ctx, cfg.S3, cfg.Writer.Topics, log)
 	w, err := writer.New(cfg.Writer, ch, log)
 	if err != nil {
 		return fmt.Errorf("kafka: %w", err)
@@ -220,6 +244,32 @@ func RunWriter(ctx context.Context, cfg WriterConfig, log *slog.Logger) error {
 	log.Info("ingest-writer consuming", "group", cfg.Writer.Group, "topics", cfg.Writer.Topics,
 		"tail_sample_rate", cfg.Writer.Sampler.Rate, "geoip", cfg.Writer.Geo != nil)
 	return w.Run(ctx)
+}
+
+// replayStore connects the replay blob store. Without S3 (TT_S3_ENDPOINT unset, or the bucket unreachable at start)
+// tt.replay is removed from the consumed topics — its records wait in Redpanda (24 h retention) — instead of blocking
+// every other signal behind failing uploads.
+func replayStore(ctx context.Context, cfg blob.Config, topicList []string, log *slog.Logger) ([]string, writer.BlobStore) {
+	if !slices.Contains(topicList, topics.Replay) {
+		return topicList, nil
+	}
+	disable := func(reason string, err error) ([]string, writer.BlobStore) {
+		obs.WriterReplayDisabled.Set(1)
+		log.Warn("session replay disabled: "+reason+"; not consuming "+topics.Replay, "err", err)
+		return slices.DeleteFunc(slices.Clone(topicList), func(t string) bool { return t == topics.Replay }), nil
+	}
+	if cfg.Endpoint == "" {
+		return disable("TT_S3_ENDPOINT is not set", nil)
+	}
+	sctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	st, err := blob.NewS3(sctx, cfg)
+	if err != nil {
+		return disable("S3 not reachable", err)
+	}
+	obs.WriterReplayDisabled.Set(0)
+	log.Info("session replay blobs", "endpoint", cfg.Endpoint, "bucket", cfg.Bucket)
+	return topicList, st
 }
 
 func openClickHouseRetry(ctx context.Context, dsn string, log *slog.Logger) (*writer.ClickHouse, error) {

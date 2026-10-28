@@ -40,6 +40,8 @@ void main() {
       debug: true,
     ),
     appRunner: () => runApp(const ExampleApp()),
+    // Wireframe session replay (contracts.md §23). 1.0 = every session; production default is 0.1.
+    replay: const TrooperReplayOptions(sampleRate: 1.0),
   );
 }
 
@@ -59,6 +61,19 @@ class HomeScreen extends StatelessWidget {
       appBar: AppBar(title: const Text('TaskTrooper example')),
       body: ListView(
         children: [
+          const Padding(
+            padding: EdgeInsets.all(16),
+            child: TextField(decoration: InputDecoration(labelText: 'Search (always masked in replay)')),
+          ),
+          const ListTile(title: TrooperUnmask(child: Text('Unmasked in replay'))),
+          SwitchListTile(value: true, onChanged: (_) {}, title: const Text('A switch')),
+          ListTile(
+            title: const Text('Show dialog'),
+            onTap: () => showDialog<void>(
+              context: context,
+              builder: (_) => const AlertDialog(title: Text('Hello'), content: Text('Dialogs are in the replay too.')),
+            ),
+          ),
           ListTile(title: const Text('Open product 42'), onTap: () => context.go('/products/42')),
           ListTile(
             title: const Text('Identify user'),

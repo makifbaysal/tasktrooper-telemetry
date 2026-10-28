@@ -10,6 +10,8 @@ kotlin = "2.4.21"
 coroutines = "1.11.0"
 junit = "5.14.4"
 assertj = "3.27.7"
+anthropic = "2.71.0"
+langchain4j = "1.21.0"
 
 [libraries]
 otel-bom = { module = "io.opentelemetry:opentelemetry-bom", version.ref = "otel" }
@@ -34,6 +36,8 @@ ktor-bom = { module = "io.ktor:ktor-bom", version.ref = "ktor" }
 coroutines-bom = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-bom", version.ref = "coroutines" }
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 assertj = { module = "org.assertj:assertj-core", version.ref = "assertj" }
+anthropic-java = { module = "com.anthropic:anthropic-java", version.ref = "anthropic" }
+langchain4j-core = { module = "dev.langchain4j:langchain4j-core", version.ref = "langchain4j" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

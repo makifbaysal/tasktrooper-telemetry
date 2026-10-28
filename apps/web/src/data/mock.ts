@@ -26,6 +26,8 @@ function hash(s: string): number {
 }
 
 export const RANGE_POINTS: Record<TimeRange, { points: number; stepMs: number }> = {
+  '15m': { points: 15, stepMs: 60_000 },
+  '30m': { points: 30, stepMs: 60_000 },
   '1h': { points: 60, stepMs: 60_000 },
   '6h': { points: 72, stepMs: 5 * 60_000 },
   '24h': { points: 96, stepMs: 15 * 60_000 },
@@ -82,7 +84,7 @@ export const services: Service[] = [
   { id: 'orders-api', name: 'orders-api', type: 'http', language: 'Node.js', version: 'v2.41.0', rpm: 18420, errorRate: 0.0042, p95: 182, prevRpm: 17100, prevErrorRate: 0.0031, prevP95: 171, status: 'warning', instances: 12 },
   { id: 'payments-api', name: 'payments-api', type: 'http', language: 'Go', version: 'v1.18.3', rpm: 6390, errorRate: 0.0213, p95: 640, prevRpm: 6580, prevErrorRate: 0.0040, prevP95: 410, status: 'critical', instances: 6 },
   { id: 'catalog-api', name: 'catalog-api', type: 'http', language: 'Go', version: 'v3.2.0', rpm: 42800, errorRate: 0.0006, p95: 48, prevRpm: 40100, prevErrorRate: 0.0007, prevP95: 51, status: 'ok', instances: 18 },
-  { id: 'auth-api', name: 'auth-api', type: 'http', language: 'Node.js', version: 'v5.0.2', rpm: 9100, errorRate: 0.0019, p95: 96, prevRpm: 9300, prevErrorRate: 0.0020, prevP95: 94, status: 'ok', instances: 4 },
+  { id: 'auth-api', name: 'auth-api', type: 'http', language: 'Node.js', version: 'v5.0.2', rpm: 9100, errorRate: 0.0019, p95: 96, prevRpm: 9300, prevErrorRate: 0.0020, prevP95: 94, status: 'ok', instances: 4, source: 'ebpf' },
   { id: 'order-events', name: 'order-events-consumer', type: 'consumer', language: 'Node.js', version: 'v2.41.0', rpm: 15200, errorRate: 0.0011, p95: 34, prevRpm: 14800, prevErrorRate: 0.0010, prevP95: 33, status: 'warning', instances: 8, lag: 18400 },
   { id: 'email-worker', name: 'email-worker', type: 'worker', language: 'Python', version: 'v0.9.12', rpm: 820, errorRate: 0.0090, p95: 1240, prevRpm: 790, prevErrorRate: 0.0085, prevP95: 1180, status: 'ok', instances: 2, lag: 120 },
   { id: 'shop-web', name: 'shop-web', type: 'web', language: 'React', version: '2026.10.24', rpm: 3900, errorRate: 0.0034, p95: 2140, prevRpm: 3600, prevErrorRate: 0.0031, prevP95: 2300, status: 'ok', instances: 0 },
@@ -240,17 +242,17 @@ export const logs: LogLine[] = Array.from({ length: 120 }, (_, i) => {
 });
 
 export const monitors: Monitor[] = [
-  { id: 'm1', name: 'Charges error rate', kind: 'metric_threshold', target: 'payments-api · POST /v1/charges', condition: 'error rate > 2% for 5m', severity: 'critical', state: 'firing', source: 'code', lastChange: NOW - 23 * 60_000, channels: ['#payments-alerts', 'PagerDuty'] },
-  { id: 'm2', name: 'Charges p95 latency', kind: 'latency', target: 'payments-api · POST /v1/charges', condition: 'p95 > 600 ms for 10m', severity: 'warning', state: 'firing', source: 'code', lastChange: NOW - 41 * 60_000, channels: ['#payments-alerts'] },
+  { id: 'm1', name: 'Charges error rate', kind: 'metric_threshold', target: 'payments-api · POST /v1/charges', condition: 'error rate > 2% for 5m', severity: 'critical', state: 'firing', source: 'code', codeRef: 'shop/payments:.trooper/monitors/charges.yaml', lastChange: NOW - 23 * 60_000, channels: ['#payments-alerts', 'PagerDuty'] },
+  { id: 'm2', name: 'Charges p95 latency', kind: 'latency', target: 'payments-api · POST /v1/charges', condition: 'p95 > 600 ms for 10m', severity: 'warning', state: 'firing', source: 'suggestion', lastChange: NOW - 41 * 60_000, channels: ['#payments-alerts'] },
   { id: 'm3', name: 'order-created-handler lag', kind: 'consumer_lag', target: 'order-events-consumer · order-created-handler', condition: 'lag > 10K for 5m', severity: 'warning', state: 'pending', source: 'code', lastChange: NOW - 3 * 60_000, channels: ['#orders-oncall'],
     queue: { clusterId: 'kafka-main', group: 'order-events.fulfilment', topic: 'orders.created', metric: 'lag', threshold: 10_000, forMin: 5 } },
   { id: 'm12', name: 'reco-trainer drains every run', kind: 'consumer_lag', target: 'kafka-main · reco-trainer', condition: 'lag not drained in 2h', severity: 'warning', state: 'ok', source: 'manual', lastChange: NOW - 4 * 86400_000, channels: ['#data-platform'],
     queue: { clusterId: 'kafka-main', group: 'reco-trainer', topic: 'reco.events', metric: 'not_drained', threshold: 2, forMin: 0 } },
   { id: 'm4', name: 'Create order errors', kind: 'metric_threshold', target: 'orders-api · POST /v1/orders', condition: 'error rate > 1% for 5m', severity: 'critical', state: 'ok', source: 'manual', lastChange: NOW - 2 * 86400_000, channels: ['#orders-oncall', 'PagerDuty'] },
-  { id: 'm5', name: 'Payment provider timeouts', kind: 'log_match', target: 'payments-api logs', condition: 'count("provider timeout") > 20 in 5m', severity: 'critical', state: 'ok', source: 'code', lastChange: NOW - 26 * 3600_000, channels: ['#payments-alerts'] },
+  { id: 'm5', name: 'Payment provider timeouts', kind: 'log_match', target: 'payments-api logs', condition: 'count("provider timeout") > 20 in 5m', severity: 'critical', state: 'ok', source: 'suggestion', lastChange: NOW - 26 * 3600_000, channels: ['#payments-alerts'] },
   { id: 'm6', name: 'Checkout LCP', kind: 'rum_vital', target: 'shop-web · /checkout', condition: 'p75 LCP > 2.5 s for 15m', severity: 'warning', state: 'ok', source: 'template', lastChange: NOW - 5 * 3600_000, channels: ['#web-team'] },
   { id: 'm7', name: 'Catalog throughput drop', kind: 'throughput_change', target: 'catalog-api · all endpoints', condition: '−50% vs same hour last week', severity: 'warning', state: 'ok', source: 'manual', lastChange: NOW - 6 * 86400_000, channels: ['#platform'] },
-  { id: 'm8', name: 'Nightly invoice job', kind: 'job_missed', target: 'email-worker · invoice-batch', condition: 'no success in 26h', severity: 'warning', state: 'muted', source: 'code', lastChange: NOW - 3 * 86400_000, channels: ['#billing'] },
+  { id: 'm8', name: 'Nightly invoice job', kind: 'job_missed', target: 'email-worker · invoice-batch', condition: 'no success in 26h', severity: 'warning', state: 'muted', source: 'code', codeRef: 'shop/billing:.trooper/monitors/invoice-batch.yaml', lastChange: NOW - 3 * 86400_000, channels: ['#billing'] },
   { id: 'm9', name: 'Homepage loads fast · fast burn', kind: 'kpi_burn', target: 'KPI · Homepage loads fast', condition: 'budget burns > 6× too fast over 1h and 5m', severity: 'critical', state: 'firing', source: 'code', lastChange: DEGRADED_SINCE + 5 * 60_000, channels: ['#web-team', 'PagerDuty'] },
   { id: 'm10', name: 'Checkout succeeds · fast burn', kind: 'kpi_burn', target: 'KPI · Checkout succeeds', condition: 'budget burns > 3× too fast over 1h and 5m', severity: 'critical', state: 'firing', source: 'code', lastChange: NOW - 18 * 60_000, channels: ['#payments-alerts', 'PagerDuty'] },
   { id: 'm11', name: 'Order placement API succeeds · slow burn', kind: 'kpi_burn', target: 'KPI · Order placement API succeeds', condition: 'budget burns > 1.5× too fast over 6h and 30m', severity: 'warning', state: 'pending', source: 'code', lastChange: NOW - 40 * 60_000, channels: ['#orders-oncall'] },
@@ -336,6 +338,8 @@ export const TIME_CATEGORIES: { id: TimeCategory; label: string; slot: number }[
   { id: 'cache', label: 'Cache', slot: 3 },
   { id: 'http', label: 'External HTTP', slot: 7 },
   { id: 'queue', label: 'Queue publish', slot: 5 },
+  // LLM calls (dep_kind `ai`, ADR-023) — next fixed slot in LINE_SLOTS order
+  { id: 'ai', label: 'AI / LLM', slot: 6 },
 ];
 
 type DepDef = Omit<Dependency, 'serviceId' | 'callsPerMin'>;
@@ -444,9 +448,9 @@ function mockEndpointCalls(ep: Endpoint): EndpointCall[] {
 }
 
 function mockEndpointBreakdown(ep: Endpoint): TimeBreakdown {
-  const parts: Record<TimeCategory, number> = { app: 0, db: 0, cache: 0, http: 0, queue: 0 };
+  const parts: Record<TimeCategory, number> = { app: 0, db: 0, cache: 0, http: 0, queue: 0, ai: 0 };
   for (const c of mockEndpointCalls(ep)) parts[c.dep.kind] += c.msPerReq;
-  const depMs = parts.db + parts.cache + parts.http + parts.queue;
+  const depMs = parts.db + parts.cache + parts.http + parts.queue + parts.ai;
   // avg sits a bit above p50 (latency is right-skewed); own code takes at least 15%
   const avgMs = Math.max(ep.p50 * 1.2, depMs / 0.85);
   parts.app = avgMs - depMs;
@@ -457,7 +461,7 @@ function mockEndpointBreakdown(ep: Endpoint): TimeBreakdown {
 function mockServiceBreakdown(serviceId: string): TimeBreakdown {
   const eps = mockEndpointsFor(serviceId);
   const total = eps.reduce((a, e) => a + e.rpm, 0) || 1;
-  const parts: Record<TimeCategory, number> = { app: 0, db: 0, cache: 0, http: 0, queue: 0 };
+  const parts: Record<TimeCategory, number> = { app: 0, db: 0, cache: 0, http: 0, queue: 0, ai: 0 };
   for (const e of eps) {
     const b = mockEndpointBreakdown(e);
     for (const k of Object.keys(parts) as TimeCategory[]) parts[k] += (b.parts[k] * e.rpm) / total;
@@ -705,7 +709,7 @@ export function endpointCalls(ep: Endpoint): EndpointCall[] {
   if (!isApi) return mockEndpointCalls(ep);
   return A.list(`${A.epPath(ep.serviceId, ep.id)}/calls${H1}`, A.mapCalls);
 }
-const loadingBreakdown = (avg: number): TimeBreakdown => ({ avgMs: avg, parts: { app: avg, db: 0, cache: 0, http: 0, queue: 0 } });
+const loadingBreakdown = (avg: number): TimeBreakdown => ({ avgMs: avg, parts: { app: avg, db: 0, cache: 0, http: 0, queue: 0, ai: 0 } });
 export function endpointBreakdown(ep: Endpoint): TimeBreakdown {
   if (!isApi) return mockEndpointBreakdown(ep);
   return remote(`${A.epPath(ep.serviceId, ep.id)}/breakdown${H1}`, loadingBreakdown(ep.p50), A.mapBreakdown);
@@ -787,6 +791,39 @@ export function tracesFor(serviceId: string, ep: Endpoint | undefined, range: Ti
     id: (0x9f3a12 + i * 7919).toString(16) + 'c0ffee' + i, ts: NOW - i * 47_000, dur: p95 * (0.6 + ((i * 37) % 10) / 6),
     status: hot && i % 2 === 0 ? 502 : 200, service: s?.name ?? serviceId, method: ep?.method ?? 'GET', route: ep?.route ?? '/', isError: hot && i % 2 === 0,
   }));
+}
+
+/**
+ * Recent traces served by one Kubernetes pod (contracts §22: GET /traces?service=&pod=&namespace=, span resource
+ * attributes k8s.pod.name / k8s.namespace.name). Mock: deterministic requests over the service's HTTP endpoints.
+ */
+export function podTraces(pod: { name: string; namespace: string; service: string }, range: TimeRange, opts: { errors?: boolean; limit?: number } = {}): TraceSummary[] {
+  const limit = opts.limit ?? 20;
+  if (isApi) {
+    return A.list(`/traces${A.rangeQs(range, {
+      service: pod.service || undefined, pod: pod.name, namespace: pod.namespace || undefined, errors: opts.errors ? 'true' : undefined, limit,
+    })}`, (raw: TraceSummary[] | null) => raw ?? []);
+  }
+  const s = services.find((x) => x.id === pod.service || x.name === pod.service);
+  if (!s) return [];
+  const eps = endpointsFor(s.id).filter((e) => !e.sub);
+  const rnd = mulberry32(hash(`pod-traces-${pod.namespace}/${pod.name}`));
+  const errEvery = s.errorRate > 0.02 ? 3 : s.errorRate > 0.005 ? 6 : 11;
+  const out: TraceSummary[] = [];
+  let t = NOW - Math.round(rnd() * 20_000);
+  for (let i = 0; i < 40 && out.length < limit; i++) {
+    const ep = eps.length ? eps[Math.floor(rnd() * eps.length)] : undefined;
+    const isError = i % errEvery === errEvery - 1;
+    const p95 = ep?.p95 ?? s.p95;
+    const tr: TraceSummary = {
+      id: (hash(`${pod.name}-${i}`).toString(16).padStart(8, '0') + hash(`${i}-${pod.namespace}`).toString(16).padStart(8, '0')).repeat(2).slice(0, 32),
+      ts: t, dur: +(p95 * (0.25 + rnd() * (isError ? 1.6 : 0.9))).toFixed(1), status: isError ? (rnd() < 0.7 ? 500 : 503) : 200,
+      service: s.name, method: ep?.method ?? 'GET', route: ep?.route ?? '/', isError,
+    };
+    t -= Math.round(5_000 + rnd() * 70_000);
+    if (!opts.errors || isError) out.push(tr);
+  }
+  return out;
 }
 
 /** The mock implementations, for modules that derive mock data from mock data (graph.ts). */

@@ -182,11 +182,56 @@ Extensions usually have no view controllers worth tracking — set `trackViews =
   that still declare 13/14 with older Xcode versions; with Xcode 27 the effective minimum is raised to 15
   automatically. No 13/14-only API paths were removed, but they are only exercised by older Xcodes.
 
+## Session replay (`TaskTrooperReplay`)
+
+Wireframe replay (iOS only): window hierarchies become rectangles with kind, colors, corner radius and **masked**
+text — never pixels or screenshots. SPM product `TaskTrooperReplay` / pod `TaskTrooper/Replay`.
+
+```swift
+import TaskTrooper
+import TaskTrooperReplay   // SPM only
+
+TaskTrooper.start(config, replay: .init(sampleRate: 0.1, onErrorSampleRate: 1.0))
+```
+
+- **Sampling** per RUM session (unsampled RUM sessions are never recorded): `sampleRate` records from the start;
+  otherwise `onErrorSampleRate` keeps the last 60 s in memory and uploads it (then keeps recording) on the first ERROR
+  (handled error, hang, network error). Crashes cannot flush the buffer (signal handler); in recorded sessions only
+  the last ≤ 5 s segment is lost.
+- **Privacy:** all text masked by default (`•`, length kept); `UITextField` / `UITextView` / secure entry always (their
+  subviews are never read); images are boxes; `WKWebView` is a black box; keyboard windows are skipped. Opt in with
+  `view.trooperUnmask = true` (subtree; `false` forces masking) or SwiftUI `.trooperUnmask()`.
+- **SwiftUI** is best effort: CALayer fills/borders of hosting views; text (`CGDrawingLayer`) becomes a masked `text`
+  placeholder sized from the layer (the string is not available), bitmaps (`ImageLayer`, SF Symbols) `image` / `icon`.
+  Only where text may be shown unmasked (`.trooperUnmask()`, `maskAllText: false`) are SwiftUI accessibility elements
+  read — and SwiftUI builds them only while VoiceOver / UI automation runs, so unmasked SwiftUI text needs one of
+  those; without it it stays masked. Embedded UIKit views (e.g. `TextField`'s `UITextField`) are mapped normally.
+- **Cost:** a main run loop observer marks the UI dirty; captures at most 2 fps (trailing capture after a burst), throttle
+  grows with capture cost (≈ 1% of main-thread time), traversal stops at 1500 nodes / 12 ms; unchanged frames are not
+  recorded. Touches via a `UIWindow.sendEvent(_:)` hook (observe only), keyboard via UIKit notifications. A capture that
+  hits the budget is dropped when a complete frame of the same screen exists. Each capture is a Points of Interest
+  signpost `replay.capture` (subsystem `dev.tasktrooper.replay`); with `config.debug` the cost is logged. Measured on the
+  iOS 26.5 simulator (sample app): p50 0.5–2 ms, p95 ≤ 3.3 ms per capture, 9–105 nodes per frame, 2–7 KB per gzip
+  segment.
+- **Delivery:** segments of ≤ 5 s or ≤ 256 KB, gzip, `POST /v1/replay` with the RUM key/backoff; offline segments kept up
+  to `maxQueueBytes` (2 MB), newer ones dropped beyond that. No-op in app extensions and on tvOS.
+- **Stop:** `TrooperReplay.stop()` ends capture (touch hook becomes a pass-through), seals and sends the open segment;
+  idempotent, `install` starts again (same session keeps its segment numbering).
+- **Sample:** `Examples/TrooperSample` — `xcodegen generate` (project.yml) builds a runnable app with UIKit form / alert /
+  table and SwiftUI list screens plus an XCUITest (`ReplayUITests`) driving them; `-trooperScreen form|list` opens a
+  screen without XCUITest (UI automation turns accessibility on, which changes what SwiftUI exposes), `-trooperReplayOff`
+  disables replay.
+
 ## Hybrid apps (Flutter / React Native)
 
 `TaskTrooper.hybridContext()`, `TaskTrooper.setHybridContext(_:)` and `TaskTrooper.processStartTimeMs()` implement
 `getContext` / `setContext` / `getProcessStartTime` of the `dev.tasktrooper.telemetry/rum` channel
 (contracts.md §9). The Flutter plugin / RN native module registers the channel and forwards to these methods.
+The session adopted via `setContext` is **external**: native RUM events, crash reports and session replay use it (and its
+view / anonymous id / user when no native view is open), native never sends a SESSION_START for it and never rotates it
+(30 min inactivity / 4 h); re-adopting the same id keeps it. `sampled` (bool, optional) in the `setContext` dictionary
+is the JS/Dart sampling decision and is used as is; without it the native decision at adoption is kept for that
+session. `getContext` returns the adopted context; `setHybridContext(nil)` hands the session back to the native SDK.
 
 ## Limitations
 

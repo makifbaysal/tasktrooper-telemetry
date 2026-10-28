@@ -1,4 +1,4 @@
-// Package otlptest is an in-process OTLP/HTTP metrics receiver for tests.
+// Package otlptest is an in-process OTLP/HTTP metrics + logs receiver for tests.
 package otlptest
 
 import (
@@ -7,8 +7,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync"
 
+	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	colmetricspb "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	metricspb "go.opentelemetry.io/proto/otlp/metrics/v1"
@@ -24,13 +26,24 @@ type Point struct {
 	Value       float64
 	Attrs       map[string]string
 	ServiceName string
+	// Resource holds every resource attribute.
+	Resource map[string]string
 }
 
-// Server records every request to /v1/metrics.
+// LogRecord is one received log record, flattened.
+type LogRecord struct {
+	Body, SeverityText string
+	Severity           int32
+	TimeUnixNano       uint64
+	Attrs, Resource    map[string]string
+}
+
+// Server records every request to /v1/metrics and /v1/logs.
 type Server struct {
 	*httptest.Server
 	mu     sync.Mutex
 	points []Point
+	logs   []LogRecord
 	keys   []string
 	reqs   int
 }
@@ -42,23 +55,84 @@ func New() *Server {
 	return s
 }
 
-func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/v1/metrics" || r.Method != http.MethodPost {
-		http.NotFound(w, r)
-		return
-	}
+func readBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 	var body io.Reader = r.Body
 	if r.Header.Get("Content-Encoding") == "gzip" {
 		zr, err := gzip.NewReader(r.Body)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
+			return nil, false
 		}
 		body = zr
 	}
 	b, err := io.ReadAll(body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return nil, false
+	}
+	return b, true
+}
+
+func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
+	b, ok := readBody(w, r)
+	if !ok {
+		return
+	}
+	var req collogspb.ExportLogsServiceRequest
+	if err := proto.Unmarshal(b, &req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.mu.Lock()
+	s.reqs++
+	s.keys = append(s.keys, r.Header.Get("x-trooper-key"))
+	for _, rl := range req.ResourceLogs {
+		res := attrs(rl.GetResource().GetAttributes())
+		for _, sl := range rl.ScopeLogs {
+			for _, lr := range sl.LogRecords {
+				s.logs = append(s.logs, LogRecord{Body: anyString(lr.Body), SeverityText: lr.SeverityText,
+					Severity: int32(lr.SeverityNumber), TimeUnixNano: lr.TimeUnixNano, Attrs: attrs(lr.Attributes), Resource: res})
+			}
+		}
+	}
+	s.mu.Unlock()
+	out, _ := proto.Marshal(&collogspb.ExportLogsServiceResponse{})
+	w.Header().Set("Content-Type", "application/x-protobuf")
+	_, _ = w.Write(out)
+}
+
+// Logs returns a copy of every received log record.
+func (s *Server) Logs() []LogRecord {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]LogRecord(nil), s.logs...)
+}
+
+func anyString(v *commonpb.AnyValue) string {
+	switch x := v.GetValue().(type) {
+	case *commonpb.AnyValue_StringValue:
+		return x.StringValue
+	case *commonpb.AnyValue_IntValue:
+		return strconv.FormatInt(x.IntValue, 10)
+	case *commonpb.AnyValue_DoubleValue:
+		return strconv.FormatFloat(x.DoubleValue, 'g', -1, 64)
+	case *commonpb.AnyValue_BoolValue:
+		return strconv.FormatBool(x.BoolValue)
+	}
+	return ""
+}
+
+func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/v1/logs" && r.Method == http.MethodPost {
+		s.handleLogs(w, r)
+		return
+	}
+	if r.URL.Path != "/v1/metrics" || r.Method != http.MethodPost {
+		http.NotFound(w, r)
+		return
+	}
+	b, ok := readBody(w, r)
+	if !ok {
 		return
 	}
 	var req colmetricspb.ExportMetricsServiceRequest
@@ -70,10 +144,13 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	s.reqs++
 	s.keys = append(s.keys, r.Header.Get("x-trooper-key"))
 	for _, rm := range req.ResourceMetrics {
-		svc := attrs(rm.GetResource().GetAttributes())["service.name"]
+		res := attrs(rm.GetResource().GetAttributes())
 		for _, sm := range rm.ScopeMetrics {
 			for _, m := range sm.Metrics {
-				s.points = append(s.points, flatten(m, svc)...)
+				for _, p := range flatten(m, res["service.name"]) {
+					p.Resource = res
+					s.points = append(s.points, p)
+				}
 			}
 		}
 	}
@@ -109,7 +186,7 @@ func flatten(m *metricspb.Metric, svc string) []Point {
 func attrs(kvs []*commonpb.KeyValue) map[string]string {
 	out := map[string]string{}
 	for _, kv := range kvs {
-		out[kv.Key] = kv.Value.GetStringValue()
+		out[kv.Key] = anyString(kv.Value)
 	}
 	return out
 }

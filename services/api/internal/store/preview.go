@@ -184,7 +184,7 @@ func (d *DB) bucketed(ctx context.Context, w timerange.Window, table, timeCol, t
 }
 
 // PreviewSeries returns, per bucket of the range, the value a log_count / log_match / log_pattern / log_pattern_new,
-// dlq / consumer_failures, rum_vital or crash_rate monitor compares (same sources and formulas as the alert engine;
+// dlq / consumer_failures, rum_vital, crash_rate or llm monitor compares (same sources and formulas as the alert engine;
 // counts are summed over condition.window). volume is the per-bucket denominator used for minRequests (nil = none).
 func (d *DB) PreviewSeries(ctx context.Context, q Q, kind string, t model.MonitorTarget, raw json.RawMessage, cond model.MonitorCondition) (data, volume []float64, err error) {
 	var pq PreviewQuery
@@ -204,6 +204,8 @@ func (d *DB) PreviewSeries(ctx context.Context, q Q, kind string, t model.Monito
 		env = t.Env
 	}
 	switch kind {
+	case "llm":
+		return d.llmPreview(ctx, q, t, raw, cond)
 	case "log_count", "log_match", "log_pattern", "log_pattern_new":
 		sev := monitorSeverities(pq)
 		if (kind == "log_pattern" || kind == "log_pattern_new") && pq.PatternID == 0 {

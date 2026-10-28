@@ -363,6 +363,9 @@ func runEmailWorker(ctx context.Context, a *App, _ int) error {
 		var unsub int
 		_ = mdb.QueryRowContext(ctx, `SELECT count(*) FROM unsubscribes WHERE recipient_hash = ?`, HexID(32)).Scan(&unsub)
 		_ = cache.Get(ctx, "tpl:"+template).Err()
+		if a.RT.LLM && template == "newsletter-sender" && Chance(0.75) {
+			a.subjectLine(ctx) // personalized subject line (gemini) — llm.go
+		}
 		Work(ctx, smtpMs, 0.45) // SMTP round trip
 		if Chance(failP) {
 			err := errors.New("SMTP 421 service not available, will retry")

@@ -7,7 +7,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/tasktrooper/telemetry/services/integrations/internal/fakes"
 	"github.com/tasktrooper/telemetry/services/integrations/internal/model"
 )
 
@@ -44,5 +46,21 @@ func TestVercelTokenAndDrainSecret(t *testing.T) {
 	}
 	if want := `"secret":"drain-s3cret"`; !strings.Contains(drainBody, want) {
 		t.Fatalf("drain body %s", drainBody)
+	}
+}
+
+func TestAzureProvider(t *testing.T) {
+	f := fakes.NewAzure(t, time.Now())
+	defer f.Close()
+	t.Setenv("TT_TEST_AZURE_SECRET", "s3cret-value")
+	fac := &Factory{Endpoints: Endpoints{AzureLogin: f.URL, AzureARM: f.URL}}
+	p, err := fac.Build(context.Background(), model.Integration{ID: 1, ProjectID: 3, Provider: "azure", CredentialsRef: "env:TT_TEST_AZURE_SECRET",
+		Config: []byte(`{"tenantId":"tenant-1","clientId":"client-1","subscriptionIds":["sub-1"]}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inv, err := p.Discover(context.Background())
+	if err != nil || len(inv.Functions) != 5 { // 2 apps + 3 App Insights function rows
+		t.Fatalf("inv %v err %v", inv, err)
 	}
 }

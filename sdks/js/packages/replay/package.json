@@ -1,0 +1,53 @@
+{
+  "name": "@trooper/replay",
+  "version": "0.1.0",
+  "description": "TaskTrooper Telemetry session replay for the web (rrweb recording, masking, sampling) — an integration for @trooper/browser.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json",
+    "./iife": "./dist/trooper-replay.iife.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json",
+    "size": "node scripts/size.mjs"
+  },
+  "dependencies": {
+    "@rrweb/record": "2.2.0"
+  },
+  "peerDependencies": {
+    "@trooper/browser": "workspace:^"
+  },
+  "devDependencies": {
+    "@trooper/browser": "workspace:*",
+    "@trooper/core": "workspace:*",
+    "typescript": "5.9.3",
+    "tsup": "^9.0.0",
+    "vitest": "^5.0.5",
+    "happy-dom": "^21.0.0",
+    "esbuild": "^0.28.0",
+    "@types/node": "^26.6.5"
+  },
+  "unpkg": "./dist/trooper-replay.iife.js",
+  "jsdelivr": "./dist/trooper-replay.iife.js"
+}

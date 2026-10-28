@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { AlertTriangle, ArrowRight, Bell, FileCode2, Play, Sparkles } from 'lucide-react';
 import { BreakdownBar, Columns, TimeSeries, seriesColor } from '@/components/charts';
 import {
-  Badge, Button, Callout, Card, CodeBlock, Drawer, DrawerSection, EmptyState, KeyValues, MetricCard, PageHeader, Section, StatusBadge, Table, useDrawer,
+  Badge, Button, Callout, Card, CodeBlock, Drawer, DrawerSection, EmptyState, KeyValues, MetricCard, PageHeader, Section, StatusBadge, useDrawer,
 } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
 import {
@@ -12,10 +12,11 @@ import {
   type CallerTraffic, type Dependency, type Endpoint, type LogLine, type TimeCategory,
 } from '@/data';
 import { ago, compact, dateTime, ms, pct } from '@/lib/format';
-import { CallerDrawer, DependencyDrawer, ErrorCell, epLabel, epRef, sourceLabel, latencyHint, latencySeries, statusSplit } from './apm';
+import { CallerDrawer, DependencyDrawer, ErrorCell, TraceTable, epLabel, epRef, sourceLabel, latencyHint, latencySeries, statusSplit } from './apm';
 import { AlertCount, AlertsBody, OpenIncidents } from './Alerts';
-import { CALLER_KIND_LABEL, CriticalityBadge, DEP_KIND_LABEL, callerColorFor, categoryOf } from './shared';
+import { CALLER_KIND_LABEL, CriticalityBadge, DEP_KIND_LABEL, callerColorFor, categoryOf, traceUrl } from './shared';
 import { RootCauseCard, diagnose } from './rca';
+import { EndpointProfile } from './Profiling';
 
 const catColor = (k: TimeCategory) => seriesColor(TIME_CATEGORIES.find((c) => c.id === k)!.slot);
 
@@ -29,7 +30,6 @@ export function EndpointDetail() {
   const depDrawer = useDrawer<Dependency>();
   const callerDrawer = useDrawer<CallerTraffic>();
   const errDrawer = useDrawer<LogLine>();
-  const traceDrawer = useDrawer<Trace>();
   useEffect(() => {
     if (params.get('tab') === 'time') document.getElementById('time')?.scrollIntoView({ behavior: 'smooth' });
   }, [params]);
@@ -132,6 +132,8 @@ export function EndpointDetail() {
         </Section>
       </div>
 
+      <EndpointProfile svc={svc} ep={ep} />
+
       <Section title={sub ? 'Reads from' : 'Where requests come from'}
         subtitle={sub ? (sharedWith.length ? `also read by ${sharedWith.map((x) => epLabel(x)).join(', ')} (own consumer group each)` : 'only this process reads it') : `${callers.length} caller${callers.length === 1 ? '' : 's'}`}>
         <div className="grid grid-3">
@@ -176,20 +178,14 @@ export function EndpointDetail() {
             </div>
           </Card>
           <Card title="Sample traces" subtitle="Click for the span waterfall" flush>
-            <Table rowKey={(t) => t.id} rows={traces} onRowClick={traceDrawer.open} columns={[
-              { key: 'id', header: 'Trace', render: (t) => <span className="mono">{t.id.slice(0, 12)}</span> },
-              { key: 's', header: 'Status', render: (t) => t.status >= 500 ? <StatusBadge status="critical" label={String(t.status)} /> : <Badge>{t.status}</Badge> },
-              { key: 'd', header: 'Duration', numeric: true, render: (t) => ms(t.dur) },
-              { key: 't', header: 'When', numeric: true, render: (t) => <span className="muted">{ago(t.ts)}</span> },
-            ]} />
+            <TraceTable rows={traces} />
           </Card>
         </div>
       </Section>
 
       <DependencyDrawer dep={depDrawer.item} serviceRpm={svc.rpm} onClose={depDrawer.close} />
       <CallerDrawer caller={callerDrawer.item} targetKey={key} color={callerDrawer.item ? callerColor(callerDrawer.item.caller.id) : ''} onClose={callerDrawer.close} />
-      {errDrawer.item && <ErrorDrawer log={errDrawer.item} ep={ep} onClose={errDrawer.close} onTrace={() => { errDrawer.close(); traceDrawer.open(traces[0]); }} />}
-      {traceDrawer.item && <TraceDrawer trace={traceDrawer.item} ep={ep} svcName={svc.name} onClose={traceDrawer.close} />}
+      {errDrawer.item && <ErrorDrawer log={errDrawer.item} ep={ep} onClose={errDrawer.close} onTrace={() => { const id = errDrawer.item?.traceId ?? traces[0]?.id; errDrawer.close(); if (id) nav(traceUrl(id)); }} />}
     </>
   );
 }
@@ -218,51 +214,6 @@ function ErrorDrawer({ log, ep, onClose, onTrace }: { log: LogLine; ep: Endpoint
     at processTicksAndRejections (node:internal/process/task_queues:95:5)
     at async Router.handle (node_modules/@trooper/node/dist/http.js:118:9)`}</CodeBlock>
       </DrawerSection>
-    </Drawer>
-  );
-}
-
-// ---------------------------------------------------------------- Trace drawer
-function TraceDrawer({ trace, ep, svcName, onClose }: { trace: Trace; ep: Endpoint; svcName: string; onClose: () => void }) {
-  const calls = endpointCalls(ep);
-  // lay calls out sequentially inside the request; scale call durations to this trace's duration
-  const callTotal = calls.reduce((a, c) => a + c.msPerReq, 0);
-  const scale = Math.min(1, (trace.dur * 0.85) / (callTotal || 1)) * (trace.dur / endpointBreakdown(ep).avgMs);
-  const gap = (trace.dur - Math.min(trace.dur * 0.85, callTotal * scale)) / (calls.reduce((a, c) => a + c.callsPerReq, 0) + 1);
-  let t = gap;
-  const spans = calls.flatMap((c) => Array.from({ length: c.callsPerReq }, (_, i) => {
-    const d = (c.msPerReq / c.callsPerReq) * scale;
-    const s = { id: `${c.dep.id}-${i}`, name: c.dep.name, kind: c.dep.kind, start: t, dur: d, failed: trace.status >= 500 && c.dep.kind === 'http' };
-    t += d + gap;
-    return s;
-  }));
-  const rows = [{ id: 'root', name: `${svcName} ${ep.method} ${ep.route}`, kind: 'app' as TimeCategory, start: 0, dur: trace.dur, failed: trace.status >= 500 }, ...spans];
-
-  return (
-    <Drawer open onClose={onClose} width={760} title={<span className="mono">{trace.id}</span>}
-      subtitle={<>{trace.status >= 500 ? <StatusBadge status="critical" label={String(trace.status)} /> : <Badge>{trace.status}</Badge>}<span className="muted">{ms(trace.dur)} · {rows.length} spans · {ago(trace.ts)}</span></>}>
-      <DrawerSection title="Waterfall">
-        <div className="stack" style={{ gap: 4 }}>
-          {rows.map((r, i) => (
-            <div key={r.id} className="row" style={{ gap: 'var(--space-3)', fontSize: 'var(--text-sm)' }}>
-              <span className={`truncate${i ? ' mono' : ''}`} style={{ width: 220, flexShrink: 0, paddingLeft: i ? 16 : 0 }} title={r.name}>{r.name}</span>
-              <div style={{ position: 'relative', flex: 1, height: 16, background: 'var(--bg-sunken)', borderRadius: 4 }}>
-                <div title={`${r.name}: ${ms(r.dur)}`} style={{
-                  position: 'absolute', top: 2, bottom: 2, borderRadius: 3,
-                  left: `${(r.start / trace.dur) * 100}%`, width: `max(2px, ${(r.dur / trace.dur) * 100}%)`,
-                  background: r.failed ? 'var(--status-critical)' : catColor(r.kind),
-                }} />
-              </div>
-              <span className="num" style={{ width: 64, textAlign: 'right' }}>{ms(r.dur)}</span>
-            </div>
-          ))}
-        </div>
-      </DrawerSection>
-      {trace.status >= 500 && (
-        <Callout icon={<AlertTriangle size={16} />}>
-          Failed on an external HTTP call — the request returned {trace.status} after the upstream timed out.
-        </Callout>
-      )}
     </Drawer>
   );
 }

@@ -36,7 +36,7 @@ Her modül/klasör tek bir sahibe (agent/geliştirici) aittir; başka modülün 
 gerekirse küçük tutulur (tek harici bağımlılık `google.golang.org/protobuf`) ve bu dosyaya not düşülür.
 
 `services/pkg` içeriği: `topics` (topic/header adları), `tenant` (Tenant + context), `config` (TT_* env okuma),
-`logx` (JSON slog), `secrets` (AES-GCM + credentials ref çözümü), `rumpb` (`proto/rum/v1`'den buf ile üretilir: `cd proto && go run github.com/bufbuild/buf/cmd/buf@v1.57.0 generate`).
+`logx` (JSON slog), `secrets` (AES-GCM + credentials ref çözümü), `llmprice` (LLM fiyat tablosu + maliyet, gömülü default'lar, org override cache'i; §25), `rumpb` (`proto/rum/v1`'den buf ile üretilir: `cd proto && go run github.com/bufbuild/buf/cmd/buf@v1.57.0 generate`).
 
 **Ortam değişkenleri** (default'lar host'tan docker-compose'a göre): `TT_POSTGRES_URL`, `TT_CLICKHOUSE_URL`
 (`clickhouse://trooper:trooper@localhost:9000/telemetry`), `TT_KAFKA_BROKERS` (`localhost:19092`; container içinden `redpanda:9092`),
@@ -46,15 +46,18 @@ gerekirse küçük tutulur (tek harici bağımlılık `google.golang.org/protobu
 
 | Servis | Port | Not |
 |---|---|---|
-| ingest-gw HTTP | 4318 | `POST /v1/traces`, `/v1/metrics`, `/v1/logs` (OTLP/HTTP protobuf **ve** JSON; `Content-Encoding: gzip` desteklenir), `POST /v1/rum` (RUM JSON, gzip opsiyonel), `GET /healthz` |
+| ingest-gw HTTP | 4318 | `POST /v1/replay` (§23), `POST /v1/profiles` (§24), `POST /v1/traces`, `/v1/metrics`, `/v1/logs` (OTLP/HTTP protobuf **ve** JSON; `Content-Encoding: gzip` desteklenir), `POST /v1/rum` (RUM JSON, gzip opsiyonel), `GET /healthz` |
 | ingest-gw gRPC | 4317 | OTLP gRPC (TraceService, MetricsService, LogsService) |
 | api | 8080 | `/api/v1/...` (bkz. `services/api/openapi.yaml`), `GET /healthz` |
 | alert-engine | 8090 | sadece `/healthz`, `/metrics` |
 | ingest-gw metrics | 4318 (veya `TT_INGEST_METRICS_ADDR`) | Prometheus `GET /metrics` |
 | ingest-writer metrics | 9464 (`TT_INGEST_WRITER_METRICS_ADDR`) | Prometheus `GET /metrics` |
 
+**Internal credential:** servis içi gönderenler (trooper-cloud, loadtest-runner) `x-trooper-internal: <TT_INTERNAL_TOKEN>` +
+`x-trooper-project: <id>` gönderir (OTLP HTTP/gRPC metadata, `/v1/rum`); sabit zamanlı karşılaştırma, `Origin` varsa 403, token
+ayarlı değilse 401. Org Postgres'ten (60 sn cache).
 **Ingest auth:** `x-trooper-key: <ingest key>` header'ı, ya da `Authorization: Bearer <key>`. Browser `sendBeacon` header
-koyamadığı için `?key=` query parametresi de kabul edilir (sadece `/v1/rum`). Key Postgres `api_keys` tablosunda sha256 hash'i ile
+koyamadığı için `?key=` query parametresi de kabul edilir (sadece `/v1/rum` ve `/v1/replay`). Key Postgres `api_keys` tablosunda sha256 hash'i ile
 durur; ingest-gw 60 sn TTL'li in-memory cache tutar. Key → `(org_id, project_id)`. Browser key'lerinde `allowed_origins` kontrolü.
 **DSN:** `https://<key>@<host>[:port]/<project_id>` — SDK'lar DSN'den endpoint ve key çıkarır. Lokal: `http://tt_dev_ingest_key@localhost:4318/1`.
 **Dev seed:** org 1, project 1, ingest key `tt_dev_ingest_key`, api key `tt_dev_api_key` (postgres/002_seed.sql).
@@ -81,6 +84,8 @@ backend SDK'ları upstream retry politikasıyla yetinebilir (429/502/503/504, en
 | `tt.otlp.metrics` | `ExportMetricsServiceRequest` protobuf | `project_id` |
 | `tt.otlp.logs` | `ExportLogsServiceRequest` protobuf | `project_id` |
 | `tt.rum` | `RumBatch` protobuf (`proto/rum/v1`) | `project_id` |
+| `tt.replay` | gzip'li replay segment JSON'u (§23) | `project_id` |
+| `tt.profiles` | ham profil gövdesi (pprof / folded, §24) | `project_id` |
 
 Header'lar (hepsi string): `org_id`, `project_id`, `received_at` (unix ms), `client_ip` (sadece geo için, writer sonrası atılır),
 `user_agent` (sadece RUM). Topic'ler 24 saat retention, 24 partition (dev: 3). Writer consumer group: `tt-ingest-writer`.
@@ -120,7 +125,7 @@ ile taşınır; consumer SDK'sı bunu `trooper.consumer.attempt`'e yazar (Rabbit
 Spring Kafka'da `kafka_deliveryAttempt`).
 
 **SDK iç metriği:** her backend SDK'sı yuttuğu hataları `trooper.sdk.errors` counter'ında (meter `TaskTrooper.Telemetry`,
-attr `component`) sayar.
+attr `component`) sayar. Profiling/LLM bileşenleri: `profiler`, `profiler.cpu`, `exporter.profiles`, `llm`.
 
 ## 5. Collector metrikleri (trooper-agent → OTLP metrics → writer)
 
@@ -223,9 +228,13 @@ MetricKit'ten gelen crash/hang'ler `attributes.metrickit=true` taşır; aynı cr
 
 **Hibrit uygulamalar (Flutter / React Native + native SDK):** native SDK varsa oturum ve crash'ler ortak olur. Kanal adı
 `dev.tasktrooper.telemetry/rum` (Flutter MethodChannel — `trooper_flutter` plugin'i, iOS'ta native SDK için `trooper_flutter/Native` subspec; RN'de native module adı `TrooperRum` (TurboModule + eski mimari), JS önce `TrooperRum`, sonra bu kanal adını arar; RN ≥ 0.74, iOS'ta native SDK için `TROOPER_RN_NATIVE_SDK=1 pod install`):
-- `setContext({session_id, anonymous_id, view_id, view_name, user_id})` — JS/Dart → native; native crash raporu bu bağlamla gönderilir.
+- `setContext({session_id, anonymous_id, view_id, view_name, user_id, sampled})` — JS/Dart → native; native crash raporu bu bağlamla
+  gönderilir. `sampled` (bool, opsiyonel) JS/Dart'ın RUM örnekleme kararıdır; native bunu kullanır (yoksa eski davranış). Benimsenen
+  (adopted) oturum native tarafta **dış oturumdur**: native inaktivite/4 saat kuralıyla döndürmez, sahibi JS/Dart'tır.
 - `getContext()` → aynı alanlar — native → JS/Dart (native önce başladıysa onun oturumu kullanılır).
 - `getProcessStartTime()` → unix ms — APP_START `start_reference=process` için.
+- `isNativeReplayActive()` → bool — Flutter, native replay kuruluysa Dart wireframe kaydını başlatmaz (Android reflection; iOS şimdilik
+  hep `false` → "ikisini birden açma" doküman kuralı).
 Native handler yoksa çağrılar sessizce başarısız olur. Oturumun sahibi Dart/JS katmanıdır: native SDK `setContext` ile
 oturumu devraldığında kendi SESSION_START'ını göndermez.
 
@@ -267,8 +276,8 @@ offline kuyruktan gelen ≤ 24 saatlik event'ler kendi zamanlarında kalır.
   Neon tüketim sayaçları custom metrik `trooper.cloud.neon.*` (`compute_time_seconds`, `active_time_seconds`,
   `cpu_used_seconds`, `written_data_bytes`, `data_transfer_bytes`, `synthetic_storage_bytes`, `logical_size_bytes`,
   `compute_active`, `compute_cu_max`) → generic `metrics` tablosu. Datapoint zamanı sağlayıcının kendi dakikasıdır.
-- **trooper-cloud ingest auth (geçici):** proje başına ingest key `TT_CLOUD_INGEST_KEYS=projectId:key,...`; `TT_DSN`'deki proje
-  otomatik. Hedef: ingest-gw'de proje header'ı kabul eden internal servis credential'ı (roadmap).
+- **trooper-cloud ingest auth:** `TT_INTERNAL_TOKEN` ayarlıysa internal credential (§2); değilse/401'de proje başına ingest key
+  `TT_CLOUD_INGEST_KEYS=projectId:key,...` (geri uyumlu). Vercel `createDrain` gerçek ingest key ister (drain URL'si public).
 - Bilinen boşluklar: Neon CPU/memory/connection metriği yok; RDS memory instance-class tablosundan (bilinmeyen sınıf →
   `config.instanceMemoryGb`); CloudWatch/GCP'den `max_connections` ve p95 yok; MSK Serverless'ta sadece lag.
 
@@ -309,3 +318,661 @@ offline kuyruktan gelen ≤ 24 saatlik event'ler kendi zamanlarında kalır.
   --app --release <path>` (`TROOPER_API_URL`, `TROOPER_API_KEY`). Exit kodları: 0 ok, 1 sunucu/ağ, 2 kullanım, 3 yetkisiz, 4 bazı
   dosyalar reddedildi. Android Gradle plugin'i (`com.tasktrooper.mapping-upload`) sadece `r8` yükler; NDK `.so` için CLI
   `upload-ndk-symbols`. iOS: `sdks/ios/Scripts/upload-dsyms.sh`.
+
+## 13. Code intelligence (`services/codeintel`, ADR-014)
+
+- Port :8096 (`/healthz`, `/metrics`, `POST /v1/webhooks/github`, `POST /v1/webhooks/gitlab`, `POST /v1/webhooks/bitbucket`).
+  Provider'lar: `github` (App / token / public), `gitlab` (gitlab.com + self-managed `base_url`), `bitbucket` (Cloud),
+  `local` (dev) — §18a. Migration `deploy/postgres/005_codeintel.sql` (codeintel sahibi):
+  - `repositories` + `installation_id bigint`, `credentials_ref text`, `local_path text` (provider `local` eklenir),
+    `analyze_requested_at timestamptz`, `analyzed_at timestamptz`, `error text`, `languages text[]`, `services text[]`,
+    `webhook_secret_ref text`.
+  - `inventory_items` + `service text`, `criticality text` (critical|high|medium|low), `observed bool`, `monitored bool`,
+    `code_hash text`, `summary text`, `dead bool` (kodda var, 30 gün trafik yok), `shadow bool` (trafik var, kodda yok →
+    `repository_id` NULL olabilir), `llm jsonb` (failure_modes, loadtest_hint).
+  - `alert_suggestions` + `title text`, `kind text`, `target text`, `condition text`, `criticality text`, `code_ref text`,
+    `calibrated bool` (eşik gözlem verisiyle ayarlandı), `created_at`. `monitor_draft` = api `POST /monitors` gövdesiyle aynı şekil.
+  - `monitors` + `source text` ('manual'|'code'|'template'|'suggestion'), `code_ref text` (alert-as-code; read-only).
+  - `loadtest_scenarios` + `state text` ('draft'|'ready', default 'ready'); codeintel `source='generated', state='draft'` yazar.
+- `.trooper/config.yaml`: `services: [{ path: services/orders, name: orders-api }]`; yoksa SDK init çağrılarından tespit.
+- `.trooper/monitors/*.yaml`: alerting.md § Kural şeması formatı (name, kind, query, condition, severity, notify, labels).
+- Envanter `key` formatı: endpoint `"METHOD /route/:param"` (writer normalizasyonu ile aynı), consumer = process adı (`source` =
+  topic/queue), cron = job adı (`source` = schedule), view = route, dependency = `"<kind> · <name>"`.
+- Gözlem eşleştirme: `red_1m` (son 7 gün) route'ları ve `consumer_1m` process'leri ile; `observed`, `dead`, `shadow`.
+
+## 14. Load testing (`services/loadtest`, ADR-015)
+
+- `loadtest-ctl` :8097 (`/healthz`, `/metrics`). Migration `deploy/postgres/006_loadtest.sql` (loadtest sahibi):
+  - `loadtest_runs` + `region text`, `live jsonb` (`{ ts, vus, rps, p95, errorRate, progress }`), `abort_requested_at`,
+    `error text`, `created_at`, `requested_by bigint`.
+  - `loadtest_domains (id, project_id, host, token, verified_at, method 'dns'|'http', created_at, UNIQUE(project_id, host))`.
+  - `loadtest_usage (project_id, month date, vu_minutes numeric, PRIMARY KEY(project_id, month))`.
+- Senaryo `spec` (jsonb) = UI `ScenarioEditor` modeli: `{ target, mode: 'vus'|'rps', levels: [{durationS, target}], steps: [key],
+  weights: {key: pct}, requests: {key: {method, path, headers?, json?, checks?}}, thinkTime, regions, gate: {...},
+  thresholds: {p95Ms, errorRate}, script? }`. Şablonlar: `{{int a-b}}`, `{{pool.<name>}}`, `{{weighted a:70 b:30}}`,
+  `{{prev "KEY" .field}}`, `{{uuid}}`.
+- Runner metrikleri (OTLP, `service.name=loadtest`, attr `trooper.loadtest.run`, `trooper.loadtest.step`):
+  `trooper.loadtest.requests` (sum), `trooper.loadtest.errors` (sum), `trooper.loadtest.duration_ms` (histogram),
+  `trooper.loadtest.vus` (gauge) → generic `metrics` tablosu.
+- İstek header'ları: `traceparent`, `baggage: tt.svc=loadtest:<run_id>`, `x-trooper-loadtest-run`, `user-agent: TaskTrooper-LoadTest/1`.
+
+## 15. Kimlik, org ve yönetim API'si (ADR-016)
+
+- Migration `deploy/postgres/007_auth.sql` (api sahibi): `sessions (id text PK, user_id, created_at, expires_at, last_seen_at,
+  user_agent)`, `org_members.role` ∈ owner|admin|member|viewer, `audit_log (id, org_id, project_id, user_id, api_key_id,
+  action, target, meta jsonb, at)`, `users.oidc_subject`, `api_keys.created_by`, `api_keys.last_used_at`.
+- Uçlar (`/api/v1`):
+  - `GET /auth/config` (anonim) → `{ oidc: bool, devLogin: bool }`; `GET /auth/login?redirect=` → OIDC'ye yönlendirir;
+    `GET /auth/callback`; `POST /auth/dev-login {email}`; `POST /auth/logout`; `GET /me` → `{ user, orgs: [{id, name, role,
+    projects: [{id, name}]}], currentProjectId }`.
+  - `GET/POST /orgs/{org}/members`, `PATCH/DELETE /orgs/{org}/members/{user}` (rol), `GET/POST /projects`,
+    `GET/POST /api-keys` (POST cevabı key'i **bir kez** döner), `DELETE /api-keys/{id}`, `GET /audit-log?limit=`.
+- CORS: cookie'li istekler için `Access-Control-Allow-Credentials: true` ve tam origin (wildcard değil).
+
+## 16. Faz 4–5 api uçları ve diğer açık işler
+
+- Code intelligence (api, Postgres'ten okur/yazar):
+  - `GET /repos` → UI `Repo[]`; `POST /repos {provider, fullName, defaultBranch?, token? | installationId? | localPath?, baseUrl?}`
+    (`baseUrl` sadece gitlab; cevapta App'siz github/gitlab/bitbucket için bir kerelik `webhook {url, secret}`, §18a);
+    `DELETE /repos/{id}`; `POST /repos/{id}/analyze` (→ `analyze_requested_at`, `pending_paths='{*}'`; codeintel
+    `last_analyzed_sha..HEAD` git diff'iyle incremental koşar, olmazsa full scan — code-intelligence.md § Incremental analiz); `POST /repos/{id}/webhook-secret` (yeni secret).
+  - `GET /inventory?repoId=&kind=&service=` → UI `InventoryItem[]` (+ `dead`, `shadow`, `summary`).
+  - `GET /suggestions?state=proposed` → UI `Suggestion[]`; `POST /suggestions/{id}/accept` (monitor oluşturur, `source=suggestion`)
+    ; `POST /suggestions/{id}/reject`.
+  - `PUT/PATCH/DELETE /monitors/{id}` `source='code'` ise 409 "managed in repository".
+- Load test (api): mevcut uçlar + `GET /loadtests/runs/{id}/series?step=5s` (`{ ts[], vus[], rps[], p95[], errorRate[] }`,
+  `metrics` tablosundan) ve `GET /loadtests/runs/{id}/target?service=` (hedef servisin aynı penceredeki RED'i, caller
+  `loadtest:<id>` ayrımı ile); `GET/POST /loadtests/domains`, `POST /loadtests/domains/{id}/verify`, `DELETE /loadtests/domains/{id}`.
+- Range: `15m`, `30m` eklenir (`timerange` + UI `TimeRange`).
+- Logs: `GET /logs?source=` → `attrs['vercel.source']` filtresi (build|static|external|edge|lambda|redirect|firewall).
+- Ingest internal credential: `x-trooper-internal: <TT_INTERNAL_TOKEN>` + `x-trooper-project: <id>` başlıkları; ingest-gw
+  token eşleşirse key aramaz. trooper-cloud ve loadtest-runner bunu kullanır (`TT_CLOUD_INGEST_KEYS` geri uyumlu kalır).
+- KPI kuralları: `kpi_alert_rules.condition jsonb` (`renotifyMin`) — migration `008_alerting_r3.sql` (alerting sahibi).
+
+## 17. Slack App (ADR-017)
+
+- Env (api + notifier): `TT_SLACK_CLIENT_ID`, `TT_SLACK_CLIENT_SECRET`, `TT_SLACK_SIGNING_SECRET`, `TT_PUBLIC_API_URL`
+  (OAuth redirect + interactivity URL tabanı), `TT_PUBLIC_APP_URL` (mesajlardaki linkler).
+- Postgres (`009_slack_github.sql`, api sahibi): `integrations.provider` += `slack`, `github`; Slack kurulumu
+  `integrations(provider='slack', config={teamId, teamName, botUserId}, credentials_ref=secret:<bot token>)`, org başına bir
+  tane (project_id = kurulumu yapan proje; okumada org geneli). `notification_messages (id, incident_id, channel, provider,
+  external_id /*slack ts*/, external_channel, created_at)`.
+- api uçları: `GET /integrations/slack/install` → Slack OAuth'a yönlendirir (state imzalı); `GET /integrations/slack/callback`;
+  `GET /integrations/slack/channels?q=` → `[{id, name, isPrivate, isMember}]` (cache 5 dk); `DELETE /integrations/slack`;
+  `POST /slack/interactions` (Ack / Mute 1h butonları; imza doğrulaması; Slack kullanıcısını e-posta ile `users`'a eşler).
+- Bildirim kind'ları: `firing | resolved | reminder | acknowledged`; ack bildirimini **alert-engine** kuyruğa koyar (api koymaz;
+  dedupe `incident:<id>:acknowledged:<channel>`). Buton action id'leri: `tt_ack:<incidentId>`, `tt_mute1h:<monitorId>`.
+  `not_in_channel` → `conversations.join` (scope `channels:join`) + bir kez tekrar; private kanal → kalıcı "uygulamayı davet et"
+  hatası. Test için `TT_SLACK_API_URL`. Alert-engine çoklu shard: stream kuralı isabetleri `alert_stream_hits` (unlogged) +
+  `NOTIFY tt_stream_hit` ile monitor'ün sahibi shard'a devredilir.
+- Bildirim hedefi formatı: `slack:<channel_id>#<channel_name>` (örn. `slack:C0123ABCD#payments-alerts`). notifier: bot token ile
+  `chat.postMessage`; ilk mesajın `ts`'i `notification_messages`'e; `resolved`/`reminder`/`acknowledged` → `thread_ts` ile
+  thread'e cevap + ilk mesaj `chat.update` (renk/durum). `slack:https://hooks.slack.com/...` webhook hedefleri eskisi gibi.
+- Mesaj Block Kit: header (durum emoji + başlık), alanlar (servis, değer vs eşik, süre, severity), **"Likely cause"** bölümü
+  (`incidents.root_cause` → `summary` + `round(confidence*100)%`; `< 30%` → "low confidence"), deploy context, butonlar
+  (Open incident, Ack, Mute 1h).
+
+## 18. GitHub App (ADR-017)
+
+- Env (api + codeintel): `TT_GITHUB_APP_ID`, `TT_GITHUB_APP_SLUG`, `TT_GITHUB_APP_PRIVATE_KEY` (env:/file: ref),
+  `TT_GITHUB_WEBHOOK_SECRET`. Ortak istemci `services/pkg/githubapp` (JWT, installation token cache, repo listesi, sayfalama).
+- Kurulum: `integrations(provider='github', config={installationId, account, accountType}, project_id)`; `repositories.installation_id`.
+- api uçları: `GET /integrations/github/install` → `https://github.com/apps/<slug>/installations/new?state=<imzalı>`;
+  `GET /integrations/github/callback?installation_id&setup_action&state` → integration kaydı, UI'a `/settings/integrations?github=<id>`
+  ile döner; `GET /integrations/github/{id}/repos?q=` → `[{fullName, defaultBranch, private, language, added}]`;
+  `POST /repos {provider:'github', fullName, installationId}` (mevcut uç; token gerekmez).
+- Webhook (codeintel `POST /v1/webhooks/github`, App webhook URL'si): `push` default branch → `repositories.analyze_requested_at
+  = now()` + değişen dosya listesi (`pending_paths text[]`) → incremental analiz; `installation_repositories` removed → repo
+  `status='disconnected'`; `installation` deleted → integration `status='error'`. Teslim id'si (`X-GitHub-Delivery`) ile idempotent.
+
+## 18a. GitLab ve Bitbucket kaynakları
+
+- Migration `deploy/postgres/013_vcs_sources.sql` (codeintel sahibi): `repositories.base_url text` (sadece `provider='gitlab'`,
+  self-managed; NULL → `https://gitlab.com`; CHECK `base_url IS NULL OR provider = 'gitlab'`), `repositories.webhook_received_at
+  timestamptz` (son doğrulanmış webhook teslimi; tüm provider'lar).
+- Ortak kurallar `services/pkg/vcs`: `ValidFullName(provider, name)` (github `owner/name`, gitlab `group/…/project` 2–20
+  segment, bitbucket tam `workspace/repo`; segment `[A-Za-z0-9_][A-Za-z0-9_.-]*`, `.git`/`.atom` ile bitemez),
+  `NormalizeBaseURL` (https, host zorunlu, userinfo/query/fragment yok, sondaki `/` atılır), `CloneURL`, `AuthHeader`
+  (gitlab `Basic oauth2:<token>`, bitbucket `Basic x-token-auth:<token>`; `kullanıcı:parola` biçimli token iki sağlayıcıda da
+  olduğu gibi Basic olur).
+- api: `POST /repos` gitlab/bitbucket'ta `fullName`, `defaultBranch?`, `token?` (yoksa public), `baseUrl?` (gitlab) alır.
+  App'siz github, gitlab ve bitbucket repo'ları için 32 bayt rastgele secret (URL-safe base64) `secrets`'a mühürlenir
+  (`webhook_secret_ref`) ve cevap **bir kez** `webhook: {url: <TT_PUBLIC_WEBHOOK_URL>/v1/webhooks/<provider>, secret}` taşır.
+  `POST /repos/{id}/webhook-secret` secret'ı yeniler (eski ref silinir), aynı şekli döner (installation repo'ları → 400).
+  `Repo` + `baseUrl?`, `url` (tarayıcı linki), `webhookActive` = installation var **veya** `webhook_received_at` dolu.
+- codeintel webhook'ları (kurulum: GitLab → Settings → Webhooks, "Push events", Secret token = secret; Bitbucket →
+  Repository settings → Webhooks, "Repository push", Secret = secret):
+  - `POST /v1/webhooks/gitlab`: `X-Gitlab-Token` sabit zamanlı karşılaştırma, `X-Gitlab-Event: Push Hook`, idempotency
+    `Idempotency-Key` → `X-Gitlab-Event-UUID`; `commits[]` dosyaları, `total_commits_count > len(commits)` → `{*}`.
+  - `POST /v1/webhooks/bitbucket`: `X-Hub-Signature: sha256=<hex>` (HMAC-SHA256), `X-Event-Key: repo:push`, idempotency
+    `X-Request-UUID`; payload dosya listelemez → `{*}` (incremental diff `last_analyzed_sha`'dan).
+  - Cevaplar GitHub ile aynı: 202 "queued", 200 "ignored" / "duplicate" / "pong", 401 imza/token, 400 JSON, 413 > 25 MB.
+    Teslim id'leri `codeintel_webhook_deliveries`'e `gitlab:<webhook uuid>:<id>` / `bitbucket:<hook uuid>:<id>` olarak yazılır.
+- Desteklenmeyenler: Bitbucket Server / Data Center, GitLab/Bitbucket OAuth uygulama akışı ve repo seçici (token elle girilir),
+  sağlayıcı API'siyle otomatik webhook kurulumu.
+
+## 19. AI kullanım kotası (ADR-018)
+
+**Postgres `deploy/postgres/010_ai_quota.sql`** (sahibi: aiquota sahibi; idempotent):
+```sql
+ALTER TABLE orgs        ADD COLUMN IF NOT EXISTS ai_monthly_credits integer;          -- NULL = paket varsayılanı, -1 = sınırsız
+ALTER TABLE orgs        ADD COLUMN IF NOT EXISTS ai_notify text[] NOT NULL DEFAULT '{}'; -- monitor channels formatı (slack:<id>#ad, email:..)
+ALTER TABLE memberships ADD COLUMN IF NOT EXISTS ai_monthly_credits integer;          -- NULL = üye tavanı yok
+ALTER TABLE repositories ADD COLUMN IF NOT EXISTS analyze_requested_by bigint REFERENCES users(id) ON DELETE SET NULL;
+CREATE TABLE IF NOT EXISTS ai_usage (
+  id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  org_id bigint NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+  project_id bigint REFERENCES projects(id) ON DELETE SET NULL,
+  user_id bigint REFERENCES users(id) ON DELETE SET NULL,      -- NULL = otomatik iş
+  feature text NOT NULL,                                       -- codeintel.enrich | codeintel.suggest | rca | other
+  model text NOT NULL, input_tokens integer NOT NULL, output_tokens integer NOT NULL,
+  credits numeric(12,4) NOT NULL, ref text NOT NULL DEFAULT '',  -- ör. 'repo:12'
+  created_at timestamptz NOT NULL DEFAULT now());
+-- index: (org_id, created_at), (org_id, user_id, created_at)
+CREATE TABLE IF NOT EXISTS ai_quota_alerts (org_id bigint, period date, threshold smallint CHECK (threshold IN (80,100)),
+  sent_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (org_id, period, threshold));
+-- notifications.kind CHECK: ('firing','resolved','reminder','acknowledged','ai_quota'); incident_id zaten NULL olabilir
+```
+
+**Kredi hesabı** (`services/pkg/aiquota`, harici bağımlılık yok):
+- `credits = (inTok × inPrice + outTok × outPrice) / 1e6 / 0.01` — fiyatlar USD / milyon token.
+- `TT_AI_PRICES="<model>=<in>/<out>,..."`, bilinmeyen model → `TT_AI_DEFAULT_PRICE` (varsayılan `3/15`).
+- `TT_AI_PLAN_CREDITS="free=100,team=5000,enterprise=-1"` (varsayılan bu). Bilinmeyen plan → `free`.
+- Etkin org limiti: `orgs.ai_monthly_credits` ?? plan varsayılanı; `-1` sınırsız. Üye limiti: `memberships.ai_monthly_credits`.
+- `(*Config).Reserve(ctx, tx, Request{OrgID, ProjectID, UserID *int64, Feature, EstimateCredits})` → `Decision{Allowed, Reason
+  ("org_limit"|"user_limit"), OrgUsed, OrgLimit, UserUsed, UserLimit}`. Transaction içinde
+  `pg_advisory_xact_lock(7140, org_id)`; kullanım = bu ayın `ai_usage` SUM'ı. `Record(ctx, db, Usage{...})` gerçek token ile yazar.
+  Postgres erişimi küçük bir arayüzle (`Exec`, `QueryRow(...).Scan`); pgx adaptörünü çağıran yazar.
+- Tahmin: `ceil(promptChars/4) × in + maxTokens × out`.
+
+**codeintel:** her LLM batch'inden önce `Reserve`; red → kalan öğeler LLM'siz (statik), analiz özetine
+`repositories.analysis` (jsonb, 010) yazılır: `{sha, incremental, items, llmItems, llm: {status: "ok"|"disabled"|
+"quota_exceeded", reason?: "org_limit"|"user_limit"|"check_failed", credits, skipped?}}` (api `inventory.analysis.llm` olarak
+döner; `check_failed` = kota kontrolü hata verdi, LLM fail-closed atlanır).
+`UserID` = `repositories.analyze_requested_by` (manuel analizde api doldurur; webhook/otomatik isteklerde codeintel NULL'lar).
+
+**Eşik bildirimi:** alert-engine 5 dk'da bir: org kullanımı ≥ %80 / ≥ %100 ve `ai_quota_alerts`'te o ay+eşik yoksa
+`orgs.ai_notify` hedeflerine bildirim kuyruğa (notification kind `ai_quota`, incident'sız; payload `{orgId, period, threshold,
+used, limit}`). Notifier Slack/e-posta metni: "AI usage at 80% of this month's credits (4,012 / 5,000). Resets Nov 1."
+
+**API** (api sahibi):
+- `GET /usage/ai?month=YYYY-MM` (member+, varsayılan bu ay) →
+  `{ period, resetsAt, plan, org: {limit: number|null, used, remaining: number|null}, me: {limit: number|null, used},
+     byUser: [{userId, email, name, limit: number|null, used}] (sadece admin+; diğerlerine []),
+     byFeature: [{feature, credits, calls}], byProject: [{projectId, name, credits}],
+     daily: SeriesSet (id 'credits'), aiQuota?: {monthlyCredits: number|null, notify: string[]} (sadece admin+) }` —
+  `limit: null` = sınırsız. Krediler 2 ondalık.
+- `PUT /orgs/{org}/ai-quota {monthlyCredits: number|null, notify: string[]}` (admin+, audit `ai_quota.update`).
+- `PUT /orgs/{org}/members/{user}/ai-quota {monthlyCredits: number|null}` (admin+, audit `ai_quota.member`).
+- `GET /me` → ek alan `ai: {period, limit, used, userLimit, userUsed}`; `GET /orgs/{org}/members` satırları `aiCredits: {limit, used}`.
+- `POST /repos/{id}/analyze` → `analyze_requested_by` = oturum kullanıcısı (api key ile NULL).
+
+## 20. Host, container, process ve Kubernetes (ADR-019)
+
+**trooper-agent modları:** `TT_AGENT_MODES` (virgüllü; varsayılan `db`) — `db`, `host`, `cluster`. `TT_K8S_CLUSTER` (cluster adı;
+host modunda K8s içindeyse de set edilir), `NODE_NAME`/`NODE_IP` (downward API), `TT_AGENT_DOCKER_SOCKET`
+(varsayılan `/var/run/docker.sock`, yoksa container toplanmaz), `TT_AGENT_PROCFS` (`/host/proc`), `TT_AGENT_TOP_PROCESSES` (20).
+Aralık: host 15 sn, cluster 30 sn. Gönderim bugünkü gibi OTLP metrics, `TT_DSN` ingest key.
+
+Ortak resource attr'ları: `service.name=trooper-agent`, `host.name`, `host.id` (machine-id), `os.type`, `host.arch`,
+`k8s.cluster.name` (varsa), `k8s.node.name` (varsa), `cloud.provider`/`cloud.region` (varsa).
+
+| Metrik (gauge) | Birim | Attr'lar | Tablo.kolon |
+|---|---|---|---|
+| `trooper.host.cpu` | 0..1 | — | `hosts_1m.cpu` |
+| `trooper.host.memory` / `.memory_bytes` | 0..1 / byte | | `memory` / `memory_bytes` |
+| `trooper.host.disk` | 0..1 (en dolu fs) | | `disk` |
+| `trooper.host.disk_read` / `.disk_write` | byte/sn | | `disk_read` / `disk_write` |
+| `trooper.host.net_in` / `.net_out` | byte/sn | | `net_in` / `net_out` |
+| `trooper.host.load1`, `trooper.host.uptime_s`, `trooper.host.cpu_cores` | | | `load1`, `uptime_s`, `cpu_cores` |
+| `trooper.container.cpu` / `.cpu_limit` | core | `container.id`, `container.name`, `container.image.name`, `k8s.namespace.name`, `k8s.pod.name`, `k8s.pod.uid`, `trooper.k8s.workload.kind`, `trooper.k8s.workload.name`, `trooper.service` | `containers_1m.cpu` / `cpu_limit` |
+| `trooper.container.memory_bytes` / `.memory_limit_bytes` | byte | aynı | `memory_bytes` / `memory_limit` |
+| `trooper.container.restarts` | toplam sayaç | aynı | `restarts` |
+| `trooper.container.net_in` / `.net_out` | byte/sn | aynı | `net_in` / `net_out` |
+| `trooper.container.throttled` | 0..1 | aynı | `throttled` |
+| `trooper.process.cpu` (core), `.memory_bytes`, `.threads`, `.fds` | | `process.pid`, `process.executable.name`, `process.command` (sadece ilk token, ≤ 128 karakter), `container.id` | `processes_1m` |
+| `trooper.k8s.node.ready` (0/1), `.allocatable_cpu` (core), `.allocatable_memory` (byte), `.pods` | | `k8s.node.name` | `k8s_nodes_1m` |
+| `trooper.k8s.pod.ready` (0/1), `.restarts`, `.cpu_request`, `.cpu_limit`, `.memory_request`, `.memory_limit` | | `k8s.namespace.name`, `k8s.pod.name`, `k8s.pod.uid`, `k8s.node.name`, `k8s.pod.phase`, `trooper.k8s.pod.reason`, `trooper.k8s.workload.kind`, `trooper.k8s.workload.name`, `trooper.service` | `k8s_pods_1m` |
+| `trooper.k8s.workload.desired` / `.ready` / `.available` / `.updated` | | `k8s.namespace.name`, `trooper.k8s.workload.kind` (Deployment\|StatefulSet\|DaemonSet\|Job\|CronJob), `trooper.k8s.workload.name` | `k8s_workloads_1m` |
+
+- `trooper.k8s.pod.reason`: container waiting/terminated reason (`CrashLoopBackOff`, `OOMKilled`, `ImagePullBackOff`,
+  `ErrImagePull`, `CreateContainerConfigError`, `Evicted`, `Error`) yoksa boş. Workload = ReplicaSet → Deployment'a çözülür.
+- `trooper.service` = pod label `tasktrooper.io/service` > `app.kubernetes.io/name` > `app`; K8s dışı container'da label
+  `tasktrooper.io/service` veya container adı.
+- **Event'ler** (cluster modu): sadece `type=Warning` → OTLP log, resource `service.name=k8s`, `k8s.cluster.name`; log attr'ları
+  `k8s.event.reason`, `k8s.event.type`, `k8s.object.kind`, `k8s.object.name`, `k8s.namespace.name`, `k8s.event.count`;
+  body = message; severity `warn`. Aynı event (uid+count) bir kez.
+- SDK/servis tarafı: K8s'te uygulama `OTEL_RESOURCE_ATTRIBUTES=k8s.pod.name=$(POD_NAME),k8s.namespace.name=$(POD_NAMESPACE),k8s.node.name=$(NODE_NAME)`
+  set ederse span'lar pod'a bağlanır (sdk.md'de örnek).
+- **eBPF (OBI):** Helm `ebpf.enabled=true` → OBI DaemonSet; `OTEL_EXPORTER_OTLP_ENDPOINT=<ingest-gw>`, header `x-trooper-key`.
+  OBI span'larının `telemetry.sdk.name` değeri `opentelemetry-ebpf-instrumentation` (veya `beyla`); api servis listesinde
+  `source: 'ebpf'` döner.
+
+**trooper-agent uygulama notları:** `process.pid` ve `k8s.event.count` OTLP int. K8s'te pod ağı ortak olduğu için `net_in/out`
+sadece pod'un ilk container'ında. `trooper.k8s.pod.reason` son `lastState.terminated` sebebini 15 dk tutar (OOM sonrası
+CrashLoopBackOff → `OOMKilled`). Job: desired = completions, available = updated = succeeded (çalışan Job `unavailable`
+sayılmaz — alerting ve api Job'u hariç tutar); CronJob: desired 1 (askıdaysa 0), son run başarısızsa available 0. Ek env:
+`TT_KUBELET_INSECURE`, `TT_KUBELET_URL`, `TT_K8S_API_URL`, `TT_K8S_TOKEN`, `TT_K8S_INSECURE`, `TT_AGENT_ROOTFS`, `TT_AGENT_SYSFS`,
+`TT_AGENT_HOSTNAME`, `TT_CLOUD_PROVIDER`, `TT_CLOUD_REGION`.
+
+**ClickHouse `deploy/clickhouse/003_infra_k8s_faas.sql`** (AggregatingMergeTree, gauge'lar `SimpleAggregateFunction(max, Float64)`,
+string durum kolonları `SimpleAggregateFunction(anyLast, String)`; TTL 1m tablolar 30 gün, processes 7 gün; raporlanmayan değer
+§5 kuralı: max kolonu `-Inf`):
+- `hosts_1m (org_id, project_id, cluster, host, host_id, os, arch, node, minute | cpu, cpu_cores, memory, memory_bytes, disk,
+  disk_read, disk_write, net_in, net_out, load1, uptime_s)` ORDER BY (org_id, project_id, host, minute).
+- `containers_1m (org_id, project_id, cluster, host, namespace, pod, pod_uid, container, container_id, image, workload_kind,
+  workload, service, minute | cpu, cpu_limit, memory_bytes, memory_limit, restarts, net_in, net_out, throttled)`
+  ORDER BY (org_id, project_id, cluster, namespace, pod, container, minute).
+- `processes_1m (org_id, project_id, host, container_id, pid UInt32, exe, command, minute | cpu, memory_bytes, threads, fds)`.
+- `k8s_nodes_1m (org_id, project_id, cluster, node, minute | ready, allocatable_cpu, allocatable_memory, pods)`.
+- `k8s_pods_1m (org_id, project_id, cluster, namespace, pod, pod_uid, node, workload_kind, workload, service, minute |
+  phase anyLast, reason anyLast, ready, restarts, cpu_request, cpu_limit, memory_request, memory_limit)`.
+- `k8s_workloads_1m (org_id, project_id, cluster, namespace, kind, name, minute | desired, ready, available, updated)`.
+Boş `cluster` = K8s dışı. Writer `trooper.host.*`, `trooper.container.*`, `trooper.process.*`, `trooper.k8s.*`, `trooper.faas.*`
+öneklerini bu tablolara yönlendirir.
+
+**Monitor kind `infra`** — `query: {entity: 'host'|'container'|'pod'|'node'|'workload', metric, filter: {cluster?, namespace?,
+host?, workload?, service?}, agg: 'max'|'avg'}`; metrikler: host `cpu|memory|disk|load1`, container/pod `cpu_ratio`
+(cpu/limit) `|memory_ratio|restarts` (pencere içi artış) `|throttled`, pod `not_ready` (ready=0 olan pod sayısı), node
+`not_ready` (sayı), workload `unavailable` (desired − available). Değer = eşleşen varlıklardaki en kötü değer; incident
+`detail.entities` en kötü 5 varlık. Şablonlar: pod CrashLoop (`restarts` > 3 / 10 dk), node NotReady (`not_ready` > 0, 5 dk),
+host CPU > 0.9 (10 dk), host disk > 0.9, workload `unavailable` > 0 (10 dk).
+**RCA:** servis incident'ında aynı `service`'in pod'larında pencere içinde `reason ∈ {OOMKilled, CrashLoopBackOff}` veya restart
+artışı → aday "Pod <pod> restarted (OOMKilled)" (confidence 0.6–0.85); pod'un host'unda cpu > 0.9 → "Host <h> CPU saturated".
+
+**API** (`?range=` her yerde; değerler seçili aralığın son tam dakikası, seriler aralık bucket'ları):
+- `GET /infra/hosts?cluster=&q=` → `[{id (host.name), hostId, os, arch, cluster, node, cpu, cpuCores, memory, memoryBytes,
+  disk, netIn, netOut, load1, uptimeS, containers, lastSeen, status, spark: {cpu: number[], memory: number[]}}]`.
+- `GET /infra/hosts/{host}` → host alanları (anlık değerler, liste ile aynı) + `series: {cpu, memory, disk (SeriesSet, 0..1),
+  network (SeriesSet: `in`, `out` byte/sn)}`, `containerList: Container[]`, `processes: [{pid, exe, command, containerId, cpu, memoryBytes, threads, fds}]` (son
+  dakika, cpu'ya göre), `services: string[]`.
+- `GET /infra/containers?host=&service=` → `Container[] = [{id, name, image, host, cluster, namespace, pod, podUid, service,
+  cpu, cpuLimit, memoryBytes, memoryLimit, restarts, netIn, netOut, throttled, status}]`.
+- `GET /infra/k8s/clusters` → `[{name, nodes, nodesReady, pods, podsRunning, podsFailing, namespaces, workloads,
+  cpuUsed, cpuAllocatable, memoryUsed, memoryAllocatable, warningEvents, lastSeen, status}]`.
+- `GET /infra/k8s/clusters/{cluster}` → cluster alanları (sayılar, liste ile aynı) + `nodeList: [{name, ready, status, cpu,
+  cpuAllocatable, memoryBytes, memoryAllocatable, pods, host}]`, `namespaceList: [{name, pods, workloads, failing}]`,
+  `series: {cpu (SeriesSet core: `used`, `requested`, `allocatable`), memory (SeriesSet byte, aynı id'ler)}`.
+- `GET /infra/k8s/workloads?cluster=&namespace=` → `[{cluster, namespace, kind, name, desired, ready, available, updated,
+  restarts (aralıkta artış), cpu, memoryBytes, service, status}]`.
+- `GET /infra/k8s/pods?cluster=&namespace=&workload=&node=&service=` → `Pod[] = [{uid, name, namespace, cluster, node, phase,
+  reason, ready, restarts, restartsInRange, cpu, cpuRequest, cpuLimit, memoryBytes, memoryRequest, memoryLimit, workloadKind,
+  workload, service, status, containers: [{name, image, cpu, memoryBytes, restarts}]}]`.
+- `GET /infra/k8s/pods/{uid}` → Pod (anlık değerler) + `series: {cpu (SeriesSet core: `usage`, `request`, `limit`), memory
+  (byte, aynı id'ler), restarts (SeriesSet, bucket başına restart artışı)}`, `events: K8sEvent[]`.
+- `GET /infra/k8s/events?cluster=&namespace=&kind=&name=&limit=` → `K8sEvent[] = [{ts, type, reason, message, objectKind,
+  objectName, namespace, cluster, count}]` (logs tablosu, `service='k8s'`).
+- `GET /services/{svc}/infra` → `{pods: Pod[], hosts: [{id, cpu, memory}], containers: Container[], functions:
+  [{id, name, provider}]}`.
+- Durum kuralları (`status`: `ok|warning|critical|stale`): host/node `critical` cpu|memory|disk > 0.95 veya NotReady,
+  `warning` > 0.85, `stale` son veri > 5 dk. Pod `critical`: phase Failed, reason ∈ {CrashLoopBackOff, OOMKilled,
+  ImagePullBackOff, ErrImagePull} veya Running+ready=0; `warning`: restartsInRange > 0 veya Pending. Workload `critical`
+  available=0 & desired>0, `warning` available < desired. Cluster: en kötü node/pod durumu.
+  Kural: detay uçları liste satırının alanlarını **aynen** taşır; seriler `series` altında, listeler `*List` adıyla (alan adı
+  çakışması olmaz).
+
+## 21. Serverless (ADR-020)
+
+**Postgres `deploy/postgres/011_serverless.sql`** (sahibi: integrations):
+```sql
+-- integrations.provider CHECK'ine 'azure' eklenir; monitors.kind serbest text (kontrol yoksa dokunulmaz)
+CREATE TABLE IF NOT EXISTS serverless_functions (
+  id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  project_id bigint NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  integration_id bigint REFERENCES integrations(id) ON DELETE SET NULL,
+  provider text NOT NULL CHECK (provider IN ('aws','azure')),
+  slug text NOT NULL,                 -- aws-<region>-<name> | azure-<app>
+  name text NOT NULL, app text,       -- Azure: function app adı (name = app)
+  region text NOT NULL DEFAULT '', runtime text NOT NULL DEFAULT '', memory_mb integer, timeout_s integer,
+  arch text NOT NULL DEFAULT '', triggers text[] NOT NULL DEFAULT '{}',   -- 'api', 'sqs:orders', 'schedule', 'http', 'kinesis:..'
+  service text NOT NULL,              -- span service.name eşlemesi (varsayılan name; tag/app setting 'tasktrooper.service')
+  url text, meta jsonb NOT NULL DEFAULT '{}',   -- arn, plan (Consumption|Flex|Premium), functions[] (Azure), tags
+  last_seen_at timestamptz NOT NULL DEFAULT now(), missing boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now(), UNIQUE (project_id, slug));
+```
+
+**trooper-cloud:**
+- AWS `config.services` içinde `lambda` (yeni entegrasyonlarda varsayılan açık). IAM: `lambda:ListFunctions`, `lambda:ListTags`,
+  `lambda:ListEventSourceMappings`, `lambda:GetFunctionConcurrency`, `cloudwatch:GetMetricData`.
+- Azure: `provider='azure'`, `config: {tenantId, clientId, subscriptionIds: [], resourceGroups?: [], env?}`,
+  `credentials_ref` → client secret (düz sealed secret). Token: `https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token`
+  (client_credentials, scope `https://management.azure.com/.default`); `TT_AZURE_LOGIN_URL`, `TT_AZURE_ARM_URL` test için
+  override. Keşif `Microsoft.Web/sites` (kind `functionapp`), fonksiyonlar `{site}/functions`; metrikler
+  `{site}/providers/microsoft.insights/metrics` PT1M. Rol: Reader + Monitoring Reader.
+- OTLP metrikler (gauge, sağlayıcı dakikası; resource `service.name=trooper-cloud`, `cloud.provider`, `cloud.region`;
+  datapoint attr'ları `trooper.faas.id` = slug, `faas.name`):
+
+| Metrik | AWS kaynağı | Azure kaynağı | `faas_1m` kolonu |
+|---|---|---|---|
+| `trooper.faas.invocations` | Invocations Sum | FunctionExecutionCount Total | `invocations` |
+| `trooper.faas.errors` | Errors Sum | Http5xx Total | `errors` |
+| `trooper.faas.throttles` | Throttles Sum | — | `throttles` |
+| `trooper.faas.duration.avg` / `.max` / `.p95` / `.p99` (ms) | Duration Average/Maximum/p95/p99 | HttpResponseTime Average/Maximum (s→ms) | `duration_avg` / `duration_max` / `duration_p95` / `duration_p99` |
+| `trooper.faas.concurrency` | ConcurrentExecutions Maximum | — | `concurrency` |
+| `trooper.faas.iterator_age_ms` | IteratorAge Maximum | — | `iterator_age_ms` |
+| `trooper.faas.memory_bytes` | — | MemoryWorkingSet Average | `memory_bytes` |
+| `trooper.faas.execution_units` (MB·ms) | — | FunctionExecutionUnits Total | `execution_units` |
+
+**ClickHouse** `faas_1m (org_id, project_id, function_id, provider, region, minute | invocations, errors, throttles, duration_avg,
+duration_max, duration_p95, duration_p99, concurrency, iterator_age_ms, memory_bytes, execution_units)` — §20 dosyasında,
+`ORDER BY (org_id, project_id, function_id, minute)`. Dakika değerleri gauge `max`; aralık toplamı = dakikaların `sum`'ı.
+
+**Trace / cold start:** fonksiyon span'ları `faas.name`, `faas.coldstart` (bool), `faas.trigger`, `cloud.provider` taşır
+(OTel semconv). `@trooper/node` `wrapLambda(handler, opts?)`: ilk çağrıda `faas.coldstart=true`, `faas.invocation_id`,
+`faas.trigger` set eder, dönmeden önce flush eder. Cold start sayısı api'de `spans` (`attrs['faas.coldstart']='true'`,
+`service` = fonksiyonun `service`'i, `is_entry=1`).
+
+**Maliyet tahmini** (api, USD; env ile override): Lambda `invocations × 0.20/1e6 + GB-s × 0.0000166667` (arm64 `0.0000133334`),
+GB-s = Σ(invocations × duration_avg ms / 1000) × memory_mb / 1024. Azure Consumption `execution_units / 1024 / 1000 × 0.000016
++ invocations × 0.20/1e6`. Free tier düşülmez.
+
+**Monitor kind `faas`** — `query: {functionId? | filter: {provider?, region?, service?}, metric: 'invocations'|'errors'|
+'error_rate'|'throttles'|'duration_p95'|'duration_p99'|'cold_starts'|'concurrency'|'iterator_age_ms'}`. Şablonlar: error rate
+> 0.05 (5 dk), throttles > 0 (5 dk), p95 > timeout × 0.8.
+
+**API:**
+- `GET /serverless/summary` → `{functions, invocations, errors, errorRate, throttles, coldStarts, costUsd,
+  byProvider: [{provider, functions, invocations, costUsd}]}`.
+- `GET /serverless/functions?provider=&q=` → `[{id, slug, name, provider, app, region, runtime, memoryMb, timeoutS, arch,
+  triggers, service, invocations, errors, errorRate, throttles, p95Ms, p99Ms, coldStarts, coldStartRate, concurrencyMax, costUsd,
+  status: 'ok'|'warning'|'critical'|'idle'|'missing', spark: number[]}]` (spark = invocations bucket'ları). `idle` =
+  aralıkta çağrı yok; `critical` errorRate > 0.05 veya throttles > 0; `warning` errorRate > 0.01 veya p95 > timeout × 0.8.
+- `GET /serverless/functions/{id}` → function (anlık/aralık değerleri, liste ile aynı) + `series: {invocations (SeriesSet:
+  `invocations`, `errors`, `throttles`), duration (SeriesSet ms: `avg`, `p95`, `p99`), concurrency (SeriesSet), coldStarts
+  (SeriesSet)}`, `recentErrors: [{ts, traceId,
+  message}]` (span'lardan), `functions?: string[]` (Azure), `integration: {id, name}`.
+- `POST /integrations` `provider:'azure'` → `config` yukarıdaki gibi, client secret aws/gcp ile aynı `secret` alanında.
+
+**Monitor şablonları:** kaynak `services/alerting/internal/eval/templates.go` (`eval.Templates`); api aynı listeyi
+`GET /monitor-templates` → `[{id, name, description, kind, severity, query, condition}]` ile döner. `faas` "p95 > timeout × 0.8"
+şablonu `query.relativeToTimeout: true` + eşik 0.8. Incident `rootCause` ek alanları: `infra: [{kind: pod|host, entity,
+cluster?, node?, reason, restarts?, value?, title, confidence}]`, `treeSummary`, `treeConfidence`.
+
+**Faz 6 api notları (uygulamadan):** repo seviyesi analiz özeti `Repo.analysis` (`analysis.llm`); inventory satırlarının
+`analysis`'i öğe seviyesidir. `Pod.lastSeen` (ms), `K8sNode.status` ek alan. Container durumu: `critical` memory > 0.95 × limit;
+`warning` cpu|memory > 0.85, aralıkta restart veya throttled > 0.25; `stale` 5 dk veri yok. eBPF tespiti son 6 saat; servisin tüm
+span'ları OBI/beyla ise `source: 'ebpf'`. `GET /serverless/functions/{id}` numeric id veya slug kabul eder; satırlarda `costUsd`.
+Faas `relativeToTimeout` sadece `duration_p95|duration_p99` ile geçerli.
+
+## 22. Faz 6 tamamlayıcıları
+
+**trooper-agent:**
+- Cluster modu **watch** kullanır: her kaynak için ilk `list` + `watch?resourceVersion=` (allowWatchBookmarks); 410 Gone → yeniden
+  list. Snapshot metrikleri yine 30 sn'de bir bellekteki durumdan üretilir. Event'ler de watch ile.
+- Container kaynakları sırası (host modu, K8s dışı): Docker Engine API → Podman (Docker uyumlu socket; `TT_AGENT_PODMAN_SOCKET`,
+  varsayılan `/run/podman/podman.sock`, rootless `$XDG_RUNTIME_DIR/podman/podman.sock`) → **cgroup v2 fallback** (Linux,
+  `/sys/fs/cgroup`; containerd/nerdctl/diğerleri: `cpu.stat`, `memory.current`, `memory.max`, `cpu.max`; container id cgroup yolundan,
+  ad/imaj bilinmiyorsa id'nin ilk 12 karakteri). Aynı container iki kaynaktan gelirse ilki kazanır.
+- **GPU** (host modu, `nvidia-smi` PATH'te varsa veya `TT_AGENT_NVIDIA_SMI`): `trooper.host.gpu.utilization` (0..1),
+  `.memory` (0..1), `.memory_bytes`, `.temperature_c`, `.power_w`; attr `gpu.index`, `gpu.model`, `gpu.uuid`. ClickHouse
+  `gpus_1m (org_id, project_id, cluster, host, gpu_index UInt8, gpu_uuid, model, minute | utilization, memory, memory_bytes,
+  temperature_c, power_w)` (`deploy/clickhouse/004_gpu.sql`). Host'a ek alan: `hosts_1m` değişmez; api host satırına
+  `gpus: [{index, model, uuid, utilization, memory, memoryBytes, temperatureC, powerW}]` ekler (son dakika); host
+  detayı `series.gpu` (GPU başına seri, id `gpu<index>`).
+- **Windows** node/host: agent `GOOS=windows` build edilir (host + docker npipe `//./pipe/docker_engine`; process `fds` yok);
+  Helm `windows.enabled` → `kubernetes.io/os: windows` nodeSelector'lı ayrı DaemonSet (HostProcess container). `os.type=windows`.
+- **Tek Helm chart:** `deploy/helm/trooper-agent` tek kaynak; eski `services/collector/deploy/helm/trooper-agent` silinir.
+  DB/broker hedefleri yeni chart'ta `db.enabled` + `db.targets` (statik YAML, eski chart'ın configmap formatı) ve/veya
+  `db.fromApi` (`TT_API_URL`/`TT_API_KEY`) ile cluster Deployment'ında çalışır.
+
+**Azure fonksiyon bazında metrik (Application Insights):**
+- Function App'e bağlı App Insights bileşeni ARM'dan bulunur: `Microsoft.Insights/components` kaynaklarının
+  `hidden-link:<siteId>` tag'i (Reader yeterli). Sorgu ARM proxy'si üzerinden: `POST {componentId}/query?api-version=2018-04-20`
+  (`{"query": KQL, "timespan": "PT15M"}`), aynı ARM token'ı.
+- KQL: `requests | where timestamp > ago(15m) | summarize invocations=sum(itemCount), errors=sumif(itemCount, success == false),
+  avg=avg(duration), p95=percentile(duration,95), p99=percentile(duration,99), max=max(duration) by bin(timestamp, 1m),
+  operation_Name, cloud_RoleName`. Cold start: `customMetrics`/trace yoksa boş.
+- Her fonksiyon ayrı `serverless_functions` satırı: slug `azure-<app>-<function>`, `name` = fonksiyon, `app` = app adı,
+  `meta.parent` = app slug'ı, `meta.source = 'appinsights'`, `triggers` = fonksiyonun tetikleyicisi. App satırı kalır (app
+  seviyesi metrikler). `service` = `cloud_RoleName` (yoksa tag, yoksa app). Metrik attr'ı `trooper.faas.id` = fonksiyon slug'ı.
+- Fonksiyon satırı `meta`: `parent, source, trigger, disabled?, language?, plan, appId, subscriptionId, resourceGroup`; HTTP
+  tetikleyicide `url`. App satırı `meta.appInsightsComponent`. `cloud_RoleName` app adına eşitse ve app'te tag varsa tag kazanır.
+  Özet/byProvider toplamları `meta.parent` olan satırları saymaz (çift sayım olmasın).
+- App Insights yoksa veya erişim yoksa sadece app satırı (bugünkü davranış), `meta.appInsights = 'unavailable'`.
+- Opsiyonel `config.readAppSettings: true` → `POST {site}/config/appsettings/list` (Website Contributor gerekir) ile
+  `TASKTROOPER_SERVICE` / `OTEL_SERVICE_NAME` okunur; yetki yoksa sessizce atlanır.
+- api: `GET /serverless/functions` satırlarına `parentId` (app satırının id'si, sadece Azure fonksiyon satırlarında); liste varsayılan
+  olarak hepsini döner; `?parent=<id>` filtresi. Function detail'da Azure app için `children: Function[]`. Satırlarda
+  `appInsights` (`connected|unavailable`). Özet: `meta.parent` olan satırlar toplamlara girmez; çocuğu olan app `functions`
+  sayısına girmez, maliyet app satırında.
+
+**Pod bazında trace ve log:**
+- `GET /traces` yeni filtreler: `pod`, `namespace`, `node`, `host` (span `resource_attrs['k8s.pod.name']`,
+  `['k8s.namespace.name']`, `['k8s.node.name']`, `['host.name']`).
+- `GET /logs` yeni filtreler: `pod`, `namespace` (`attrs['k8s.pod.name']`, `attrs['k8s.namespace.name']`).
+- Pod sayfası: "Traces" bölümü `/traces?service=&pod=` listesini gösterir; "Logs" linki `/logs?pod=&namespace=` ile sunucu tarafı filtre.
+
+## 23. Session replay (ADR-021)
+
+**Ingest:** `POST /v1/replay` (ingest-gw :4318). Auth, CORS, `?key=`, internal credential ve content type'lar `/v1/rum` ile aynı
+(§2). Gövde tek segment JSON'u; `Content-Encoding: gzip` önerilir (browser `CompressionStream`). Limit: sıkıştırılmış ≤ 1 MB,
+açılmış ≤ 10 MB → aşarsa 413. gw JSON'u parse edip doğrular (`session_id`, `segment`, `format`, `events` zorunlu), gövdeyi
+**gzip'li** halde `tt.replay`'e yollar (gzip değilse sıkıştırır). Rate limit RUM ile ortak.
+
+```jsonc
+{
+  "resource": { "service": "shop-web", "env": "production", "version": "1.4.0", "platform": "web",   // web | android | ios
+                "sdk_name": "@trooper/replay", "sdk_version": "0.1.0" },
+  "session_id": "…",            // RUM session_id ile aynı
+  "segment": 0,                 // oturum içinde 0'dan artan; web: localStorage'da oturum başına sayaç (sekmeler arası ortak, sayfa yüklemeleri arasında sürer)
+  "start_ts": 1730000000000,    // unix ms, ilk event
+  "end_ts":   1730000005000,    // unix ms, son event
+  "format": "rrweb",            // rrweb (web) | wireframe (mobil)
+  "has_full_snapshot": true,    // rrweb: segment FullSnapshot (type 2) içeriyor; wireframe: segmentte en az bir frame var (yoksa oynatıcı önceki frame'i tutar; her segment `screen` ile başlar)
+  "view_id": "…", "view_name": "/checkout",          // segment başındaki view (opsiyonel)
+  "user_id": "", "anonymous_id": "…",                 // RUM ile aynı (opsiyonel)
+  "stats": { "clicks": 3, "errors": 0, "rage_clicks": 0, "inputs": 1 },   // SDK sayar (opsiyonel)
+  "events": [ … ]
+}
+```
+
+- **rrweb:** `events` = `@rrweb/record` 2.x event'leri olduğu gibi (`{type, data, timestamp}`). Her sayfa yüklemesi ve her
+  `checkoutEveryNms` (5 dk) FullSnapshot ile başlar. Segment ≤ 5 sn veya ≤ 256 KB (sıkıştırmadan önce tahmini) dolunca gönderilir;
+  `pagehide`'da `fetch keepalive` (≤ 64 KB) ile son segment.
+- **wireframe** (mobil) event tipleri:
+  - `{"type":"screen","ts":…,"width":390,"height":844,"density":3,"name":"CheckoutScreen"}` — başta, ekran/rotasyon değişince.
+  - `{"type":"frame","ts":…,"nodes":[Node…]}` — her zaman tam kare (diff yok), sadece hiyerarşi değişince, ≤ 2 kare/sn.
+    `Node = {"id":int,"x","y","w","h" (dp/pt, ekran koordinatı),"kind":"view|text|image|button|input|switch|webview|list|icon",
+    "bg"?:"#rrggbb[aa]","fg"?:"#rrggbb","radius"?:num,"border"?:"#rrggbb","text"?:string,"masked"?:bool,"alpha"?:0..1,
+    "clip"?:[x,y,w,h],"checked"?:bool}`. Liste çizim sırasıdır (arkadan öne). Maskeli metin uzunluğu korunur (`"•••• •••"`).
+    `checked` sadece `switch` (toggle/checkbox/radio) için. Etiketli toggle = `text` + `switch` (toggle alanı) iki node. Dialog karartması
+    yarı saydam tam ekran `view` node'u. `bg`'siz `button` oynatıcıda nötr dolgu ile çizilir. Compose ve SwiftUI node'larında renk yok;
+    SwiftUI metni yalnız erişilebilirlik ağacı açıkken okunur (aksi halde içerik katmanları — metin unmask edilemez).
+    Yakalama bütçesi: Android main thread CPU süresi (~12 ms), bütçe aşan kare atılır ve bir kez yeniden denenir; iOS tam kare varken
+    yarım kareyi atar. `TrooperReplay.stop()` her iki platformda (idempotent, açık segmenti mühürleyip gönderir).
+  - `{"type":"touch","ts":…,"x":…,"y":…,"phase":"down|move|up"}` (move ≤ 10/sn), `{"type":"keyboard","ts":…,"visible":bool}`.
+- **Gizlilik (SDK default):** web `maskAllText`, `maskAllInputs` true; `input[type=password]` her zaman maskeli; seçiciler
+  `data-trooper-block` (öğe boyutunda boş kutu), `data-trooper-mask`, `data-trooper-unmask`; canvas, cross-origin iframe, network
+  gövdesi, `<script>` kaydedilmez. Mobil: metin maskeli, görsel = kutu, input/secure text her zaman maskeli; Android
+  `View.setTag(R.id.trooper_unmask, true)` / Compose `Modifier.trooperUnmask()`, iOS `view.trooperUnmask = true`.
+- **Örnekleme:** `replay.sampleRate` (default 0.1), `replay.onErrorSampleRate` (default 1.0; son 60 sn bellekte ring buffer, ERROR
+  event'inde flush + kayda devam). Karar oturum başında verilir, oturum boyunca sabit (web: localStorage, oturum id'si anahtarlı — RUM oturumu sekmeler arası ortak olduğu için karar ve segment sayacı da ortak; her sekme kendi FullSnapshot'ı ile başlar). `replay.enabled=false` tamamen kapatır.
+
+**Kafka:** `tt.replay` — değer gzip'li segment JSON'u; key `project_id`; header'lar §3 + `session_id`, `segment`.
+`tt.replay` ve `tt.profiles` topic'leri `max.message.bytes=10485760` ile açılır (compose; prod/Helm'de aynı); gw bu iki topic için
+ayrı producer kullanır (kayıt ≤ 8 MiB). gw doğrulaması: `session_id` ≤ 128 karakter `[A-Za-z0-9._-]` (S3 anahtarının parçası),
+`segment` 0..999999.
+
+**Writer:** blob'u S3'e yazar, sonra indeks satırını ClickHouse'a (`deploy/clickhouse/005_replay_profiles_llm.sql`).
+- S3: §12'deki `TT_S3_*` env'leri; bucket `TT_REPLAY_S3_BUCKET` (default `tt-replays`, yoksa oluşturulur). Anahtar
+  `<org>/<project>/<yyyy-mm-dd>/<session_id>/<segment:06d>.json.gz` (tarih = `start_ts` UTC). `TT_S3_ENDPOINT` yoksa (default yok)
+  veya bucket 15 sn içinde açılamazsa writer replay topic'ini tüketmez (log + `tt_writer_replay_disabled` gauge = 1). Host'ta
+  çalışan writer için `TT_S3_ENDPOINT=http://localhost:9002`. Nesneler `Content-Encoding: gzip`, `Content-Type: application/json`. Prod'da bucket lifecycle 30 gün.
+- `replay_segments(org_id, project_id, session_id String, segment UInt32, service, env, version, platform, format
+  LowCardinality(String), start_ts, end_ts DateTime64(3), events UInt32, bytes UInt32 (sıkıştırılmış), blob_key String,
+  has_full_snapshot UInt8, clicks, errors, rage_clicks UInt16, view_name String, user_id, anonymous_id String, received_at
+  DateTime64(3))` — `MergeTree`, `PARTITION BY toDate(start_ts)`, `ORDER BY (org_id, project_id, session_id, segment)`,
+  TTL 30 gün. Aynı (session, segment) iki kez gelirse sorgu `argMax(…, received_at)` ile tekler.
+- MV `replay_sessions` (`AggregatingMergeTree`, `ORDER BY (org_id, project_id, service, session_id)`): `min(start_ts)`,
+  `max(end_ts)`, `count()` segment, `sum(clicks|errors|rage_clicks)`, `any(platform|format|user_id|anonymous_id)`,
+  `argMin(view_name, start_ts)` ilk view. Liste sorgusu buradan.
+
+**API** (`openapi.yaml`, tenant filtresi zorunlu):
+- `GET /api/v1/replays?app=&range=&q=&hasErrors=&minDurationS=&limit=` → `{ replays: ReplaySummary[] }`
+  `ReplaySummary = { sessionId, app, platform, startedAt (ms), durationMs, segments, user: {id?, anonymousId}, country?,
+  device?, browser?, os?, appVersion?, firstView, views, errors, clicks, rageClicks }` (kullanıcı/cihaz alanları `rum_events`'ten).
+  `q` user id / anonymous id / view adında arar. Sıra: en yeni önce.
+- `GET /api/v1/replays/{sessionId}` → `{ summary: ReplaySummary, segments: [{ segment, startTs, endTs, events, bytes,
+  hasFullSnapshot }], timeline: TimelineItem[] }`. `TimelineItem = { ts, kind: 'view'|'action'|'error'|'resource'|'vital',
+  label, detail?, viewName?, traceId?, fingerprint?, status?, durationMs? }` — `rum_events`'ten (oturumun tüm event'leri, ≤ 2000).
+- `GET /api/v1/replays/{sessionId}/segments/{segment}` → segment JSON'u (S3'teki gzip gövde `Content-Encoding: gzip` ile
+  olduğu gibi). 404: segment yok veya TTL geçti.
+- Mevcut uçlara ek: `GET /apps/{app}/sessions` satırlarında `hasReplay: boolean`; `GET /apps/{app}/errors/{fingerprint}` ve
+  `GET /errors/{fingerprint}` cevabında üst seviye `replay?: { sessionId, offsetMs }` (replay'in kapsadığı en yeni oluşum; backend hatasında trace id taşıyan RUM resource event'i üzerinden).
+
+**Hibrit uygulamalar:** React Native → native SDK replay'i (`TrooperRum.startReplay(options)`, `stopReplay()`, `isReplayRecording()`
+— hepsi `Promise<boolean>` —, `notifyReplayError()` JS hatasında on-error buffer'ı tetikler; native API `TrooperReplay.notifyError()` /
+`TrooperReplay.stop()`; iOS'ta `TROOPER_RN_NATIVE_SDK=1` `TaskTrooper/Replay` subspec'ini de çeker, `TROOPER_RN_REPLAY=0` kapatır; native SDK yoksa
+no-op + uyarı), `resource.platform` = `android|ios`, `sdk_name` native SDK'nınki. Flutter → `trooper_flutter` Dart tarafı wireframe
+(`sdk_name` = `trooper_flutter`, `platform` = `android|ios`), native SDK varsa native replay **başlatılmaz** (çift kayıt olmasın).
+**Web sekmeleri:** buffer modundaki sekme localStorage `storage` event'inde karar `session` olursa buffer'ını flush edip kayda geçer.
+
+**UI:** `/replays/:sessionId` oynatıcı (`?t=<offsetMs>`), client app detayında **Replays** sekmesi; Sessions satırında ve hata
+çekmecesinde "Watch replay". Web oynatıcı `@rrweb/replay`; wireframe oynatıcı kendi SVG'miz.
+
+## 24. Continuous profiling (ADR-022)
+
+**Ingest:** `POST /v1/profiles` (ingest-gw :4318; `x-trooper-key` / Bearer / internal credential; `Origin` header'lı istek 403, CORS yok,
+`?key=` **kabul edilmez**). gw profili parse ederek doğrular (bozuksa 400); `end − start` ≤ 1 saat, `unit` tiple uyumlu olmalı. Gövde tek profil, ≤ 4 MB (açılmış ≤ 32 MB); `Content-Encoding: gzip` her iki formatta kabul edilir. Metadata query parametreleriyle:
+
+| Param | Zorunlu | Anlam |
+|---|---|---|
+| `service` | ✓ | `service.name` |
+| `env`, `version`, `host`, `runtime` (`go|jvm|node|dotnet|python`) | | resource |
+| `start`, `end` | ✓ | unix ms, profilin kapsadığı pencere |
+| `format` | | `pprof` (default; `Content-Type: application/octet-stream`, gzip'li veya değil — magic `1f8b` ile anlaşılır) veya `folded` (`text/plain`) |
+| `type`, `unit` | folded'da ✓ | aşağıdaki tip adları; pprof'ta sample type'lardan çıkarılır |
+
+- **Tipler** (`type` / `unit`): `cpu` (nanoseconds), `wall` (nanoseconds), `alloc_space` (bytes), `alloc_objects` (count),
+  `inuse_space` (bytes), `inuse_objects` (count), `goroutines` (count), `lock` (nanoseconds — mutex/monitor bekleme),
+  `block` (nanoseconds). pprof sample type eşlemesi: `cpu/nanoseconds`→cpu, `samples/count` atlanır (cpu varsa),
+  `alloc_space/bytes`, `alloc_objects/count`, `inuse_space/bytes`, `inuse_objects/count`, `goroutine/count`→goroutines,
+  `delay/nanoseconds` (mutex)→lock (block profilinde `?type=block` ile), `contentions/count` atlanır.
+- **folded:** satır başına `frame1;frame2;…;frameN <değer>` (root önce, leaf son, değer tamsayı, `unit` cinsinden).
+  `# trooper.route=<route> trooper.method=<METHOD>` satırı sonraki satırlara endpoint etiketi uygular (bir sonraki `#` satırına kadar;
+  `# ` tek başına etiketi temizler). Frame adında `;` ve satır sonu olamaz.
+- **pprof label'ları:** sample label `trooper.route` + `trooper.method` → endpoint. Diğer label'lar atılır.
+- **Frame adı:** Go `pkg.(*T).Method`, JVM `com.acme.Foo.bar`, Node `fn (path/to/file.js)` (satır/sütun yok; anonim → `(anonymous)`).
+  Dosya/satır saklanmaz. Stack derinliği > 128 ise root tarafı `[truncated]` frame'i ile kesilir.
+
+**Kafka:** `tt.profiles` — değer ham gövde (gzip'li olabilir); header'lar §3 + `service`, `env`, `version`, `host`, `runtime`,
+`start`, `end`, `format`, `type`, `unit`.
+
+**OTLP profiles:** gw `POST /v1development/profiles` (OTLP/HTTP; protobuf veya JSON; gzip) ve gRPC
+`opentelemetry.proto.collector.profiles.v1development.ProfilesService/Export` (:4317). Auth OTLP uçlarıyla aynı. gw istek başına
+`tt.profiles`'a tek kayıt yazar (`format=otlp`, değer = `ExportProfilesServiceRequest` protobuf; servis/zaman header'ları boş olabilir).
+Writer her `ResourceProfiles` → `ScopeProfiles` → `Profile` için: `service.name` / `deployment.environment.name` / `service.version` /
+`host.name` / `process.runtime.name` resource attribute'larından, `time_unix_nano` + `duration_nano` pencere, sample type'lar §24 pprof
+eşlemesiyle (nanosecond tipi yoksa `samples`/`count` × period → `cpu`), stack = location → function adı (inline frame'ler açılır),
+sample attribute `trooper.route`/`trooper.method` → endpoint. Proto: ayrı modüller `go.opentelemetry.io/proto/otlp/profiles/v1development`
+ve `.../collector/profiles/v1development` **v0.4.1** (Collector 0.164 pdata ile aynı; request seviyesinde `ProfilesDictionary`) —
+kırıcı değişiklikte gw sürümü pinler. Writer kuralları: attribute'lar inline veya `key_strindex`/`string_value_strindex` ile gelebilir
+(ikisi de çözülür); tabloların 0. indeksi gerçek veri olabilir (Collector böyle yazar) → normal indeks gibi okunur. `service.name` yoksa
+`unknown_service:<process.executable.name>` (eBPF profiler servis yazmaz). Sample değeri = `values` toplamı, yoksa timestamp sayısı.
+Aynı zamanda `cpu/nanoseconds` varsa `samples/count` profili atlanır. Metrik: `tt_ingest_writer_otlp_profiles_total{outcome}`.
+
+**Writer** (`deploy/clickhouse/005_replay_profiles_llm.sql`):
+- `profile_stacks(org_id, project_id, ts DateTime (profil start'ı), service, env, version, host, runtime, type, unit, route,
+  method LowCardinality(String), stack_hash UInt64 (cityHash64(stack)), stack Array(LowCardinality(String)), value Int64)` —
+  `PARTITION BY toDate(ts)`, `ORDER BY (org_id, project_id, service, type, ts, stack_hash)`, TTL 14 gün. Profil + tip + route +
+  stack başına bir satır (aynı stack'ler writer'da toplanır). Profil başına tip başına ≤ 10.000 stack; fazlası değere göre
+  küçükler `[other]` tek frame'li stack'e toplanır. Değeri 0 olanlar yazılmaz.
+- `profiles(org_id, project_id, ts DateTime64(3) (start), end_ts DateTime64(3), service, env, version, host, runtime, type, unit,
+  total Int64, stacks UInt32)` — profil + tip başına bir satır, `ORDER BY (org_id, project_id, service, type, ts)`, TTL 14 gün.
+  CPU kullanımı (core) = `total / ((end_ts - ts) ns)`; zaman serisi buradan.
+
+**API:**
+- `GET /api/v1/profiles/types?service=&range=` → `{ types: [{ type, unit, runtime, hosts: string[], versions: string[],
+  routes: number (route etiketli stack var mı / kaç route) }] }` (veri olanlar).
+- `GET /api/v1/profiles/flamegraph?service=&type=&range=&env=&version=&host=&route=&method=` →
+  `{ type, unit, total, profiles, from, to, root: FlameNode }`, `FlameNode = { name, value (total), self, children: FlameNode[] }`.
+  Kök adı `"all"`. Toplam değerin < %0.05'i olan düğümler kesilir (değerleri ebeveynin `self`'inde kalmaz, `"[pruned]"` adlı tek
+  çocukta toplanır); ≤ 5000 düğüm. Çocuklar değere göre azalan.
+- `GET /api/v1/profiles/diff?service=&type=&env=&host=&route=&method=` + taban ve hedef: (`baseVersion` & `version`) **veya**
+  (`baseFrom`, `baseTo`, `from`, `to` unix ms) → `{ type, unit, total, baseTotal, root: DiffNode }`, `DiffNode = FlameNode +
+  { baseValue, baseSelf }` (iki ağaç birleşik; olmayan tarafta 0). UI pay farkını (`value/total − baseValue/baseTotal`) çizer.
+- `GET /api/v1/profiles/top?service=&type=&range=&env=&version=&host=&route=&method=&limit=50` → `{ unit, total, functions:
+  [{ name, self, total }] }` (`total` = fonksiyonu içeren stack'lerin toplamı, recursion bir kez sayılır).
+- `GET /api/v1/profiles/series?service=&type=&range=&env=&version=` → Seri (§8): `cpu`/`wall` için ortalama core; `alloc_*`/`lock`/`block` profil
+  penceresine göre normalize edilmiş dakika başına oran (pencereli SDK'lar düşük okunmasın); anlık tipler (`inuse_*`, `goroutines`) dakika
+  başına ortalama değer; host başına seri (≤ 8, fazlası "Other").
+- Endpoint sayfası route/method'u servis endpoint'inden alır; profil yoksa UI "Enable profiling" talimatını gösterir.
+
+**.NET:** `TaskTrooper.Telemetry.Profiling` paketi (`services.AddTaskTrooperProfiling()` veya `TROOPER_PROFILING=true` + paket
+referansı), default tipler `cpu,alloc_space,lock`, runtime `dotnet`, folded format + route bölümleri. EventPipe ~1 kHz'de
+sabit örneklediği için pencereli (default 10 sn / 60 sn; `Duration = Period` sürekli); ortalama ek yük ~%2 (pencere içinde %10–13).
+Route etiketi `AsyncLocal` ile `await`'ler boyunca izlenir (sadece örneklenmiş istekler). `cpu` = managed kod çalışırken alınan örnekler. **Python:** `tasktrooper`
+`init(profiling=True)`, default `cpu`, opsiyonel `wall`, `inuse_space` (tracemalloc, overhead uyarısı), runtime `python`, route etiketi
+entry span'ının thread'i üzerinden (asyncio'da task başına değil, thread başına — not edilir). Python ek env'leri: `TROOPER_PROFILING_HZ`,
+`TROOPER_DISABLE_INSTRUMENTATIONS`, `TROOPER_DEBUG`; CPU Linux'ta thread CPU saatinden, diğerlerinde idle sezgisiyle; Python < 3.11'de
+frame adı sadece fonksiyon adı.
+
+**SDK config:** `TROOPER_PROFILING` (`true|false`, default false), `TROOPER_PROFILING_TYPES` (virgüllü; default
+`cpu,alloc_space,inuse_space` + Go'da `goroutines`), `TROOPER_PROFILING_PERIOD` (sn, default 60), `TROOPER_PROFILING_CPU_DURATION`
+(sn, default 10). Node: default `cpu,inuse_space` (V8 aynı anda tek sampling heap profiler çalıştırır), route etiketi yok (V8 sample'ları async context taşımaz); `cpu` = main thread `(idle)` hariç, `wall` opsiyonel. Overhead bütçesi < %2 CPU (sdk.md İlke 2). Gönderim başarısızsa profil atılır (kuyruk yok), backoff §2.
+
+## 25. AI / LLM monitoring (ADR-023)
+
+**Wire:** OTLP span (yeni endpoint yok). Writer'ın okuduğu OTel GenAI attribute'ları (span):
+
+| Attribute | Anlam |
+|---|---|
+| `gen_ai.operation.name` | `chat`, `text_completion`, `embeddings`, `generate_content`, `execute_tool`, `invoke_agent`, `create_agent` — **varlığı span'ı LLM span'ı yapar** |
+| `gen_ai.provider.name` (eski `gen_ai.system`) | `openai`, `anthropic`, `gcp.gemini`, `gcp.vertex_ai`, `aws.bedrock`, `azure.ai.openai`, `mistral_ai`, `cohere`, `groq`, `deepseek`, `x_ai`, `ollama`, `openrouter`, `together_ai`, `fireworks_ai`, `perplexity`, `cerebras` … |
+| `gen_ai.request.model`, `gen_ai.response.model` | model (response varsa o kazanır) |
+| `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens` | token'lar (int) |
+| `gen_ai.usage.cache_read.input_tokens`, `gen_ai.usage.cache_creation.input_tokens` | prompt cache token'ları (Anthropic/OpenAI) — **`input_tokens` bunları da içerir** (OTel semconv; Anthropic'te SDK `input_tokens + cache_read + cache_creation` yazar, OpenAI `prompt_tokens` zaten dahil). Maliyet: `(input − cache_read − cache_write) × input fiyatı + cache_read × cacheRead + cache_write × cacheWrite (yoksa input fiyatı) + output × output fiyatı` |
+| `gen_ai.request.max_tokens`, `gen_ai.request.temperature`, `gen_ai.response.finish_reasons` (string[]), `gen_ai.response.id`, `gen_ai.conversation.id`, `gen_ai.agent.name`, `gen_ai.tool.name` | meta (attrs'ta kalır) |
+| `trooper.llm.ttft_ms` (double) | stream'de ilk token süresi (SDK ölçer) |
+| `gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions` (JSON string) | **sadece `captureContent`** — writer bunları attrs'tan çıkarıp `llm_content`'e yazar |
+
+Vercel AI SDK provider span'ları (`ai.*.doGenerate|doStream|doEmbed`) `gen_ai.operation.name` taşımaz: writer `ai.operationId` / `gen_ai.system`'dan tamamlar (`anthropic.messages` → `anthropic`, TTFT `ai.response.msToFirstChunk`); `@trooper/node` bunu SDK'da da yapar.
+Provider SDK'larının kendi GenAI span'ları (ör. Anthropic Python SDK 2.x, .NET): `gen_ai.usage.cache_write.input_tokens` →
+cache_creation, `gen_ai.response.time_to_first_chunk` (saniye) → `trooper.llm.ttft_ms`. Böyle SDK'larda `instrument_anthropic` ikinci
+span üretmez (çift sayım olmasın).
+Eski OpenLLMetry adları da kabul: `gen_ai.prompt.N.*` / `gen_ai.completion.N.*` → içerik; `llm.usage.*` → token'lar.
+OTel log event'i `gen_ai.client.inference.operation.details` gelirse içerik oradan alınır.
+
+**Writer:**
+- LLM span'ında `dep_kind = 'ai'`, `dep = "<provider> · <model>"` (client/internal fark etmez; `execute_tool`/`invoke_agent`/
+  `create_agent` dep üretmez). Aynı istekte altındaki HTTP client span'ı (ör. `HTTP · api.openai.com`) **dep olarak sayılmaz**
+  (parent'ı LLM span'ı olan HTTP client span'ı atlanır) — süre çift sayılmasın.
+- `spans`'a normal yazılır (içerik attr'ları hariç). `llm_content(org_id, project_id, ts DateTime64(6), trace_id, span_id,
+  service, system String, input String, output String)` — alan başına 32 KB'ta kesilir (`…[truncated]`), TTL 7 gün,
+  `ORDER BY (org_id, project_id, trace_id, span_id)`.
+- MV `llm_1m` (`spans`'tan, sadece model çağrıları — `execute_tool` / `invoke_agent` / `create_agent` hariç; `/ai/calls` ve trace `llm` alanı da aynı kural; `AggregatingMergeTree`): `org_id, project_id, service, env, provider, model, operation, route
+  (entry route), method, minute | calls, errors, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens
+  (SimpleAggregateFunction(sum, UInt64)), duration_hist (quantilesTDigestWeighted), ttft_hist` — TTL 30 gün; MV `llm_1h` 13 ay.
+  `sample_weight` ile çarpılır (tail sampling).
+
+**API:**
+- `GET /api/v1/ai/overview?range=&env=&service=&provider=&model=` → `{ totals: { calls, errors, errorRate, inputTokens,
+  outputTokens, cacheReadTokens, costUsd (fiyatı bilinen modellerin toplamı; hiçbirinin fiyatı yoksa null), costPartial: boolean (fiyatsız çağrı var), p50Ms, p95Ms, ttftP95Ms? },
+  series: { calls, tokens (input/output), cost (model başına ≤ 8 + Other), latency (p95) },
+  byModel: [{ provider, model, calls, errors, inputTokens, outputTokens, costUsd, p95Ms, priceKnown }],
+  byService: [{ service, calls, inputTokens, outputTokens, costUsd, models: string[] }],
+  byEndpoint: [{ service, route, method, calls, avgInputTokens, avgOutputTokens, costUsd, costPerCallUsd, p95Ms }] }`.
+- `GET /api/v1/ai/calls?range=&service=&provider=&model=&errorsOnly=&route=&limit=50` → `{ calls: [{ ts, traceId, spanId,
+  service, route, provider, model, operation, inputTokens, outputTokens, costUsd, durationMs, ttftMs?, error?, finishReason?,
+  hasContent }] }` (son çağrılar, `spans`'tan).
+- `GET /api/v1/ai/calls/{traceId}/{spanId}` → `{ call, attributes: Record<string,string>, content?: { system?, input, output } }`
+  (`input`/`output` JSON string — GenAI mesaj dizisi; UI rol bazında gösterir).
+- `GET /api/v1/ai/prices` → `{ updated (default tablonun tarihi), prices: [{ provider, model, inputPerMTok, outputPerMTok, cacheReadPerMTok?, cacheWritePerMTok?,
+  source: 'default'|'org' }] }`; `PUT /api/v1/ai/prices` (admin+) `{ provider, model, inputPerMTok, outputPerMTok, … }` org
+  override; `DELETE /api/v1/ai/prices?provider=&model=` default'a döner. Fiyat anahtarı **aile** + model: provider aileye indirgenir (`gcp.gemini`/`gcp.vertex_ai` → `google`, `azure.ai.openai` → `openai`, `aws.bedrock` → modelin üreticisi, ör. `anthropic.claude-…` → `anthropic`). Model eşleşmesi: tam ad, yoksa alfanümerik olmayan sınırda en uzun önek
+  (ör. `claude-sonnet-4-5-20250929` → `claude-sonnet-4-5`). Varsayılan fiyatlar `services/pkg/llmprice/defaults.json`.
+  Postgres `llm_prices(org_id, provider, model, input_per_mtok, output_per_mtok, cache_read_per_mtok, cache_write_per_mtok,
+  updated_by, updated_at)` (`deploy/postgres/012_llm_prices.sql`).
+- `GET /api/v1/services/{id}` cevabına `hasAi: boolean`; servis kapsamı `ai/overview?service=`.
+- `GET /api/v1/traces/{id}` span'larında LLM span'ı için `llm?: { provider, model, operation, inputTokens, outputTokens,
+  costUsd, ttftMs?, hasContent }`.
+
+**Alert (monitor kind `llm`):** `query: { filter: { service?, provider?, model?, route?, method?, operation? }, metric }`,
+`metric` ∈ `cost_usd` (pencere toplamı, tahmini — fiyat kuralı yukarıda, org override dahil), `cost_usd_per_hour`, `tokens`,
+`input_tokens`, `output_tokens`, `calls`, `errors`, `error_rate`, `p95_ms`, `ttft_p95_ms`; kaynak `llm_1m` (pencere ≥ 6 saat ise
+`llm_1h`). `minRequests` oran/süre metriklerinde. Fiyat bilinmeyen modeller `cost_*`'a girmez; filtredeki tüm modeller fiyatsızsa
+`no_data`. Fiyat tablosu `services/pkg/llmprice` (api ve alert-engine ortak; default'lar gömülü JSON + Postgres `llm_prices`). Şablonlar:
+"LLM cost above $X/hour" (`cost_usd_per_hour`, 1 saat), "LLM error rate > 5%" (15 dk, minRequests 20), "LLM p95 > 20 s" (15 dk),
+"Token spike" (`tokens` eşik). UI: AI monitoring ekranında model/servis satırından "Create alert" → `/alerts/new?kind=llm&service=&model=`.
+
+**SDK yüzeyi:** bkz. sdk.md § AI / LLM. Ortak config: `TROOPER_LLM_CAPTURE_CONTENT` (`true|false`, default false).

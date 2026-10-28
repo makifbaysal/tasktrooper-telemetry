@@ -31,7 +31,11 @@ type ShutdownFunc func(context.Context) error
 //
 // Start never panics. On error a non-nil no-op shutdown function is returned and the application
 // keeps running without exporting telemetry.
-func Start(ctx context.Context, cfg Config) (shutdown ShutdownFunc, err error) {
+//
+// Options (e.g. WithProfiling) are applied on top of cfg:
+//
+//	shutdown, err := trooper.Start(ctx, trooper.Config{Service: "orders"}, trooper.WithProfiling())
+func Start(ctx context.Context, cfg Config, opts ...Option) (shutdown ShutdownFunc, err error) {
 	noop := func(context.Context) error { return nil }
 	defer func() {
 		if r := recover(); r != nil {
@@ -40,6 +44,11 @@ func Start(ctx context.Context, cfg Config) (shutdown ShutdownFunc, err error) {
 	}()
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	for _, o := range opts {
+		if o != nil {
+			o(&cfg)
+		}
 	}
 	cfg = cfg.withDefaults()
 	if cfg.Service == "" {
@@ -188,6 +197,12 @@ func Start(ctx context.Context, cfg Config) (shutdown ShutdownFunc, err error) {
 		)
 		global.SetLoggerProvider(lp)
 		shutdowns = append(shutdowns, lp.Shutdown)
+	}
+
+	if cfg.Profiling.Enabled {
+		if p := startProfiler(cfg, client, endpoint, key); p != nil {
+			shutdowns = append(shutdowns, p.shutdown)
+		}
 	}
 
 	done := false

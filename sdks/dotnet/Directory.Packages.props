@@ -15,10 +15,15 @@
     <PackageVersion Include="OpenTelemetry.Instrumentation.StackExchangeRedis" Version="$(OTelBetaVersion)" />
     <PackageVersion Include="Confluent.Kafka" Version="2.16.0" />
     <PackageVersion Include="RabbitMQ.Client" Version="7.2.2" />
+    <!-- TaskTrooper.Telemetry.Profiling: in-process EventPipe session + real-time TraceLog -->
+    <PackageVersion Include="Microsoft.Diagnostics.NETCore.Client" Version="0.2.750501" />
+    <PackageVersion Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="4.0.0" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
     <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.13" />
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.13" />
+    <!-- tests only: the SDK listens to M.E.AI's ActivitySource without referencing it -->
+    <PackageVersion Include="Microsoft.Extensions.AI" Version="10.10.0" />
   </ItemGroup>
 </Project>

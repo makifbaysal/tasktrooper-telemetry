@@ -1,0 +1,24 @@
+/* AI monitoring (screens/AiMonitoring.tsx): LLM prompt / completion messages, price editor. Tokens only. */
+
+.llm-msgs { display: flex; flex-direction: column; gap: var(--space-2); }
+.llm-msg {
+  border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-surface);
+  padding: var(--space-2) var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); min-width: 0;
+}
+.llm-msg--system { background: var(--bg-sunken); }
+.llm-msg--assistant { border-color: var(--border-strong); }
+.llm-msg__head { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs); color: var(--text-muted); }
+.llm-msg__role { text-transform: uppercase; letter-spacing: 0.04em; font-weight: var(--weight-semibold); color: var(--text-secondary); }
+.llm-msg__text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--text-md); line-height: var(--lh-md); color: var(--text-primary); }
+.llm-msg__tool { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.llm-msg__tool-head { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); color: var(--text-secondary); }
+.llm-msg__tool .code { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.ai-filters { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.ai-toggle { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); color: var(--text-secondary); cursor: pointer; }
+
+.ai-price-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+.ai-price-form__actions { grid-column: 1 / -1; display: flex; gap: var(--space-2); justify-content: flex-end; }
+@media (max-width: 640px) { .ai-price-form { grid-template-columns: minmax(0, 1fr); } }
+
+.ai-cell-sub { font-size: var(--text-xs); color: var(--text-muted); white-space: nowrap; }

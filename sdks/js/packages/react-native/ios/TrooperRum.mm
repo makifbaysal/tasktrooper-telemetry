@@ -33,6 +33,26 @@ RCT_EXPORT_MODULE(TrooperRum)
   resolve([TrooperRumBridge processStartTime]);
 }
 
+- (void)startReplay:(NSDictionary *)options resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject
+{
+  resolve(@([TrooperRumBridge startReplay:options]));
+}
+
+- (void)stopReplay:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject
+{
+  resolve(@([TrooperRumBridge stopReplay]));
+}
+
+- (void)isReplayRecording:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject
+{
+  resolve(@([TrooperRumBridge isReplayRecording]));
+}
+
+- (void)notifyReplayError
+{
+  [TrooperRumBridge notifyReplayError];
+}
+
 - (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
     (const facebook::react::ObjCTurboModule::InitParams &)params
 {
@@ -54,6 +74,26 @@ RCT_EXPORT_METHOD(getContext:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseR
 RCT_EXPORT_METHOD(getProcessStartTime:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject)
 {
   resolve([TrooperRumBridge processStartTime]);
+}
+
+RCT_EXPORT_METHOD(startReplay:(NSDictionary *)options resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject)
+{
+  resolve(@([TrooperRumBridge startReplay:options]));
+}
+
+RCT_EXPORT_METHOD(stopReplay:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject)
+{
+  resolve(@([TrooperRumBridge stopReplay]));
+}
+
+RCT_EXPORT_METHOD(isReplayRecording:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject)
+{
+  resolve(@([TrooperRumBridge isReplayRecording]));
+}
+
+RCT_EXPORT_METHOD(notifyReplayError)
+{
+  [TrooperRumBridge notifyReplayError];
 }
 
 #endif

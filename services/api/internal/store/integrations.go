@@ -17,12 +17,12 @@ import (
 )
 
 // Providers are the integrations.provider values (ADR-012).
-var Providers = map[string]bool{"aws": true, "gcp": true, "vercel": true, "neon": true}
+var Providers = map[string]bool{"aws": true, "gcp": true, "vercel": true, "neon": true, "azure": true}
 
 // secretConfigKeys are never returned in integration config (they belong in the secrets table).
 var secretConfigKeys = map[string]bool{
 	"secret": true, "password": true, "privatekey": true, "secretaccesskey": true, "apikey": true, "accesstoken": true,
-	"token": true, "drainsecret": true, "serviceaccountjson": true, "sessiontoken": true,
+	"token": true, "drainsecret": true, "serviceaccountjson": true, "sessiontoken": true, "clientsecret": true,
 }
 
 // ---------------------------------------------------------------- secrets
@@ -212,8 +212,24 @@ func (d *DB) ListIntegrations(ctx context.Context) ([]model.Integration, error) 
 	return d.integrations(ctx, 0)
 }
 
+type providerKey struct{}
+
+// WithProviderFilter narrows ListIntegrations to one provider (GET /integrations?provider=).
+func WithProviderFilter(ctx context.Context, provider string) context.Context {
+	return context.WithValue(ctx, providerKey{}, provider)
+}
+
+// ProviderFilter returns the provider set by WithProviderFilter.
+func ProviderFilter(ctx context.Context) string {
+	p, _ := ctx.Value(providerKey{}).(string)
+	return p
+}
+
 func (d *DB) integrations(ctx context.Context, only int64) ([]model.Integration, error) {
 	where, args := "", []any{}
+	if p := ProviderFilter(ctx); p != "" {
+		where, args = " AND provider = $1", []any{p}
+	}
 	if only > 0 {
 		where, args = " AND id = $1", []any{only}
 	}
@@ -241,6 +257,15 @@ func (d *DB) integrations(ctx context.Context, only int64) ([]model.Integration,
 	res, err := d.discovered(ctx, ids)
 	if err != nil {
 		return nil, err
+	}
+	if len(ids) > 0 {
+		fns, err := d.functionResources(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+		for id, x := range fns {
+			res[id] = append(res[id], x...)
+		}
 	}
 	out := make([]model.Integration, 0, len(list))
 	for _, r := range list {
@@ -353,6 +378,26 @@ func validateProviderConfig(provider string, cfg map[string]any, hasSecret bool)
 		if _, ok := cfg["roleArn"].(string); !ok && !hasSecret {
 			return Invalid("aws needs config.roleArn (assume role) or an access key as secret")
 		}
+	case "azure":
+		for _, k := range []string{"tenantId", "clientId"} {
+			if v, _ := cfg[k].(string); strings.TrimSpace(v) == "" {
+				return Invalid("azure needs config." + k)
+			}
+		}
+		if v, ok := cfg["subscriptionIds"]; ok { // optional: empty = every subscription the principal can read
+			subs, isList := v.([]any)
+			if !isList {
+				return Invalid("config.subscriptionIds must be an array of strings")
+			}
+			for _, s := range subs {
+				if v, _ := s.(string); strings.TrimSpace(v) == "" {
+					return Invalid("config.subscriptionIds must be strings")
+				}
+			}
+		}
+		if !hasSecret {
+			return Invalid("azure needs the service principal client secret (secret or credentials.clientSecret)")
+		}
 	case "gcp", "vercel", "neon":
 		if !hasSecret {
 			return Invalid(provider + " needs a secret (" + map[string]string{"gcp": "service-account JSON", "vercel": "access token", "neon": "API key"}[provider] + ")")
@@ -393,7 +438,10 @@ func splitVercelSecret(provider, secret string, config json.RawMessage) (string,
 func (d *DB) CreateIntegration(ctx context.Context, in model.IntegrationInput) (*model.Integration, error) {
 	in.Name = strings.TrimSpace(in.Name)
 	if !Providers[in.Provider] {
-		return nil, Invalid("provider must be aws|gcp|vercel|neon")
+		return nil, Invalid("provider must be aws|gcp|vercel|neon|azure")
+	}
+	if in.Secret == "" && in.Credentials != nil { // {credentials: {clientSecret}} (azure; contracts §21)
+		in.Secret = in.Credentials.ClientSecret
 	}
 	if in.Name == "" {
 		return nil, Invalid("name is required")
@@ -447,6 +495,9 @@ func (d *DB) UpdateIntegration(ctx context.Context, id string, p model.Integrati
 		if name = strings.TrimSpace(*p.Name); name == "" {
 			return nil, Invalid("name must not be empty")
 		}
+	}
+	if p.Secret == nil && p.Credentials != nil && p.Credentials.ClientSecret != "" {
+		p.Secret = &p.Credentials.ClientSecret
 	}
 	if p.Secret != nil {
 		sec := *p.Secret

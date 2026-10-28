@@ -11,9 +11,11 @@ import (
 type IngestDSN struct {
 	// MetricsURL is the OTLP/HTTP metrics endpoint (`<scheme>://<host>[:port]/v1/metrics`).
 	MetricsURL string
-	Key        string
-	ProjectID  string
-	Insecure   bool
+	// LogsURL is the OTLP/HTTP logs endpoint (`<scheme>://<host>[:port]/v1/logs`).
+	LogsURL   string
+	Key       string
+	ProjectID string
+	Insecure  bool
 }
 
 // ParseIngestDSN parses TT_DSN (contracts §2), e.g. http://tt_dev_ingest_key@localhost:4318/1.
@@ -37,8 +39,10 @@ func ParseIngestDSN(s string) (IngestDSN, error) {
 	}
 	project := strings.Trim(u.Path, "/")
 	base := url.URL{Scheme: u.Scheme, Host: u.Host, Path: "/v1/metrics"}
+	logs := url.URL{Scheme: u.Scheme, Host: u.Host, Path: "/v1/logs"}
 	return IngestDSN{
 		MetricsURL: base.String(),
+		LogsURL:    logs.String(),
 		Key:        u.User.Username(),
 		ProjectID:  project,
 		Insecure:   u.Scheme == "http",

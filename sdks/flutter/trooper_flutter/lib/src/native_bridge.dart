@@ -38,6 +38,16 @@ class TrooperNativeBridge {
     } catch (_) {}
   }
 
+  /// Whether the native SDK's own session replay runs in this app (Android `TrooperReplay.install`). Flutter
+  /// replay is then not started (contracts.md §23 hybrid apps). False when unknown (no plugin, iOS).
+  Future<bool> isNativeReplayActive() async {
+    try {
+      return await channel.invokeMethod<bool>('isNativeReplayActive') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<DateTime?> processStartTime() async {
     try {
       final ms = await channel.invokeMethod<int>('getProcessStartTime');

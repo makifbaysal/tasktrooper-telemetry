@@ -171,6 +171,52 @@ func (s *Store) SyncBrokers(ctx context.Context, in model.Integration, brokers [
 	return slugs, tx.Commit(ctx)
 }
 
+// SyncFunctions upserts discovered serverless functions (deploy/postgres/011_serverless.sql) and sets
+// missing=true on the integration's rows that were not discovered (cleared when they reappear). Rows owned by
+// another integration or added by hand (integration_id NULL) are never touched. Returns the slugs written.
+func (s *Store) SyncFunctions(ctx context.Context, in model.Integration, fns []model.Function) ([]string, error) {
+	tx, err := s.DB.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	slugs := make([]string, 0, len(fns))
+	all := make([]string, 0, len(fns))
+	for _, f := range fns {
+		all = append(all, f.Slug)
+		triggers := f.Triggers
+		if triggers == nil {
+			triggers = []string{}
+		}
+		service := f.Service
+		if service == "" {
+			service = f.Name
+		}
+		tag, err := tx.Exec(ctx, `INSERT INTO serverless_functions (project_id, integration_id, provider, slug, name, app, region, runtime,
+				memory_mb, timeout_s, arch, triggers, service, url, meta, last_seen_at, missing)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, now(), false)
+			ON CONFLICT (project_id, slug) DO UPDATE SET name = EXCLUDED.name, app = EXCLUDED.app, region = EXCLUDED.region,
+				runtime = EXCLUDED.runtime, memory_mb = EXCLUDED.memory_mb, timeout_s = EXCLUDED.timeout_s, arch = EXCLUDED.arch,
+				triggers = EXCLUDED.triggers, service = EXCLUDED.service, url = EXCLUDED.url, meta = EXCLUDED.meta,
+				last_seen_at = now(), missing = false
+			WHERE serverless_functions.integration_id = EXCLUDED.integration_id`,
+			in.ProjectID, in.ID, in.Provider, f.Slug, f.Name, nz(f.App), f.Region, f.Runtime, f.MemoryMB, f.TimeoutS, f.Arch,
+			triggers, service, nz(f.URL), metaJSON(f.Meta))
+		if err != nil {
+			return nil, err
+		}
+		if tag.RowsAffected() > 0 {
+			slugs = append(slugs, f.Slug)
+		}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE serverless_functions SET missing = true
+		WHERE project_id = $1 AND integration_id = $2 AND NOT (slug = ANY($3)) AND NOT missing`,
+		in.ProjectID, in.ID, all); err != nil {
+		return nil, err
+	}
+	return slugs, tx.Commit(ctx)
+}
+
 // PatchDatabaseMeta merges patch into databases.meta for the integration's row with slug.
 func (s *Store) PatchDatabaseMeta(ctx context.Context, in model.Integration, patches map[string]map[string]any) error {
 	for slug, p := range patches {

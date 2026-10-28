@@ -50,6 +50,8 @@ export interface ClientConfig extends CoreOptions {
   isOnline?: () => boolean;
   /** Called right after SESSION_START is recorded (`first` = first session of this client). */
   onSessionStart?: (session: SessionState, first: boolean) => void;
+  /** Called for every event accepted for delivery (after `beforeSend`), e.g. to let integrations react to ERRORs. */
+  onEvent?: (event: RumEvent) => void;
 }
 
 /** Input for `capture`: the event type, a payload and optional overrides of the common fields. */
@@ -114,6 +116,11 @@ export class Client {
 
   get enabled(): boolean {
     return !this.closed;
+  }
+
+  /** Whether the current session is sampled in (`sampleRate`). */
+  isSampled(): boolean {
+    return this.sampled;
   }
 
   /** Session id, creating a session if needed. */
@@ -186,6 +193,11 @@ export class Client {
       return undefined;
     }
     this.enqueue(ev);
+    const onEvent = this.config.onEvent;
+    if (onEvent) {
+      const e = ev;
+      safe('onEvent', () => onEvent(e));
+    }
     return ev;
   }
 

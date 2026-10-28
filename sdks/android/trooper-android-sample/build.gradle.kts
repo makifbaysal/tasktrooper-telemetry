@@ -41,6 +41,7 @@ dependencies {
     implementation(project(":trooper-ndk"))
     implementation(project(":trooper-okhttp"))
     implementation(project(":trooper-compose"))
+    implementation(project(":trooper-replay"))
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation(platform("androidx.compose:compose-bom:2025.09.00"))
     implementation("androidx.compose.ui:ui")
