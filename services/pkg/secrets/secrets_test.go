@@ -7,7 +7,9 @@ import (
 
 type memStore struct{ n, c []byte }
 
-func (m memStore) LoadSecret(context.Context, int64, int64) ([]byte, []byte, error) { return m.n, m.c, nil }
+func (m memStore) LoadSecret(context.Context, int64, int64) ([]byte, []byte, error) {
+	return m.n, m.c, nil
+}
 
 func TestRoundTrip(t *testing.T) {
 	n, c, err := Seal(devKey, 7, []byte("tok"))

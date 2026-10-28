@@ -269,10 +269,10 @@ func (e *Evaluator) infraValues(ctx context.Context, m *model.Monitor, entity, m
 		cols = s.full
 	}
 	type stateRow struct {
-		labels  map[string]string
-		last    time.Time
-		a, b    float64
-		phase   string
+		labels map[string]string
+		last   time.Time
+		a, b   float64
+		phase  string
 	}
 	var vals []EntityValue
 	var states []stateRow

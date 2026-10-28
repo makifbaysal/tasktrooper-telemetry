@@ -45,7 +45,9 @@ type InfraCandidate struct {
 	Confidence float64 `json:"confidence"`
 }
 
-func clampConf(c float64) float64 { return math.Min(InfraMaxConfidence, math.Max(InfraMinConfidence, c)) }
+func clampConf(c float64) float64 {
+	return math.Min(InfraMaxConfidence, math.Max(InfraMinConfidence, c))
+}
 
 // InfraCandidates ranks pod and host signals (most confident first, at most 5).
 func InfraCandidates(pods []PodSignal, hosts []HostSignal) []InfraCandidate {

@@ -7,7 +7,7 @@ CH       := $(COMPOSE) exec -T clickhouse clickhouse-client --user trooper --pas
 PSQL     := $(COMPOSE) exec -T -e PGOPTIONS=--client-min-messages=warning postgres psql -U trooper -d trooper -v ON_ERROR_STOP=1 -q
 MODULES  := pkg ingest api alerting collector integrations symbolicator codeintel loadtest
 
-.PHONY: infra infra-down migrate build test run-gw run-writer e2e-ingest bench-ingest
+.PHONY: infra infra-down migrate build test check run-gw run-writer e2e-ingest bench-ingest
 
 infra: ## start ClickHouse, Postgres, Redpanda (+ topics), Redis
 	$(COMPOSE) up -d --wait clickhouse postgres redpanda redis
@@ -25,6 +25,24 @@ build: ## build every Go service module (go.work)
 
 test: ## unit tests of every Go service module
 	@for m in $(MODULES); do [ -d services/$$m ] || continue; echo "test services/$$m"; (cd services/$$m && go test ./...) || exit 1; done
+
+check: ## one-shot health check — same gates as .github/workflows/ci.yml
+	@node --version  >/dev/null 2>&1 || { echo "check: node not in PATH (need Node.js >= 22)"; exit 1; }
+	@pnpm --version  >/dev/null 2>&1 || { echo "check: pnpm not in PATH, or not runnable (needs node)"; exit 1; }
+	@go version      >/dev/null 2>&1 || { echo "check: go not in PATH, or not runnable (Go 1.26; mise: run 'mise use -g go@1.26.3')"; exit 1; }
+	@printf 'package p\n' | gofmt >/dev/null 2>&1 || { echo "check: gofmt not in PATH, or not runnable (ships with Go)"; exit 1; }
+	@bad=$$(cd services && gofmt -l .) || exit 1; \
+	if [ -n "$$bad" ]; then echo "services/ needs gofmt:"; echo "$$bad"; (cd services && gofmt -d $$bad); exit 1; fi
+	@for m in $(MODULES); do [ -d services/$$m ] || continue; echo "vet services/$$m"; (cd services/$$m && go vet ./...) || exit 1; done
+	@$(MAKE) test
+	@echo "web: install, typecheck, build"
+	@pnpm install --frozen-lockfile
+	@cd apps/web && pnpm exec tsc -b && pnpm exec vite build
+	@echo "js sdk: build, vitest"
+	@pnpm -r --filter "./sdks/js/packages/**" build
+	@pnpm -r --filter "./sdks/js/packages/**" test
+	@go run github.com/rhysd/actionlint/cmd/actionlint@latest .github/workflows/*.yml
+	@echo "check OK"
 
 run-gw: ## ingest-gw on :4318 (HTTP) / :4317 (gRPC)
 	cd services/ingest && go run ./cmd/ingest-gw
