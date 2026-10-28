@@ -89,6 +89,8 @@ deploy'unu (`deploy`) taşır. Query JSON detayları: `services/alerting/README.
 
 ## Kod-farkındalıklı otomatik alert
 
+Lokal mock UI'da envanter detayındaki `Suggest monitors` aksiyonu örnek eşikler ve gerekçe gösterir. Bu taslaklar aktif monitor olarak kaydedilmez; gerçek baseline ile kalibrasyon ve kullanıcı onayı gerekir.
+
 Akış (detay: [code-intelligence.md](code-intelligence.md)):
 
 1. `codeintel` repo'dan envanter çıkarır: endpoint, consumer, cron, dış bağımlılık, kritik iş akışları (ödeme, auth, sipariş).

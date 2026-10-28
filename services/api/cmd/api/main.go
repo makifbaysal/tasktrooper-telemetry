@@ -14,6 +14,7 @@ import (
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tasktrooper/telemetry/services/api/internal/ai"
 	"github.com/tasktrooper/telemetry/services/api/internal/auth"
 	"github.com/tasktrooper/telemetry/services/api/internal/blob"
 	"github.com/tasktrooper/telemetry/services/api/internal/cloudcheck"
@@ -39,6 +40,10 @@ func main() {
 }
 
 func run(cfg config.Common, log *slog.Logger) error {
+	summarizer, err := ai.NewFromEnv()
+	if err != nil {
+		return fmt.Errorf("AI configuration: %w", err)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -70,6 +75,7 @@ func run(cfg config.Common, log *slog.Logger) error {
 	}
 	srv := &server.Server{
 		Store:        st,
+		AI:           summarizer,
 		CloudTest:    cloudcheck.Run,
 		Symbolicator: symbolicate.New(config.String("TT_SYMBOLICATOR_URL", "http://localhost:8095")),
 		Auth:         auth.NewPG(pool),

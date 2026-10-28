@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { Sparkline, TimeSeries } from '@/components/charts';
 import {
-  Badge, Button, Callout, Card, Drawer, DrawerSection, EmptyState, Field, Input, KeyValues, Section, Select, StatusBadge, Table, Tabs, useDrawer,
+  Badge, Button, Callout, Card, CodeBlock, Drawer, DrawerSection, EmptyState, Field, Input, KeyValues, Section, Select, StatusBadge, Table, Tabs, useDrawer,
   type StatusKind,
 } from '@/components/ui';
 import {
@@ -515,17 +515,127 @@ export function IncidentDrawer({ incident: i, state, onClose, onAck, onResolve, 
   const likely = stored?.summary ? { summary: stored.summary, confidence: typeof stored.confidence === 'number' ? stored.confidence : undefined }
     : rca ? { summary: rca.summary, confidence: rca.confidence } : undefined;
   const nav = useNavigate();
+  const [explanation, setExplanation] = useState<{ summary: string; provider: string; usage: { inputTokens: number; outputTokens: number } } | null>(null);
+  const [explainError, setExplainError] = useState('');
+  const [explaining, setExplaining] = useState(false);
+  const [nextSteps, setNextSteps] = useState<string[]>([]);
+  const [stepsError, setStepsError] = useState('');
+  const [suggesting, setSuggesting] = useState(false);
+  const [report, setReport] = useState('');
+  const [reportError, setReportError] = useState('');
+  const [reporting, setReporting] = useState(false);
+  const [triage, setTriage] = useState<{ groups: { label: string; count: number }[] } | null>(null);
+  const [triageError, setTriageError] = useState('');
+  const [triaging, setTriaging] = useState(false);
+  useEffect(() => {
+    setExplanation(null); setExplainError(''); setNextSteps([]); setStepsError('');
+    setReport(''); setReportError(''); setTriage(null); setTriageError('');
+  }, [i.id]);
+
+  const incidentEvidence = [
+    `Service: ${i.service}; severity: ${i.severity}; observed value: ${i.value}`,
+    `Monitor: ${m.name}; target: ${m.target}; condition: ${m.condition}`,
+    ...related.slice(0, 4).map((l) => `${l.level}: ${l.message}`),
+  ].map((s) => s.slice(0, 500));
+
+  const explain = async () => {
+    setExplaining(true);
+    setExplainError('');
+    try {
+      const response = await fetch('/local-ai/incident-summary', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: i.title, evidence: incidentEvidence }),
+      });
+      if (!response.ok) throw new Error(`Local mock server returned HTTP ${response.status}`);
+      setExplanation(await response.json());
+    } catch (cause) {
+      setExplainError(cause instanceof Error ? cause.message : 'Could not reach the local mock server.');
+    } finally {
+      setExplaining(false);
+    }
+  };
+
+  const suggestNextSteps = async () => {
+    setSuggesting(true);
+    setStepsError('');
+    try {
+      const response = await fetch('/local-ai/incident-next-steps', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: i.title, evidence: incidentEvidence }),
+      });
+      if (!response.ok) throw new Error(`Local mock server returned HTTP ${response.status}`);
+      const result = await response.json() as { steps: string[] };
+      setNextSteps(result.steps);
+    } catch (cause) {
+      setStepsError(cause instanceof Error ? cause.message : 'Could not reach the local mock server.');
+    } finally {
+      setSuggesting(false);
+    }
+  };
+
+  const draftReport = async () => {
+    setReporting(true);
+    setReportError('');
+    try {
+      const response = await fetch('/local-ai/incident-report', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: i.title, evidence: incidentEvidence }),
+      });
+      if (!response.ok) throw new Error(`Local mock server returned HTTP ${response.status}`);
+      const result = await response.json() as { report: string };
+      setReport(result.report);
+    } catch (cause) {
+      setReportError(cause instanceof Error ? cause.message : 'Could not reach the local mock server.');
+    } finally {
+      setReporting(false);
+    }
+  };
+
+  const triageLogs = async () => {
+    setTriaging(true);
+    setTriageError('');
+    try {
+      const response = await fetch('/local-ai/triage-logs', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: i.title, logs: related.map((l) => l.message.slice(0, 500)) }),
+      });
+      if (!response.ok) throw new Error(`Local mock server returned HTTP ${response.status}`);
+      setTriage(await response.json());
+    } catch (cause) {
+      setTriageError(cause instanceof Error ? cause.message : 'Could not reach the local mock server.');
+    } finally {
+      setTriaging(false);
+    }
+  };
 
   return (
     <Drawer open onClose={onClose} width={720}
       title={i.title}
       subtitle={<span className="row" style={{ gap: 'var(--space-2)' }}><StatusBadge status={incidentStatus(state)} /><Badge tone={sevTone(i.severity)}>{i.severity}</Badge><span className="muted">started {dateTime(i.startedAt)}</span></span>}
       actions={<>
+        <Button size="sm" icon={<Sparkles size={12} />} disabled={explaining} onClick={() => void explain()}>{explaining ? 'Explaining…' : 'Explain'}</Button>
         {i.kpiId && <Button size="sm" icon={<Target size={12} />} onClick={() => nav(`/kpis/${i.kpiId}`)}>Open KPI</Button>}
         {sid && <Button size="sm" icon={<ExternalLink size={12} />} onClick={() => onOpenService(sid)}>Open {i.service}</Button>}
         {state === 'firing' && can('write') && <Button size="sm" variant="primary" icon={<Check size={12} />} onClick={onAck}>Acknowledge</Button>}
         {onResolve && can('write') && !past && state !== 'resolved' && <Button size="sm" icon={<CheckCircle2 size={12} />} onClick={onResolve}>Resolve</Button>}
       </>}>
+      {(explanation || explainError) && <DrawerSection title="AI explanation" aside={explanation?.provider === 'mock' ? 'Offline mock · 0 tokens' : undefined}>
+        {explanation && <p className="secondary" style={{ margin: 0 }}>{explanation.summary}</p>}
+        {explainError && <p role="alert" className="secondary" style={{ margin: 0 }}>{explainError}</p>}
+      </DrawerSection>}
+      <DrawerSection title="AI follow-up" aside="Offline mock · 0 tokens">
+        <div className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+          <Button size="sm" icon={<Sparkles size={12} />} disabled={suggesting} onClick={() => void suggestNextSteps()}>
+            {suggesting ? 'Drafting…' : 'Suggest next steps'}
+          </Button>
+          <Button size="sm" icon={<FileCode2 size={12} />} disabled={reporting} onClick={() => void draftReport()}>
+            {reporting ? 'Drafting…' : 'Draft incident report'}
+          </Button>
+        </div>
+        {nextSteps.length > 0 && <ol className="stack" style={{ gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}>
+          {nextSteps.map((step) => <li key={step}>{step}</li>)}
+        </ol>}
+        {stepsError && <p role="alert" className="secondary">{stepsError}</p>}
+        {report && <div style={{ marginTop: 'var(--space-3)' }}><CodeBlock>{report}</CodeBlock><p className="muted">Draft only; no report was saved.</p></div>}
+        {reportError && <p role="alert" className="secondary">{reportError}</p>}
+      </DrawerSection>
       {state === 'pending' && (
         <Callout icon={<CircleDashed size={16} />}>
           <strong>Pending.</strong> <span className="secondary">The condition is breached but has not held for {forMin} minutes yet. It fires and notifies {channelsLabel(m) || 'its channels'} if it holds; if it clears first, it closes quietly.</span>
@@ -593,6 +703,16 @@ export function IncidentDrawer({ incident: i, state, onClose, onAck, onResolve, 
       </DrawerSection>
 
       <DrawerSection title="Related logs" aside={`${i.service} · warn & error`}>
+        <div style={{ marginBottom: 'var(--space-3)' }}>
+          <Button size="sm" icon={<Sparkles size={12} />} disabled={triaging || related.length === 0} onClick={() => void triageLogs()}>
+            {triaging ? 'Triage in progress…' : 'Triage logs'}
+          </Button>
+        </div>
+        {triage && <div className="stack" style={{ gap: 'var(--space-1)', marginBottom: 'var(--space-3)' }}>
+          {triage.groups.map((group) => <div key={group.label}>{group.label}: {group.count}</div>)}
+          <span className="muted">Offline mock · 0 tokens · labels are not saved.</span>
+        </div>}
+        {triageError && <p role="alert" className="secondary">{triageError}</p>}
         {related.length === 0 ? <span className="muted">No warning or error logs from this service in the window.</span> : (
           <div className="stack" style={{ gap: 'var(--space-1)' }}>
             {related.map((l) => (

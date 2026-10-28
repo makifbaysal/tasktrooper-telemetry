@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tasktrooper/telemetry/services/api/internal/ai"
 	"github.com/tasktrooper/telemetry/services/api/internal/auth"
 	"github.com/tasktrooper/telemetry/services/api/internal/model"
 	"github.com/tasktrooper/telemetry/services/api/internal/rules"
@@ -84,6 +85,7 @@ func newTestServer(t *testing.T, fs *fakeStore) http.Handler {
 	fs.t = t
 	s := &Server{
 		Store:   fs,
+		AI:      ai.NewMock(),
 		Auth:    auth.Static{"good": {OrgID: 7, ProjectID: 42}},
 		Log:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Origins: []string{"http://localhost:5173"},

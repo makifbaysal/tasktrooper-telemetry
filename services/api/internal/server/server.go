@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/tasktrooper/telemetry/services/api/internal/ai"
 	"github.com/tasktrooper/telemetry/services/api/internal/auth"
 	"github.com/tasktrooper/telemetry/services/api/internal/blob"
 	"github.com/tasktrooper/telemetry/services/api/internal/model"
@@ -164,6 +165,7 @@ type CloudTester func(ctx context.Context, provider string, config json.RawMessa
 // Server holds dependencies.
 type Server struct {
 	Store   Store
+	AI      ai.Summarizer
 	Auth    auth.Resolver
 	Log     *slog.Logger
 	Origins []string

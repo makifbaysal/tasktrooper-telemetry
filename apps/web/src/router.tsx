@@ -68,6 +68,7 @@ export const router = createBrowserRouter([
       { path: '/infrastructure/serverless/:functionId', element: <FunctionDetail /> },
       { path: '/settings/usage', element: <SettingsScreen /> },
       { path: '/code', element: <CodeInsights /> },
+      { path: '/ai-playground', element: <Navigate to="/incidents" replace /> },
       { path: '/settings', element: <SettingsScreen /> },
       { path: '/settings/integrations', element: <Integrations /> },
       { path: '/design-system', element: <DesignSystem /> },

@@ -103,6 +103,30 @@ export function CodeInsights() {
   const [filter, setFilter] = useState<Filter>('all');
   const [kind, setKind] = useState('');
   const [svc, setSvc] = useState('');
+  const [enrichment, setEnrichment] = useState<{ summary: string; failureModes: string[]; provider: string } | null>(null);
+  const [monitorDraft, setMonitorDraft] = useState<{ suggestions: { name: string; kind: string; condition: string; rationale: string }[] } | null>(null);
+  const [loadTestDraft, setLoadTestDraft] = useState<{ yaml: string; note: string } | null>(null);
+  const [aiError, setAiError] = useState('');
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiItemId, setAiItemId] = useState('');
+  const runLocalAI = async (action: 'inventory-enrichment' | 'monitor-suggestions' | 'loadtest-draft') => {
+    const selected = drawer.item;
+    if (!selected) return;
+    if (aiItemId !== selected.id) { setEnrichment(null); setMonitorDraft(null); setLoadTestDraft(null); setAiItemId(selected.id); }
+    setAiBusy(true); setAiError('');
+    try {
+      const response = await fetch(`/local-ai/${action}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: selected.key, kind: selected.kind, service: selected.service, file: selected.file, criticality: selected.criticality }),
+      });
+      if (!response.ok) throw new Error(`Local mock server returned HTTP ${response.status}`);
+      const result = await response.json();
+      if (action === 'inventory-enrichment') setEnrichment(result);
+      else if (action === 'monitor-suggestions') setMonitorDraft(result);
+      else setLoadTestDraft(result);
+    } catch (cause) { setAiError(cause instanceof Error ? cause.message : 'Could not reach the local mock server.'); }
+    finally { setAiBusy(false); }
+  };
 
   const repos = repoList();
   const inventory = inventoryRows();
@@ -270,11 +294,25 @@ export function CodeInsights() {
       <Drawer open={!!item} onClose={drawer.close}
         title={item ? <span className="mono">{item.key}</span> : ''}
         subtitle={item && <>{KIND_LABEL[item.kind]} · {item.service}</>}
-        actions={item?.kind === 'endpoint' && !item.shadow && <Button size="sm" icon={<Gauge size={14} />} onClick={() => nav('/load-tests')}>Load test this</Button>}>
+        actions={item && <>
+          <Button size="sm" icon={<Sparkles size={14} />} disabled={aiBusy} onClick={() => void runLocalAI('inventory-enrichment')}>Enrich inventory</Button>
+          {item.kind === 'endpoint' && !item.shadow && <Button size="sm" icon={<Gauge size={14} />} onClick={() => nav('/load-tests')}>Load test this</Button>}
+        </>}>
         {item && (
           <>
             <DrawerSection title="Summary" aside={<CriticalityBadge c={item.criticality} />}>
               <p className="secondary" style={{ margin: 0 }}>{whyCritical(item)}</p>
+            </DrawerSection>
+
+            <DrawerSection title="Local AI drafts" aside="Offline mock · 0 tokens">
+              <div className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+                <Button size="sm" icon={<Bell size={12} />} disabled={aiBusy} onClick={() => void runLocalAI('monitor-suggestions')}>Suggest monitors</Button>
+                {item.kind === 'endpoint' && <Button size="sm" icon={<Gauge size={12} />} disabled={aiBusy} onClick={() => void runLocalAI('loadtest-draft')}>Draft load test</Button>}
+              </div>
+              {aiItemId === item.id && enrichment && <div className="stack" style={{ marginTop: 'var(--space-3)' }}><p>{enrichment.summary}</p><ul>{enrichment.failureModes.map((mode) => <li key={mode}>{mode}</li>)}</ul></div>}
+              {aiItemId === item.id && monitorDraft && <div className="stack" style={{ marginTop: 'var(--space-3)' }}>{monitorDraft.suggestions.map((suggestion) => <div key={suggestion.name}><strong>{suggestion.name}</strong><div className="mono secondary">{suggestion.kind} · {suggestion.condition}</div><div className="muted">{suggestion.rationale}</div></div>)}<span className="muted">Drafts only; no monitor was created.</span></div>}
+              {aiItemId === item.id && loadTestDraft && <div className="stack" style={{ marginTop: 'var(--space-3)' }}><CodeBlock>{loadTestDraft.yaml}</CodeBlock><span className="muted">{loadTestDraft.note}</span></div>}
+              {aiItemId === item.id && aiError && <p role="alert" className="secondary">{aiError}</p>}
             </DrawerSection>
 
             {item.shadow ? (
