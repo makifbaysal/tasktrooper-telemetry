@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import {
   AlertOctagon, BookOpen, BotMessageSquare, Boxes, Server, Building2, ChevronsUpDown, Code2, Database, Gauge, KeyRound, LayoutDashboard, LogOut, Moon, Waypoints,
-  Layers, Plug, Search, Settings, Sparkles, SquareFunction, Sun, SunMoon, Target, UserRound, Users, Zap, type LucideIcon,
+  Layers, PanelLeftClose, PanelLeftOpen, Plug, Settings, Sparkles, SquareFunction, Sun, SunMoon, Target, UserRound, Users, type LucideIcon,
 } from 'lucide-react';
 import { Avatar, Badge, Menu, MenuDivider, MenuItem, MenuLabel, Segmented, Select } from '@/components/ui';
 import { logout, switchProject, useAuth } from '@/data/auth';
@@ -11,7 +11,7 @@ import { useAcks } from '@/screens/Alerts';
 import { SERVICE_CATEGORIES } from '@/screens/shared';
 import { AiQuotaBanner } from '@/screens/Usage';
 import { useApp } from './context';
-import { Logo } from './Logo';
+import { LiquidCursor } from './LiquidCursor';
 
 /** `badge` is evaluated on every render so counts follow data changes (api hydrate, mutations). */
 interface NavItem { to: string; label: string; icon: LucideIcon; end?: boolean; badge?: () => { count: number; tone?: Health }; liveCount?: 'firing' }
@@ -49,34 +49,52 @@ const RANGES: { id: TimeRange; label: string }[] = [
 ];
 
 export function AppShell() {
+  useCardReveal();
   const { range, setRange, env, setEnv, theme, setTheme } = useApp();
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    const saved = window.localStorage.getItem('tasktrooper.sidebarOpen');
+    return saved === null ? !window.matchMedia('(max-width: 900px)').matches : saved !== 'false';
+  });
+  const toggleSidebar = () => setSidebarOpen((open) => {
+    window.localStorage.setItem('tasktrooper.sidebarOpen', String(!open));
+    return !open;
+  });
   const nextTheme = theme === 'system' ? 'light' : theme === 'light' ? 'dark' : 'system';
   const ThemeIcon = theme === 'system' ? SunMoon : theme === 'light' ? Sun : Moon;
 
   return (
-    <div className="shell">
-      <aside className="sidebar">
-        <div className="sidebar__brand">
-          <span className="sidebar__logo"><Logo /></span>
-          <span className="sidebar__name"><strong>TaskTrooper</strong><span>Telemetry</span></span>
-        </div>
+    <div className={`shell${sidebarOpen ? '' : ' shell--sidebar-collapsed'}`}>
+      <LiquidCursor />
+      <aside className="sidebar" id="app-sidebar" aria-label="Main navigation"
+        onClick={(event) => {
+          if (event.target instanceof Element && event.target.closest('a') && window.matchMedia('(max-width: 900px)').matches) {
+            setSidebarOpen(false);
+            window.localStorage.setItem('tasktrooper.sidebarOpen', 'false');
+          }
+        }}>
+        <button className="btn btn--ghost sidebar__close" type="button" onClick={toggleSidebar} aria-label="Close navigation">
+          <PanelLeftClose size={18} aria-hidden /> Close navigation
+        </button>
         <ProjectSwitcher />
         {NAV.slice(0, 1).map((g, gi) => <NavGroup key={gi} g={g} />)}
         <ServicesNav />
         {NAV.slice(1).map((g, gi) => <NavGroup key={gi} g={g} />)}
         <div className="sidebar__footer">
-          <NavLink to="/settings" end className="sidebar__link"><Settings size={16} aria-hidden />Settings &amp; SDK</NavLink>
-          <NavLink to="/settings/integrations" className="sidebar__link"><Plug size={16} aria-hidden />Integrations<IntegrationErrors /></NavLink>
-          <NavLink to="/design-system" className="sidebar__link"><BookOpen size={16} aria-hidden />Design system</NavLink>
+          <div className="sidebar__section">Settings</div>
+          <div className="sidebar__grid">
+            <NavLink to="/settings" end className="sidebar__link sidebar__tile" title="Settings & SDK" aria-label="Settings & SDK"><Settings size={20} aria-hidden /><span className="sidebar__label">Settings &amp; SDK</span></NavLink>
+            <NavLink to="/settings/integrations" className="sidebar__link sidebar__tile" title="Integrations" aria-label="Integrations"><Plug size={20} aria-hidden /><span className="sidebar__label">Integrations</span><IntegrationErrors /></NavLink>
+            <NavLink to="/design-system" className="sidebar__link sidebar__tile" title="Design system" aria-label="Design system"><BookOpen size={20} aria-hidden /><span className="sidebar__label">Design system</span></NavLink>
+          </div>
         </div>
       </aside>
 
       <div className="main">
         <header className="topbar">
-          <div className="input-group" style={{ width: 280, maxWidth: '40vw' }}>
-            <Search size={14} aria-hidden />
-            <input className="input" placeholder="Search services, endpoints, pages…" style={{ width: '100%' }} />
-          </div>
+          <button className="btn btn--ghost btn--icon sidebar-toggle" type="button" title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+            aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'} aria-expanded={sidebarOpen} aria-controls="app-sidebar" onClick={toggleSidebar}>
+            {sidebarOpen ? <PanelLeftClose size={18} aria-hidden /> : <PanelLeftOpen size={18} aria-hidden />}
+          </button>
           <span className="spacer" />
           <Select aria-label="Environment" value={env} onChange={(e) => setEnv(e.target.value)}
             options={[{ value: 'production', label: 'production' }, { value: 'staging', label: 'staging' }]} />
@@ -84,7 +102,6 @@ export function AppShell() {
           <button className="btn btn--ghost btn--icon" title={`Theme: ${theme}`} aria-label={`Theme: ${theme}. Switch to ${nextTheme}`} onClick={() => setTheme(nextTheme)}>
             <ThemeIcon size={16} />
           </button>
-          <button className="btn btn--ghost btn--icon" aria-label="What's new"><Zap size={16} /></button>
           <UserMenu />
         </header>
         <main className="content">
@@ -96,18 +113,75 @@ export function AppShell() {
   );
 }
 
+function useCardReveal() {
+  const location = useLocation();
+
+  useLayoutEffect(() => {
+    const content = document.querySelector<HTMLElement>('.content');
+    if (!content || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    const seen = new WeakSet<Element>();
+    let revealed = 0;
+    let seenCount = 0;
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        const card = entry.target as HTMLElement;
+        if (!entry.isIntersecting) {
+          delete card.dataset.inView;
+          const bounds = card.getBoundingClientRect();
+          card.dataset.revealFrom = bounds.bottom <= 0 ? 'above' : 'below';
+          card.dataset.reveal = 'pending';
+          continue;
+        }
+        card.dataset.inView = 'true';
+        if (card.dataset.reveal === 'pending') {
+          card.style.setProperty('--reveal-delay', `${Math.min(revealed % 3, 2) * 75}ms`);
+          revealed += 1;
+          card.dataset.reveal = 'visible';
+        }
+      }
+    }, { threshold: 0 });
+
+    let frame = 0;
+    const collect = () => {
+      frame = 0;
+      for (const card of content.querySelectorAll<HTMLElement>('.card')) {
+        if (seen.has(card)) continue;
+        seen.add(card);
+        const bounds = card.getBoundingClientRect();
+        card.style.setProperty('--ambient-offset', `${-(seenCount++ % 5) * 1.1}s`);
+        card.dataset.revealFrom = 'below';
+        card.dataset.reveal = bounds.top < window.innerHeight * 0.85 || bounds.bottom < 0 ? 'settled' : 'pending';
+        observer.observe(card);
+      }
+    };
+    const changes = new MutationObserver(() => {
+      if (!frame) frame = requestAnimationFrame(collect);
+    });
+    collect();
+    changes.observe(content, { childList: true, subtree: true });
+    return () => {
+      changes.disconnect();
+      observer.disconnect();
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [location.pathname]);
+}
+
 function NavGroup({ g }: { g: (typeof NAV)[number] }) {
   useData();
   return (
     <nav aria-label={g.section ?? 'Main'}>
-      {g.section && <div className="sidebar__section">{g.section}</div>}
-      {g.items.map((it) => (
-        <NavLink key={it.to} to={it.to} end={it.end ?? false} className="sidebar__link">
-          <it.icon size={16} aria-hidden />
-          {it.label}
-          {it.liveCount ? <FiringCount /> : <NavCount badge={it.badge} />}
-        </NavLink>
-      ))}
+      <div className="sidebar__section">{g.section ?? 'Workspace'}</div>
+      <div className="sidebar__grid">
+        {g.items.map((it) => (
+          <NavLink key={it.to} to={it.to} end={it.end ?? false} className="sidebar__link sidebar__tile" title={it.label} aria-label={it.label}>
+            <it.icon size={20} aria-hidden />
+            <span className="sidebar__label">{it.label}</span>
+            {it.liveCount ? <FiringCount /> : <NavCount badge={it.badge} />}
+          </NavLink>
+        ))}
+      </div>
     </nav>
   );
 }
@@ -142,22 +216,25 @@ function ServicesNav() {
   return (
     <nav aria-label="Services">
       <div className="sidebar__section">Services</div>
-      <Link to="/services" className="sidebar__link" aria-current={onList && !type ? 'page' : undefined}>
-        <Layers size={16} aria-hidden />All services
-        <span className="sidebar__count muted num">{services.length}</span>
-      </Link>
-      {items.map((c) => (
-        <Link key={c.id} to={`/services?type=${c.id}`} className="sidebar__link" aria-current={c.active ? 'page' : undefined}
-          title={c.bad.length ? `${c.bad.length} degraded` : undefined}>
-          <c.Icon size={16} aria-hidden />
-          {c.label}
-          <span className="sidebar__count">
-            {c.bad.length > 0
-              ? <Badge tone={c.critical ? 'critical' : 'warning'}>{c.bad.length}</Badge>
-              : <span className="muted num">{c.rows.length}</span>}
-          </span>
+      <div className="sidebar__grid">
+        <Link to="/services" className="sidebar__link sidebar__tile" title="All services" aria-label="All services" aria-current={onList && !type ? 'page' : undefined}>
+          <Layers size={20} aria-hidden />
+          <span className="sidebar__label">All services</span>
+          <span className="sidebar__count muted num">{services.length}</span>
         </Link>
-      ))}
+        {items.map((c) => (
+          <Link key={c.id} to={`/services?type=${c.id}`} className="sidebar__link sidebar__tile" aria-label={c.label} aria-current={c.active ? 'page' : undefined}
+            title={c.bad.length ? `${c.bad.length} degraded` : undefined}>
+            <c.Icon size={20} aria-hidden />
+            <span className="sidebar__label">{c.label}</span>
+            <span className="sidebar__count">
+              {c.bad.length > 0
+                ? <Badge tone={c.critical ? 'critical' : 'warning'}>{c.bad.length}</Badge>
+                : <span className="muted num">{c.rows.length}</span>}
+            </span>
+          </Link>
+        ))}
+      </div>
     </nav>
   );
 }

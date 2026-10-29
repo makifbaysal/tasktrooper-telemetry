@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { ChevronRight, Plus } from 'lucide-react';
-import { Sparkline, TimeSeries } from '@/components/charts';
+import { Sparkline } from '@/components/charts';
 import { Button, Card, PageHeader, Section, SearchInput, StatusBadge, Table } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
-import { appSummary, serviceErrorSeries, serviceTrafficSeries, services, timestamps, type Service, type ServiceType as SType } from '@/data';
+import { appSummary, serviceErrorSeries, serviceTrafficSeries, services, type Service, type ServiceType as SType } from '@/data';
 import { change, compact, ms, pct } from '@/lib/format';
 import { SERVICE_CATEGORIES, ServiceType, TYPE_META } from './shared';
 import { EbpfBadge } from './k8sShared';
@@ -60,25 +60,14 @@ export function Services() {
 
       {attention.length > 0 && (
         <Section title="Needs attention" subtitle={`${attention.length} of ${scoped.length} are degraded`}>
-          <div className="grid grid-3">
+          <div className="services-attention">
             {attention.map((s) => (
-              <Card key={s.id} onClick={() => open(s)}
-                title={<span className="row">{s.name}<StatusBadge status={s.status} /></span>}
-                subtitle={reason(s)}
-                actions={<ChevronRight size={16} className="muted" aria-hidden />}>
-                <div className="grid grid-2" style={{ gap: 'var(--space-3)' }}>
-                  <div>
-                    <div className="muted" style={{ fontSize: 'var(--text-xs)', marginBottom: 'var(--space-1)' }}>Traffic · {unitOf(s)}</div>
-                    <TimeSeries timestamps={timestamps(range)} height={96} area format={(v) => compact(v)}
-                      series={[{ id: 'rpm', label: 'Traffic', slot: 1, data: serviceTrafficSeries(s.id, range) }]} />
-                  </div>
-                  <div>
-                    <div className="muted" style={{ fontSize: 'var(--text-xs)', marginBottom: 'var(--space-1)' }}>Error rate</div>
-                    <TimeSeries timestamps={timestamps(range)} height={96} area format={(v) => pct(v)}
-                      series={[{ id: 'err', label: 'Error rate', slot: 8, data: serviceErrorSeries(s.id, range) }]} />
-                  </div>
-                </div>
-              </Card>
+              <button key={s.id} className="services-attention__row" onClick={() => open(s)}>
+                <StatusBadge status={s.status} />
+                <strong>{s.name}</strong>
+                <span>{reason(s)}</span>
+                <ChevronRight size={16} aria-hidden />
+              </button>
             ))}
           </div>
         </Section>

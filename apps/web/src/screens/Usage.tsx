@@ -232,7 +232,7 @@ export function AiQuotaBanner() {
   return (
     <div style={{ marginBottom: 'var(--space-4)' }}>
       <Callout icon={<ShieldAlert size={16} color={level === 100 ? 'var(--status-critical)' : 'var(--status-warning)'} />}>
-        <div className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+        <div className="row ai-quota-banner__content" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}>
           <Badge tone={level === 100 ? 'critical' : 'warning'}>{level === 100 ? 'AI credits used up' : `AI credits ${Math.round((ratio ?? 0) * 100)}% used`}</Badge>
           <span className="secondary" style={{ flex: 1, minWidth: 0 }}>
             {credits(ai.used)} of {credits(ai.limit ?? 0)} credits this month.{' '}
