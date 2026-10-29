@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { CheckCircle2 } from 'lucide-react';
 import {
-  Badge, Card, EmptyState, PageHeader, SearchInput, Section, Select, StatTile, StatusBadge, Table,
+  Badge, Card, EmptyState, SearchInput, Section, Select, StatusBadge, Table,
 } from '@/components/ui';
 import { NOW, incidents, isApi, services, type Incident } from '@/data';
 import { ago, duration } from '@/lib/format';
@@ -34,7 +34,6 @@ export function Incidents() {
 
   const openAll = incidents.filter((i) => stateOf(i) !== 'resolved');
   const firing = openAll.filter((i) => stateOf(i) === 'firing').length;
-  const ackOrPending = openAll.length - firing;
   const mttr = pastIncidents.reduce((a, h) => a + (h.resolvedAt - h.startedAt), 0) / (pastIncidents.length || 1);
   const ackTimes = pastIncidents.map((h) => (ackedAtOf(h) ?? 0) - h.startedAt).filter((d) => d > 0);
   const tta = ackTimes.reduce((a, b) => a + b, 0) / (ackTimes.length || 1);
@@ -47,27 +46,34 @@ export function Incidents() {
 
   return (
     <>
-      <PageHeader title="Incidents" subtitle="Every incident across services and apps · each service also lists its own under its Alerts tab"
-        actions={<>
+      <header className="incidents-heading">
+        <div className="incidents-heading__intro">
+          <span className="incidents-heading__eyebrow">LIVE OPERATIONS / INCIDENTS</span>
+          <h1>Incidents <span>{openAll.length} open</span></h1>
+        </div>
+        <div className="incidents-heading__meta" aria-label="Incident summary">
+          <span><strong>{firing}</strong> firing now</span>
+          <span>7d avg acknowledge <strong>{ackTimes.length ? duration(tta / 1000) : '—'}</strong></span>
+          <span>7d avg resolve <strong>{duration(mttr / 1000)}</strong></span>
+          <a href="#maintenance-windows">Maintenance windows</a>
+        </div>
+      </header>
+
+      <div className="incidents-filterbar">
+        <div className="incidents-filterbar__controls">
           <Select aria-label="Filter by service" value={svc} onChange={(e) => setSvc(e.target.value)}
             options={[{ value: 'all', label: 'All services & apps' }, ...affected.map((id) => ({ value: id, label: services.find((s) => s.id === id)?.name ?? id }))]} />
           <Select aria-label="Filter by severity" value={sev} onChange={(e) => setSev(e.target.value)}
             options={[{ value: 'all', label: 'Any severity' }, { value: 'critical', label: 'Critical' }, { value: 'warning', label: 'Warning' }]} />
-          <div style={{ width: 200 }}><SearchInput placeholder="Search incidents" value={q} onChange={(e) => setQ(e.target.value)} /></div>
-        </>} />
-
-      <div className="grid grid-4">
-        <StatTile label="Firing now" value={firing} />
-        <StatTile label="Acknowledged or pending" value={ackOrPending} />
-        <StatTile label="Time to acknowledge · 7d" value={ackTimes.length ? duration(tta / 1000) : '—'} />
-        <StatTile label="Time to resolve · 7d" value={duration(mttr / 1000)} unit="avg" />
+          <div className="incidents-filterbar__search"><SearchInput placeholder="Search incidents" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+        </div>
       </div>
 
-      <Section title="Open" subtitle={open.length ? `${open.filter((i) => stateOf(i) === 'firing').length} firing · ${open.length} open${week ? ` · ${week} in the last 7 days` : ''}` : undefined}>
+      <Section title="Active queue" subtitle={week ? `${week} incidents in the last 7 days` : undefined}>
         {open.length === 0 ? (
           <Card><EmptyState icon={<CheckCircle2 />} title="All clear">{q || svc !== 'all' || sev !== 'all' ? 'No open incident matches the filters.' : 'No monitor is firing or pending.'}</EmptyState></Card>
         ) : (
-          <div className="grid grid-3">
+          <div className="incidents-workspace__feed">
             {open.map((i) => <IncidentCard key={i.id} incident={i} state={stateOf(i)} onOpen={() => openDrawer(i)} onAck={() => ack(i.id)} />)}
           </div>
         )}
@@ -101,9 +107,10 @@ export function Incidents() {
         </Card>
       </Section>
 
-      <Section title="Maintenance windows" subtitle="Planned work: monitors in scope don't notify anyone">
+      <details className="incidents-maintenance" id="maintenance-windows">
+        <summary>Maintenance windows <span>Schedule planned work or review existing windows</span></summary>
         <MaintenanceWindows />
-      </Section>
+      </details>
 
       {selected && (
         <IncidentDrawer incident={selected} state={stateOf(selected)} onClose={closeDrawer} onAck={() => ack(selected.id)} onResolve={() => resolve(selected.id)}

@@ -1,17 +1,17 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
-import { AlertOctagon, ArrowRight, Sparkles } from 'lucide-react';
-import { Sparkline, TimeSeries } from '@/components/charts';
+import { ArrowRight, Sparkles } from 'lucide-react';
+import { TimeSeries } from '@/components/charts';
 import {
-  Badge, Button, Card, Drawer, DrawerSection, KeyValues, Meter, MetricCard, PageHeader, Section, Select, StatusBadge, Table, useDrawer,
+  Badge, Button, Card, Drawer, DrawerSection, KeyValues, Meter, MetricCard, Section, Select, StatusBadge, Table, useDrawer,
 } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
 import {
-  deployMarkers, endpointsFor, incidents, inventory, isApi, kpiSeries, kpis, monitors, redSeries, series, serviceErrorSeries, serviceTrafficSeries, services, suggestions, timestamps,
+  deployMarkers, endpointsFor, incidents, inventory, isApi, kpiSeries, kpis, monitors, redSeries, series, serviceErrorSeries, services, suggestions, timestamps,
   type Endpoint, type Incident,
 } from '@/data';
 import { ago, compact, ms, pct } from '@/lib/format';
-import { ErrorCell, latencyHint, latencySeriesFor, type Latency } from './apm';
+import { ErrorCell, latencyHint, type Latency } from './apm';
 import { ServiceType } from './shared';
 import { PathCrumbs, incidentCause } from './rca';
 import { ruleSeries } from '@/lib/lagAlerts';
@@ -85,49 +85,50 @@ export function Overview() {
 
   return (
     <>
-      <PageHeader title="Overview" subtitle={`shop-platform · ${env} · last ${range}`}
-        actions={<Button icon={<Sparkles size={14} />} onClick={() => setAskOpen(true)}>Ask telemetry</Button>} />
+      <header className="overview-heading" aria-labelledby="overview-title">
+        <div className="overview-heading__copy">
+          <span className="overview-heading__eyebrow">TaskTrooper · {env}</span>
+          <h1 id="overview-title">Production overview</h1>
+          <p>{backend.length} backend services monitored over the last {range}. Start with the active incidents.</p>
+        </div>
+        <Button icon={<Sparkles size={14} />} onClick={() => setAskOpen(true)}>Ask telemetry</Button>
+      </header>
 
+      <div className="overview-primary">
       {open.length > 0 && (
-        <Card flush title={<span className="row"><AlertOctagon size={16} color="var(--status-critical)" aria-hidden />{open.length} open incidents</span>}
-          subtitle="each service also lists its own under its Alerts tab"
-          actions={<Button size="sm" variant="ghost" onClick={() => nav('/incidents')}>All incidents <ArrowRight size={14} /></Button>}>
-          <div className="list">
-            {open.map((i) => {
-              const cause = incidentCause(i);
-              return (
-                <div key={i.id} className="list__row list__row--clickable" onClick={() => inc.open(i)}>
-                  <StatusBadge status={i.state === 'acknowledged' ? 'acknowledged' : i.state === 'pending' ? 'pending' : 'firing'} />
-                  <div className="list__main">
-                    <span className="list__title">{i.title}</span>
-                    <span className="list__meta">{i.service} · now {i.value}</span>
-                    {cause && <span className="secondary" style={{ fontSize: 'var(--text-sm)', whiteSpace: 'normal' }}><strong>Why:</strong> {cause.summary}</span>}
-                  </div>
-                  <span className="muted">{ago(i.startedAt)}</span>
-                </div>
-              );
-            })}
+        <section className="overview-incidents" aria-label="Open incidents">
+          <div className="overview-incidents__heading">
+            <h2>{open.length} open incidents</h2>
+            <Button size="sm" variant="ghost" onClick={() => nav('/incidents')}>View all <ArrowRight size={14} /></Button>
           </div>
-        </Card>
+          <Card flush><div className="list">
+            {open.slice(0, 3).map((i) => (
+              <div key={i.id} className="list__row list__row--clickable" onClick={() => inc.open(i)}>
+                <StatusBadge status={i.state === 'acknowledged' ? 'acknowledged' : i.state === 'pending' ? 'pending' : 'firing'} />
+                <div className="list__main"><span className="list__title">{i.title}</span><span className="list__meta">{i.service} · now {i.value}</span></div>
+                <span className="muted">{ago(i.startedAt)}</span>
+              </div>
+            ))}
+          </div></Card>
+        </section>
       )}
 
-      <div className="grid grid-3">
-        <MetricCard className="span-2 metric--hero" label="Error rate · all backend services" value={pct(err)} curr={err} prev={prevErr} upIsGood={false}
+        <MetricCard className="metric--hero" label="Error rate · all backend services" value={pct(err)} curr={err} prev={prevErr} upIsGood={false}
           hint={`${compact(rpm * err)} failed requests / min · SLO 1%`}>
           <TimeSeries timestamps={ts} series={[{ id: 'err', label: 'Error rate', slot: 8, data: errSeries }]} area
-            format={(v) => pct(v)} height={300} threshold={{ value: 0.01, label: 'SLO 1%' }}
+            format={(v) => pct(v)} height={180} threshold={{ value: 0.01, label: 'SLO 1%' }}
             events={heroEvents} />
         </MetricCard>
-        <div className="stack">
+      </div>
+      <div className="overview-secondary">
           <MetricCard label="Throughput" value={compact(rpm)} unit="rpm" curr={rpm} prev={prevRpm}>
-            <TimeSeries timestamps={ts} height={96} area format={(v) => compact(v)}
+            <TimeSeries timestamps={ts} height={72} area format={(v) => compact(v)}
               series={[{ id: 'rpm', label: 'Throughput', slot: 1, data: rpmSeries }]} />
           </MetricCard>
           <MetricCard label="Latency · p95 · all endpoints" value={String(Math.round(p95Now))} unit="ms" curr={p95Now} prev={red ? p95Now : 198} upIsGood={false}
             hint={red ? `p50 ${ms(latNow.p50)} · p99 ${ms(latNow.p99)}` : latencyHint(LAT, 'p95')}>
-            <TimeSeries timestamps={ts} height={120} format={ms} series={latencySeriesFor('all', range, LAT, { spikeAt: 0.82, spikeMul: 1.6, spikeWidth: 5 })} />
+            <TimeSeries timestamps={ts} height={72} format={ms} series={[{ id: 'p95', label: 'p95 latency', slot: 1, data: red ? red.p95 : series('p95-all', range, { base: p95Now, spikeAt: 0.82, spikeMul: 1.6, spikeWidth: 5 }) }]} />
           </MetricCard>
-        </div>
       </div>
 
       <Section title="Services" subtitle="unhealthy first · click for details"
@@ -137,15 +138,13 @@ export function Overview() {
             { key: 'name', header: 'Service', render: (s) => <div><div style={{ fontWeight: 'var(--weight-medium)' }}>{s.name}</div><div style={{ fontSize: 'var(--text-xs)' }}><ServiceType type={s.type} /></div></div> },
             { key: 'status', header: 'Health', render: (s) => <StatusBadge status={s.status} /> },
             { key: 'rpm', header: 'Traffic', numeric: true, render: (s) => `${compact(s.rpm)} ${s.type === 'http' ? 'rpm' : 'msg/min'}` },
-            { key: 'rpm-t', header: '', render: (s) => <Sparkline data={serviceTrafficSeries(s.id, range).slice(-24)} width={80} height={24} /> },
             { key: 'err', header: 'Error rate', numeric: true, render: (s) => <ErrorCell rate={s.errorRate} /> },
-            { key: 'err-t', header: '', render: (s) => <Sparkline data={serviceErrorSeries(s.id, range).slice(-24)} width={80} height={24} /> },
             { key: 'p95', header: 'p95', numeric: true, render: (s) => ms(s.p95) },
           ]} />
         </Card>
       </Section>
 
-      <div className="grid grid-3">
+      <div className="overview-detail">
         <Card className="span-2" flush title="Endpoints needing attention" subtitle="Failing or slow, worst first · click to open">
           <Table rows={attention} rowKey={(e) => e.serviceId + e.id} onRowClick={(e) => nav(`/services/${e.serviceId}/endpoints/${e.id}`)} columns={[
             { key: 'ep', header: 'Endpoint', render: (e) => <div style={{ minWidth: 0 }}><div className="truncate" style={{ maxWidth: 280 }}><span className="mono muted">{e.method}</span> {e.route}</div><div className="muted" style={{ fontSize: 'var(--text-xs)' }}>{e.service}</div></div> },

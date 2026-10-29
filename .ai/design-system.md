@@ -1,5 +1,7 @@
 # Design system
 
+Yerel stil denemesi (`apps/web/src/styles/exploration.css`): New Relic dokümantasyonunun koyu kömür yüzeyi ve canlı yeşil vurgusundan, Sentry'nin başlık hiyerarşisi ve mor tonlarından esinlenir. Taste skill'in `data-terminal` yönüyle Overview, açık incident kuyruğunu deploy işaretli error-rate grafiğinin yanında gösterir; throughput ve p95 latency ikinci satırdadır. Sidebar'ın bütün navigasyon grupları iki sütunlu ikon, ad ve gerektiğinde sayı gösteren kutulardır. Dar ekranda sidebar başlangıçta kapalıdır ve düğmeyle açılan panel olarak görünür. Services uyarılarını grafik tekrarı olmadan kısa satırlarda toplar; Incidents canlı kuyruğu öne çıkarır ve maintenance ayarlarını isteğe bağlı açılır bölümde tutar. Topbar'daki işlevsiz arama ve duyuru düğmeleri kaldırılmıştır. Bu deneme yalnızca yerel dalda değerlendirilir.
+
 Kaynak: `apps/web/src/styles/tokens.css` (token'lar), `apps/web/src/components/ui` (komponentler), `apps/web/src/components/charts` (grafikler).
 Canlı showcase: dashboard'da **`/design-system`** sayfası.
 
@@ -10,10 +12,12 @@ değişirse bu dosya ve `tokens.css` aynı PR'da güncellenir.
 ## İlkeler
 
 1. **Veri yüksek sesle konuşur, arayüz sessiz kalır.** Hue-265 soğuk nötrler, primary = TaskTrooper laciverti (`--accent`), marka işareti `--brand-mark #15214b`, sıcak amber (`--accent-warm`) sadece seçim/vurgu. Renk sadece veri ve durum için.
-2. **Yoğun ama ferah.** Body 14px (Inter), 4px grid, tablolar sıkı; kartlar arası 16px. Micro etiketler (`.eyebrow`, tablo başlığı, metric label) 11px uppercase + letter-spacing.
+2. **Yoğun ama ferah.** Body 14px (Inter), 4px grid, tablolar sıkı; kartlar arası 16px. Overview'da tablo başlıkları ve metric etiketleri okunur 14px sentence case biçimindedir; yalnızca grafik ekseni ve ikincil meta daha küçüktür.
 3. **Durum asla tek başına renk değildir.** Status her zaman ikon + etiket (`StatusBadge`).
-4. **Light ve dark eşit vatandaş.** Dark tema aynı rampalardan seçilmiş ayrı adımlar, otomatik ters çevirme değil. Tema: `system | light | dark` (topbar'dan), `data-theme` attribute'u ile.
-5. **Ham değer yasak.** Komponentlerde hex, px font size, rastgele spacing yazılmaz; token kullanılır.
+4. **Kartlar kaydırmayla görünür.** Viewport'a giren kartlar kısa bir opaklık ve hareket geçişiyle sırayla açılır; yukarı kaydırıp geri gelince geçiş giriş yönünden tekrar oynar. Görünür kartların gölgesi ve çok hafif kenar vurgusu yavaş, farklı fazlarda sürekli değişir; ekran dışındaki kartlar animasyonu durdurur. `prefers-reduced-motion` tüm bu hareketi kapatır.
+5. **İmleç efekti yerel ve ikincildir.** Yerel fare imleci görünür kalır; ek daire hareket sırasında hız yönünde esneyip kenarını kısa süre değiştirir, durunca yuvarlaklaşır ve etkileşimli öğelerde sınırlarına uyar. Tıklamada kısa mor bir ışık ve büyüyüp toparlanan jelly dalgası oynar. İmleç 1,6 saniye durunca daire yavaşça kaybolur, hareket edince geri gelir. Dokunmatik ve `prefers-reduced-motion` durumlarında gösterilmez.
+6. **Light ve dark eşit vatandaş.** Dark tema aynı rampalardan seçilmiş ayrı adımlar, otomatik ters çevirme değil. Tema: `system | light | dark` (topbar'dan), `data-theme` attribute'u ile.
+7. **Ham değer yasak.** Komponentlerde hex, px font size, rastgele spacing yazılmaz; token kullanılır.
 
 ## Token'lar
 
@@ -58,7 +62,7 @@ Font: `--font-sans` (Inter), `--font-mono` (JetBrains Mono — route, log, kod, 
 - Spacing: `--space-1..12` (4px grid).
 - Radius: `--radius-xs 4` (bar ucu) · `sm 6` (chip, segmented item) · `md 8` (buton, input, nav item) · `lg 14` (kart, rounded-xl) · `full` (badge).
 - Kontrol yükseklikleri: `--control-h-sm 30`, `--control-h-md 36`.
-- Layout: sidebar 240px, topbar 56px (yarı saydam + blur), içerik max 1440px. 900px altı sidebar üstte yatay.
+- Layout: sidebar açıkken 240px, kapalıyken tamamen gizli; topbar 56px, içerik max 1440px. Topbar düğmesi sidebar'ı açıp kapatır, seçim tarayıcıda saklanır. 900px altında düğmeyle tam navigasyon açılır. Sidebar marka başlığı kaldırılmıştır; proje seçici yalnızca açık görünümde yer alır.
 - Kartlar: `--shadow-sm` (TaskTrooper shadow-raised). Alarm durumundaki kart: sol 4px status rail (`.card--rail-critical` / `.card--rail-warning`).
 
 ## Komponentler (`components/ui`)
