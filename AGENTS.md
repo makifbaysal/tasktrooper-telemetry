@@ -70,6 +70,8 @@ pnpm typecheck
 
 Backend: `docker compose -f deploy/docker-compose.yml up -d` (altyapı), `make migrate`, `make build`, `make test`. Detay: `services/*/README.md`, `sdks/*/README.md`.
 
+Tam kontrol (CI ile birebir aynı kapılar): `make check` → gofmt, `go vet`, tüm Go modül birim testleri, web typecheck + build, JS SDK build + vitest, workflow lint.
+
 ## Çalışma kuralları
 
 1. **Önce doküman.** Yeni servis, tablo, SDK API'si veya alert tipi → önce ilgili `.ai/*.md` güncellenir, sonra kod.
@@ -82,6 +84,7 @@ Backend: `docker compose -f deploy/docker-compose.yml up -d` (altyapı), `make m
 8. **Testler:** Go → table-driven test; web → komponent mantığı için vitest (eklenecek). Ingest yolu için benchmark zorunlu.
 9. **Commit:** Conventional Commits (`feat(web): ...`, `fix(ingest): ...`).
 10. **Dil:** Kod, identifier, commit İngilizce. `.ai/` dokümanları Türkçe (teknik terimler İngilizce).
+11. **Seans sonunda `make check`.** Bir değişiklik tamamlanıp commit'lenmeden/PR açılmadan önce repo kökünde `make check` çalıştır ve mutlaka `check OK` ile bitmesini bekle. Uygulamanın core flow'u (Go servisleri derleniyor + testleri geçiyor, web build oluyor, JS SDK'lar build + test oluyor, workflow lint temiz) bozuksa check'lemeyle yetinme: nedeni bul ve düzelt, sonra tekrar `make check` çalıştır. Yeşil olmadan işi teslim etme; geçici olarak atlamak/elemek yok.
 
 ## Mevcut durum
 
