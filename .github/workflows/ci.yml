@@ -17,13 +17,26 @@ env:
   PNPM_VERSION: "12" # matches pnpm-lock.yaml (lockfileVersion 9.0)
 
 jobs:
+  # Module list is derived from services/go.work (same source as Makefile MODULES),
+  # so adding a module there is enough — no matrix to keep in sync.
+  modules:
+    runs-on: ubuntu-latest
+    outputs:
+      list: ${{ steps.read.outputs.list }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: read
+        run: echo "list=$(grep -E '^[[:space:]]*\./' go.work | sed 's|.*\./||' | jq -R -s -c 'split("\n") | map(select(length > 0))')" >> "$GITHUB_OUTPUT"
+        working-directory: services
+
   go:
     name: go / ${{ matrix.module }}
+    needs: modules
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        module: [pkg, ingest, api, alerting, collector, integrations, symbolicator]
+        module: ${{ fromJSON(needs.modules.outputs.list) }}
     defaults:
       run:
         working-directory: services # go.work lives here; matrix strings are repo literals
@@ -33,9 +46,9 @@ jobs:
         with:
           go-version-file: services/go.work
           cache-dependency-path: services/**/go.sum
-      - name: gofmt (fail on diff)
+      - name: gofmt (fail on diff, testdata fixtures excluded)
         run: |
-          files=$(gofmt -l "${{ matrix.module }}")
+          files=$(find . -path '*/testdata' -prune -o -name '*.go' -print | xargs gofmt -l)
           if [ -n "$files" ]; then
             echo "needs gofmt: $files"
             gofmt -d $files
