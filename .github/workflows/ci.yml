@@ -48,16 +48,25 @@ jobs:
           cache-dependency-path: services/**/go.sum
       - name: gofmt (fail on diff, testdata fixtures excluded)
         run: |
-          files=$(find . -path '*/testdata' -prune -o -name '*.go' -print | xargs gofmt -l)
+          files=$(find "./${{ matrix.module }}" -path '*/testdata' -prune -o -name '*.go' -print0 | xargs -0 gofmt -l)
           if [ -n "$files" ]; then
             echo "needs gofmt: $files"
-            gofmt -d $files
+            printf '%s\n' "$files" | xargs gofmt -d
             exit 1
           fi
       - name: go vet
         run: go vet ./${{ matrix.module }}/...
       - name: go test (unit only)
         run: go test ./${{ matrix.module }}/...
+
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: services/go.work
+      - run: go run github.com/rhysd/actionlint/cmd/actionlint@latest .github/workflows/*.yml
 
   web:
     runs-on: ubuntu-latest

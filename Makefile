@@ -31,7 +31,7 @@ check: ## one-shot health check — same gates as .github/workflows/ci.yml
 	@pnpm --version  >/dev/null 2>&1 || { echo "check: pnpm not in PATH, or not runnable (needs node)"; exit 1; }
 	@go version      >/dev/null 2>&1 || { echo "check: go not in PATH, or not runnable (Go 1.26; mise: run 'mise use -g go@1.26.3')"; exit 1; }
 	@printf 'package p\n' | gofmt >/dev/null 2>&1 || { echo "check: gofmt not in PATH, or not runnable (ships with Go)"; exit 1; }
-	@bad=$$(cd services && find . -path '*/testdata' -prune -o -name '*.go' -print | xargs gofmt -l) || exit 1; \
+	@bad=$$(cd services && find . -path '*/testdata' -prune -o -name '*.go' -print0 | xargs -0 gofmt -l) || exit 1; \
 	if [ -n "$$bad" ]; then echo "services/ needs gofmt:"; echo "$$bad"; (cd services && gofmt -d $$bad); exit 1; fi
 	@for m in $(MODULES); do [ -d services/$$m ] || continue; echo "vet services/$$m"; (cd services/$$m && go vet ./...) || exit 1; done
 	@$(MAKE) test
