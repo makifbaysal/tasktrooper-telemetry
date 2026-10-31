@@ -39,7 +39,7 @@ const (
 type traceSearchInput struct {
 	RangeInput
 	Service    string `json:"service,omitempty" jsonschema:"Service name, as returned by tt_list_services"`
-	Endpoint   string `json:"endpoint,omitempty" jsonschema:"Endpoint id (slug) from tt_list_endpoints, not the route"`
+	Endpoint   string `json:"endpoint,omitempty" jsonschema:"Endpoint as \"METHOD /route\" (e.g. \"POST /v1/charges\", method + route from tt_list_endpoints) or a consumer process name; NOT the slug id. A slug matches nothing and returns an empty list"`
 	ErrorsOnly bool   `json:"errorsOnly,omitempty" jsonschema:"Only traces containing an error span"`
 	MinMs      *int   `json:"minMs,omitempty" jsonschema:"Only traces at least this slow, in milliseconds"`
 	Sort       string `json:"sort,omitempty" jsonschema:"slowest to sort by duration instead of recency"`

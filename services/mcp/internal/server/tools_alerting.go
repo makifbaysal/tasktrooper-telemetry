@@ -32,7 +32,7 @@ func (s *Server) registerAlertingTools(srv *mcp.Server) {
 type monitorListInput struct {
 	RangeInput
 	Service   string `json:"service,omitempty" jsonschema:"Service name, as returned by tt_list_services"`
-	Endpoint  string `json:"endpoint,omitempty" jsonschema:"Endpoint id (slug) from tt_list_endpoints, not the route"`
+	Endpoint  string `json:"endpoint,omitempty" jsonschema:"Endpoint as \"METHOD /route\" (e.g. \"POST /v1/charges\", method + route from tt_list_endpoints) or a consumer process name; NOT the slug id. A slug matches nothing and returns an empty list"`
 	Kind      string `json:"kind,omitempty" jsonschema:"Monitor kind filter (threshold, latency, log_match, error_new, anomaly, composite, kpi_burn, ...)"`
 	ClusterID string `json:"clusterId,omitempty" jsonschema:"Infra cluster id filter"`
 	Group     string `json:"group,omitempty" jsonschema:"Consumer group filter"`
@@ -65,7 +65,7 @@ type incidentListInput struct {
 	RangeInput
 	State     string `json:"state,omitempty" jsonschema:"Incident state: firing, resolved or acked"`
 	Service   string `json:"service,omitempty" jsonschema:"Service name, as returned by tt_list_services"`
-	Endpoint  string `json:"endpoint,omitempty" jsonschema:"Endpoint id (slug) from tt_list_endpoints, not the route"`
+	Endpoint  string `json:"endpoint,omitempty" jsonschema:"Endpoint as \"METHOD /route\" (e.g. \"POST /v1/charges\", method + route from tt_list_endpoints) or a consumer process name; NOT the slug id. A slug matches nothing and returns an empty list"`
 	MonitorID string `json:"monitorId,omitempty" jsonschema:"Monitor id, from tt_list_monitors"`
 	KpiID     string `json:"kpiId,omitempty" jsonschema:"KPI id filter"`
 	Since     *int   `json:"since,omitempty" jsonschema:"Only incidents started at or after this ts (ms)"`
