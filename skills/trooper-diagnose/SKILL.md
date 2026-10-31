@@ -24,8 +24,8 @@ read-only and scoped to one project by the API key. Background on the tools: the
 
 ## Workflow (in order; skip a step only when it cannot apply, and say so)
 
-1. **Incidents.** `tt_list_incidents` with `{ service, state: "firing" }`; if empty, drop `state`
-   and widen `range` (`6h`, `24h`). If the user did not name a service, call it without `service` and
+1. **Incidents.** `tt_list_incidents { service, range: "24h" }` **without** `state`: `pending` incidents
+   (threshold crossed, not yet firing) are often the live problem, and `state` can't select them. If the user did not name a service, call it without `service` and
    pick the most severe firing incident. If the service name may be wrong, check `tt_list_services`.
 2. **Incident detail.** `tt_get_incident { id }` for the relevant incident(s). Note `startedAt`,
    `value`/`peakValue`, `endpoint` (a route like `POST /v1/orders`), and the `events` timeline. `rootCause` is unstructured JSON whose
@@ -36,14 +36,17 @@ read-only and scoped to one project by the API key. Background on the tools: the
    `id` from this list, then `tt_endpoint_rca { service, endpoint: <id slug>, range, baseline }`
    (`baseline: "prev"` default; use `1d`/`7d` if the problem may be older than the window). Read
    `deltaAvgMs`, `ownMs` [current, baseline] and `children` (sorted by `deltaMsPerReq`): the top child is the
-   dependency that got slower/errorier; a large `ownMs` delta means the endpoint's own code.
+   dependency that got slower/errorier; a large `ownMs` delta means the endpoint's own code. If
+   `baseline.requests` is 0 there is no comparison: retry another `baseline`, else read `children` only as a
+   time breakdown and say the baseline is missing.
 5. **Sample traces.** `tt_search_traces { service, endpoint: "<METHOD> <route>", errorsOnly: true }` for
    errors, or `{ service, endpoint, sort: "slowest", minMs }` for latency. Keep `limit` small (5–10).
    Set `range` to cover the incident; if empty, retry with only `service` before concluding.
 6. **One trace.** `tt_get_trace { traceId }` on 1–2 representative traces; find the failing or slow span,
    its dependency and attributes (status, `db.statement`, peer, exception).
-7. **Logs.** `tt_search_logs { traceId }` first. Then the window: `{ service, level: "warn", range }`,
-   optionally `q` with a term from the span/exception. To look further back, page with `before: <nextBefore>`.
+7. **Logs.** `tt_search_logs { traceId }` first. Then the window: `{ service, level: "error", range }` and
+   separately `level: "warn"` (`level` is an exact match, not a minimum); optionally `q` with a term from the
+   span/exception. The `levels` counts in the result show which levels have lines. To look further back, page with `before: <nextBefore>`.
 8. **Deploys.** `tt_list_deploys { service, range }` (and for the dependency's service if step 4/6 points
    at one). A deploy shortly before `startedAt` or the RCA window is a correlation, not proof: say so.
 

@@ -12,7 +12,8 @@ description: How to query TaskTrooper telemetry efficiently with the tt_* MCP to
 1. `tt_list_services` → exact service names (+ RED summary). Every `service` argument must be one of
    these names; `type` filters `http,worker,web,mobile`.
 2. Then go narrow: `tt_get_service_kpis` (one service), `tt_list_endpoints` (its endpoints + **ids**).
-3. For "what is broken now": `tt_list_incidents { state: "firing" }` instead.
+3. For "what is broken now": `tt_list_incidents` (no `state`: it can only select `firing`/`resolved`, and
+   `pending` incidents matter) instead.
 
 ## Scoping
 
@@ -27,8 +28,8 @@ description: How to query TaskTrooper telemetry efficiently with the tt_* MCP to
 | `since` | epoch ms (incidents) | |
 | `before` | epoch ms cursor (logs) | Pass the previous page's `nextBefore` |
 
-Trace filters: `errorsOnly`, `minMs`, `sort: "slowest"`. Log filters: `level` (minimum:
-`debug|info|warn|error`), `q` (full text), `traceId` (32 hex), `route` (template, e.g. `/orders/:id`).
+Trace filters: `errorsOnly`, `minMs`, `sort: "slowest"`. Log filters: `level` (**exact**, one of
+`debug|info|warn|error`; not a minimum, so query `error` and `warn` separately), `q` (full text), `traceId` (32 hex), `route` (template, e.g. `/orders/:id`).
 RCA: `tt_endpoint_rca { service, endpoint, range, baseline: prev|1d|7d }`.
 
 ## Reading results
@@ -52,6 +53,10 @@ RCA: `tt_endpoint_rca { service, endpoint, range, baseline: prev|1d|7d }`.
 - `tt_search_traces` with `limit: 100` to "see everything" → use `errorsOnly`/`minMs`/`sort` and limit 5–10.
 - Calling `tt_get_service_kpis` to discover services (it needs a name; use `tt_list_services`).
 - A `range` shorter than the age of the incident → empty results that look like "healthy".
+- `level: "warn"` expecting errors too → it is exact; check the `levels` counts in the result.
+- Relying on the log `route` filter: it matches only lines that carry a route (many log lines don't). An
+  empty result means "no routed lines", not "no logs"; prefer `traceId` or `service` + `q`.
+- `tt_list_incidents { state: "acked" }` → rejected upstream; omit `state` and read each incident's `state`.
 - Expecting write actions: no tool acks incidents, creates monitors or starts load tests.
 
 ## Examples
@@ -75,7 +80,7 @@ repeat with `before: <nextBefore>`.
 `tt_get_incident { id }` (note `startedAt`) → `tt_list_deploys { service, range: "24h" }` → compare `ts`.
 
 **"Is anything alerting / what is configured for catalog-api?"**
-`tt_list_incidents { state: "firing" }`; `tt_list_monitors { service: "catalog-api" }`.
+`tt_list_incidents { range: "24h" }` (read `state`); `tt_list_monitors { service: "catalog-api" }`.
 
 **"Did the last checkout load test pass?"**
 `tt_list_loadtest_runs { limit: 5 }` (or `{ scenarioId }`) → check state and thresholds.
