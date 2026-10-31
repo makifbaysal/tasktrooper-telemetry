@@ -129,6 +129,10 @@ verisi (`/inventory`, `/suggestions` — bkz. aşağıdaki örtüşme notu).
 
 ## Bağlanma
 
+Binary: `cd services/mcp && go install ./cmd/tt-mcp` (`$(go env GOPATH)/bin` PATH'te olmalı; değilse aşağıdaki
+`command`'a mutlak yol yazılır). API ayakta olmalı (`make demo` veya compose `--profile app`): `tt-mcp`
+startup'ta `GET /me` çağırır, API yoksa başlamaz.
+
 **OpenCode** (`~/.config/opencode/opencode.json` veya proje `opencode.json`):
 
 ```json
@@ -175,6 +179,23 @@ veya proje kökünde `.mcp.json`:
   }
 }
 ```
+
+## Agent Skills (`skills/`)
+
+Tool'ları **hangi sırayla** kullanacağını anlatan Agent Skills (`<name>/SKILL.md`, frontmatter `name` +
+`description`). Kanonik yer repo kökündeki `skills/`; detay ve tetikleme tablosu: [`skills/README.md`](../skills/README.md).
+
+| Skill | Ne zaman |
+|---|---|
+| `trooper-diagnose` | "X'te bir sorun var, neden?" — incident → KPI → endpoint RCA → trace → log → deploy; kanıtsız neden yok, zayıf kanıtta "unknown" |
+| `trooper-query` | Telemetri sorusu; scope (`range`/`service`/`limit`), log sayfalama (`before`/`nextBefore`), `truncated` okuma |
+| `trooper-contribute` | Bu repoda kod değişikliği; AGENTS.md + `.ai/` kurallarına işaret eden kontrol listesi |
+
+**Keşif:** tek bağlantı commit'li `.claude/skills -> ../skills` symlink'i. Claude Code proje skill'lerini
+`.claude/skills/`'ten okur; OpenCode (≥ 2.0) `.opencode/skill(s)/` yanında uyumluluk için `.claude/skills/` ve
+`.agents/skills/`'i de tarar (symlink takip edilir). Kopya yok; symlink desteklenmeyen checkout'ta OpenCode için
+`opencode.json` → `"skills": ["./skills"]`. Skill metni tool adlarını birebir (`tt_*`) kullanır; tool eklenir/
+yeniden adlandırılırsa skill'ler aynı PR'da güncellenir.
 
 ## Bilinen bayraklar / boşluklar
 

@@ -6,7 +6,7 @@ Agent'lar ve geliştiriciler için kaynak doküman seti. Giriş noktası: [`../A
 
 1. [product.md](product.md) — ne yapıyoruz, kim için
 2. [architecture.md](architecture.md) — nasıl yapıyoruz
-3. Konuya göre: [sdk.md](sdk.md), [data-model.md](data-model.md), [alerting.md](alerting.md), [code-intelligence.md](code-intelligence.md), [load-testing.md](load-testing.md), [mcp.md](mcp.md)
+3. Konuya göre: [sdk.md](sdk.md), [data-model.md](data-model.md), [alerting.md](alerting.md), [code-intelligence.md](code-intelligence.md), [load-testing.md](load-testing.md), [mcp.md](mcp.md) (+ Agent Skills: [`../skills/`](../skills/README.md))
 4. UI işi: [design-system.md](design-system.md)
 5. Neden böyle: [decisions.md](decisions.md) · Sırada ne var: [roadmap.md](roadmap.md)
 
