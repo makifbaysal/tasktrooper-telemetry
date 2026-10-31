@@ -10,4 +10,5 @@ use (
 	./symbolicator
 	./codeintel
 	./loadtest
+	./mcp
 )

@@ -349,3 +349,27 @@ LLM alert'leri monitor kind `llm` (contracts §25, alerting.md). Detay: contract
 - `tasktrooper.init(...)` asla throw etmez; `tasktrooper-run` launcher + `import tasktrooper.auto`.
 - Profiling (§24) ve LLM (`instrument_openai`, `instrument_anthropic`, sync + async + stream; §25) aynı pakette, ek bağımlılık yok.
 **Sonuç:** Paket yayını diğer SDK'larla birlikte (hesap gerektirir).
+
+## ADR-025 — MCP sunucusu: `services/mcp`, salt okunur, stdio, api'yi sarar
+**Bağlam:** Yerel kodlama agent'ları (OpenCode, Claude Code) telemetriye doğal dilde sorgu sunsun; her ekip
+üçüncü parti observability MCP'si yazmasın. API'de 150+ uç var, agent tool seti bunların aynası olamaz.
+**Karar:**
+- Yeni Go modülü `services/mcp` (`cmd/tt-mcp`), `services/go.work`'e eklenir; resmi Go MCP SDK, **stdio**
+  transport (streamable-HTTP uzatma hedefi, v1'de tasarlanmıyor).
+- Tool'lar `services/api`'yi (`openapi.yaml`) sarar; ClickHouse/Postgres'e doğrudan bağlanılmaz (contracts §26).
+  Tenant (org/project) api key'den gelir; ek olarak `TT_ORG_ID`/`TT_PROJECT_ID` startup'ta `/me` ile doğrulanır.
+- v1 **salt okunur**: 12 tool (servis KPI, endpoint, endpoint RCA, trace, log, monitor, incident + timeline,
+  load test run, deploy marker). Write tool yok. Her tool input doğrulama, sonuç cap'i (64 KB; kesilirse
+  `truncated`/`total`/`hint` işaretleri) ve secret/stack içermeyen hata döner. Detay: `.ai/mcp.md`.
+**Sonuç:** Tool seti bilinçli olarak dar; api'ye yeni uç eklenince MCP de senkron büyür. Write tool'ları
+v2'de ayrı ADR ile gelir.
+
+## ADR-026 — CI sözleşmesi: Make hedefleri + go.work modül matrisi
+**Bağlam:** PR'lerde her Go modülünün derlenmesi/vet + unit testi, web typecheck + build, JS SDK build + vitest
+ve workflow lint doğrulanmalı; modül listesi iki yerde tutulamaz.
+**Karar:**
+- `.github/workflows/ci.yml` modül matrisini `services/go.work`'ten türetir; `make check` aynı kapıları lokal
+  koşar — CI sözleşmesi = Makefile hedefleri.
+- PR CI unit-only'dir; integration/e2e (`make e2e-ingest`) local'dedir ve ertelenmiştir, CI'ya girmez.
+- Imaj build'leri ci.yml'de değil, `.github/workflows/docker.yml`'dedir (release/registry akışı).
+**Sonuç:** `go.work`'e modül eklemek CI'ı otomatik genişletir; matrix senkron derdi yok.

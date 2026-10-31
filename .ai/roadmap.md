@@ -94,3 +94,12 @@ Durum: servisler (`ingest`, `api`, `alerting`, `collector`, `integrations` = `tr
 - [x] OTLP profiles sinyali (`/v1development/profiles`, gRPC)
 - [x] Web replay: buffer sekmesi `storage` event'i
 - [x] Mobil replay emülatör/simulator doğrulaması
+
+## Faz 8 — MCP sunucusu (local coding agent entegrasyonu) ✅
+- [x] Sözleşme: ADR-025/026, contracts §26, `.ai/mcp.md` (12 salt okunur `tt_*` tool'u)
+- [x] `services/mcp` modülü: stdio transport (stdout = protokol), `TT_*` config + startup `/me` kontrolü,
+  tek shared HTTP client, 64 KB sonuç cap'i (`truncated`/`total`/`hint`), `internal/redact` PII maskesi
+- [x] Testler: doğrulama/redact/hata eşlemesi (table-driven), in-memory e2e (12 tool + 3 çağrı),
+  stdio stdout saflığı (gerçek binary subprocess)
+- [x] Dockerfile (distroless, `services/` build context); CI modül matrisi `go.work`'ten otomatik
+- [ ] Canlı stack üzerinde gerçek MCP client ile manuel doğrulama
