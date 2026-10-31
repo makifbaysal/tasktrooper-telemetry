@@ -184,20 +184,32 @@ veya proje kökünde `.mcp.json`:
 
 ## Agent Skills (`skills/`)
 
-Tool'ları **hangi sırayla** kullanacağını anlatan Agent Skills (`<name>/SKILL.md`, frontmatter `name` +
-`description`). Kanonik yer repo kökündeki `skills/`; detay ve tetikleme tablosu: [`skills/README.md`](../skills/README.md).
+Tool'ları **hangi sırayla** kullanacağını anlatan Agent Skills (`skills/<name>/SKILL.md`, frontmatter `name` +
+`description`; description agent'ın skill'i **ne zaman** yükleyeceğini söyler). Kanonik yer repo kökündeki
+`skills/`; skill'ler sadece orada düzenlenir.
 
 | Skill | Ne zaman |
 |---|---|
-| `trooper-diagnose` | "X'te bir sorun var, neden?" — incident → KPI → endpoint RCA → trace → log → deploy; kanıtsız neden yok, zayıf kanıtta "unknown" |
-| `trooper-query` | Telemetri sorusu; scope (`range`/`service`/`limit`), log sayfalama (`before`/`nextBefore`), `truncated` okuma |
-| `trooper-contribute` | Bu repoda kod değişikliği; AGENTS.md + `.ai/` kurallarına işaret eden kontrol listesi |
+| [`trooper-diagnose`](../skills/trooper-diagnose/SKILL.md) | "X'te bir sorun var, neden?" — incident → KPI → endpoint RCA → trace → log → deploy; kanıtsız neden yok, zayıf kanıtta "unknown" |
+| [`trooper-query`](../skills/trooper-query/SKILL.md) | Telemetri sorusu; scope (`range`/`service`/`limit`), log sayfalama (`before`/`nextBefore`), `truncated` okuma |
+| [`trooper-contribute`](../skills/trooper-contribute/SKILL.md) | Bu repoda kod değişikliği; AGENTS.md + `.ai/` kurallarına işaret eden kontrol listesi |
 
-**Keşif:** tek bağlantı commit'li `.claude/skills -> ../skills` symlink'i. Claude Code proje skill'lerini
-`.claude/skills/`'ten okur; OpenCode (≥ 2.0) `.opencode/skill(s)/` yanında uyumluluk için `.claude/skills/` ve
-`.agents/skills/`'i de tarar (symlink takip edilir). Kopya yok; symlink desteklenmeyen checkout'ta OpenCode için
-`opencode.json` → `"skills": ["./skills"]`. Skill metni tool adlarını birebir (`tt_*`) kullanır; tool eklenir/
-yeniden adlandırılırsa skill'ler aynı PR'da güncellenir.
+`trooper-diagnose` ve `trooper-query` yukarıdaki § Bağlanma ile kayıtlı `tasktrooper` MCP sunucusunu gerektirir.
+
+**Keşif:** tek bağlantı commit'li `.claude/skills -> ../skills` symlink'i, kopya yok.
+- Claude Code proje skill'lerini `.claude/skills/<name>/SKILL.md`'den okur.
+- OpenCode (2.0.x) `.opencode/skill(s)/` yanında uyumluluk için `.claude/skills/` ve `.agents/skills/`'i de
+  tarar (cwd'den yukarı, symlink takip edilir). Tarama asenkron: background service açıksa dosya değişikliği
+  birkaç saniye sonra görünür.
+- **`skills/` altına skill olmayan `.md` koyma:** OpenCode `{*.md,**/SKILL.md}` deseniyle tarar; ör. bir
+  `skills/README.md` "README" adlı bir skill olarak listelenir. Bu yüzden kurulum notu burada, `skills/`'te değil.
+- Symlink'siz checkout (`core.symlinks=false`): OpenCode için `opencode.json` → `"skills": ["./skills"]`; Claude
+  Code için `rm .claude/skills && cp -r skills .claude/skills` (kopya commit'lenmez).
+- Kontrol: `claude -p "list skills starting with trooper-"`; OpenCode'da `/skills` komutu veya
+  `opencode api skill.list --param "location[directory]=$PWD"`.
+
+Skill metni tool adlarını birebir (`tt_*`) kullanır; tool eklenir/yeniden adlandırılırsa skill'ler aynı PR'da
+güncellenir.
 
 ## Bilinen bayraklar / boşluklar
 

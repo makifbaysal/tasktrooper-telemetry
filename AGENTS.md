@@ -29,7 +29,7 @@ Dört ana yetenek:
 | [`.ai/alerting.md`](.ai/alerting.md) | Alert motoru, kural tipleri, kod analizi ile otomatik alert |
 | [`.ai/code-intelligence.md`](.ai/code-intelligence.md) | Repo okuma, envanter çıkarma, LLM kullanımı |
 | [`.ai/mcp.md`](.ai/mcp.md) | MCP sunucusu (`services/mcp`), tool yüzeyi, config |
-| [`skills/`](skills/README.md) | Agent Skills (`trooper-diagnose`, `trooper-query`, `trooper-contribute`), keşif + kurulum |
+| [`skills/`](skills/) | Agent Skills (`trooper-diagnose`, `trooper-query`, `trooper-contribute`); keşif + kurulum: [`.ai/mcp.md`](.ai/mcp.md) § Agent Skills |
 | [`.ai/load-testing.md`](.ai/load-testing.md) | Load test altyapısı, runner'lar, senaryo formatı |
 | [`.ai/design-system.md`](.ai/design-system.md) | UI token'ları, komponentler, grafik kuralları |
 | [`.ai/contracts.md`](.ai/contracts.md) | Servisler/SDK'lar arası sözleşme: portlar, auth, Kafka topic'leri, `trooper.*` attribute'ları, collector metrikleri |
