@@ -14,9 +14,11 @@ read-only and scoped to one project by the API key. Background on the tools: the
   output (incident id, endpoint id, trace id, log ts, deploy version). No citation, no claim.
 - **Truncated results.** If a result has `truncated: true`, read its `hint` and narrow the query
   (service, endpoint, `errorsOnly`, `minMs`, `level`, shorter `range`) and call again **before** concluding.
-- **Never guess ids.** Service names come from `tt_list_services`, endpoint ids (slugs like
-  `get-orders-id`, not routes) from `tt_list_endpoints`, trace ids from `tt_search_traces`, incident ids
-  from `tt_list_incidents`. A 404 that says "call tt_list_endpoints" means the id was guessed.
+- **Never guess ids.** Service names come from `tt_list_services`, trace ids from `tt_search_traces`,
+  incident ids from `tt_list_incidents`. Endpoints have **two forms**, both from `tt_list_endpoints`:
+  the `id` slug (`post-v1-charges`) **only** for `tt_endpoint_rca`; `"METHOD /route"`
+  (`"POST /v1/charges"`) for the `endpoint` filter of traces/incidents/monitors. The wrong form returns an
+  **empty list**, not an error, so an empty result after an endpoint filter is suspect, not "healthy".
 - **Say "unknown"** when the evidence is thin or contradictory. A weak guess presented as a finding is worse.
 - Timestamps are epoch **ms**. Convert to UTC when reporting.
 
@@ -26,17 +28,18 @@ read-only and scoped to one project by the API key. Background on the tools: the
    and widen `range` (`6h`, `24h`). If the user did not name a service, call it without `service` and
    pick the most severe firing incident. If the service name may be wrong, check `tt_list_services`.
 2. **Incident detail.** `tt_get_incident { id }` for the relevant incident(s). Note `startedAt`,
-   `value`/`peakValue`, `endpoint`, and the `events` timeline. `rootCause` is unstructured JSON whose
+   `value`/`peakValue`, `endpoint` (a route like `POST /v1/orders`), and the `events` timeline. `rootCause` is unstructured JSON whose
    shape varies: treat it as a **hint** to verify in later steps, never as the conclusion.
 3. **Service health.** `tt_get_service_kpis { service, range }`: error rate, latency, throughput,
    dependencies, version. Pick a `range` that covers the incident start (e.g. `6h` if it started 2h ago).
 4. **Endpoints.** `tt_list_endpoints { service, range }`; rank by `errorRate` and `p95`. Take the endpoint
-   `id` from this list, then `tt_endpoint_rca { service, endpoint: <id>, range, baseline }`
+   `id` from this list, then `tt_endpoint_rca { service, endpoint: <id slug>, range, baseline }`
    (`baseline: "prev"` default; use `1d`/`7d` if the problem may be older than the window). Read
    `deltaAvgMs`, `ownMs` [current, baseline] and `children` (sorted by `deltaMsPerReq`): the top child is the
    dependency that got slower/errorier; a large `ownMs` delta means the endpoint's own code.
-5. **Sample traces.** `tt_search_traces { service, endpoint, errorsOnly: true }` for errors, or
-   `{ service, endpoint, sort: "slowest", minMs }` for latency. Keep `limit` small (5–10).
+5. **Sample traces.** `tt_search_traces { service, endpoint: "<METHOD> <route>", errorsOnly: true }` for
+   errors, or `{ service, endpoint, sort: "slowest", minMs }` for latency. Keep `limit` small (5–10).
+   Set `range` to cover the incident; if empty, retry with only `service` before concluding.
 6. **One trace.** `tt_get_trace { traceId }` on 1–2 representative traces; find the failing or slow span,
    its dependency and attributes (status, `db.statement`, peer, exception).
 7. **Logs.** `tt_search_logs { traceId }` first. Then the window: `{ service, level: "warn", range }`,

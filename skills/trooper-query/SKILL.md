@@ -21,7 +21,8 @@ description: How to query TaskTrooper telemetry efficiently with the tt_* MCP to
 | `range` | `15m 30m 1h 6h 24h 7d` | Relative to now; default `1h`. Must cover the event you look for |
 | `env` | e.g. `production` | Omit = all environments |
 | `service` | name from `tt_list_services` | On traces, logs, incidents, monitors, deploys |
-| `endpoint` | **slug id** from `tt_list_endpoints` (`get-orders-id`) | Never a route like `GET /orders/:id` |
+| `endpoint` on `tt_endpoint_rca` | **`id` slug** from `tt_list_endpoints` (`post-v1-charges`) | Not the route |
+| `endpoint` on traces, incidents, monitors | **`"METHOD /route"`** (`"POST /v1/charges"`) or consumer process name | Not the slug |
 | `limit` | traces ≤100 (20), logs ≤200 (50), incidents/deploys/runs ≤100 (20) | Clamped server-side |
 | `since` | epoch ms (incidents) | |
 | `before` | epoch ms cursor (logs) | Pass the previous page's `nextBefore` |
@@ -44,7 +45,9 @@ RCA: `tt_endpoint_rca { service, endpoint, range, baseline: prev|1d|7d }`.
 
 ## Common mistakes
 
-- Guessing an endpoint id from a route or URL → 404. Always `tt_list_endpoints` first.
+- Guessing an endpoint id from a route or URL → 404 on `tt_endpoint_rca`. Always `tt_list_endpoints` first.
+- Passing the slug to `tt_search_traces`/`tt_list_incidents`/`tt_list_monitors` → silently **empty** list.
+  Those filters take `"METHOD /route"`. Never read an empty filtered result as "no problem".
 - Unfiltered `tt_search_logs` over `7d` → truncated noise. Add `service` + `level` + `q`/`traceId`.
 - `tt_search_traces` with `limit: 100` to "see everything" → use `errorsOnly`/`minMs`/`sort` and limit 5–10.
 - Calling `tt_get_service_kpis` to discover services (it needs a name; use `tt_list_services`).
@@ -57,8 +60,9 @@ RCA: `tt_endpoint_rca { service, endpoint, range, baseline: prev|1d|7d }`.
 `tt_list_services { type: "http" }` → `tt_list_endpoints { service: "payments-api", range: "1h" }` → sort by `p95`.
 
 **"Why did POST /v1/charges get slower since yesterday?"**
-`tt_list_endpoints { service: "payments-api" }` (find the id for `POST /v1/charges`) →
-`tt_endpoint_rca { service: "payments-api", endpoint: <id>, range: "1h", baseline: "1d" }` → top `children`.
+`tt_list_endpoints { service: "payments-api" }` (id for `POST /v1/charges` is `post-v1-charges`) →
+`tt_endpoint_rca { service: "payments-api", endpoint: "post-v1-charges", range: "1h", baseline: "1d" }` → top
+`children` → `tt_search_traces { service: "payments-api", endpoint: "POST /v1/charges", sort: "slowest", limit: 5 }`.
 
 **"Show me the errors behind trace 4bf9…"**
 `tt_get_trace { traceId }` → `tt_search_logs { traceId, level: "warn" }`.
