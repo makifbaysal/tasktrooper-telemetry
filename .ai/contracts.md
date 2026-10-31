@@ -15,6 +15,9 @@ services/                      Go 1.26, go.work ile çok modül
   alerting/                    .../services/alerting  cmd/alert-engine, cmd/notifier
   collector/                   .../services/collector cmd/trooper-agent (DB + broker collector)
   integrations/                .../services/integrations cmd/trooper-cloud (AWS, GCP, Neon, Vercel — ADR-012)
+  codeintel/                   .../services/codeintel   (repo analizi, webhook — ADR-014)
+  loadtest/                    .../services/loadtest    loadtest-ctl + runner (ADR-015)
+  mcp/                         .../services/mcp         cmd/tt-mcp (MCP sunucusu, stdio — ADR-025, §26)
 tools/
   demo/                        github.com/tasktrooper/telemetry/tools/demo — demo trafiği (SDK'larla gerçek veri üretir)
 deploy/
@@ -976,3 +979,38 @@ OTel log event'i `gen_ai.client.inference.operation.details` gelirse içerik ora
 "Token spike" (`tokens` eşik). UI: AI monitoring ekranında model/servis satırından "Create alert" → `/alerts/new?kind=llm&service=&model=`.
 
 **SDK yüzeyi:** bkz. sdk.md § AI / LLM. Ortak config: `TROOPER_LLM_CAPTURE_CONTENT` (`true|false`, default false).
+
+## 26. MCP sunucusu (`services/mcp`, ADR-025)
+
+Yerel kodlama agent'ları için salt okunur MCP sunucusu (`cmd/tt-mcp`, stdio; resmi Go MCP SDK). Detay: `.ai/mcp.md`.
+
+- **Sarım:** Tool'lar `services/api`'yi (`openapi.yaml`) sarar; DB'ye doğrudan bağlantı yok. HTTP client
+  `Authorization: Bearer <TT_API_KEY>`; tenant api key'den gelir (ADR-016). Ek doğrulama: `TT_ORG_ID` /
+  `TT_PROJECT_ID` startup'ta `GET /me` ile eşleştirilmezse sunucu başlamaz.
+- **Env:** `TT_API_URL`, `TT_API_KEY`, `TT_ORG_ID`, `TT_PROJECT_ID`, `TT_LOG_LEVEL`. `TT_API_KEY` tool
+  tanımına, tool çıktısına, hata mesajına ve log'a girmez.
+- **v1 tool yüzeyi** (12, hepsi GET; write tool yok). `range` enum `15m|30m|1h|6h|24h|7d` (default `1h`):
+
+  | Tool | Sarılan uç (operationId) |
+  |---|---|
+  | `tt_list_services` | `GET /api/v1/services` (`getServices`) |
+  | `tt_get_service_kpis` | `GET /api/v1/services/{service}` (`getServicesService`) |
+  | `tt_list_endpoints` | `GET /api/v1/services/{service}/endpoints` (`getServicesServiceEndpoints`) |
+  | `tt_endpoint_rca` | `GET /api/v1/services/{service}/endpoints/{endpoint}/rca` (`getServicesServiceEndpointsEndpointRca`) |
+  | `tt_search_traces` | `GET /api/v1/traces` (`getTraces`) |
+  | `tt_get_trace` | `GET /api/v1/traces/{traceId}` (`getTracesTraceId`) |
+  | `tt_search_logs` | `GET /api/v1/logs` (`getLogs`) |
+  | `tt_list_monitors` | `GET /api/v1/monitors` (`getMonitors`) |
+  | `tt_list_incidents` | `GET /api/v1/incidents` (`getIncidents`) |
+  | `tt_get_incident` | `GET /api/v1/incidents/{id}` (`getIncidentsId`) + `GET /api/v1/incidents/{id}/events` (`getIncidentsIdEvents`) |
+  | `tt_list_loadtest_runs` | `GET /api/v1/loadtests/runs` (`getLoadtestsRuns`) |
+  | `tt_list_deploys` | `GET /api/v1/deploys` (`getDeploys`) |
+
+- **Kesişen kurallar:** her tool org/project anahtarından gelir (ek tenant parametresi almaz); input enum/hex/limit
+  doğrulaması API'ye gitmeden yapılır; tool çıktısı ≤ 64 KB JSON (aşarsa dizi kesilir + `truncated: true`,
+  `total: <orijinal adet>`, `hint: <nasıl daraltılır>`); hata kısa ve aksiyon odaklıdır (`check TT_API_KEY`,
+  `call tt_list_endpoints for valid endpoint ids`, …); secret, stack ve ham upstream gövde asla taşınmaz.
+- **codeintel:** `services/codeintel` sorgu API'si değildir (webhook + analiz); envanter/öneri verisi api uçlarındadır.
+  MCP codeintel'e bağlanmaz; v2 envanter tool'ları da yalnız `GET /inventory` / `GET /suggestions` üzerinden sarılır.
+- **Bayrak:** `POST /api/v1/ai/incident-summary` main'e yeni (0764ad4) ve default mock sağlayıcı — v1'de sarılmadı.
+  `Incident.rootCause` openapi'de şemasız (`rootCause: {}`); MCP bunu opaque JSON olarak geçirir.
