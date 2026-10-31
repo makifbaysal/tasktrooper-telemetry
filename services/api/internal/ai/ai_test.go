@@ -3,10 +3,12 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestProviderSelectionFailsClosed(t *testing.T) {
@@ -16,9 +18,11 @@ func TestProviderSelectionFailsClosed(t *testing.T) {
 	}{
 		{"default mock", "", "", "", false},
 		{"explicit mock ignores key", "mock", "true", "secret", false},
+		{"default mock ignores paid opt in and key", "", "true", "secret", false},
 		{"meta needs opt in", "meta", "", "secret", true},
 		{"meta needs key", "meta", "true", "", true},
 		{"baseten needs opt in", "baseten", "", "secret", true},
+		{"baseten needs key", "baseten", "true", "", true},
 		{"unknown provider", "unknown", "true", "secret", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -35,6 +39,65 @@ func TestProviderSelectionFailsClosed(t *testing.T) {
 				if err != nil || got.Provider != "mock" || got.Usage != (Usage{}) {
 					t.Fatalf("mock result=%+v err=%v", got, err)
 				}
+			}
+		})
+	}
+}
+
+func TestRemoteProviderFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name, response, want string
+		status               int
+	}{
+		{"rate limited", `{"error":"rate limited"}`, "HTTP 429", http.StatusTooManyRequests},
+		{"server error", `{"error":"unavailable"}`, "HTTP 503", http.StatusServiceUnavailable},
+		{"invalid JSON", `{`, "decode meta response", http.StatusOK},
+		{"empty choices", `{"choices":[]}`, "no summary", http.StatusOK},
+		{"blank summary", `{"choices":[{"message":{"content":"  "}}]}`, "no summary", http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.response))
+			}))
+			defer ts.Close()
+			p := &remote{provider: "meta", endpoint: ts.URL, model: "test", key: "test", client: ts.Client()}
+			got, err := p.Summarize(context.Background(), Input{Title: "Incident"})
+			if err == nil || !strings.Contains(err.Error(), tc.want) || got != (Result{}) {
+				t.Fatalf("result=%+v err=%v; want %q", got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestRemoteHonorsContextFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ctx  func() (context.Context, context.CancelFunc)
+		want error
+	}{
+		{"canceled", func() (context.Context, context.CancelFunc) {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			return ctx, cancel
+		}, context.Canceled},
+		{"deadline exceeded", func() (context.Context, context.CancelFunc) {
+			return context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+		}, context.DeadlineExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requests := 0
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				requests++
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer ts.Close()
+			ctx, cancel := tc.ctx()
+			defer cancel()
+			p := &remote{provider: "meta", endpoint: ts.URL, model: "test", key: "test", client: ts.Client()}
+			got, err := p.Summarize(ctx, Input{Title: "Incident"})
+			if !errors.Is(err, tc.want) || got != (Result{}) || requests != 0 {
+				t.Fatalf("result=%+v err=%v requests=%d", got, err, requests)
 			}
 		})
 	}
