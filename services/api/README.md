@@ -65,7 +65,7 @@ service of `deploy/docker-compose.yml` (profile `app`).
 
 `POST /api/v1/ai/incident-summary` is an authenticated, explicit integration route. The default provider is a deterministic offline mock with zero token usage. `GOWORK=off go run ./cmd/ai-demo` tests it without Docker. For the dashboard's contextual AI buttons, run `GOWORK=off go run ./cmd/ai-playground` from `services/api` alongside the Vite web server; those `/local-ai/*` routes are also offline mocks.
 
-The incident-summary route can use Meta or Baseten only when `TT_AI_PROVIDER`, `TT_AI_ALLOW_PAID=true`, and the corresponding server-side key are set. It has bounded input, a 300-token output cap, a 15-second timeout, and no retry. The team's `aiquota` system currently covers code-intelligence enrichment; this standalone incident-summary route does **not** reserve credits through it yet. Keep this route in mock mode until quota accounting is wired in for production use.
+The incident-summary route can use Meta or Baseten only when `TT_AI_PROVIDER`, `TT_AI_ALLOW_PAID=true`, and the corresponding server-side key are set. Each request is limited to 4,000 bytes of user-controlled title/evidence before a provider call and a 150-token output cap; it also has a 15-second timeout and no retry. The team's `aiquota` system currently covers code-intelligence enrichment; this standalone incident-summary route does **not** reserve credits through it yet. These per-request limits do not cap the number of requests or total spending. Keep this route in mock mode until quota accounting is wired in for production use.
 
 ## Test
 

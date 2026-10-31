@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/tasktrooper/telemetry/services/api/internal/ai"
@@ -37,6 +38,15 @@ func TestIncidentSummaryMock(t *testing.T) {
 	}
 	if got := do(h, http.MethodPost, path, "good", `{"title":"","evidence":[]}`); got.Code != http.StatusBadRequest {
 		t.Fatalf("invalid status=%d", got.Code)
+	}
+	items := make([]string, 9)
+	for i := range items {
+		items[i] = strings.Repeat("x", 500)
+	}
+	oversized, _ := json.Marshal(ai.Input{Title: "Incident", Evidence: items})
+	if got := do(h, http.MethodPost, path, "good", string(oversized)); got.Code != http.StatusBadRequest ||
+		!strings.Contains(got.Body.String(), "exceeds 4000 bytes") {
+		t.Fatalf("oversized status=%d body=%s", got.Code, got.Body.String())
 	}
 }
 
