@@ -26,7 +26,7 @@ const (
 type logSearchInput struct {
 	RangeInput
 	Service string `json:"service,omitempty" jsonschema:"Service name, as returned by tt_list_services"`
-	Level   string `json:"level,omitempty" jsonschema:"Minimum log level: debug, info, warn or error"`
+	Level   string `json:"level,omitempty" jsonschema:"Exact log level, not a minimum: debug, info, warn or error (one per call; query error and warn separately)"`
 	Q       string `json:"q,omitempty" jsonschema:"Full-text query over log messages"`
 	TraceID string `json:"traceId,omitempty" jsonschema:"32 hex chars; logs belonging to one trace"`
 	Route   string `json:"route,omitempty" jsonschema:"Route template filter (e.g. /orders/:id)"`

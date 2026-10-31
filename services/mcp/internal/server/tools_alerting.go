@@ -20,7 +20,7 @@ func (s *Server) registerAlertingTools(srv *mcp.Server) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "tt_list_incidents",
-		Description: "Open or recent incidents with severity and current value; start here for 'what is broken right now'.",
+		Description: "Open or recent incidents with severity, state (pending, firing, acknowledged, resolved) and current value; start here for 'what is broken right now'. Omit state first: pending incidents are often the live problem.",
 	}, s.listIncidents)
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -63,7 +63,7 @@ const (
 
 type incidentListInput struct {
 	RangeInput
-	State     string `json:"state,omitempty" jsonschema:"Incident state: firing, resolved or acked"`
+	State     string `json:"state,omitempty" jsonschema:"Incident state: firing or resolved. Omit to get every state, including pending (threshold crossed, waiting for its for-duration) and acknowledged"`
 	Service   string `json:"service,omitempty" jsonschema:"Service name, as returned by tt_list_services"`
 	Endpoint  string `json:"endpoint,omitempty" jsonschema:"Endpoint as \"METHOD /route\" (e.g. \"POST /v1/charges\", method + route from tt_list_endpoints) or a consumer process name; NOT the slug id. A slug matches nothing and returns an empty list"`
 	MonitorID string `json:"monitorId,omitempty" jsonschema:"Monitor id, from tt_list_monitors"`

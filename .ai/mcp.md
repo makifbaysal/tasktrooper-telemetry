@@ -81,8 +81,9 @@ tüm ortamlar. Sonuç şekilleri contracts.md'deki schema'lardır (api ile bireb
 8. **`tt_list_monitors`** — "Alert rules (monitors) with kind, query and state; use to find what is
    alerting or what is configured for a service." Input: `{ service?, endpoint? ("METHOD /route"), kind?, clusterId?, group? }`.
    Sonuç: `Monitor[]`.
-9. **`tt_list_incidents`** — "Open or recent incidents with severity and current value; start here for
-   'what is broken right now'." Input: `{ state?, service?, endpoint? ("METHOD /route"), monitorId?, kpiId?, since?, limit? }`
+9. **`tt_list_incidents`** — "Open or recent incidents with severity, state (pending, firing, acknowledged,
+   resolved) and current value; start here for 'what is broken right now'. Omit state first: pending incidents
+   are often the live problem." Input: `{ state?, service?, endpoint? ("METHOD /route"), monitorId?, kpiId?, since?, limit? }`
    (limit default 20, max 100). Sonuç: `Incident[]`.
 10. **`tt_get_incident`** — "Everything about ONE incident: alert detail, root cause and timeline.
     rootCause is unstructured and its shape may vary; treat it as opaque JSON." Input: `{ id: string }`.
@@ -224,5 +225,10 @@ güncellenir.
   `endpoint` filtresi (query param, api `refParam` / `i.endpoint = $?`) ise **`"METHOD /route"`** (consumer'da process
   adı). Slug bu filtrelerde hata değil **boş liste** döner — agent "olay yok" sanır. Tool input tanımları bunu açıkça
   söyler; `Incident.endpoint` de route biçimindedir (`POST /v1/orders`). API tek biçime çekilirse tanımlar güncellenir.
+- **Doğrulama ↔ API uyumsuzlukları** (demo ile doğrulandı, 2026-10-31; kod düzeltmesi açık iş, şimdilik tool tanımları
+  çalışan değerlere yönlendirir): `tt_list_incidents.state` MCP'de `firing|resolved|acked` ile doğrulanıyor, API ise
+  `open|pending|firing|acknowledged|resolved` bekliyor → `acked` API'den 400 döner, `pending`/`open`/`acknowledged`
+  MCP'de reddedilir. `tt_search_logs.level` API'de **tam eşleşme** (virgül listesi `warn,error` kabul eder), "minimum"
+  değil; MCP tek değer kabul ediyor (virgül listesi reddedilir).
 - Auth today: `Authorization: Bearer <api key>` (dev akışı). OIDC session akışına geçilirse MCP için anahtar
   kalır; `X-Trooper-Project` header'ı sadece cookie akışında anlamlı.
