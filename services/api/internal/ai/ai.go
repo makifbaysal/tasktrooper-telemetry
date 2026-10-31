@@ -19,6 +19,20 @@ type Input struct {
 	Evidence []string `json:"evidence"`
 }
 
+// IncidentSummaryMaxInputBytes caps the entire user-controlled prompt before a
+// paid request is made. The output cap is sent to the provider in max_tokens.
+const IncidentSummaryMaxInputBytes = 4000
+const IncidentSummaryMaxOutputTokens = 150
+
+var ErrInputTooLarge = errors.New("incident summary input exceeds 4000 bytes")
+
+func ValidateInput(in Input) error {
+	if len(in.Title)+len(strings.Join(in.Evidence, "\n- ")) > IncidentSummaryMaxInputBytes {
+		return ErrInputTooLarge
+	}
+	return nil
+}
+
 type Usage struct {
 	InputTokens  int `json:"inputTokens"`
 	OutputTokens int `json:"outputTokens"`
@@ -89,11 +103,14 @@ func NewFromEnv() (Summarizer, error) {
 }
 
 func (p *remote) Summarize(ctx context.Context, in Input) (Result, error) {
+	if err := ValidateInput(in); err != nil {
+		return Result{}, err
+	}
 	payload := struct {
 		Model     string    `json:"model"`
 		Messages  []message `json:"messages"`
 		MaxTokens int       `json:"max_tokens"`
-	}{Model: p.model, MaxTokens: 300}
+	}{Model: p.model, MaxTokens: IncidentSummaryMaxOutputTokens}
 	payload.Messages = append(payload.Messages,
 		message{"developer", "Write a concise incident summary using only the evidence given. State uncertainty. Do not invent a root cause. Reply in plain text, at most 100 words."},
 		message{"user", "Incident: " + in.Title + "\nEvidence:\n- " + strings.Join(in.Evidence, "\n- ")})

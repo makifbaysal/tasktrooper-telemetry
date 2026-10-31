@@ -116,7 +116,7 @@ func TestRemoteRequestAndUsage(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatal(err)
 		}
-		if req.Model != "test-model" || req.MaxTokens != 300 || len(req.Messages) != 2 ||
+		if req.Model != "test-model" || req.MaxTokens != IncidentSummaryMaxOutputTokens || len(req.Messages) != 2 ||
 			req.Messages[0].Role != "developer" || !strings.Contains(req.Messages[1].Content, "5xx rate") {
 			t.Errorf("unexpected payload: %+v", req)
 		}
@@ -127,5 +127,19 @@ func TestRemoteRequestAndUsage(t *testing.T) {
 	got, err := p.Summarize(context.Background(), Input{Title: "Checkout errors", Evidence: []string{"5xx rate rose"}})
 	if err != nil || got.Provider != "meta" || got.Usage.InputTokens != 42 || got.Usage.OutputTokens != 9 {
 		t.Fatalf("result=%+v err=%v", got, err)
+	}
+}
+
+func TestRemoteRejectsOversizedInputBeforeNetwork(t *testing.T) {
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+	p := &remote{provider: "meta", endpoint: ts.URL, model: "test", key: "test", client: ts.Client()}
+	got, err := p.Summarize(context.Background(), Input{Title: "Incident", Evidence: []string{strings.Repeat("x", IncidentSummaryMaxInputBytes)}})
+	if !errors.Is(err, ErrInputTooLarge) || got != (Result{}) || requests != 0 {
+		t.Fatalf("result=%+v err=%v requests=%d", got, err, requests)
 	}
 }

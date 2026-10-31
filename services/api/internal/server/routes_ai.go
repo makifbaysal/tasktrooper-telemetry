@@ -31,6 +31,10 @@ func (s *Server) incidentSummary(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if err := ai.ValidateInput(in); err != nil {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: err.Error()})
+		return
+	}
 	result, err := s.AI.Summarize(r.Context(), in)
 	if err != nil {
 		s.Log.Error("AI summary failed", "err", err)
