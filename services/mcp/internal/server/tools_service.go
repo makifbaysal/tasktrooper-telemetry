@@ -25,7 +25,7 @@ func (s *Server) registerServiceTools(srv *mcp.Server) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "tt_list_endpoints",
-		Description: "Endpoints (routes, consumers) of one service with error rate and p95; returns the endpoint ids other tools need.",
+		Description: "Endpoints (routes, consumers) of one service with error rate and p95. Returns each endpoint's id (slug, for tt_endpoint_rca) and method + route (\"POST /v1/charges\", for the endpoint filter of tt_search_traces, tt_list_incidents, tt_list_monitors).",
 	}, s.listEndpoints)
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -95,7 +95,7 @@ func (s *Server) listEndpoints(ctx context.Context, _ *mcp.CallToolRequest, in e
 type rcaInput struct {
 	RangeInput
 	Service  string `json:"service" jsonschema:"Service name, as returned by tt_list_services"`
-	Endpoint string `json:"endpoint" jsonschema:"Endpoint id (slug) from tt_list_endpoints, not the route"`
+	Endpoint string `json:"endpoint" jsonschema:"Endpoint id (slug, e.g. post-v1-charges) from the id field of tt_list_endpoints, not the route"`
 	Baseline string `json:"baseline,omitempty" jsonschema:"Comparison window: prev (default), 1d or 7d"`
 }
 

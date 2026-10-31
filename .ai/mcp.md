@@ -61,14 +61,16 @@ tüm ortamlar. Sonuç şekilleri contracts.md'deki schema'lardır (api ile bireb
 2. **`tt_get_service_kpis`** — "Health, RED metrics, dependencies and version info of ONE service;
    use after tt_list_services, not for discovery." Input: `{ service: string, range?, env? }`.
    Sonuç: `ServiceDetail` (+ `hasAi`).
-3. **`tt_list_endpoints`** — "Endpoints (routes, consumers) of one service with error rate and p95;
-   returns the endpoint ids other tools need." Input: `{ service: string, range?, env? }`.
-   Sonuç: `Endpoint[]` (id = slug, ör. `get-orders-id`).
+3. **`tt_list_endpoints`** — "Endpoints (routes, consumers) of one service with error rate and p95.
+   Returns each endpoint's id (slug, for tt_endpoint_rca) and method + route ("POST /v1/charges", for the
+   endpoint filter of tt_search_traces, tt_list_incidents, tt_list_monitors)." Input: `{ service: string, range?, env? }`.
+   Sonuç: `Endpoint[]` (id = slug, ör. `get-orders-id`; `method` + `route`).
 4. **`tt_endpoint_rca`** — "Explain WHY one endpoint got slower or errorier: per-dependency delta vs a
    baseline window (root-cause attribution). Requires an endpoint id from tt_list_endpoints." Input:
    `{ service, endpoint, range?, baseline?: prev|1d|7d }` (default `prev`). Sonuç: `EndpointRca` (ADR-009).
 5. **`tt_search_traces`** — "Find recent traces by service/endpoint/duration/error; returns trace ids
-   for tt_get_trace." Input: `{ range?, env?, service?, endpoint?, errorsOnly?: bool, minMs?: number,
+   for tt_get_trace." Input: `{ range?, env?, service?, endpoint? ("METHOD /route" veya process adı — slug değil),
+   errorsOnly?: bool, minMs?: number,
    sort?: string, limit? }` (limit default 20, max 100). Sonuç: `TraceSummary[]`.
 6. **`tt_get_trace`** — "Full span tree of ONE trace (waterfall, attributes, dependencies). Use a trace
    id from tt_search_traces or an error issue." Input: `{ traceId: string }` (32 hex; format doğrulanır).
@@ -77,10 +79,11 @@ tüm ortamlar. Sonuç şekilleri contracts.md'deki schema'lardır (api ile bireb
    id; cursor-paginate with `before`/`nextBefore`." Input: `{ range?, env?, service?, level?, q?, traceId?,
    route?, before?, limit? }` (limit default 50, max 200). Sonuç: `LogPage { lines, nextBefore, ... }`.
 8. **`tt_list_monitors`** — "Alert rules (monitors) with kind, query and state; use to find what is
-   alerting or what is configured for a service." Input: `{ service?, endpoint?, kind?, clusterId?, group? }`.
+   alerting or what is configured for a service." Input: `{ service?, endpoint? ("METHOD /route"), kind?, clusterId?, group? }`.
    Sonuç: `Monitor[]`.
-9. **`tt_list_incidents`** — "Open or recent incidents with severity and current value; start here for
-   'what is broken right now'." Input: `{ state?, service?, endpoint?, monitorId?, kpiId?, since?, limit? }`
+9. **`tt_list_incidents`** — "Open or recent incidents with severity, state (pending, firing, acknowledged,
+   resolved) and current value; start here for 'what is broken right now'. Omit state first: pending incidents
+   are often the live problem." Input: `{ state?, service?, endpoint? ("METHOD /route"), monitorId?, kpiId?, since?, limit? }`
    (limit default 20, max 100). Sonuç: `Incident[]`.
 10. **`tt_get_incident`** — "Everything about ONE incident: alert detail, root cause and timeline.
     rootCause is unstructured and its shape may vary; treat it as opaque JSON." Input: `{ id: string }`.
@@ -129,6 +132,10 @@ verisi (`/inventory`, `/suggestions` — bkz. aşağıdaki örtüşme notu).
 
 ## Bağlanma
 
+Binary: `cd services/mcp && go install ./cmd/tt-mcp` (`$(go env GOPATH)/bin` PATH'te olmalı; değilse aşağıdaki
+`command`'a mutlak yol yazılır). API ayakta olmalı (`make demo` veya compose `--profile app`): `tt-mcp`
+startup'ta `GET /me` çağırır, API yoksa başlamaz.
+
 **OpenCode** (`~/.config/opencode/opencode.json` veya proje `opencode.json`):
 
 ```json
@@ -176,6 +183,35 @@ veya proje kökünde `.mcp.json`:
 }
 ```
 
+## Agent Skills (`skills/`)
+
+Tool'ları **hangi sırayla** kullanacağını anlatan Agent Skills (`skills/<name>/SKILL.md`, frontmatter `name` +
+`description`; description agent'ın skill'i **ne zaman** yükleyeceğini söyler). Kanonik yer repo kökündeki
+`skills/`; skill'ler sadece orada düzenlenir.
+
+| Skill | Ne zaman |
+|---|---|
+| [`trooper-diagnose`](../skills/trooper-diagnose/SKILL.md) | "X'te bir sorun var, neden?" — incident → KPI → endpoint RCA → trace → log → deploy; kanıtsız neden yok, zayıf kanıtta "unknown" |
+| [`trooper-query`](../skills/trooper-query/SKILL.md) | Telemetri sorusu; scope (`range`/`service`/`limit`), log sayfalama (`before`/`nextBefore`), `truncated` okuma |
+| [`trooper-contribute`](../skills/trooper-contribute/SKILL.md) | Bu repoda kod değişikliği; AGENTS.md + `.ai/` kurallarına işaret eden kontrol listesi |
+
+`trooper-diagnose` ve `trooper-query` yukarıdaki § Bağlanma ile kayıtlı `tasktrooper` MCP sunucusunu gerektirir.
+
+**Keşif:** tek bağlantı commit'li `.claude/skills -> ../skills` symlink'i, kopya yok.
+- Claude Code proje skill'lerini `.claude/skills/<name>/SKILL.md`'den okur.
+- OpenCode (2.0.x) `.opencode/skill(s)/` yanında uyumluluk için `.claude/skills/` ve `.agents/skills/`'i de
+  tarar (cwd'den yukarı, symlink takip edilir). Tarama asenkron: background service açıksa dosya değişikliği
+  birkaç saniye sonra görünür.
+- **`skills/` altına skill olmayan `.md` koyma:** OpenCode `{*.md,**/SKILL.md}` deseniyle tarar; ör. bir
+  `skills/README.md` "README" adlı bir skill olarak listelenir. Bu yüzden kurulum notu burada, `skills/`'te değil.
+- Symlink'siz checkout (`core.symlinks=false`): OpenCode için `opencode.json` → `"skills": ["./skills"]`; Claude
+  Code için `rm .claude/skills && cp -r skills .claude/skills` (kopya commit'lenmez).
+- Kontrol: `claude -p "list skills starting with trooper-"`; OpenCode'da `/skills` komutu veya
+  `opencode api skill.list --param "location[directory]=$PWD"`.
+
+Skill metni tool adlarını birebir (`tt_*`) kullanır; tool eklenir/yeniden adlandırılırsa skill'ler aynı PR'da
+güncellenir.
+
 ## Bilinen bayraklar / boşluklar
 
 - `POST /api/v1/ai/incident-summary` (`postAIIncidentSummary`) main'e **yeni** düştü (0764ad4, "offline mock
@@ -184,5 +220,15 @@ veya proje kökünde `.mcp.json`:
 - `Incident.rootCause` openapi'de `rootCause: {}` — **şeması belgelenmemiş**, passthrough opaque JSON.
 - `endpoint` path paramı route değil **slug id** (`get-orders-id`); agent'ların önce `tt_list_endpoints`
   çağırması şart (tool tanımında böyle yazıyor).
+- **İki farklı endpoint kimliği** (demo verisiyle doğrulandı, 2026-10-31): `tt_endpoint_rca`'nın `endpoint`'i
+  (path param, `ResolveEndpoint`) **slug**'tır; `tt_search_traces`, `tt_list_incidents`, `tt_list_monitors`'ın
+  `endpoint` filtresi (query param, api `refParam` / `i.endpoint = $?`) ise **`"METHOD /route"`** (consumer'da process
+  adı). Slug bu filtrelerde hata değil **boş liste** döner — agent "olay yok" sanır. Tool input tanımları bunu açıkça
+  söyler; `Incident.endpoint` de route biçimindedir (`POST /v1/orders`). API tek biçime çekilirse tanımlar güncellenir.
+- **Doğrulama ↔ API uyumsuzlukları** (demo ile doğrulandı, 2026-10-31; kod düzeltmesi açık iş, şimdilik tool tanımları
+  çalışan değerlere yönlendirir): `tt_list_incidents.state` MCP'de `firing|resolved|acked` ile doğrulanıyor, API ise
+  `open|pending|firing|acknowledged|resolved` bekliyor → `acked` API'den 400 döner, `pending`/`open`/`acknowledged`
+  MCP'de reddedilir. `tt_search_logs.level` API'de **tam eşleşme** (virgül listesi `warn,error` kabul eder), "minimum"
+  değil; MCP tek değer kabul ediyor (virgül listesi reddedilir).
 - Auth today: `Authorization: Bearer <api key>` (dev akışı). OIDC session akışına geçilirse MCP için anahtar
   kalır; `X-Trooper-Project` header'ı sadece cookie akışında anlamlı.
