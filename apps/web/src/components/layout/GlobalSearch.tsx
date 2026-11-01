@@ -21,6 +21,7 @@ export function GlobalSearch({ pages }: { pages: SearchPage[] }) {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
+  const shortcut = /Macintosh|Mac OS X|iPad|iPhone/.test(navigator.userAgent) ? '⌘K' : 'Ctrl+K';
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -42,7 +43,7 @@ export function GlobalSearch({ pages }: { pages: SearchPage[] }) {
     const svc = services
       .filter((s) => s.name.toLowerCase().includes(term))
       .sort((a, b) => Number(!a.name.toLowerCase().startsWith(term)) - Number(!b.name.toLowerCase().startsWith(term)) || a.name.localeCompare(b.name))
-      .map((s) => ({ key: `s:${s.id}`, to: `/services/${s.id}`, label: s.name, hint: typeLabel(s.type) }));
+      .map((s) => ({ key: `s:${s.id}`, to: `/services/${encodeURIComponent(s.id)}`, label: s.name, hint: typeLabel(s.type) }));
     const pg = pages
       .filter((p) => p.label.toLowerCase().includes(term))
       .map((p) => ({ key: `p:${p.to}`, to: p.to, label: p.label, hint: 'Page', icon: p.icon }));
@@ -57,7 +58,7 @@ export function GlobalSearch({ pages }: { pages: SearchPage[] }) {
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); setActive((i) => Math.min(i + 1, hits.length - 1)); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (!hits.length) return; setOpen(true); setActive((i) => Math.min(i + 1, hits.length - 1)); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((i) => Math.max(i - 1, 0)); }
     else if (e.key === 'Enter' && hits[active]) { e.preventDefault(); go(hits[active]); }
     else if (e.key === 'Escape') { setQ(''); setOpen(false); input.current?.blur(); }
@@ -74,7 +75,7 @@ export function GlobalSearch({ pages }: { pages: SearchPage[] }) {
           aria-activedescendant={show && hits[active] ? `${listId}-${active}` : undefined}
           value={q} onChange={(e) => { setQ(e.target.value); setActive(0); setOpen(true); }}
           onFocus={() => setOpen(true)} onBlur={() => setOpen(false)} onKeyDown={onKeyDown} />
-        <kbd className="global-search__kbd" aria-hidden>⌘K</kbd>
+        <kbd className="global-search__kbd" aria-hidden>{shortcut}</kbd>
       </div>
       {show && (
         <ul className="global-search__list" id={listId} role="listbox" aria-label="Results">
