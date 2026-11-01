@@ -84,6 +84,7 @@ export function mapService(r: RawService): Service {
   };
   if (typeof r.lag === 'number') s.lag = r.lag;
   if (r.source === 'ebpf') s.source = 'ebpf';
+  if (num(r.lastSeen) > 0) s.lastSeen = r.lastSeen;
   return s;
 }
 export const mapServices = (raw: RawService[] | null) => arr(raw).map(mapService);

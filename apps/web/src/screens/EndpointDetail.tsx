@@ -53,7 +53,7 @@ export function EndpointDetail() {
   const code = inventory.find((i) => i.service === svc.name && i.key === (sub ? sub.process : ref));
   const unit = sub ? 'msg/min' : 'rpm';
   const unitOf = sub ? 'message' : 'request';
-  const sharedWith = sub ? endpointsFor(serviceId).filter((x) => x.id !== ep.id && x.sub?.topic === sub.topic) : [];
+  const sharedWith = sub?.topic ? endpointsFor(serviceId).filter((x) => x.id !== ep.id && x.sub?.topic === sub.topic) : [];
   const timeRows = [
     { id: 'app', label: 'Own code', sub: 'App code', dep: null as Dependency | null, ms: breakdown.parts.app, color: catColor('app') },
     ...calls.map((c) => ({ id: c.dep.id, label: c.dep.name, sub: `${DEP_KIND_LABEL[c.dep.kind]} · ${c.callsPerReq}× ${ms(c.dep.avgMs)}`, dep: c.dep as Dependency | null, ms: c.msPerReq, color: catColor(c.dep.kind) })),

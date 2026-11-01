@@ -5,7 +5,7 @@ import { Sparkline } from '@/components/charts';
 import { Button, Card, ConnectSdk, PageHeader, Section, SearchInput, StatusBadge, Table } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
 import { appSummary, serviceErrorSeries, serviceTrafficSeries, services, type Service, type ServiceType as SType } from '@/data';
-import { change, compact, ms, pct } from '@/lib/format';
+import { ago, change, compact, ms, pct } from '@/lib/format';
 import { SERVICE_CATEGORIES, ServiceType, TYPE_META } from './shared';
 import { EbpfBadge } from './k8sShared';
 
@@ -14,6 +14,9 @@ const GROUPS: { id: 'backend' | 'async' | 'client'; title: string; types: SType[
   { id: 'async', title: 'Workers & consumers', types: ['worker', 'consumer'] },
   { id: 'client', title: 'Web & mobile apps', types: ['web', 'mobile'] },
 ];
+
+/** "go · v1.2" without dangling separators; a service without traffic says when it was last seen. */
+const meta = (s: Service) => [s.language, s.version, s.rpm === 0 && s.lastSeen ? `seen ${ago(s.lastSeen)}` : ''].filter(Boolean).join(' · ');
 
 const unitOf = (s: Service) => (s.type === 'http' ? 'rpm' : s.type === 'worker' || s.type === 'consumer' ? 'msg/min' : 'views/min');
 
@@ -93,7 +96,7 @@ export function Services() {
               <Table rows={g.rows} rowKey={(s) => s.id} onRowClick={open} defaultSort={{ key: g.id === 'client' ? 'users' : 'rpm', dir: 'desc' }}
                 columns={g.id === 'client' ? [
                   { key: 'name', header: 'App', sortValue: (s) => s.name, render: (s) => (
-                    <div><div style={{ fontWeight: 'var(--weight-medium)' }}>{s.name}</div><div className="muted" style={{ fontSize: 'var(--text-xs)' }}>{s.language} · {s.version}</div></div>) },
+                    <div><div style={{ fontWeight: 'var(--weight-medium)' }}>{s.name}</div><div className="muted" style={{ fontSize: 'var(--text-xs)' }}>{meta(s)}</div></div>) },
                   { key: 'type', header: 'Type', render: (s) => <ServiceType type={s.type} /> },
                   { key: 'status', header: 'Health', sortValue: (s) => ['ok', 'warning', 'critical'].indexOf(s.status), render: (s) => <StatusBadge status={s.status} /> },
                   { key: 'users', header: 'Active users', numeric: true, sortValue: (s) => appSummary(s.id).activeUsers, render: (s) => compact(appSummary(s.id).activeUsers) },
@@ -108,7 +111,7 @@ export function Services() {
                   { key: 'go', header: '', render: () => <ChevronRight size={14} className="muted" aria-hidden /> },
                 ] : [
                   { key: 'name', header: 'Service', sortValue: (s) => s.name, render: (s) => (
-                    <div><div style={{ fontWeight: 'var(--weight-medium)' }}>{s.name}{s.source === 'ebpf' && <> <EbpfBadge /></>}</div><div className="muted" style={{ fontSize: 'var(--text-xs)' }}>{s.language} · {s.version}</div></div>) },
+                    <div><div style={{ fontWeight: 'var(--weight-medium)' }}>{s.name}{s.source === 'ebpf' && <> <EbpfBadge /></>}</div><div className="muted" style={{ fontSize: 'var(--text-xs)' }}>{meta(s)}</div></div>) },
                   { key: 'type', header: 'Type', render: (s) => <ServiceType type={s.type} /> },
                   { key: 'status', header: 'Health', sortValue: (s) => ['ok', 'warning', 'critical'].indexOf(s.status), render: (s) => <StatusBadge status={s.status} /> },
                   { key: 'rpm', header: 'Traffic', numeric: true, sortValue: (s) => s.rpm, render: (s) => <span>{compact(s.rpm)} <span className="muted">{unitOf(s)}</span></span> },
