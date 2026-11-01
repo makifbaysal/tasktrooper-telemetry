@@ -153,7 +153,9 @@ defaults to `5m` (`15m` for anomaly) when omitted; always state it to the user.
 | `rum_vital` | `{vital: "LCP", percentile: "p75", view?}`; target.service = app | threshold ms (CLS unitless) |
 | `crash_rate` | `{per: "session"}`; target.service = app | threshold fraction |
 | `composite` | `{op: "and", monitorIds: ["12", "15"]}` | fires when all (and) / any (or) children fire; pass `{op: ">", threshold: 0}` |
-| `infra`, `faas`, `llm` | copy a `tt_list_monitor_templates` item | `window` from the template |
+| `infra` (host / Kubernetes) | `{entity: "host" \| "node" \| "cluster", metric: "cpu" \| "memory" \| "disk", agg: "max", filter: {cluster?, host?}}`; pods/containers `{entity: "pod", metric: "memory_ratio" \| "restarts" \| "not_ready"}`; `{entity: "workload", metric: "unavailable"}` | ratios are 0..1 (0.9 = 90 %); `cluster` = mean over the cluster's nodes, `node` = worst node |
+| `infra` (database) | `{entity: "database", metric: "memory" \| "disk" \| "cpu" \| "connections_ratio" \| "p95_ms" \| "repl_lag_ms" \| "hit_ratio", agg: "max", filter: {database?: <id from tt_list_databases>}}` | ratios 0..1; `hit_ratio` with op `<` |
+| `faas`, `llm` | copy a `tt_list_monitor_templates` item | `window` from the template |
 
 `tt_create_kpi { kpi, confirm }`:
 

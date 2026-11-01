@@ -25,7 +25,7 @@ import (
 )
 
 var infraTables = []string{"hosts_1m", "containers_1m", "k8s_nodes_1m", "k8s_pods_1m", "k8s_workloads_1m", "faas_1m", "spans", "red_1m",
-	"red_1h", "callers_1m", "edges_1m", "errors_1h", "trace_index"}
+	"red_1h", "callers_1m", "edges_1m", "errors_1h", "trace_index", "db_1m"}
 
 func cleanupInfra(t *testing.T, ctx context.Context, pg *pgxpool.Pool, ch driver.Conn) {
 	t.Helper()
@@ -106,6 +106,10 @@ func TestInfraFaaS(t *testing.T) {
 	ins(`INSERT INTO telemetry.k8s_workloads_1m (org_id, project_id, cluster, namespace, kind, name, minute, desired, ready, available, updated)
 		SELECT 9601, 9601, 'itc', 'shop', 'Deployment', 'api', toDateTime(?) + number * 60, 2, if(number = 9, 1, 2), if(number = 9, 1, 2), 2
 		FROM numbers(10)`, from)
+	ins(`INSERT INTO telemetry.db_1m (org_id, project_id, database_id, engine, node, role, minute, cpu, memory, disk, connections, max_connections)
+		SELECT 9601, 9601, 'it-db', 'postgresql', n, if(n = 'primary', 'primary', 'replica'), toDateTime(?) + number * 60, 0.2,
+			if(n = 'primary', 0.92, 0.4), 0.3, if(n = 'primary', 90, 10), 100
+		FROM numbers(10) ARRAY JOIN ['primary', 'replica'] AS n`, from)
 	ins(`INSERT INTO telemetry.faas_1m (org_id, project_id, function_id, provider, region, minute, invocations, errors, throttles, duration_avg,
 			duration_max, duration_p95, duration_p99, concurrency, iterator_age_ms, memory_bytes, execution_units)
 		SELECT 9601, 9601, f, 'aws', 'eu-west-1', toDateTime(?) + number * 60, 100, if(f = 'it-fn-a', 10, 0), -inf, 300, 950,
@@ -139,6 +143,11 @@ func TestInfraFaaS(t *testing.T) {
 		{9601109, "faas", `{}`, `{"metric":"error_rate","filter":{"provider":"aws"}}`, `{"op":">","threshold":0.05,"minRequests":20}`, "firing", 0.1, "it-fn-a"},
 		{9601110, "faas", `{}`, `{"metric":"throttles"}`, `{"op":">","threshold":0}`, "no_data", 0, ""},
 		{9601111, "infra", `{}`, `{"entity":"host","metric":"disk","agg":"max"}`, `{"op":">","threshold":0.9}`, "ok", 0.5, ""},
+		{9601116, "infra", `{}`, `{"entity":"node","metric":"cpu","agg":"max","filter":{"cluster":"itc"}}`, `{"op":">","threshold":0.9}`, "firing", 0.95, "it-h1"},
+		{9601117, "infra", `{}`, `{"entity":"cluster","metric":"cpu","agg":"avg"}`, `{"op":">","threshold":0.6}`, "firing", 0.625, "itc"},
+		{9601118, "infra", `{}`, `{"entity":"database","metric":"memory","agg":"max","filter":{"database":"it-db"}}`, `{"op":">","threshold":0.9}`, "firing", 0.92, "it-db/primary"},
+		{9601119, "infra", `{}`, `{"entity":"database","metric":"connections_ratio","agg":"max"}`, `{"op":">","threshold":0.8}`, "firing", 0.9, "it-db/primary"},
+		{9601120, "infra", `{}`, `{"entity":"cluster","metric":"disk"}`, `{"op":">","threshold":0.8}`, "ok", 0.5, ""},
 		{9601112, "error_rate", `{"service":"it-svc","endpoint":"POST /pay"}`, `{}`, `{"op":">","threshold":0.2}`, "firing", 0.5, ""},
 	}
 	if hasFns {

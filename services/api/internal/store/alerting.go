@@ -77,8 +77,12 @@ func scanMonitor(row pgx.Row) (model.Monitor, error) {
 	m.LastChange = ms(since)
 	var meta struct {
 		Metric string `json:"metric"`
+		Entity string `json:"entity"`
 	}
 	_ = json.Unmarshal(query, &meta)
+	if m.Kind == "infra" && meta.Entity != "" { // rules.DescribeCondition reads "entity metric" for infra
+		meta.Metric = meta.Entity + " " + meta.Metric
+	}
 	if m.Kind == "consumer_lag" {
 		var r model.QueueRule
 		if json.Unmarshal(query, &r) == nil && r.Group != "" {

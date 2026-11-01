@@ -109,6 +109,20 @@ func TestDescribeCondition(t *testing.T) {
 	if got := DescribeCondition("latency", "", model.MonitorCondition{Op: ">", Threshold: 800, Window: float64(10), ForMin: 5}); got != "p95 over 10m > 800 ms for 5m" {
 		t.Error(got)
 	}
+	for _, tc := range []struct {
+		metric string
+		c      model.MonitorCondition
+		want   string
+	}{
+		{"database memory", model.MonitorCondition{Op: ">", Threshold: 0.9, Window: "5m", ForMin: 10}, "database memory over 5m > 90% for 10m"},
+		{"node disk", model.MonitorCondition{Op: ">", Threshold: 0.85, Window: "5m"}, "node disk over 5m > 85%"},
+		{"database repl_lag_ms", model.MonitorCondition{Op: ">", Threshold: 5000, Window: "5m"}, "database replication lag over 5m > 5000 ms"},
+		{"pod restarts", model.MonitorCondition{Op: ">", Threshold: 3, Window: "10m"}, "pod restarts over 10m > 3"},
+	} {
+		if got := DescribeCondition("infra", tc.metric, tc.c); got != tc.want {
+			t.Errorf("%s: %q want %q", tc.metric, got, tc.want)
+		}
+	}
 }
 
 func TestDescribeLLMCondition(t *testing.T) {

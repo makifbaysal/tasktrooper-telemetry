@@ -648,12 +648,17 @@ per the §5 rule: max column `-Inf`):
 Empty `cluster` = outside K8s. The writer routes the `trooper.host.*`, `trooper.container.*`, `trooper.process.*`, `trooper.k8s.*`, `trooper.faas.*`
 prefixes to these tables.
 
-**Monitor kind `infra`** — `query: {entity: 'host'|'container'|'pod'|'node'|'workload', metric, filter: {cluster?, namespace?,
-host?, workload?, service?}, agg: 'max'|'avg'}`; metrics: host `cpu|memory|disk|load1`, container/pod `cpu_ratio`
-(cpu/limit) `|memory_ratio|restarts` (increase within the window) `|throttled`, pod `not_ready` (count of pods with ready=0), node
-`not_ready` (count), workload `unavailable` (desired − available). Value = the worst value among matching entities; incident
-`detail.entities` holds the worst 5 entities. Templates: pod CrashLoop (`restarts` > 3 / 10 min), node NotReady (`not_ready` > 0, 5 min),
-host CPU > 0.9 (10 min), host disk > 0.9, workload `unavailable` > 0 (10 min).
+**Monitor kind `infra`** — `query: {entity: 'host'|'node'|'cluster'|'container'|'pod'|'workload'|'database', metric, filter: {cluster?,
+namespace?, host?, workload?, service?}, agg: 'max'|'avg'}` (entity `database`: `filter: {database?, engine?}`); metrics: host
+`cpu|memory|disk|load1`, node `cpu|memory|disk` (from `hosts_1m` rows with `node` set; `filter.host` = node name) `|not_ready`
+(count, `k8s_nodes_1m`), cluster `cpu|memory|disk` (per minute the **mean** over the cluster's nodes), container/pod `cpu_ratio`
+(cpu/limit) `|memory_ratio|restarts` (increase within the window) `|throttled`, pod `not_ready` (count of pods with ready=0), workload
+`unavailable` (desired − available), database (`db_1m`, one entity per `database_id` + `node`) `cpu|memory|disk|connections_ratio`
+(connections / max_connections) `|p95_ms|repl_lag_ms|hit_ratio|evictions|slow`. Ratios are 0..1. Value = the worst value among
+matching entities; incident `detail.entities` holds the worst 5 entities. Templates: pod CrashLoop (`restarts` > 3 / 10 min), node
+NotReady (`not_ready` > 0, 5 min), host CPU > 0.9 (10 min), host memory > 0.9 (10 min), host disk > 0.9, node disk > 0.85, cluster disk
+> 0.8 (15 min), database memory > 0.9 (10 min), database disk > 0.85, database connections > 0.8 of max, workload `unavailable` > 0
+(10 min).
 **RCA:** on a service incident, `reason ∈ {OOMKilled, CrashLoopBackOff}` or a restart increase within the window on pods of the same `service`
 → candidate "Pod <pod> restarted (OOMKilled)" (confidence 0.6–0.85); cpu > 0.9 on the pod's host → "Host <h> CPU saturated".
 

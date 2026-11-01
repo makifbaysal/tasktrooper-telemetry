@@ -228,6 +228,8 @@ func DescribeCondition(kind string, metric string, c model.MonitorCondition) str
 		return s
 	}
 	switch {
+	case kind == "infra":
+		what, val = describeInfra(metric, c.Threshold)
 	case kind == "latency" || metric == "p95" || metric == "p99" || metric == "p50":
 		if metric == "" || kind == "latency" && metric == "" {
 			metric = "p95"
@@ -248,6 +250,38 @@ func DescribeCondition(kind string, metric string, c model.MonitorCondition) str
 		s += fmt.Sprintf(" for %sm", trim(c.ForMin))
 	}
 	return s
+}
+
+// infraRatio are the infra metrics measured 0..1 (shown as percentages); infraMs are in milliseconds.
+var (
+	infraRatio = map[string]bool{"cpu": true, "memory": true, "disk": true, "cpu_ratio": true, "memory_ratio": true, "throttled": true,
+		"connections_ratio": true, "hit_ratio": true}
+	infraMs = map[string]bool{"p95_ms": true, "repl_lag_ms": true}
+)
+
+// describeInfra renders an infra rule's subject and threshold from "entity metric" ("database memory" → "database
+// memory", "90%"); a bare metric (older callers) is accepted.
+func describeInfra(entityMetric string, th float64) (string, string) {
+	entity, metric, ok := strings.Cut(entityMetric, " ")
+	if !ok {
+		entity, metric = "", entityMetric
+	}
+	name := map[string]string{"cpu_ratio": "CPU / limit", "memory_ratio": "memory / limit", "connections_ratio": "connections / max",
+		"p95_ms": "query p95", "repl_lag_ms": "replication lag", "hit_ratio": "hit ratio", "not_ready": "not ready",
+		"cpu": "CPU", "load1": "load1"}[metric]
+	if name == "" {
+		name = metric
+	}
+	if entity != "" {
+		name = entity + " " + name
+	}
+	switch {
+	case infraRatio[metric]:
+		return name, trim(th*100) + "%"
+	case infraMs[metric]:
+		return name, trim(th) + " ms"
+	}
+	return name, trim(th)
 }
 
 // windowString renders condition.window ("5m", or minutes as a number); "" when unset.

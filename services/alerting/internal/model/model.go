@@ -132,6 +132,8 @@ type InfraFilter struct {
 	Route     string `json:"route"`
 	Method    string `json:"method"`
 	Operation string `json:"operation"`
+	Database  string `json:"database"` // infra entity database: trooper.db.id (db_1m.database_id)
+	Engine    string `json:"engine"`   // infra entity database: db.system
 }
 
 // Function is one serverless_functions row (faas monitors: service mapping, timeout).

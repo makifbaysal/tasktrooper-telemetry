@@ -49,6 +49,8 @@ func TestEntityID(t *testing.T) {
 		{"container", map[string]string{"container": "redis", "host": "h1"}, "h1/redis"},
 		{"pod", map[string]string{"namespace": "shop", "pod": "api-1"}, "shop/api-1"},
 		{"node", map[string]string{"node": "n1"}, "n1"},
+		{"cluster", map[string]string{"cluster": "prod"}, "prod"},
+		{"database", map[string]string{"database_id": "orders-db", "node": "primary-0"}, "orders-db/primary-0"},
 		{"workload", map[string]string{"namespace": "shop", "kind": "Deployment", "name": "api"}, "shop/Deployment/api"},
 	}
 	for _, tc := range cases {
@@ -74,13 +76,21 @@ func TestInfraShapeAndWhere(t *testing.T) {
 		{"pod", "cpu_ratio", "containers_1m", model.InfraFilter{}, nil, 4},
 		{"node", "not_ready", "k8s_nodes_1m", model.InfraFilter{Service: "orders"}, []string{"node IN (SELECT DISTINCT node FROM telemetry.k8s_pods_1m"}, 9},
 		{"workload", "unavailable", "k8s_workloads_1m", model.InfraFilter{Workload: "api", Service: "s"}, []string{"name = ?", "(namespace, name) IN"}, 10},
+		{"node", "disk", "hosts_1m", model.InfraFilter{Cluster: "c", Host: "n1"}, []string{"cluster = ?", "node = ?", "node != ''"}, 6},
+		{"cluster", "memory", "hosts_1m", model.InfraFilter{Cluster: "c"}, []string{"cluster = ?", "cluster != ''"}, 5},
+		{"database", "memory", "db_1m", model.InfraFilter{Database: "orders-db", Engine: "postgresql"}, []string{"database_id = ?", "engine = ?"}, 6},
+		{"database", "connections_ratio", "db_1m", model.InfraFilter{}, nil, 4},
 	}
 	for _, tc := range cases {
 		s := infraShapeOf(tc.entity, tc.metric)
 		if s.table != tc.table {
 			t.Errorf("%s/%s: table %s want %s", tc.entity, tc.metric, s.table, tc.table)
 		}
-		w := infraWhere(m, s.table, tc.f, from, to)
+		variant := s.table
+		if s.where != "" {
+			variant = s.where
+		}
+		w := infraWhere(m, variant, tc.f, from, to)
 		sql := w.sql()
 		for _, frag := range tc.wantSQL {
 			if !strings.Contains(sql, frag) {
@@ -95,7 +105,7 @@ func TestInfraShapeAndWhere(t *testing.T) {
 
 func TestInfraUnsupported(t *testing.T) {
 	e := &Evaluator{}
-	for _, q := range []model.Query{{Entity: "host", Metric: "restarts"}, {Entity: "galaxy", Metric: "cpu"}, {Entity: "node", Metric: "cpu"}} {
+	for _, q := range []model.Query{{Entity: "host", Metric: "restarts"}, {Entity: "galaxy", Metric: "cpu"}, {Entity: "node", Metric: "load1"}, {Entity: "cluster", Metric: "not_ready"}, {Entity: "database", Metric: "restarts"}} {
 		r, err := e.Eval(t.Context(), &model.Monitor{Kind: "infra", Query: q}, time.Now())
 		if err == nil || !r.NoData {
 			t.Errorf("%+v: %v %+v", q, err, r)
