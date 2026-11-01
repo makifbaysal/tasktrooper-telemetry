@@ -197,14 +197,14 @@ func normalizeMonitor(in *model.MonitorInput) (target, query, cond []byte, sourc
 	}
 	switch in.Source {
 	case "": // create: manual; update: keep the stored source
-	case "manual", "template":
+	case "manual", "template", "agent":
 		source = in.Source
 	case "suggestion", "suggested":
 		source = "suggestion"
 	case "code":
 		return nil, nil, nil, "", Invalid("source code is reserved for monitors managed in a repository (.trooper/monitors/*.yaml)")
 	default:
-		return nil, nil, nil, "", Invalid("source must be manual|template|suggestion")
+		return nil, nil, nil, "", Invalid("source must be manual|template|suggestion|agent")
 	}
 	if in.Kind == "consumer_lag" {
 		if in.Queue == nil {

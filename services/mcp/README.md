@@ -1,6 +1,7 @@
 # mcp
 
-Read-only MCP server for local coding agents (Claude Code, OpenCode, …) — ADR-025, design in
+MCP server for local coding agents (Claude Code, OpenCode, …): read-only by default, opt-in confirmed writes (ADR-025,
+ADR-032). Design in
 [`.ai/mcp.md`](../../.ai/mcp.md), tool contract in [`.ai/contracts.md`](../../.ai/contracts.md) §26.
 Module `github.com/tasktrooper/telemetry/services/mcp`, binary `cmd/tt-mcp`, **no port**: it speaks MCP
 over stdin/stdout (stdio transport), spawned by the agent.
@@ -12,8 +13,7 @@ message; keep it green.
 
 ## Surface
 
-12 `tt_*` tools, every one a GET over `services/api` with the shared key-derived tenant (no org/project
-tool params, no write tools):
+27 read tools over `services/api` with the shared key-derived tenant (no org/project tool params). The original 12:
 
 | Tool | Upstream |
 |---|---|
@@ -29,6 +29,26 @@ tool params, no write tools):
 | `tt_get_incident` | `GET /api/v1/incidents/{id}` + `/events` (two calls, merged) |
 | `tt_list_loadtest_runs` | `GET /api/v1/loadtests/runs` |
 | `tt_list_deploys` | `GET /api/v1/deploys` |
+
+Added by ADR-032 (`tools_insights.go`, `tools_infra.go`, `tools_loadtest.go`, `tools_monitors.go`): `tt_list_errors`,
+`tt_get_error`, `tt_list_kpis`, `tt_list_alert_suggestions`, `tt_list_inventory`, `tt_list_monitor_templates`,
+`tt_list_notify_channels` (Slack App channels + configured channels, each with its exact `target` string; never a
+channel's config), `tt_get_app_summary`, `tt_get_ai_overview`, `tt_list_hosts`, `tt_list_databases`,
+`tt_list_consumer_groups`, `tt_list_loadtest_scenarios`, `tt_get_loadtest_run` and `tt_preview_monitor` (a POST that
+saves nothing).
+
+### Writes (`TT_MCP_ALLOW_WRITE=true`)
+
+11 more tools: `tt_create_monitor`, `tt_update_monitor`, `tt_delete_monitor`, `tt_accept_suggestion`, `tt_create_kpi`,
+`tt_update_kpi`, `tt_delete_kpi`, `tt_send_slack_test`, `tt_create_loadtest_scenario`, `tt_run_loadtest`,
+`tt_stop_loadtest`. Rules (tested in `e2e_test.go` `TestE2EWrite`):
+
+- Without `confirm: true` nothing is sent; the result is `{dryRun, wouldSend, next}` for the agent to show the user.
+  `tt_stop_loadtest` is the exception (it only reduces load).
+- Created monitors, KPIs and scenarios get `source: "agent"` whatever the input says.
+- Deletes only touch `source = agent`; `source = code` (repository managed) is never updated.
+- `tt_run_loadtest` refuses draft scenarios; new scenarios get an abort `gate` when they have none.
+- API 400/409/501/502 messages are passed on (≤ 300 chars); 5xx bodies never are.
 
 ## Cross-cutting rules
 
@@ -54,6 +74,7 @@ tool params, no write tools):
 | `TT_API_URL` | `http://localhost:8080` |
 | `TT_ORG_ID` / `TT_PROJECT_ID` | unset (optional cross-checks) |
 | `TT_LOG_LEVEL` | `info` (stderr JSON) |
+| `TT_MCP_ALLOW_WRITE` | `false` — `true` registers the 11 write tools (ADR-032) |
 
 Connection recipes (OpenCode, Claude Code, `.mcp.json`): `.ai/mcp.md` § Bağlanma.
 

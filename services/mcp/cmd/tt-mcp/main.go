@@ -60,10 +60,10 @@ func run() error {
 		return err
 	}
 
-	srv := server.New(client, log)
+	srv := server.New(client, log, server.Options{AllowWrite: cfg.AllowWrite})
 	// Run connects the stdio transport and serves until ctx is cancelled. It
 	// owns the only writer on os.Stdout.
-	log.Info("tt-mcp listening on stdio", "tools", server.ToolCount, "api", cfg.APIURL)
+	log.Info("tt-mcp listening on stdio", "tools", server.ToolCount(cfg.AllowWrite), "write", cfg.AllowWrite, "api", cfg.APIURL)
 	if err := srv.Run(ctx, &mcp.StdioTransport{}); err != nil && !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("stdio transport: %w", err)
 	}

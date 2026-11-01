@@ -214,3 +214,53 @@ func TestCheckUnreachable(t *testing.T) {
 		t.Errorf("message %q does not say unreachable", err)
 	}
 }
+
+func TestSend(t *testing.T) {
+	tests := []struct {
+		name    string
+		status  int
+		body    string
+		wantErr string
+		wantOut string
+	}{
+		{name: "created", status: http.StatusCreated, body: `{"id":"m1"}`, wantOut: "m1"},
+		{name: "no content", status: http.StatusNoContent},
+		{name: "validation message passed on", status: http.StatusBadRequest, body: `{"error":"threshold must be > 0"}`, wantErr: "threshold must be > 0"},
+		{name: "conflict", status: http.StatusConflict, body: `{"error":"name taken"}`, wantErr: "name taken"},
+		{name: "slack refusal passed on", status: http.StatusBadGateway, body: `{"error":"invite the bot to #alerts"}`, wantErr: "invite the bot"},
+		{name: "key", status: http.StatusForbidden, wantErr: "TT_API_KEY"},
+		{name: "not found", status: http.StatusNotFound, wantErr: "not found"},
+		{name: "server error", status: http.StatusInternalServerError, body: `{"error":"pq: secret"}`, wantErr: "HTTP 500"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotMethod, gotType string
+			api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotMethod, gotType = r.Method, r.Header.Get("Content-Type")
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer api.Close()
+			var out map[string]any
+			err := New(api.URL, "k", time.Second).Send(context.Background(), http.MethodPost, "/api/v1/monitors", nil, map[string]any{"a": 1}, &out)
+			if gotMethod != http.MethodPost || gotType != "application/json" {
+				t.Errorf("request %s %q, want POST application/json", gotMethod, gotType)
+			}
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("err = %v", err)
+				}
+				if tc.wantOut != "" && out["id"] != tc.wantOut {
+					t.Errorf("out = %v", out)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("err = %v, want %q", err, tc.wantErr)
+			}
+			if strings.Contains(err.Error(), "pq:") {
+				t.Errorf("internal error text leaked: %v", err)
+			}
+		})
+	}
+}

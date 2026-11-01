@@ -484,8 +484,9 @@ yok. Elde bir Mac mini (Apple Silicon, 16 GB) ve Docker Desktop var. Ev ağında
 **Karar:**
 - Tüm platform tek makinede, mevcut `deploy/docker-compose.yml` + `deploy/demo/docker-compose.demo.yml` (restart
   politikası, public URL'ler, `TT_AUTH_DEV=false`, `TT_COOKIE_SECURE=true`, dashboard için Caddy `web` servisi). Demoda
-  çalışanlar: ClickHouse, Postgres, Redpanda, Redis, s3, ingest-gw, ingest-writer, api, alert-engine, notifier, web.
-  codeintel, loadtest, trooper-cloud yok. Image'lar makinede kaynaktan build edilir (arm64; ghcr image'ları amd64).
+  çalışanlar: ClickHouse, Postgres, Redpanda, Redis, s3, ingest-gw, ingest-writer, api, alert-engine, notifier, web
+  ve (ADR-032 ile) loadtest — küçük limitler: 50 VU, 15 dk, tek eşzamanlı run, ayda 3000 VU-dk, `TT_LOADTEST_ALLOW_LOCAL=false`.
+  codeintel, trooper-cloud yok. Image'lar makinede kaynaktan build edilir (arm64; ghcr image'ları amd64).
 - Yayın: Cloudflare Tunnel (giden bağlantı, port yok). Host'lar zone'un bir seviye altında: `telemetry.`,
   `telemetry-api.`, `telemetry-ingest.tasktrooper.ai` — Cloudflare'in ücretsiz sertifikası iki seviyeyi
   (`api.telemetry.…`) kapsamıyor. Tunnel'dan yalnız OTLP/HTTP (4318) geçer, gRPC (4317) yok.
@@ -505,3 +506,26 @@ yok. Elde bir Mac mini (Apple Silicon, 16 GB) ve Docker Desktop var. Ev ağında
   diğer her path `no-cache`; build `rsync --delete-after` ile kopyalanır (deploy sırasında 404 yok).
 **Sonuç:** Kurulum ve adımlar `deploy/demo/README.md`. Makine kapanınca demo da kapanır (uptime garantisi yok); yedek ve
 kısa retention ayrı iş. Production'a geçişte ADR-030 host'ları ve ayrı altyapı geçerli olur.
+
+## ADR-032 — MCP write tool'ları: opt-in, onaylı, `source = agent`
+**Bağlam:** ADR-025 MCP'yi salt okunur açtı; agent'lar sorunu bulabiliyor ama projeye alert, KPI veya load test tanımlayamıyor,
+kullanıcı her öneriyi UI'dan elle giriyor. Alert tasarımı için gereken veri (hata grupları, KPI'lar, öneriler, envanter, şablonlar,
+bildirim kanalları, infra) da tool yüzeyinde yoktu. API key'ler `admin` rolünde (identity.go), yani anahtarın kendisi yazmayı
+sınırlamıyor.
+**Karar:**
+- 15 yeni okuma tool'u (toplam 27): errors, KPI'lar, öneriler, envanter, monitor şablonları, bildirim kanalları (Slack App kanalları
+  + tanımlı kanallar; config/secret asla), RUM özeti, AI kullanımı, host / veritabanı / consumer group, load test senaryoları +
+  domain'ler, tek run, ve `tt_preview_monitor` (POST ama kaydetmez — eşik gürültüsünü kayıttan önce görmek için).
+- 11 write tool'u yalnız `TT_MCP_ALLOW_WRITE=true` ile kaydedilir (default kapalı): monitor create / update / delete, öneri kabulü,
+  KPI create / update / delete, Slack test mesajı, load test senaryosu oluşturma, run başlatma ve durdurma.
+- Her write `confirm` ister; yoksa istek gönderilmez, gönderilecek gövde (`dryRun`) döner. Agent bunu kullanıcıya gösterir ve
+  onaydan sonra `confirm: true` ile tekrarlar. İstisna `tt_stop_loadtest` (yükü yalnız azaltır).
+- Agent'ın oluşturduğu monitor, KPI ve senaryo `source = 'agent'` (check constraint'lar `014_agent_source.sql`; UI rozeti). Agent
+  yalnız `agent` kayıtlarını siler; repo'dan yönetilen (`code`) kayıtları değiştirmez.
+- Load test: draft senaryo koşmaz, hedef doğrulanmış domain olmalı (domain ekleme kullanıcıda), agent senaryosuna `gate` yoksa
+  otomatik abort eşiği eklenir.
+- Kullanım akışı `skills/trooper-alerts`: önce oku, eşiği veriden türet, preview et, toplu liste halinde onay al; veri yetersizse
+  load test öner.
+**Sonuç:** Onay MCP istemcisinin değil tool sözleşmesinin parçası; dikkatsiz bir agent `confirm: true`'yu ilk çağrıda verebilir —
+asıl koruma env bayrağı ve `agent` kaynağıyla geri alınabilirlik. Ayrı yazma kapsamlı API key rolü (read-only key) açık iş.
+Demo (ADR-031) bu karar ile `loadtest` servisini de çalıştırır; limitler `deploy/demo/docker-compose.demo.yml`'de.

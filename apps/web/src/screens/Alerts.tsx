@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import {
-  Bell, BellOff, Check, CheckCircle2, ChevronRight, CircleDashed, Code2, ExternalLink, FileCode2, Lock, Pencil, Plus, Send, Sparkles, Target, Trash2, Wrench, X,
+  Bell, BellOff, Bot, Check, CheckCircle2, ChevronRight, CircleDashed, Code2, ExternalLink, FileCode2, Lock, Pencil, Plus, Send, Sparkles, Target, Trash2, Wrench, X,
 } from 'lucide-react';
 import { Sparkline, TimeSeries } from '@/components/charts';
 import {
@@ -104,6 +104,7 @@ export const channelsLabel = (m: Monitor) => m.channels.map(targetLabel).join(',
 export function MonitorSourceBadge({ m }: { m: Monitor }) {
   if (m.source === 'code') return <Badge tone="accent" icon={<Lock />}>Managed in repository</Badge>;
   if (m.source === 'suggestion') return <Badge tone="accent" icon={<Sparkles />}>From code suggestion</Badge>;
+  if (m.source === 'agent') return <Badge tone="accent" icon={<Bot />}>Created by an agent (MCP)</Badge>;
   return <Badge>{m.source}</Badge>;
 }
 
@@ -289,7 +290,7 @@ export function AlertsBody({ serviceId, endpointRef }: { serviceId?: string; end
               { key: 'state', header: 'State', width: 130, render: (m) => isMuted(m) ? <StatusBadge status="muted" /> : <StatusBadge status={m.state} label={m.state === 'ok' ? 'OK' : undefined} /> },
               { key: 'name', header: 'Monitor', render: (m) => (
                 <div style={{ minWidth: 0 }}>
-                  <div className="row" style={{ gap: 6, fontWeight: 500 }}>{m.name}{m.source === 'code' && <Lock size={12} color="var(--accent)" aria-label="Managed in repository" />}{m.source === 'suggestion' && <Sparkles size={12} color="var(--accent)" aria-label="From code suggestion" />}</div>
+                  <div className="row" style={{ gap: 6, fontWeight: 500 }}>{m.name}{m.source === 'code' && <Lock size={12} color="var(--accent)" aria-label="Managed in repository" />}{m.source === 'suggestion' && <Sparkles size={12} color="var(--accent)" aria-label="From code suggestion" />}{m.source === 'agent' && <Bot size={12} color="var(--accent)" aria-label="Created by an agent (MCP)" />}</div>
                   <div className="muted truncate" style={{ fontSize: 'var(--text-xs)' }}>{m.target}</div>
                 </div>
               ) },

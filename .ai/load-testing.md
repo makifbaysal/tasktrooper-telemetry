@@ -86,6 +86,9 @@ teknik olarak engellenemez — bilinen açık).
 - **Envanterden:** codeintel'in çıkardığı endpoint'ler + `loadtest_hint` (payload şeması) → seçilen endpoint'ler için taslak.
 - **Gerçek trafikten:** son 7 günün route dağılımı ve RUM akışları (sayfa geçiş olasılıkları) → gerçekçi trafik karışımı. "Production trafiğinin 3 katı" gibi hedefler.
 - Üretilen senaryo her zaman `draft`; kullanıcı onayı olmadan koşmaz.
+- **Agent (MCP, ADR-032):** `tt_create_loadtest_scenario` kullanıcı onayıyla `source=agent`, `state=ready` senaryo yazar (`gate`
+  yoksa `abortErrorRate 0.5`, `abortP95Ms 10000` eklenir); `tt_run_loadtest` ayrı onayla koşturur, `tt_stop_loadtest` onaysız
+  durdurur. Tipik kullanım: alert eşiği seçmek için yeterli trafiği olmayan endpoint'lere kısa bir baz yük (`skills/trooper-alerts`).
 
 ## Güvenlik
 

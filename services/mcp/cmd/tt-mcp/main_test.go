@@ -19,6 +19,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/tasktrooper/telemetry/services/mcp/internal/server"
 )
 
 // The session runs twice: plain, and with self telemetry on (ADR-027) against a fake collector with SDK debug
@@ -159,7 +161,7 @@ func stdioSession(t *testing.T, bin string, selfTel bool) {
 		t.Fatalf("got %d response(s), want initialize + tools/list + tools/call (stderr: %q)", len(responses), stderr.String())
 	}
 
-	// tools/list response must carry the 12 approved tools.
+	// tools/list response must carry the read-only tool surface (no TT_MCP_ALLOW_WRITE).
 	var toolsResp map[string]any // responses may arrive in any order
 	for _, r := range responses {
 		if id, _ := r["id"].(float64); id == 2 {
@@ -168,8 +170,8 @@ func stdioSession(t *testing.T, bin string, selfTel bool) {
 	}
 	result, _ := toolsResp["result"].(map[string]any)
 	tools, _ := result["tools"].([]any)
-	if len(tools) != 12 {
-		t.Errorf("tools/list returned %d tools, want 12", len(tools))
+	if len(tools) != server.ToolCount(false) {
+		t.Errorf("tools/list returned %d tools, want %d", len(tools), server.ToolCount(false))
 	}
 
 	// Reap the child before reading stderr: os/exec copies stderr through its

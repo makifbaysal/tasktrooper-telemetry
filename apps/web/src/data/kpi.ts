@@ -32,7 +32,7 @@ type RawKpi = Omit<Kpi, 'threshold' | 'metric' | 'alerts'> & {
 };
 const mapKpi = (k: RawKpi): Kpi => ({
   ...k, threshold: k.threshold ?? undefined, metric: k.metric ?? undefined, degradedSince: k.degradedSince || undefined,
-  window: k.window === '7d' ? '7d' : '28d', source: k.source === 'code' || k.source === 'template' ? k.source : 'manual',
+  window: k.window === '7d' ? '7d' : '28d', source: k.source === 'code' || k.source === 'template' || k.source === 'agent' ? k.source : 'manual',
   alerts: (k.alerts ?? []).map((a) => ({
     ...a, kind: a.kind === 'burn_rate' ? 'burn_rate' : 'sli_below', channels: a.channels ?? [],
     state: a.state === 'firing' || a.state === 'pending' ? a.state : 'ok',

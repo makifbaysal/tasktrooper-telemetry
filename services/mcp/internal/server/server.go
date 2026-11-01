@@ -1,6 +1,7 @@
-// Package server builds the MCP server and registers the read-only tool
-// surface (ADR-025, contracts §26). Every tool wraps one or two GET endpoints
-// of services/api; nothing here talks to a database, and no tool mutates state.
+// Package server builds the MCP server and registers the tool surface (ADR-025,
+// ADR-032, contracts §26). Every tool wraps one or two endpoints of services/api;
+// nothing here talks to a database. Read tools are always on; the monitor write
+// tools exist only with Options.AllowWrite and act only with confirm: true.
 package server
 
 import (
@@ -15,8 +16,24 @@ import (
 	"github.com/tasktrooper/telemetry/services/mcp/internal/selftel"
 )
 
-// ToolCount is asserted by the end-to-end test and printed at startup.
-const ToolCount = 12
+// ReadToolCount / WriteToolCount are asserted by the end-to-end test; ToolCount is printed at startup.
+const (
+	ReadToolCount  = 27
+	WriteToolCount = 11
+)
+
+// ToolCount is the number of tools registered for the given write setting.
+func ToolCount(allowWrite bool) int {
+	if allowWrite {
+		return ReadToolCount + WriteToolCount
+	}
+	return ReadToolCount
+}
+
+// Options switch optional parts of the surface.
+type Options struct {
+	AllowWrite bool // TT_MCP_ALLOW_WRITE
+}
 
 // Server holds the shared client and logger and owns tool registration.
 type Server struct {
@@ -24,8 +41,8 @@ type Server struct {
 	log *slog.Logger
 }
 
-// New returns an MCP server with all v1 tools registered.
-func New(api *apiclient.Client, log *slog.Logger) *mcp.Server {
+// New returns an MCP server with the read tools, plus the write tools when opts.AllowWrite.
+func New(api *apiclient.Client, log *slog.Logger, opts Options) *mcp.Server {
 	s := &Server{api: api, log: log}
 	srv := mcp.NewServer(&mcp.Implementation{Name: "tasktrooper", Version: "v0.1.0"}, &mcp.ServerOptions{
 		Logger: log, // stderr; the SDK's default logger is discarded
@@ -37,6 +54,13 @@ func New(api *apiclient.Client, log *slog.Logger) *mcp.Server {
 	s.registerAlertingTools(srv)
 	s.registerLoadtestTools(srv)
 	s.registerDeployTools(srv)
+	s.registerInsightTools(srv)
+	s.registerInfraTools(srv)
+	s.registerMonitorPreview(srv)
+	if opts.AllowWrite {
+		s.registerMonitorWriteTools(srv)
+		s.registerLoadtestWriteTools(srv)
+	}
 	return srv
 }
 

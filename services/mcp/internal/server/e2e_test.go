@@ -65,37 +65,19 @@ func TestE2E(t *testing.T) {
 	}))
 	defer api.Close()
 
-	srv := New(apiclient.New(api.URL, "tt_api_test_key", 2*time.Second),
-		slog.New(slog.NewTextHandler(io.Discard, nil)))
-
 	ctx := context.Background()
-	clientTransport, serverTransport := mcp.NewInMemoryTransports()
-	serverSession, err := srv.Connect(ctx, serverTransport, nil)
-	if err != nil {
-		t.Fatalf("server connect: %v", err)
-	}
-	defer serverSession.Close()
+	clientSession := connect(t, api.URL, Options{})
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "e2e-test", Version: "v0.0.1"}, nil)
-	clientSession, err := client.Connect(ctx, clientTransport, nil)
-	if err != nil {
-		t.Fatalf("client connect: %v", err)
-	}
-	defer clientSession.Close()
-
-	// ---- tools/list: exactly the 12 approved names ----
+	// ---- tools/list: exactly the read-only names ----
 	listed, err := clientSession.ListTools(ctx, nil)
 	if err != nil {
 		t.Fatalf("list tools: %v", err)
 	}
-	if len(listed.Tools) != ToolCount {
-		t.Fatalf("got %d tools, want %d", len(listed.Tools), ToolCount)
+	if len(listed.Tools) != ToolCount(false) {
+		t.Fatalf("got %d tools, want %d", len(listed.Tools), ToolCount(false))
 	}
-	want := []string{
-		"tt_endpoint_rca", "tt_get_incident", "tt_get_service_kpis", "tt_get_trace",
-		"tt_list_deploys", "tt_list_endpoints", "tt_list_incidents", "tt_list_loadtest_runs",
-		"tt_list_monitors", "tt_list_services", "tt_search_logs", "tt_search_traces",
-	}
+	want := append([]string(nil), readTools...)
+	sort.Strings(want)
 	got := make([]string, 0, len(listed.Tools))
 	for _, tool := range listed.Tools {
 		got = append(got, tool.Name)
@@ -185,5 +167,209 @@ func TestE2E(t *testing.T) {
 	mu.Unlock()
 	if len(seen) != 2 || seen[0] != "/api/v1/incidents/42" || seen[1] != "/api/v1/incidents/42/events" {
 		t.Errorf("tt_get_incident upstream calls = %v, want the incident and its events", seen)
+	}
+}
+
+// readTools / writeTools are the approved tool surface (.ai/mcp.md § Tool yüzeyi).
+var (
+	readTools = []string{
+		"tt_endpoint_rca", "tt_get_incident", "tt_get_service_kpis", "tt_get_trace",
+		"tt_list_deploys", "tt_list_endpoints", "tt_list_incidents", "tt_list_loadtest_runs",
+		"tt_list_monitors", "tt_list_services", "tt_search_logs", "tt_search_traces",
+		"tt_list_errors", "tt_get_error", "tt_list_kpis", "tt_list_alert_suggestions", "tt_list_inventory",
+		"tt_list_monitor_templates", "tt_list_notify_channels", "tt_get_app_summary", "tt_get_ai_overview",
+		"tt_list_hosts", "tt_list_databases", "tt_list_consumer_groups", "tt_preview_monitor",
+		"tt_list_loadtest_scenarios", "tt_get_loadtest_run",
+	}
+	writeTools = []string{
+		"tt_create_monitor", "tt_update_monitor", "tt_delete_monitor", "tt_accept_suggestion",
+		"tt_create_kpi", "tt_update_kpi", "tt_delete_kpi", "tt_send_slack_test",
+		"tt_create_loadtest_scenario", "tt_run_loadtest", "tt_stop_loadtest",
+	}
+)
+
+// connect starts the server against apiURL and returns a connected MCP client session.
+func connect(t *testing.T, apiURL string, opts Options) *mcp.ClientSession {
+	t.Helper()
+	ctx := context.Background()
+	srv := New(apiclient.New(apiURL, "tt_api_test_key", 2*time.Second), slog.New(slog.NewTextHandler(io.Discard, nil)), opts)
+	clientTransport, serverTransport := mcp.NewInMemoryTransports()
+	serverSession, err := srv.Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	t.Cleanup(func() { _ = serverSession.Close() })
+	client := mcp.NewClient(&mcp.Implementation{Name: "e2e-test", Version: "v0.0.1"}, nil)
+	cs, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	t.Cleanup(func() { _ = cs.Close() })
+	return cs
+}
+
+// TestE2EWrite covers the write surface (ADR-032): registered only with AllowWrite, dry run without confirm,
+// source forced to agent, delete limited to agent-created monitors.
+func TestE2EWrite(t *testing.T) {
+	type call struct {
+		method, path string
+		body         map[string]any
+	}
+	var mu sync.Mutex
+	var calls []call
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		calls = append(calls, call{r.Method, r.URL.Path, body})
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/monitors":
+			w.WriteHeader(http.StatusCreated)
+			_, _ = io.WriteString(w, `{"id":"m9","name":"x","source":"agent"}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/monitors/m1":
+			_, _ = io.WriteString(w, `{"id":"m1","source":"manual"}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/monitors/m9":
+			_, _ = io.WriteString(w, `{"id":"m9","source":"agent"}`)
+		case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/monitors/m9":
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/loadtests/scenarios/s1":
+			_, _ = io.WriteString(w, `{"id":"s1","name":"checkout","target":"https://api.example.com","state":"ready","peakVus":20,"duration":420}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/loadtests/scenarios/s2":
+			_, _ = io.WriteString(w, `{"id":"s2","state":"draft"}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/loadtests/scenarios/s1/runs":
+			w.WriteHeader(http.StatusCreated)
+			_, _ = io.WriteString(w, `{"id":"r7","state":"queued"}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/loadtests/scenarios":
+			w.WriteHeader(http.StatusCreated)
+			_, _ = io.WriteString(w, `{"id":"s3"}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/kpis":
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"error":"objective out of range"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer api.Close()
+	ctx := context.Background()
+
+	// read-only by default
+	ro := connect(t, api.URL, Options{})
+	if res, _ := ro.CallTool(ctx, &mcp.CallToolParams{Name: "tt_create_monitor", Arguments: map[string]any{}}); res != nil && !res.IsError {
+		t.Fatalf("tt_create_monitor callable without AllowWrite")
+	}
+
+	cs := connect(t, api.URL, Options{AllowWrite: true})
+	listed, err := cs.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatalf("list tools: %v", err)
+	}
+	want := append(append([]string(nil), readTools...), writeTools...)
+	sort.Strings(want)
+	got := make([]string, 0, len(listed.Tools))
+	for _, tool := range listed.Tools {
+		got = append(got, tool.Name)
+	}
+	sort.Strings(got)
+	if len(got) != ToolCount(true) || strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("write tools:\n got %v\nwant %v", got, want)
+	}
+
+	monitor := map[string]any{
+		"name": "checkout p95", "kind": "latency", "target": map[string]any{"service": "checkout"},
+		"query": map[string]any{"percentile": "p95"}, "condition": map[string]any{"op": ">", "threshold": 800, "forMin": 5},
+		"severity": "warning", "source": "manual", "channels": []any{},
+	}
+	tests := []struct {
+		name      string
+		tool      string
+		args      map[string]any
+		wantErr   bool
+		wantText  string
+		wantCalls []string // "METHOD path"
+		check     func(t *testing.T, cs []call)
+	}{
+		{name: "create dry run", tool: "tt_create_monitor", args: map[string]any{"monitor": monitor},
+			wantText: `"dryRun":true`},
+		{name: "create confirmed", tool: "tt_create_monitor", args: map[string]any{"monitor": monitor, "confirm": true},
+			wantText: `"m9"`, wantCalls: []string{"POST /api/v1/monitors"},
+			check: func(t *testing.T, cs []call) {
+				if cs[0].body["source"] != "agent" {
+					t.Errorf("source = %v, want agent", cs[0].body["source"])
+				}
+				if ch, ok := cs[0].body["channels"].([]any); !ok || len(ch) != 0 {
+					t.Errorf("channels = %v, want []", cs[0].body["channels"])
+				}
+				if cond, _ := cs[0].body["condition"].(map[string]any); cond["window"] != "5m" {
+					t.Errorf("condition = %v, want the default 5m window stated", cond)
+				}
+			}},
+		{name: "create invalid severity", tool: "tt_create_monitor", wantErr: true,
+			args: map[string]any{"monitor": map[string]any{"name": "x", "kind": "latency", "condition": map[string]any{"op": ">"}, "severity": "high"}}},
+		{name: "delete manual refused", tool: "tt_delete_monitor", args: map[string]any{"id": "m1", "confirm": true},
+			wantErr: true, wantCalls: []string{"GET /api/v1/monitors/m1"}},
+		{name: "delete agent dry run", tool: "tt_delete_monitor", args: map[string]any{"id": "m9"},
+			wantText: `"dryRun":true`, wantCalls: []string{"GET /api/v1/monitors/m9"}},
+		{name: "delete agent confirmed", tool: "tt_delete_monitor", args: map[string]any{"id": "m9", "confirm": true},
+			wantText: `"deleted"`, wantCalls: []string{"GET /api/v1/monitors/m9", "DELETE /api/v1/monitors/m9"}},
+		{name: "kpi endpoint ref must be METHOD route", tool: "tt_create_kpi", wantErr: true,
+			args: map[string]any{"kpi": map[string]any{"name": "Checkout", "sli": "availability", "objective": 0.99, "window": "28d", "description": "d", "owner": "team", "alerts": []any{},
+				"target": map[string]any{"kind": "endpoint", "serviceId": "checkout", "ref": "post-orders"}}}},
+		{name: "kpi api error surfaced", tool: "tt_create_kpi", wantErr: true, wantText: "objective out of range",
+			wantCalls: []string{"POST /api/v1/kpis"},
+			args: map[string]any{"confirm": true, "kpi": map[string]any{"name": "Checkout", "sli": "availability", "objective": 0.99, "window": "28d", "description": "d", "owner": "team", "alerts": []any{},
+				"target": map[string]any{"kind": "endpoint", "serviceId": "checkout", "ref": "POST /orders"}}}},
+		{name: "scenario needs a URL target", tool: "tt_create_loadtest_scenario", wantErr: true,
+			args: map[string]any{"name": "x", "spec": map[string]any{"target": "api.example.com", "steps": []any{"GET /"}, "levels": []any{}}}},
+		{name: "scenario confirmed adds gate and source", tool: "tt_create_loadtest_scenario", wantText: `"s3"`,
+			wantCalls: []string{"POST /api/v1/loadtests/scenarios"},
+			args: map[string]any{"name": "x", "confirm": true, "spec": map[string]any{"target": "https://api.example.com", "steps": []any{"GET /"},
+				"levels": []any{map[string]any{"name": "a", "ramp": 10, "hold": 30, "target": 5}}}},
+			check: func(t *testing.T, cs []call) {
+				spec, _ := cs[0].body["spec"].(map[string]any)
+				if cs[0].body["source"] != "agent" || spec["gate"] == nil {
+					t.Errorf("body = %v, want source agent and a default gate", cs[0].body)
+				}
+			}},
+		{name: "run dry run sends no traffic", tool: "tt_run_loadtest", args: map[string]any{"scenarioId": "s1"},
+			wantText: `"dryRun":true`, wantCalls: []string{"GET /api/v1/loadtests/scenarios/s1"}},
+		{name: "run confirmed", tool: "tt_run_loadtest", args: map[string]any{"scenarioId": "s1", "confirm": true},
+			wantText: `"r7"`, wantCalls: []string{"GET /api/v1/loadtests/scenarios/s1", "POST /api/v1/loadtests/scenarios/s1/runs"}},
+		{name: "draft scenario refused", tool: "tt_run_loadtest", args: map[string]any{"scenarioId": "s2", "confirm": true},
+			wantErr: true, wantCalls: []string{"GET /api/v1/loadtests/scenarios/s2"}},
+		{name: "slack test dry run strips target", tool: "tt_send_slack_test", args: map[string]any{"channel": "slack:C123#alerts"},
+			wantText: `"channel":"C123"`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mu.Lock()
+			calls = nil
+			mu.Unlock()
+			res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: tc.tool, Arguments: tc.args})
+			if err != nil {
+				t.Fatalf("call: %v", err)
+			}
+			text := resultText(t, res)
+			if res.IsError != tc.wantErr {
+				t.Fatalf("IsError = %v, want %v: %s", res.IsError, tc.wantErr, text)
+			}
+			if tc.wantText != "" && !strings.Contains(text, tc.wantText) {
+				t.Errorf("result %s missing %s", text, tc.wantText)
+			}
+			mu.Lock()
+			seen := append([]call(nil), calls...)
+			mu.Unlock()
+			var names []string
+			for _, c := range seen {
+				names = append(names, c.method+" "+c.path)
+			}
+			if strings.Join(names, ",") != strings.Join(tc.wantCalls, ",") {
+				t.Errorf("upstream calls = %v, want %v", names, tc.wantCalls)
+			}
+			if tc.check != nil {
+				tc.check(t, seen)
+			}
+		})
 	}
 }

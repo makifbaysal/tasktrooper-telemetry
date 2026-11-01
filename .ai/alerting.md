@@ -70,6 +70,10 @@ bildirim payload'u `codeRef` taşır ve kanallar "Defined in code" olarak göste
 | `infra` | `query: {entity: host\|container\|pod\|node\|workload, metric, agg: avg (varsayılan)\|max, filter: {cluster, namespace, host, workload, service}}` (`target.service` filter.service yerine geçer). Her varlık için pencere değeri (dakikalık `max`, sonra `agg`); monitor değeri en kötü varlık (op `<` ise en küçük), `detail.entities` en kötü 5 (`id`, label'lar, `value`). `restarts` = pencere içi artış; `cpu_ratio`/`memory_ratio` = Σ kullanım / Σ limit (limiti olan container'lar); pod `not_ready` / node `not_ready` = son örneği ready=0 olan varlık **sayısı** (phase `Succeeded` ve pencerenin en yeni dakikasından 2 dk eski — silinmiş — varlıklar hariç); workload `unavailable` = en son `desired − available`. Eşleşen varlıkta hiç değer yoksa `no_data` |
 | `faas` | `query: {functionId? \| filter: {provider, region, service}, metric, relativeToTimeout?}`. Fonksiyon başına: sayılar toplam, `error_rate` = errors/invocations, `duration_p95/p99` çağrı ağırlıklı ortalama (`relativeToTimeout` → ÷ timeout), `concurrency`/`iterator_age_ms` max, `cold_starts` = fonksiyonun servisinin `spans`'taki `faas.coldstart='true'` entry span'leri. `service` filtresi, cold start ve timeout Postgres `serverless_functions`'tan çözülür. `minRequests` altındaki fonksiyonlar oran/süre metriklerinde breach'e karar vermez. Raporlanmayan metrik (ör. Azure throttles) → `no_data` |
 
+**Agent monitor'ları (ADR-032):** MCP üzerinden `tt_create_monitor` / `tt_create_kpi` ile kullanıcı onayıyla oluşturulanlar
+`source='agent'` taşır; motor bunları `manual` gibi değerlendirir. UI'da "Agent" rozeti (Bot ikonu); agent yalnız kendi
+oluşturduklarını silebilir. Akış: `skills/trooper-alerts`.
+
 **Şablonlar** (`services/alerting/internal/eval/templates.go`, `source='template'`): pod CrashLoop (`restarts > 3`, 10 dk
 pencere), node NotReady (`not_ready > 0`, 5 dk), host CPU > 0.9 (avg, 10 dk), host disk > 0.9, workload `unavailable > 0`
 (10 dk), fonksiyon error rate > 0.05 (5 dk, minRequests 20), throttles > 0 (5 dk), p95 > timeout × 0.8 (`relativeToTimeout`).

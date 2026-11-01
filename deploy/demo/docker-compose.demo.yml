@@ -1,7 +1,7 @@
 # Demo deployment on a single machine behind Cloudflare Tunnel (ADR-031, deploy/demo/README.md).
 # Layered on the local stack:
 #   docker compose -f deploy/docker-compose.yml -f deploy/demo/docker-compose.demo.yml --profile app up -d --build \
-#     ingest-gw ingest-writer api alert-engine notifier web trooper-agent
+#     ingest-gw ingest-writer api alert-engine notifier loadtest web trooper-agent
 # Values come from deploy/.env (the deploy-demo workflow writes it from the DEMO_ENV secret). Relative paths resolve against deploy/.
 # Self-observability (ADR-027): deploy.sh exports TROOPER_SELF_DSN / TT_SELF_PROJECT_ID from the DEMO_TROOPER_DSN secret (a
 # project created in the dashboard, public ingest host); empty = the services export nothing and trooper-agent is not started.
@@ -21,6 +21,18 @@ services:
   ingest-writer: { restart: unless-stopped, dns: *dns, environment: *self_env }
   alert-engine: { restart: unless-stopped, dns: *dns, environment: *self_env }
   notifier: { restart: unless-stopped, dns: *dns, environment: *self_env }
+
+  # load tests (ADR-015/032): one machine, so small caps; targets must be verified domains (never this host itself)
+  loadtest:
+    restart: unless-stopped
+    dns: *dns
+    environment:
+      <<: *self_env
+      TT_LOADTEST_ALLOW_LOCAL: "false"
+      TT_LOADTEST_MAX_VUS: "50"
+      TT_LOADTEST_MAX_DURATION: 15m
+      TT_LOADTEST_MAX_CONCURRENT: "1"
+      TT_LOADTEST_MONTHLY_VU_MINUTES: "3000"
 
   api:
     restart: unless-stopped

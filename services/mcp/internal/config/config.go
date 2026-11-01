@@ -23,6 +23,9 @@ type Config struct {
 	OrgID     uint32
 	ProjectID uint32
 	LogLevel  slog.Level
+	// AllowWrite registers the monitor write tools (tt_create_monitor, tt_update_monitor, tt_delete_monitor,
+	// tt_accept_suggestion; ADR-032). Off by default: a key is admin-level, so writing is an explicit opt-in.
+	AllowWrite bool
 }
 
 // Load reads TT_* and fails fast on anything that would otherwise surface as a
@@ -46,6 +49,7 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	c.LogLevel = parseLevel(config.String("TT_LOG_LEVEL", "info"))
+	c.AllowWrite = config.Bool("TT_MCP_ALLOW_WRITE", false)
 	return c, nil
 }
 

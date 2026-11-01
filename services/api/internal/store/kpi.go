@@ -496,8 +496,8 @@ func validateKpi(in *model.KpiInput) error {
 	if in.Source == "" {
 		in.Source = "manual"
 	}
-	if in.Source != "manual" && in.Source != "code" && in.Source != "template" {
-		return Invalid("source must be manual|code|template")
+	if in.Source != "manual" && in.Source != "code" && in.Source != "template" && in.Source != "agent" {
+		return Invalid("source must be manual|code|template|agent")
 	}
 	for i := range in.Alerts {
 		r := &in.Alerts[i]

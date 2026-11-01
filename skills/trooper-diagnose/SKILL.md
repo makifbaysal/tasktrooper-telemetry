@@ -1,12 +1,12 @@
 ---
 name: trooper-diagnose
-description: Root-cause workflow for a production problem using the TaskTrooper MCP tools (tt_*). Use when the user says something is wrong, broken, slow, erroring, down, alerting or regressed in a service, endpoint, consumer or app ("something looks wrong with orders-api", "why is checkout slow", "what caused this incident", "did the last deploy break X"). Not for writing code or changing alert rules; the tools are read-only.
+description: Root-cause workflow for a production problem using the TaskTrooper MCP tools (tt_*). Use when the user says something is wrong, broken, slow, erroring, down, alerting or regressed in a service, endpoint, consumer or app ("something looks wrong with orders-api", "why is checkout slow", "what caused this incident", "did the last deploy break X"). Not for writing code or setting up alerts (use trooper-alerts); this workflow only reads.
 ---
 
 # trooper-diagnose
 
-Find why a service/endpoint is unhealthy, using evidence from the `tt_*` MCP tools. The tools are
-read-only and scoped to one project by the API key. Background on the tools: the `trooper-query` skill.
+Find why a service/endpoint is unhealthy, using evidence from the `tt_*` MCP tools. This workflow only reads (never
+call a `tt_create_*` / `tt_update_*` / `tt_run_*` tool here); everything is scoped to one project by the API key. Background on the tools: the `trooper-query` skill.
 
 ## Rules (apply to every step)
 
@@ -50,8 +50,16 @@ read-only and scoped to one project by the API key. Background on the tools: the
 8. **Deploys.** `tt_list_deploys { service, range }` (and for the dependency's service if step 4/6 points
    at one). A deploy shortly before `startedAt` or the RCA window is a correlation, not proof: say so.
 
-Optional: `tt_list_monitors { service }` to see what else is configured/alerting;
-`tt_list_loadtest_runs` if a load test may have caused the traffic.
+Optional, when they fit the symptom:
+- `tt_list_errors { service, route, range }` → `tt_get_error { fingerprint }`: which exception, since when (`firstSeen`
+  near `startedAt` = new error, likely from a deploy), and its symbolicated stack.
+- `tt_list_kpis { service }`: SLO burn rate and remaining budget, for impact ("burned 40% of the monthly budget").
+- `tt_list_databases`, `tt_list_hosts`, `tt_list_consumer_groups`: when step 4/6 points at a database, a host or a
+  queue (connections, slow queries, CPU / memory / disk, consumer lag).
+- `tt_get_app_summary { app }` for a web / mobile app (JS errors, Web Vitals, crashes); `tt_get_ai_overview` for LLM
+  calls.
+- `tt_list_monitors { service }` to see what else is configured/alerting; `tt_list_loadtest_runs` (and
+  `tt_get_loadtest_run`) if a load test may have caused the traffic.
 
 ## Output format
 
