@@ -129,3 +129,18 @@
 /* embedded in the service detail (Map tab) */
 .svcmap__bar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-4); }
 .svcmap--embedded .svcmap__canvas { height: max(30rem, calc(100vh - 24rem)); }
+
+/* tier bands: a faint tint per tier, dashed separators between them. Hues avoid the status family (orange, yellow,
+ * red, green) so a band never reads as warning; neighbours never share a hue family: clients blue, services neutral, data aqua,
+ * external magenta. */
+.svcmap__band { stroke: none; }
+.svcmap__band--1 { fill: color-mix(in oklch, var(--series-1) 8%, transparent); }
+.svcmap__band--2 { fill: color-mix(in oklch, var(--text-muted) 6%, transparent); }
+.svcmap__band--3 { fill: color-mix(in oklch, var(--series-3) 7%, transparent); }
+.svcmap__band--4 { fill: color-mix(in oklch, var(--series-5) 6%, transparent); }
+.svcmap .smap__sep { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 6 6; opacity: 1; vector-effect: non-scaling-stroke; }
+.svcmap .smap__lane { font-weight: var(--weight-semibold); letter-spacing: 0.02em; }
+.svcmap__lane--1 { fill: var(--series-1); }
+.svcmap__lane--2 { fill: var(--text-secondary); }
+.svcmap__lane--3 { fill: var(--series-3); }
+.svcmap__lane--4 { fill: var(--series-5); }
