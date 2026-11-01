@@ -12,6 +12,8 @@ import (
 
 	"github.com/tasktrooper/telemetry/services/ingest/internal/geo"
 	"github.com/tasktrooper/telemetry/services/ingest/internal/obs"
+	"github.com/tasktrooper/telemetry/services/ingest/internal/selfobs"
+	"github.com/tasktrooper/telemetry/services/pkg/topics"
 )
 
 // Config holds ingest-writer settings.
@@ -27,6 +29,7 @@ type Config struct {
 	Geo           *geo.DB       // optional GeoIP database for RUM country
 	Blobs         BlobStore     // session replay segments (S3); nil → tt.replay must not be consumed
 	BlobWorkers   int           // parallel uploads per flush (default 16)
+	Tel           *selfobs.Tel  // self-telemetry (ADR-027); nil = off
 }
 
 // BlobStore stores replay segment objects. Put must be idempotent (same key, same body).
@@ -45,6 +48,7 @@ type Writer struct {
 	b       *Batches
 	pending map[tp]*kgo.Record // highest record per partition not yet committed
 	first   time.Time          // when the oldest buffered record arrived
+	stats   selfobs.FlushStats // records since the last flush (only counted with self-telemetry on)
 }
 
 type tp struct {
@@ -115,17 +119,7 @@ func (w *Writer) Run(ctx context.Context) error {
 			}
 		})
 		w.mu.Lock()
-		fetches.EachRecord(func(r *kgo.Record) {
-			obs.WriterConsumed.WithLabelValues(r.Topic).Inc()
-			if err := w.b.Add(r); err != nil {
-				obs.WriterDecodeErrors.WithLabelValues(r.Topic).Inc()
-				w.log.Warn("skipping undecodable record", "topic", r.Topic, "partition", r.Partition, "offset", r.Offset, "err", err)
-			}
-			if w.first.IsZero() {
-				w.first = time.Now()
-			}
-			w.pending[tp{r.Topic, r.Partition}] = r
-		})
+		fetches.EachRecord(func(r *kgo.Record) { w.addRecord(ctx, r) })
 		due := len(w.pending) > 0 && (w.b.Rows() >= w.cfg.BatchRows || w.b.Full() || time.Since(w.first) >= w.cfg.FlushInterval)
 		var err error
 		if due {
@@ -155,6 +149,13 @@ func (w *Writer) flushLocked(ctx context.Context) error {
 		return nil
 	}
 	start := time.Now()
+	ctx, span := w.cfg.Tel.StartFlush(ctx, w.cfg.Group, w.stats)
+	err := w.flushTraced(ctx, start)
+	selfobs.EndSpan(span, err)
+	return err
+}
+
+func (w *Writer) flushTraced(ctx context.Context, start time.Time) error {
 	w.b.Sample(w.cfg.Sampler)
 	// Replay blobs first: an index row must never point at a missing object. Failed uploads are retried like inserts
 	// and nothing is committed until every blob and row is stored (at-least-once; a redelivery rewrites the same key).
@@ -179,16 +180,17 @@ func (w *Writer) flushLocked(ctx context.Context) error {
 	defer cancel()
 	if err := w.cl.CommitRecords(cctx, recs...); err != nil {
 		// Rows are in ClickHouse; a failed commit only means duplicates after a rebalance/restart.
-		w.log.Warn("offset commit failed", "err", err)
+		w.log.WarnContext(ctx, "offset commit failed", "err", err)
 	}
 	obs.WriterFlushDuration.Observe(time.Since(start).Seconds())
 	attrs := []any{"ms", time.Since(start).Milliseconds()}
 	for _, t := range tables {
 		attrs = append(attrs, t.table, t.n)
 	}
-	w.log.Debug("flushed", attrs...)
+	w.log.DebugContext(ctx, "flushed", attrs...)
 	w.b.Reset()
 	clear(w.pending)
+	w.stats = selfobs.FlushStats{}
 	w.first = time.Time{}
 	return nil
 }
@@ -199,7 +201,7 @@ func (w *Writer) uploadBlobs(ctx context.Context) error {
 		return nil
 	}
 	if w.cfg.Blobs == nil {
-		w.log.Warn("replay segments without a blob store dropped", "segments", len(blobs))
+		w.log.WarnContext(ctx, "replay segments without a blob store dropped", "segments", len(blobs))
 		obs.WriterDecodeErrors.WithLabelValues("tt.replay").Add(float64(len(blobs)))
 		clear(w.b.Replay)
 		w.b.Replay = w.b.Replay[:0]
@@ -237,7 +239,7 @@ func (w *Writer) putWithRetry(ctx context.Context, b Blob) error {
 			return nil
 		}
 		obs.WriterBlobErrors.Inc()
-		w.log.Error("replay blob upload failed", "key", b.Key, "attempt", attempt, "retry_in", backoff.String(), "err", err)
+		w.log.ErrorContext(ctx, "replay blob upload failed", "key", b.Key, "attempt", attempt, "retry_in", backoff.String(), "err", err)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -251,14 +253,16 @@ func (w *Writer) insertWithRetry(ctx context.Context, t tableBatch) error {
 	backoff := 200 * time.Millisecond
 	for attempt := 1; ; attempt++ {
 		start := time.Now()
-		err := w.ins.Insert(ctx, t.table, t.columns, t.n, t.row)
+		ictx, span := selfobs.InsertSpan(ctx, t.table, t.n)
+		err := w.ins.Insert(ictx, t.table, t.columns, t.n, t.row)
+		selfobs.EndSpan(span, err)
 		if err == nil {
 			obs.WriterInsertDuration.WithLabelValues(t.table).Observe(time.Since(start).Seconds())
 			obs.WriterRowsInserted.WithLabelValues(t.table).Add(float64(t.n))
 			return nil
 		}
 		obs.WriterInsertErrors.WithLabelValues(t.table).Inc()
-		w.log.Error("clickhouse insert failed", "table", t.table, "rows", t.n, "attempt", attempt, "retry_in", backoff.String(), "err", err)
+		w.log.ErrorContext(ctx, "clickhouse insert failed", "table", t.table, "rows", t.n, "attempt", attempt, "retry_in", backoff.String(), "err", err)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -297,4 +301,40 @@ func (w *Writer) shutdown() {
 	if err := w.flushLocked(ctx); err != nil {
 		w.log.Warn("final flush failed; records will be redelivered", "err", err)
 	}
+}
+
+// countRecord updates the flush statistics used by the self-telemetry loop guard and reports whether r belongs to the
+// self project. Without self-telemetry it does nothing.
+func (w *Writer) countRecord(r *kgo.Record) bool {
+	if w.cfg.Tel == nil {
+		return false
+	}
+	w.stats.Records++
+	for _, h := range r.Headers {
+		if h.Key == topics.HeaderProjectID {
+			if w.cfg.Tel.IsSelfHeader(h.Value) {
+				w.stats.Self++
+				return true
+			}
+			return false
+		}
+	}
+	return false
+}
+
+// addRecord buffers one consumed record (w.mu held).
+func (w *Writer) addRecord(ctx context.Context, r *kgo.Record) {
+	obs.WriterConsumed.WithLabelValues(r.Topic).Inc()
+	self := w.countRecord(r)
+	if err := w.b.Add(r); err != nil {
+		obs.WriterDecodeErrors.WithLabelValues(r.Topic).Inc()
+		if self {
+			ctx = selfobs.Suppress(ctx)
+		}
+		w.log.WarnContext(ctx, "skipping undecodable record", "topic", r.Topic, "partition", r.Partition, "offset", r.Offset, "err", err)
+	}
+	if w.first.IsZero() {
+		w.first = time.Now()
+	}
+	w.pending[tp{r.Topic, r.Partition}] = r
 }

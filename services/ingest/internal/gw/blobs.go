@@ -21,7 +21,7 @@ import (
 // Auth, CORS, ?key= and content types as /v1/rum; the body is one segment JSON. It is validated and published gzip'ed.
 
 func (s *Server) replayEndpoint() http.Handler {
-	return instrument(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return s.instrument(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 		if origin != "" && corsHeaders(w, r, origin) {
 			return
@@ -48,7 +48,8 @@ func (s *Server) handleReplay(r *http.Request, origin string) error {
 	if err != nil {
 		return err
 	}
-	if err := s.allow(r.Context(), key); err != nil {
+	ctx := s.begin(r.Context(), key)
+	if err := s.allow(ctx, key); err != nil {
 		return err
 	}
 	wire, body, err := readBodyLimits(r, s.cfg.ReplayMaxWireBytes, s.cfg.ReplayMaxBodyBytes)
@@ -73,7 +74,7 @@ func (s *Server) handleReplay(r *http.Request, origin string) error {
 		return &ingestError{status: http.StatusRequestEntityTooLarge, msg: "replay segment too large"}
 	}
 	m := meta{tenant: key.Tenant, receivedAt: s.now(), clientIP: clientIP(r)}
-	return s.send(topics.Replay, [][]byte{value}, m,
+	return s.send(ctx, topics.Replay, [][]byte{value}, m,
 		kgo.RecordHeader{Key: topics.HeaderSessionID, Value: []byte(seg.SessionID)},
 		kgo.RecordHeader{Key: topics.HeaderSegment, Value: headerValue(*seg.Segment)})
 }
@@ -168,7 +169,7 @@ func parseProfileParams(r *http.Request) (*profileParams, error) {
 }
 
 func (s *Server) profilesEndpoint() http.Handler {
-	return instrument(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return s.instrument(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", "POST")
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -191,7 +192,8 @@ func (s *Server) handleProfile(r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if err := s.allow(r.Context(), key); err != nil {
+	ctx := s.begin(r.Context(), key)
+	if err := s.allow(ctx, key); err != nil {
 		return err
 	}
 	p, err := parseProfileParams(r)
@@ -225,7 +227,7 @@ func (s *Server) handleProfile(r *http.Request) error {
 	}
 	m := meta{tenant: key.Tenant, receivedAt: s.now(), clientIP: clientIP(r)}
 	h := func(k, v string) kgo.RecordHeader { return kgo.RecordHeader{Key: k, Value: []byte(v)} }
-	return s.send(topics.Profiles, [][]byte{value}, m,
+	return s.send(ctx, topics.Profiles, [][]byte{value}, m,
 		h(topics.HeaderService, p.service), h(topics.HeaderEnv, p.env), h(topics.HeaderVersion, p.version),
 		h(topics.HeaderHost, p.host), h(topics.HeaderRuntime, p.runtime),
 		h(topics.HeaderStart, strconv.FormatInt(p.start, 10)), h(topics.HeaderEnd, strconv.FormatInt(p.end, 10)),

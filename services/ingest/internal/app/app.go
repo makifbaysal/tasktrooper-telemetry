@@ -16,6 +16,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	trooperredis "github.com/tasktrooper/telemetry-go/integrations/goredis"
+	trooperpgx "github.com/tasktrooper/telemetry-go/integrations/pgx"
 
 	"github.com/tasktrooper/telemetry/services/ingest/internal/auth"
 	"github.com/tasktrooper/telemetry/services/ingest/internal/blob"
@@ -23,6 +25,7 @@ import (
 	"github.com/tasktrooper/telemetry/services/ingest/internal/gw"
 	"github.com/tasktrooper/telemetry/services/ingest/internal/obs"
 	"github.com/tasktrooper/telemetry/services/ingest/internal/ratelimit"
+	"github.com/tasktrooper/telemetry/services/ingest/internal/selfobs"
 	"github.com/tasktrooper/telemetry/services/ingest/internal/writer"
 	"github.com/tasktrooper/telemetry/services/pkg/config"
 	"github.com/tasktrooper/telemetry/services/pkg/secrets"
@@ -39,6 +42,10 @@ type GatewayConfig struct {
 	MetricsAddr string
 	// InternalToken (TT_INTERNAL_TOKEN) enables the internal service credential (contracts §16); empty = off.
 	InternalToken string
+	// Telemetry turns on self-instrumentation (set by cmd/ingest-gw when selfobs.Start enabled the SDK; ADR-027).
+	Telemetry bool
+	// SelfProjectID (TT_SELF_PROJECT_ID): requests of this project produce no spans / OTel logs; 0 = guard off.
+	SelfProjectID uint32
 }
 
 // GatewayFromEnv reads TT_* variables.
@@ -66,12 +73,18 @@ func GatewayFromEnv() GatewayConfig {
 		Burst:         2,
 		MetricsAddr:   config.String("TT_INGEST_METRICS_ADDR", ""),
 		InternalToken: config.String("TT_INTERNAL_TOKEN", ""),
+		SelfProjectID: selfobs.SelfProjectFromEnv(),
 	}
 }
 
 // RunGateway serves until ctx is cancelled. ready (optional) receives the bound HTTP and gRPC addresses.
 func RunGateway(ctx context.Context, cfg GatewayConfig, log *slog.Logger, ready func(httpAddr, grpcAddr string)) error {
-	pool, err := pgxpool.New(ctx, cfg.Common.PostgresURL)
+	var tel *selfobs.Tel
+	if cfg.Telemetry {
+		tel = selfobs.New(nil, cfg.SelfProjectID)
+		warnNoGuard(log, cfg.SelfProjectID)
+	}
+	pool, err := openPool(ctx, cfg.Common.PostgresURL, tel != nil)
 	if err != nil {
 		return fmt.Errorf("postgres: %w", err)
 	}
@@ -85,6 +98,11 @@ func RunGateway(ctx context.Context, cfg GatewayConfig, log *slog.Logger, ready 
 	} else {
 		opt.DialTimeout, opt.ReadTimeout, opt.WriteTimeout = 200*time.Millisecond, 100*time.Millisecond, 100*time.Millisecond
 		rdb = redis.NewClient(opt)
+		if tel != nil {
+			if err := trooperredis.Instrument(rdb, trooperredis.WithoutMetrics()); err != nil {
+				log.Warn("redis instrumentation failed", "err", err)
+			}
+		}
 		defer rdb.Close()
 	}
 	var lim *ratelimit.Limiter
@@ -105,6 +123,7 @@ func RunGateway(ctx context.Context, cfg GatewayConfig, log *slog.Logger, ready 
 		cfg.GW.ServeMetrics = true
 	}
 	srv := gw.New(cfg.GW, keys, lim, sink, log)
+	srv.SetTelemetry(tel)
 	if in := auth.NewInternal(cfg.InternalToken, auth.PGProjects{Pool: pool}, log); in != nil {
 		srv.SetInternal(in)
 		log.Info("internal service credential enabled")
@@ -165,6 +184,9 @@ type WriterConfig struct {
 	HealthAddr  string
 	MetricsAddr string // Prometheus /metrics; empty disables
 	GeoIPDB     string // mmdb path (MaxMind GeoLite2-Country / DB-IP); empty → no country
+	// Telemetry and SelfProjectID: see GatewayConfig.
+	Telemetry     bool
+	SelfProjectID uint32
 	// S3 for session replay blobs (contracts §23). Empty Endpoint (TT_S3_ENDPOINT unset) = replay off: tt.replay is
 	// not consumed and tt_writer_replay_disabled is 1.
 	S3 blob.Config
@@ -188,9 +210,10 @@ func WriterFromEnv() WriterConfig {
 				SlowNs: uint64(max(config.Int("TT_TAIL_SLOW_MS", 1000), 0)) * uint64(time.Millisecond),
 			},
 		},
-		HealthAddr:  config.String("TT_INGEST_WRITER_HEALTH_ADDR", ":4320"),
-		MetricsAddr: config.String("TT_INGEST_WRITER_METRICS_ADDR", ":9464"),
-		GeoIPDB:     config.String("TT_GEOIP_DB", ""),
+		HealthAddr:    config.String("TT_INGEST_WRITER_HEALTH_ADDR", ":4320"),
+		MetricsAddr:   config.String("TT_INGEST_WRITER_METRICS_ADDR", ":9464"),
+		GeoIPDB:       config.String("TT_GEOIP_DB", ""),
+		SelfProjectID: selfobs.SelfProjectFromEnv(),
 		S3: blob.Config{
 			Endpoint:  config.String("TT_S3_ENDPOINT", ""),
 			Bucket:    config.String("TT_REPLAY_S3_BUCKET", "tt-replays"),
@@ -219,6 +242,10 @@ func RunWriter(ctx context.Context, cfg WriterConfig, log *slog.Logger) error {
 	}
 	if r := cfg.Writer.Sampler.Rate; r <= 0 || r > 1 {
 		cfg.Writer.Sampler.Rate = 1
+	}
+	if cfg.Telemetry {
+		cfg.Writer.Tel = selfobs.New(nil, cfg.SelfProjectID)
+		warnNoGuard(log, cfg.SelfProjectID)
 	}
 	defer obs.Serve(cfg.MetricsAddr, log)()
 	cfg.Writer.Topics, cfg.Writer.Blobs = replayStore(ctx, cfg.S3, cfg.Writer.Topics, log)
@@ -297,4 +324,27 @@ func envFloat(key string, def float64) float64 {
 		return v
 	}
 	return def
+}
+
+// openPool connects Postgres; with self-telemetry the queries (key / project / integration lookups) get client spans.
+func openPool(ctx context.Context, url string, traced bool) (*pgxpool.Pool, error) {
+	if !traced {
+		return pgxpool.New(ctx, url)
+	}
+	pc, err := pgxpool.ParseConfig(url)
+	if err != nil {
+		return nil, err
+	}
+	pc.ConnConfig.Tracer = trooperpgx.NewTracer()
+	return pgxpool.NewWithConfig(ctx, pc)
+}
+
+// warnNoGuard flags self-telemetry without TT_SELF_PROJECT_ID: the service's own exports then produce spans about
+// themselves (a slow, steady feedback loop).
+func warnNoGuard(log *slog.Logger, self uint32) {
+	if self == 0 {
+		log.Warn("self-telemetry enabled without TT_SELF_PROJECT_ID; requests of the self project are traced too (feedback loop)")
+		return
+	}
+	log.Info("self-telemetry enabled", "self_project_id", self)
 }

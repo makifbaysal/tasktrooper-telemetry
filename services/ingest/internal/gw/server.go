@@ -21,6 +21,7 @@ import (
 	"github.com/tasktrooper/telemetry/services/ingest/internal/auth"
 	"github.com/tasktrooper/telemetry/services/ingest/internal/obs"
 	"github.com/tasktrooper/telemetry/services/ingest/internal/ratelimit"
+	"github.com/tasktrooper/telemetry/services/ingest/internal/selfobs"
 	"github.com/tasktrooper/telemetry/services/pkg/rumpb"
 	"github.com/tasktrooper/telemetry/services/pkg/tenant"
 	"github.com/tasktrooper/telemetry/services/pkg/topics"
@@ -55,6 +56,7 @@ type Server struct {
 	now          func() time.Time
 	integrations Integrations   // Vercel drains; nil → /v1/drains/* answers 503
 	internal     *auth.Internal // internal service credential; nil = off
+	tel          *selfobs.Tel   // self-telemetry (ADR-027); nil = off
 }
 
 // New builds a Server.
@@ -161,7 +163,7 @@ var (
 )
 
 func (s *Server) endpoint(sig signal) http.Handler {
-	return instrument(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return s.instrument(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 		if origin != "" && sig.cors && corsHeaders(w, r, origin) {
 			return
@@ -225,7 +227,8 @@ func (s *Server) handle(r *http.Request, sig signal, origin string, jsonReq bool
 	if err != nil {
 		return err
 	}
-	if err := s.allow(r.Context(), key); err != nil {
+	ctx := s.begin(r.Context(), key)
+	if err := s.allow(ctx, key); err != nil {
 		return err
 	}
 	body, err := readBody(r, s.cfg.MaxBodyBytes)
@@ -236,7 +239,7 @@ func (s *Server) handle(r *http.Request, sig signal, origin string, jsonReq bool
 	if sig.rum {
 		m.userAgent = r.Header.Get("User-Agent")
 	}
-	return s.publishBody(sig, body, jsonReq, m)
+	return s.publishBody(ctx, sig, body, jsonReq, m)
 }
 
 func (s *Server) allow(ctx context.Context, key *auth.Key) error {
@@ -255,7 +258,7 @@ func (s *Server) allow(ctx context.Context, key *auth.Key) error {
 
 // publishBody validates the payload and publishes it. Protobuf bodies within the record limit are
 // forwarded byte-for-byte; JSON is converted to protobuf; oversized payloads are split.
-func (s *Server) publishBody(sig signal, body []byte, jsonReq bool, m meta) error {
+func (s *Server) publishBody(ctx context.Context, sig signal, body []byte, jsonReq bool, m meta) error {
 	msg := sig.newMsg()
 	var err error
 	switch {
@@ -273,13 +276,13 @@ func (s *Server) publishBody(sig signal, body []byte, jsonReq bool, m meta) erro
 		if isEmpty(msg) {
 			return nil
 		}
-		return s.send(sig.topic, [][]byte{body}, m)
+		return s.send(ctx, sig.topic, [][]byte{body}, m)
 	}
-	return s.publishMsg(sig, msg, m)
+	return s.publishMsg(ctx, sig, msg, m)
 }
 
 // publishMsg marshals (and splits if needed) a decoded message.
-func (s *Server) publishMsg(sig signal, msg proto.Message, m meta) error {
+func (s *Server) publishMsg(ctx context.Context, sig signal, msg proto.Message, m meta) error {
 	if isEmpty(msg) {
 		return nil
 	}
@@ -295,7 +298,7 @@ func (s *Server) publishMsg(sig signal, msg proto.Message, m meta) error {
 		}
 		values = append(values, b)
 	}
-	return s.send(sig.topic, values, m)
+	return s.send(ctx, sig.topic, values, m)
 }
 
 func isEmpty(m proto.Message) bool {
@@ -312,7 +315,7 @@ func isEmpty(m proto.Message) bool {
 	return false
 }
 
-func (s *Server) send(topic string, values [][]byte, m meta, extra ...kgo.RecordHeader) error {
+func (s *Server) send(ctx context.Context, topic string, values [][]byte, m meta, extra ...kgo.RecordHeader) error {
 	org, project := m.tenant.Headers()
 	headers := []kgo.RecordHeader{
 		{Key: topics.HeaderOrgID, Value: []byte(org)},
@@ -327,13 +330,17 @@ func (s *Server) send(topic string, values [][]byte, m meta, extra ...kgo.Record
 	}
 	headers = append(headers, extra...)
 	key := []byte(project)
+	var rctx context.Context // self-telemetry: parent of the producer span / suppression marker; outlives the request
+	if s.tel != nil {
+		rctx = context.WithoutCancel(ctx)
+	}
 	for _, v := range values {
-		if err := s.sink.Send(&kgo.Record{Topic: topic, Key: key, Value: v, Headers: headers}); err != nil {
+		if err := s.sink.Send(&kgo.Record{Topic: topic, Key: key, Value: v, Headers: headers, Context: rctx}); err != nil {
 			obs.GWProduceErrors.WithLabelValues(topic, "buffer_full").Inc()
 			if errors.Is(err, ErrBufferFull) {
 				return errUnavailable
 			}
-			s.log.Error("produce enqueue failed", "topic", topic, "err", err)
+			s.log.ErrorContext(ctx, "produce enqueue failed", "topic", topic, "err", err)
 			return errUnavailable
 		}
 	}
@@ -383,4 +390,15 @@ func clientIP(r *http.Request) string {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+// SetTelemetry enables self-telemetry spans (ADR-027). nil keeps them off.
+func (s *Server) SetTelemetry(t *selfobs.Tel) { s.tel = t }
+
+// begin starts the request's server span once the tenant is known, or suppresses telemetry for the self project.
+func (s *Server) begin(ctx context.Context, key *auth.Key) context.Context {
+	if s.tel == nil {
+		return ctx
+	}
+	return selfobs.Begin(ctx, key.Tenant.OrgID, key.Tenant.ProjectID)
 }

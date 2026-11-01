@@ -9,8 +9,11 @@ import (
 	"time"
 
 	"github.com/twmb/franz-go/pkg/kgo"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/tasktrooper/telemetry/services/ingest/internal/obs"
+	"github.com/tasktrooper/telemetry/services/ingest/internal/selfobs"
 	"github.com/tasktrooper/telemetry/services/pkg/topics"
 )
 
@@ -88,6 +91,7 @@ func (k *KafkaSink) Send(r *kgo.Record) error {
 			k.Rejected.Add(1)
 			return ErrBufferFull
 		}
+		traceRecord(r)
 		k.large.TryProduce(context.Background(), r, k.done)
 		return nil
 	}
@@ -95,11 +99,38 @@ func (k *KafkaSink) Send(r *kgo.Record) error {
 		k.Rejected.Add(1)
 		return ErrBufferFull
 	}
+	traceRecord(r)
 	k.cl.TryProduce(context.Background(), r, k.done)
 	return nil
 }
 
+type producerSpanKey struct{}
+
+// traceRecord starts the producer span of r (enqueue → broker ack) when r.Context carries a recording request span
+// (self-telemetry on, not the self project). The span ends in done.
+func traceRecord(r *kgo.Record) {
+	if r.Context == nil {
+		return
+	}
+	if ctx, span := selfobs.ProducerSpan(r.Context, r.Topic); span != nil {
+		r.Context = context.WithValue(ctx, producerSpanKey{}, span)
+	}
+}
+
+func endRecordSpan(r *kgo.Record, err error) {
+	if r.Context == nil {
+		return
+	}
+	if span, ok := r.Context.Value(producerSpanKey{}).(trace.Span); ok {
+		if err == nil {
+			span.SetAttributes(attribute.String("messaging.destination.partition.id", strconv.Itoa(int(r.Partition))))
+		}
+		selfobs.EndSpan(span, err)
+	}
+}
+
 func (k *KafkaSink) done(r *kgo.Record, err error) {
+	endRecordSpan(r, err)
 	if errors.Is(err, kgo.ErrMaxBuffered) {
 		k.Rejected.Add(1)
 		obs.GWProduceErrors.WithLabelValues(r.Topic, "buffer_full").Inc()
@@ -108,7 +139,7 @@ func (k *KafkaSink) done(r *kgo.Record, err error) {
 	if err != nil {
 		k.Failed.Add(1)
 		obs.GWProduceErrors.WithLabelValues(r.Topic, "failed").Inc()
-		k.log.Error("produce failed", "topic", r.Topic, "bytes", len(r.Value), "err", err)
+		k.log.ErrorContext(r.Context, "produce failed", "topic", r.Topic, "bytes", len(r.Value), "err", err)
 		return
 	}
 	k.Produced.Add(1)

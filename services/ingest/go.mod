@@ -1,6 +1,6 @@
 module github.com/tasktrooper/telemetry/services/ingest
 
-go 1.26.0
+go 1.26.3
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.49.0
@@ -14,6 +14,10 @@ require (
 	github.com/oschwald/maxminddb-golang/v2 v2.8.0
 	github.com/prometheus/client_golang v1.24.1
 	github.com/redis/go-redis/v9 v9.23.0
+	github.com/tasktrooper/telemetry-go v0.0.0
+	github.com/tasktrooper/telemetry-go/integrations/goredis v0.0.0
+	github.com/tasktrooper/telemetry-go/integrations/pgx v0.0.0
+	github.com/tasktrooper/telemetry-go/integrations/slog v0.0.0
 	github.com/tasktrooper/telemetry/services/pkg v0.0.0
 	github.com/twmb/franz-go v1.22.2
 	github.com/twmb/franz-go/pkg/kmsg v1.15.0
@@ -29,6 +33,18 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261005182115-fad411399dd8
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12
+)
+
+require (
+	github.com/exaring/otelpgx v0.13.0 // indirect
+	github.com/redis/go-redis/extra/rediscmd/v9 v9.23.0 // indirect
+	github.com/redis/go-redis/extra/redisotel/v9 v9.23.0 // indirect
+	go.opentelemetry.io/contrib/bridges/otelslog v0.21.0 // indirect
+	go.opentelemetry.io/contrib/instrumentation/runtime v0.72.0 // indirect
+	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp v0.23.0 // indirect
+	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.47.0 // indirect
+	go.opentelemetry.io/otel/sdk/log v1.47.0 // indirect
+	go.opentelemetry.io/otel/sdk/metric v1.47.0 // indirect
 )
 
 require (
@@ -76,3 +92,10 @@ require (
 )
 
 replace github.com/tasktrooper/telemetry/services/pkg => ../pkg
+
+replace (
+	github.com/tasktrooper/telemetry-go => ../../sdks/go
+	github.com/tasktrooper/telemetry-go/integrations/goredis => ../../sdks/go/integrations/goredis
+	github.com/tasktrooper/telemetry-go/integrations/pgx => ../../sdks/go/integrations/pgx
+	github.com/tasktrooper/telemetry-go/integrations/slog => ../../sdks/go/integrations/slog
+)

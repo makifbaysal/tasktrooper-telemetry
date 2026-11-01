@@ -14,12 +14,13 @@ make infra && make migrate        # from the repo root (compose infra + schemas)
 make run-writer                   # terminal 1
 make run-gw                       # terminal 2
 
-curl -s localhost:4318/v1/logs -H 'x-trooper-key: tt_dev_ingest_key' -H 'content-type: application/json' \
+curl -s localhost:4318/v1/logs -H 'x-trooper-key: <ingest-key>' -H 'content-type: application/json' \
   -d '{"resourceLogs":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"demo"}}]},"scopeLogs":[{"logRecords":[{"severityNumber":9,"body":{"stringValue":"hello"}}]}]}]}'
 ```
 
 Docker: `docker compose -f deploy/docker-compose.yml --profile app up -d --build ingest-gw ingest-writer`
-(`Dockerfile`, build context `services/`, build arg `CMD=ingest-gw|ingest-writer`).
+(`Dockerfile`; build context = repo root, it copies `services/pkg` and `sdks/go` for the `replace` directives (ADR-027);
+build arg `CMD=ingest-gw|ingest-writer`): `docker build -f services/ingest/Dockerfile --build-arg CMD=ingest-writer .`
 
 ## Tests
 
@@ -269,3 +270,45 @@ gw: `tt_ingest_gw_requests_total{endpoint,status}`, `_request_bytes_total`, `_re
 `_replay_blobs_total`, `_replay_blob_bytes_total`, `_replay_blob_errors_total`, `_replay_blob_upload_seconds`,
 `_otlp_profiles_total{outcome=written|skipped_type|skipped_empty|no_service}`, `tt_writer_replay_disabled` (gauge, contracts §23) + Go/process metrics. gw endpoints `/v1/replay`, `/v1/profiles` and `/v1development/profiles` (gRPC `grpc:tt.profiles`) use the
 same request / auth / rate-limit metrics.
+
+## Self-observability (ADR-027, contracts §27)
+
+Both binaries report to the platform's own project with the Go SDK (`internal/selfobs`, `trooper-go` via `replace` →
+`sdks/go`). Without `TROOPER_DSN` / `OTEL_EXPORTER_OTLP_ENDPOINT` nothing is installed: no tracer, no log bridge, no pgx /
+go-redis hooks — the request path is byte-for-byte the old one (`BenchmarkHTTPTraces`: same allocations). Prometheus
+`/metrics` is unchanged either way.
+
+| Variable | Default | |
+|---|---|---|
+| `TROOPER_DSN` | — | self project ingest DSN (`make self` prints it; compose: `TROOPER_SELF_DSN` with host `ingest-gw`) |
+| `TT_SELF_PROJECT_ID` | `0` | **loop guard**: requests (gw) / records (writer) of this project produce no spans and no OTel logs. Set it to the DSN's project; with `0` a warning is logged at start |
+| `TROOPER_SERVICE` | `tt-ingest-gw` / `tt-ingest-writer` | service name override (`OTEL_SERVICE_NAME` wins) |
+| `TROOPER_ENV` | `TT_ENV`, else `development` | |
+| `TROOPER_SAMPLE_RATE` | `1` | head sampling of the gw request / writer flush spans |
+
+**Spans**
+
+- gw, per authenticated request: server span `POST /v1/traces` (… `/v1/rum`, `/v1/replay`, `/v1/profiles`,
+  `/v1development/profiles`, `/v1/drains/vercel`) or `opentelemetry.proto.collector.trace.v1.TraceService/Export` (gRPC), a
+  new root, start = request arrival, attributes `trooper.route`, `http.response.status_code` / `rpc.grpc.status_code`,
+  `tt.org_id`, `tt.project_id`; children: go-redis (rate limit), pgx (integration lookups) and one producer span
+  `send <topic>` per Kafka record (enqueue → broker ack). No trace context is injected into the records.
+  `/healthz` and `/metrics` and unauthenticated requests (401/403) get no span.
+- writer, per flush: consumer span `process flush` (`trooper.process=flush`, `messaging.batch.message_count`,
+  `tt.self_records`) with one ClickHouse client span `INSERT <table>` per table batch (`db.system=clickhouse`,
+  `db.operation.batch.size`; all retries inside one span) — never per row.
+- slog → OTel logs at the local level; the local JSON logger stays as before (records get `trace_id`/`span_id`).
+
+**Loop guard.** The gw knows the project only after key auth, so the server span starts lazily after authentication
+(with the arrival time as start). For the self project the context instead gets a fixed, *unsampled* parent span context:
+the parent-based sampler drops every child (redis, pgx, producer) and the log handler keeps records with that context local.
+The writer counts self records per flush (header compare, only with telemetry on): a flush of only self records gets the
+suppressed context (no spans, no OTel logs); a mixed flush is traced — it happens anyway because of the other projects, so
+the self data riding along creates no additional flushes. Undecodable self records log locally only. What remains
+unattributed: key-cache misses (pgx span, at most one per key per 60 s) and connection setup — bounded, not proportional to
+self traffic.
+
+**Cost** (`BenchmarkHTTPTracesTelemetry`, 100-span gzip request, M3 Pro): off 55 µs / 1066 allocs (unchanged); customer
+request traced ≈ +15 µs / +57 allocs (dominated by the OTel batch span processor's per-span wake-up); with
+`TROOPER_SAMPLE_RATE=0.1` ≈ +7 µs; self project (suppressed) ≈ +2 µs / +8 allocs. For high-volume gateways lower
+`TROOPER_SAMPLE_RATE`.

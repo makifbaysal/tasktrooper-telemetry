@@ -32,7 +32,7 @@ var sigProfiles = signal{topic: topics.Profiles,
 	newMsg: func() proto.Message { return &colprofilespb.ExportProfilesServiceRequest{} }}
 
 func (s *Server) otlpProfilesEndpoint() http.Handler {
-	return instrument(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return s.instrument(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", "POST")
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -58,7 +58,8 @@ func (s *Server) handleOTLPProfiles(r *http.Request, jsonReq bool) error {
 	if err != nil {
 		return err
 	}
-	if err := s.allow(r.Context(), key); err != nil {
+	ctx := s.begin(r.Context(), key)
+	if err := s.allow(ctx, key); err != nil {
 		return err
 	}
 	wire, body, err := readBodyLimits(r, s.cfg.ProfileMaxWireBytes, s.cfg.ProfileMaxBodyBytes)
@@ -80,12 +81,12 @@ func (s *Server) handleOTLPProfiles(r *http.Request, jsonReq bool) error {
 		return &ingestError{status: http.StatusBadRequest, msg: "invalid payload: " + err.Error()}
 	}
 	m := meta{tenant: key.Tenant, receivedAt: s.now(), clientIP: clientIP(r)}
-	return s.publishOTLPProfiles(req, body, wire, m)
+	return s.publishOTLPProfiles(ctx, req, body, wire, m)
 }
 
 // publishOTLPProfiles produces one tt.profiles record. body is req's protobuf encoding (nil = marshal), wire the bytes as
 // received when they are its gzip'ed form.
-func (s *Server) publishOTLPProfiles(req *colprofilespb.ExportProfilesServiceRequest, body, wire []byte, m meta) error {
+func (s *Server) publishOTLPProfiles(ctx context.Context, req *colprofilespb.ExportProfilesServiceRequest, body, wire []byte, m meta) error {
 	if len(req.GetResourceProfiles()) == 0 {
 		return nil
 	}
@@ -107,7 +108,7 @@ func (s *Server) publishOTLPProfiles(req *colprofilespb.ExportProfilesServiceReq
 	if len(value) > topics.MaxLargeRecordBytes {
 		return &ingestError{status: http.StatusRequestEntityTooLarge, msg: "profiles request too large"}
 	}
-	return s.send(topics.Profiles, [][]byte{value}, m, kgo.RecordHeader{Key: topics.HeaderFormat, Value: []byte(profiling.FormatOTLP)})
+	return s.send(ctx, topics.Profiles, [][]byte{value}, m, kgo.RecordHeader{Key: topics.HeaderFormat, Value: []byte(profiling.FormatOTLP)})
 }
 
 type profilesSvc struct {
