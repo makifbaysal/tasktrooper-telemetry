@@ -10,19 +10,20 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/google/pprof v0.0.0-20261026192309-dbd0ed30aa88
 	github.com/jackc/pgx/v5 v5.11.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go v0.1.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/goredis v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog v0.0.0
 	github.com/maxmind/mmdbwriter v1.2.0
 	github.com/oschwald/maxminddb-golang/v2 v2.8.0
 	github.com/prometheus/client_golang v1.24.1
 	github.com/redis/go-redis/v9 v9.23.0
-	github.com/tasktrooper/telemetry-go v0.0.0
-	github.com/tasktrooper/telemetry-go/integrations/goredis v0.0.0
-	github.com/tasktrooper/telemetry-go/integrations/pgx v0.0.0
-	github.com/tasktrooper/telemetry-go/integrations/slog v0.0.0
 	github.com/tasktrooper/telemetry/services/pkg v0.0.0
 	github.com/twmb/franz-go v1.22.2
 	github.com/twmb/franz-go/pkg/kmsg v1.15.0
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.47.0
+	go.opentelemetry.io/otel/log v1.47.0
 	go.opentelemetry.io/otel/sdk v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
 	go.opentelemetry.io/proto/otlp v1.11.1
@@ -43,7 +44,7 @@ require (
 	go.opentelemetry.io/contrib/instrumentation/runtime v0.72.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp v0.23.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.47.0 // indirect
-	go.opentelemetry.io/otel/sdk/log v1.47.0 // indirect
+	go.opentelemetry.io/otel/sdk/log v1.47.0
 	go.opentelemetry.io/otel/sdk/metric v1.47.0 // indirect
 )
 
@@ -81,7 +82,6 @@ require (
 	github.com/shopspring/decimal v1.4.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.47.0 // indirect
-	go.opentelemetry.io/otel/log v1.47.0 // indirect
 	go.opentelemetry.io/otel/metric v1.47.0 // indirect
 	go.uber.org/atomic v1.12.0 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
@@ -94,8 +94,8 @@ require (
 replace github.com/tasktrooper/telemetry/services/pkg => ../pkg
 
 replace (
-	github.com/tasktrooper/telemetry-go => ../../sdks/go
-	github.com/tasktrooper/telemetry-go/integrations/goredis => ../../sdks/go/integrations/goredis
-	github.com/tasktrooper/telemetry-go/integrations/pgx => ../../sdks/go/integrations/pgx
-	github.com/tasktrooper/telemetry-go/integrations/slog => ../../sdks/go/integrations/slog
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go => ../../sdks/go
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/goredis => ../../sdks/go/integrations/goredis
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx => ../../sdks/go/integrations/pgx
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog => ../../sdks/go/integrations/slog
 )

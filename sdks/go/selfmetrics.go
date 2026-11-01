@@ -16,7 +16,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
-	"github.com/tasktrooper/telemetry-go/internal/sdkerr"
+	"github.com/makifbaysal/tasktrooper-telemetry/sdks/go/internal/sdkerr"
 )
 
 // Internal self-metrics (meter "TaskTrooper.Telemetry", .ai/contracts.md §4): every swallowed error is

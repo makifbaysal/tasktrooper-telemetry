@@ -7,7 +7,7 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	"go.opentelemetry.io/otel/attribute"
 
-	trooper "github.com/tasktrooper/telemetry-go"
+	trooper "github.com/makifbaysal/tasktrooper-telemetry/sdks/go"
 )
 
 // Publisher is implemented by *amqp.Channel.

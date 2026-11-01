@@ -2,7 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
-    id("com.tasktrooper.mapping-upload")
+    id("ai.tasktrooper.mapping-upload")
 }
 
 // Uploads mapping.txt after minifyReleaseWithR8 when TROOPER_API_URL / TROOPER_API_KEY are set (else: warning, skipped).

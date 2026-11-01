@@ -1,4 +1,4 @@
-import type { Browser, Device, Os, SessionState, SessionStore } from '@trooper/core';
+import type { Browser, Device, Os, SessionState, SessionStore } from '@tasktrooper/core';
 
 const re = (r: RegExp, s: string): string | undefined => r.exec(s)?.[1];
 

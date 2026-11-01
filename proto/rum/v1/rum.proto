@@ -35,7 +35,7 @@ enum Platform {
 }
 
 message Sdk {
-  string name = 1;     // "@trooper/browser", "trooper_flutter", "TaskTrooper-iOS", ...
+  string name = 1;     // "@tasktrooper/browser", "trooper_flutter", "TaskTrooper-iOS", ...
   string version = 2;
 }
 

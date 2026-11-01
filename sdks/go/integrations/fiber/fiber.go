@@ -1,5 +1,5 @@
 // Package trooperfiber instruments gofiber/fiber v2 for TaskTrooper Telemetry.
-// For Fiber v3 use github.com/tasktrooper/telemetry-go/integrations/fiberv3.
+// For Fiber v3 use github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/fiberv3.
 //
 //	app := fiber.New()
 //	app.Use(recover.New())
@@ -26,7 +26,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
-	trooper "github.com/tasktrooper/telemetry-go"
+	trooper "github.com/makifbaysal/tasktrooper-telemetry/sdks/go"
 )
 
 type config struct {

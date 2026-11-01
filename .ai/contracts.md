@@ -26,7 +26,7 @@ deploy/
   postgres/*.sql               Postgres şeması
 proto/rum/v1/rum.proto         RUM wire şeması (JSON mapping kullanılır)
 sdks/
-  go/                          github.com/tasktrooper/telemetry-go (ayrı modül, go.work'e dahil değil)
+  go/                          github.com/makifbaysal/tasktrooper-telemetry/sdks/go (ayrı modül, go.work'e dahil değil)
   jvm/                         Gradle multi-project: javaagent extension, spring-boot-starter, quarkus, ktor
   dotnet/                      TaskTrooper.Telemetry (+ tests)
   js/packages/                 browser, react, vue, angular, react-native (pnpm workspace)
@@ -251,7 +251,7 @@ MetricKit'ten gelen crash/hang'ler `attributes.metrickit=true` taşır; aynı cr
 (session + zaman penceresi + fingerprint).
 
 **Hibrit uygulamalar (Flutter / React Native + native SDK):** native SDK varsa oturum ve crash'ler ortak olur. Kanal adı
-`dev.tasktrooper.telemetry/rum` (Flutter MethodChannel — `trooper_flutter` plugin'i, iOS'ta native SDK için `trooper_flutter/Native` subspec; RN'de native module adı `TrooperRum` (TurboModule + eski mimari), JS önce `TrooperRum`, sonra bu kanal adını arar; RN ≥ 0.74, iOS'ta native SDK için `TROOPER_RN_NATIVE_SDK=1 pod install`):
+`dev.tasktrooper.telemetry/rum` (Flutter MethodChannel — `tasktrooper_flutter` plugin'i, iOS'ta native SDK için `tasktrooper_flutter/Native` subspec; RN'de native module adı `TrooperRum` (TurboModule + eski mimari), JS önce `TrooperRum`, sonra bu kanal adını arar; RN ≥ 0.74, iOS'ta native SDK için `TROOPER_RN_NATIVE_SDK=1 pod install`):
 - `setContext({session_id, anonymous_id, view_id, view_name, user_id, sampled})` — JS/Dart → native; native crash raporu bu bağlamla
   gönderilir. `sampled` (bool, opsiyonel) JS/Dart'ın RUM örnekleme kararıdır; native bunu kullanır (yoksa eski davranış). Benimsenen
   (adopted) oturum native tarafta **dış oturumdur**: native inaktivite/4 saat kuralıyla döndürmez, sahibi JS/Dart'tır.
@@ -355,7 +355,7 @@ offline kuyruktan gelen ≤ 24 saatlik event'ler kendi zamanlarında kalır.
   ulaşamazsa ham stack döner.
 - CLI: `tools/trooper-cli` → `trooper-cli upload-sourcemaps|upload-dsym|upload-mapping|upload-flutter-symbols|upload-ndk-symbols|delete
   --app --release <path>` (`TROOPER_API_URL`, `TROOPER_API_KEY`). Exit kodları: 0 ok, 1 sunucu/ağ, 2 kullanım, 3 yetkisiz, 4 bazı
-  dosyalar reddedildi. Android Gradle plugin'i (`com.tasktrooper.mapping-upload`) sadece `r8` yükler; NDK `.so` için CLI
+  dosyalar reddedildi. Android Gradle plugin'i (`ai.tasktrooper.mapping-upload`) sadece `r8` yükler; NDK `.so` için CLI
   `upload-ndk-symbols`. iOS: `sdks/ios/Scripts/upload-dsyms.sh`.
 
 ## 13. Code intelligence (`services/codeintel`, ADR-014)
@@ -697,7 +697,7 @@ duration_max, duration_p95, duration_p99, concurrency, iterator_age_ms, memory_b
 `ORDER BY (org_id, project_id, function_id, minute)`. Dakika değerleri gauge `max`; aralık toplamı = dakikaların `sum`'ı.
 
 **Trace / cold start:** fonksiyon span'ları `faas.name`, `faas.coldstart` (bool), `faas.trigger`, `cloud.provider` taşır
-(OTel semconv). `@trooper/node` `wrapLambda(handler, opts?)`: ilk çağrıda `faas.coldstart=true`, `faas.invocation_id`,
+(OTel semconv). `@tasktrooper/node` `wrapLambda(handler, opts?)`: ilk çağrıda `faas.coldstart=true`, `faas.invocation_id`,
 `faas.trigger` set eder, dönmeden önce flush eder. Cold start sayısı api'de `spans` (`attrs['faas.coldstart']='true'`,
 `service` = fonksiyonun `service`'i, `is_entry=1`).
 
@@ -791,7 +791,7 @@ açılmış ≤ 10 MB → aşarsa 413. gw JSON'u parse edip doğrular (`session_
 ```jsonc
 {
   "resource": { "service": "shop-web", "env": "production", "version": "1.4.0", "platform": "web",   // web | android | ios
-                "sdk_name": "@trooper/replay", "sdk_version": "0.1.0" },
+                "sdk_name": "@tasktrooper/replay", "sdk_version": "0.1.0" },
   "session_id": "…",            // RUM session_id ile aynı
   "segment": 0,                 // oturum içinde 0'dan artan; web: localStorage'da oturum başına sayaç (sekmeler arası ortak, sayfa yüklemeleri arasında sürer)
   "start_ts": 1730000000000,    // unix ms, ilk event
@@ -862,7 +862,7 @@ ayrı producer kullanır (kayıt ≤ 8 MiB). gw doğrulaması: `session_id` ≤ 
 **Hibrit uygulamalar:** React Native → native SDK replay'i (`TrooperRum.startReplay(options)`, `stopReplay()`, `isReplayRecording()`
 — hepsi `Promise<boolean>` —, `notifyReplayError()` JS hatasında on-error buffer'ı tetikler; native API `TrooperReplay.notifyError()` /
 `TrooperReplay.stop()`; iOS'ta `TROOPER_RN_NATIVE_SDK=1` `TaskTrooper/Replay` subspec'ini de çeker, `TROOPER_RN_REPLAY=0` kapatır; native SDK yoksa
-no-op + uyarı), `resource.platform` = `android|ios`, `sdk_name` native SDK'nınki. Flutter → `trooper_flutter` Dart tarafı wireframe
+no-op + uyarı), `resource.platform` = `android|ios`, `sdk_name` native SDK'nınki. Flutter → `tasktrooper_flutter` Dart tarafı wireframe
 (`sdk_name` = `trooper_flutter`, `platform` = `android|ios`), native SDK varsa native replay **başlatılmaz** (çift kayıt olmasın).
 **Web sekmeleri:** buffer modundaki sekme localStorage `storage` event'inde karar `session` olursa buffer'ını flush edip kayda geçer.
 
@@ -965,7 +965,7 @@ frame adı sadece fonksiyon adı.
 | `trooper.llm.ttft_ms` (double) | stream'de ilk token süresi (SDK ölçer) |
 | `gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions` (JSON string) | **sadece `captureContent`** — writer bunları attrs'tan çıkarıp `llm_content`'e yazar |
 
-Vercel AI SDK provider span'ları (`ai.*.doGenerate|doStream|doEmbed`) `gen_ai.operation.name` taşımaz: writer `ai.operationId` / `gen_ai.system`'dan tamamlar (`anthropic.messages` → `anthropic`, TTFT `ai.response.msToFirstChunk`); `@trooper/node` bunu SDK'da da yapar.
+Vercel AI SDK provider span'ları (`ai.*.doGenerate|doStream|doEmbed`) `gen_ai.operation.name` taşımaz: writer `ai.operationId` / `gen_ai.system`'dan tamamlar (`anthropic.messages` → `anthropic`, TTFT `ai.response.msToFirstChunk`); `@tasktrooper/node` bunu SDK'da da yapar.
 Provider SDK'larının kendi GenAI span'ları (ör. Anthropic Python SDK 2.x, .NET): `gen_ai.usage.cache_write.input_tokens` →
 cache_creation, `gen_ai.response.time_to_first_chunk` (saniye) → `trooper.llm.ttft_ms`. Böyle SDK'larda `instrument_anthropic` ikinci
 span üretmez (çift sayım olmasın).

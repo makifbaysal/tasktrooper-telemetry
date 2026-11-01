@@ -1,10 +1,10 @@
-module github.com/tasktrooper/telemetry-go/integrations/kafkago
+module github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/kafkago
 
 go 1.26.3
 
 require (
 	github.com/segmentio/kafka-go v0.4.51
-	github.com/tasktrooper/telemetry-go v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go v0.1.0
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
 )
@@ -40,4 +40,4 @@ require (
 	google.golang.org/protobuf v1.36.12 // indirect
 )
 
-replace github.com/tasktrooper/telemetry-go => ../..
+replace github.com/makifbaysal/tasktrooper-telemetry/sdks/go => ../..

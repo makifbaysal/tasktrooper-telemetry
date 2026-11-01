@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	trooperredis "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/goredis"
+	trooperpgx "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx"
 	"github.com/redis/go-redis/v9"
-	trooperredis "github.com/tasktrooper/telemetry-go/integrations/goredis"
-	trooperpgx "github.com/tasktrooper/telemetry-go/integrations/pgx"
 
 	"github.com/tasktrooper/telemetry/services/ingest/internal/auth"
 	"github.com/tasktrooper/telemetry/services/ingest/internal/blob"

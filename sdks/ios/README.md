@@ -10,17 +10,23 @@ URLSession requests with W3C `traceparent`, crashes (signals + uncaught `NSExcep
 
 ## Install
 
-**Swift Package Manager** — add the repository and pick the `TaskTrooper` product (plus `TaskTrooperSwiftUI` for SwiftUI):
+**Swift Package Manager** — add the repository (its root `Package.swift` points into `sdks/ios`) and pick the
+`TaskTrooper` product (plus `TaskTrooperSwiftUI` for SwiftUI, `TaskTrooperReplay` for session replay):
 
 ```swift
-.package(url: "https://github.com/tasktrooper/telemetry.git", from: "0.1.0") // package lives in sdks/ios
+.package(url: "https://github.com/makifbaysal/tasktrooper-telemetry", from: "0.1.0"),
+// target dependencies:
+.product(name: "TaskTrooper", package: "tasktrooper-telemetry"),
 ```
+
+Xcode: File → Add Package Dependencies… → `https://github.com/makifbaysal/tasktrooper-telemetry`, "Up to Next Major" from `0.1.0`.
 
 **CocoaPods**
 
 ```ruby
-pod 'TaskTrooper'            # core
-pod 'TaskTrooper/SwiftUI'    # + .trooperView modifier
+pod 'TaskTrooper', '~> 0.1'            # core
+pod 'TaskTrooper/SwiftUI', '~> 0.1'    # + .trooperView modifier
+pod 'TaskTrooper/Replay', '~> 0.1'     # + wireframe session replay
 ```
 
 With CocoaPods everything is one module: `import TaskTrooper` only.
@@ -255,7 +261,29 @@ session. `getContext` returns the adopted context; `setHybridContext(nil)` hands
 swift build && swift test                                    # macOS: platform-independent parts
 xcodebuild -scheme TaskTrooper-Package -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
 xcodebuild -scheme TaskTrooper-Package -destination 'generic/platform=iOS Simulator' APPLICATION_EXTENSION_API_ONLY=YES build
-# pod lib lint expects the repo layout (paths are relative to the repo root): run it from the repository root,
-# or from a temp dir containing TaskTrooper.podspec + sdks/ios → `pod lib lint --allow-warnings --platforms=ios`
+# pod lib lint: see Releasing (lint a copy of the podspec placed at the repository root)
 cd Examples/TrooperSample && xcodebuild -scheme TrooperSample -destination 'generic/platform=iOS Simulator' build
+```
+
+## Releasing
+
+One version, two registries. The CocoaPods tag is `ios-v<version>`; SwiftPM needs a plain semver tag `<version>` on the
+same commit (the repository root `Package.swift` is the published manifest; `sdks/ios/Package.swift` is the
+local-development copy — keep both in sync).
+
+1. Bump `s.version` in `TaskTrooper.podspec` and `sdkVersion` (`Platform/DeviceInfo.swift`, `TrooperReplay.swift`); commit.
+2. `git tag ios-v0.1.1 && git push origin ios-v0.1.1`.
+3. `.github/workflows/release-ios.yml` checks the podspec version against the tag, runs `swift build` / `swift test`
+   at the repository root, `pod trunk push sdks/ios/TaskTrooper.podspec --allow-warnings`, then pushes tag `0.1.1`
+   for SwiftPM.
+
+One-time setup: `pod trunk register <email> 'TaskTrooper' --description='CI'`, confirm the e-mail, then copy the token
+from `~/.netrc` (`machine trunk.cocoapods.org` → `password`) into the repository secret `COCOAPODS_TRUNK_TOKEN`.
+
+Local pre-release check (podspec paths are relative to the repository root, `pod lib lint` resolves them from the
+podspec's directory, so lint a copy placed at the root):
+
+```bash
+cp sdks/ios/TaskTrooper.podspec . && pod lib lint TaskTrooper.podspec --allow-warnings --platforms=ios; rm TaskTrooper.podspec
+swift build && swift test   # repository root
 ```

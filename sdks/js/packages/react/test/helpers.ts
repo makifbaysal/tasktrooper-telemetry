@@ -1,5 +1,5 @@
-import { close, flush, type BrowserOptions } from '@trooper/browser';
-import type { RumBatch, RumEvent } from '@trooper/core';
+import { close, flush, type BrowserOptions } from '@tasktrooper/browser';
+import type { RumBatch, RumEvent } from '@tasktrooper/core';
 
 export const OPTIONS: BrowserOptions = {
   dsn: 'http://tt_dev_ingest_key@localhost:4318/1', app: 'shop-web', persist: false, trackVitals: false, trackActions: false,

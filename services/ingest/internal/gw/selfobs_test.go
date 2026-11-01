@@ -18,7 +18,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
-	trooper "github.com/tasktrooper/telemetry-go"
+	trooper "github.com/makifbaysal/tasktrooper-telemetry/sdks/go"
 
 	"github.com/tasktrooper/telemetry/services/ingest/internal/auth"
 	"github.com/tasktrooper/telemetry/services/ingest/internal/selfobs"

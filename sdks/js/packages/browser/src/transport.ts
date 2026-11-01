@@ -1,4 +1,4 @@
-import { FetchTransport, KEEPALIVE_LIMIT, reportInternal, type SendOptions, type SendResult } from '@trooper/core';
+import { FetchTransport, KEEPALIVE_LIMIT, reportInternal, type SendOptions, type SendResult } from '@tasktrooper/core';
 
 /**
  * Normal batches: `fetch` with `x-trooper-key`.

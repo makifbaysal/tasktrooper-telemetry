@@ -5,13 +5,16 @@ global OTel tracer, meter and logger providers to export **OTLP/HTTP protobuf (g
 and adds the `trooper.*` conventions from `.ai/contracts.md` §4. Spans you create with the plain OTel API are exported too.
 
 ```
-go get github.com/tasktrooper/telemetry-go
+go get github.com/makifbaysal/tasktrooper-telemetry/sdks/go@latest
 ```
+
+Requires Go 1.26+. Integrations are separate modules (see [Integrations](#integrations)), e.g.
+`go get github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/gin@latest`.
 
 ## Quick start
 
 ```go
-import trooper "github.com/tasktrooper/telemetry-go"
+import trooper "github.com/makifbaysal/tasktrooper-telemetry/sdks/go"
 
 func main() {
 	shutdown, err := trooper.Start(context.Background(), trooper.Config{
@@ -125,7 +128,7 @@ recovery (`gin.Recovery`, echo `Recover`, `net/http`) responds. `WithPanicPolicy
 ## Integrations
 
 Each integration is a separate Go module so you only download the frameworks you use:
-`go get github.com/tasktrooper/telemetry-go/integrations/<name>`.
+`go get github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/<name>`.
 
 | Module (`integrations/…`) | Package | Wraps |
 |---|---|---|
@@ -325,14 +328,14 @@ until the next entry; `ProcessMessage` restores them.
 
 ## AI / LLM monitoring
 
-Package `github.com/tasktrooper/telemetry-go/llm` (no extra dependencies) records LLM calls as OTel GenAI client spans
+Package `github.com/makifbaysal/tasktrooper-telemetry/sdks/go/llm` (no extra dependencies) records LLM calls as OTel GenAI client spans
 (ADR-023, contract §25): `gen_ai.operation.name`, `gen_ai.provider.name`, request/response model, `max_tokens`,
 `temperature`, input/output and cache read/write tokens, `finish_reasons`, response id, `trooper.llm.ttft_ms` for streams.
 
 **Zero-code: wrap the SDK's HTTP client.**
 
 ```go
-import "github.com/tasktrooper/telemetry-go/llm"
+import "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/llm"
 
 oa := openai.NewClient(option.WithHTTPClient(llm.HTTPClient(nil)))            // openai-go
 an := anthropic.NewClient(aoption.WithHTTPClient(llm.HTTPClient(nil)))        // anthropic-sdk-go
@@ -390,8 +393,21 @@ scripts/test-all.sh -race
 go test -tags e2e -run E2E .   # against a running ingest-gw on localhost:4318 (skips otherwise)
 ```
 
-`go.work` ties the modules together for editors; each integration's `go.mod` also has `replace` directives to the local
-core so modules build stand-alone. Remove the `replace` lines when publishing tagged versions.
+`go.work` ties the modules together for editors; each integration's `go.mod` requires the core at its released version
+(e.g. `v0.1.0`) and also has a `replace` directive to the local core so modules build stand-alone in the repo. `replace`
+only applies to the main module, so consumers ignore it and resolve the tagged version.
+
+## Releasing
+
+The modules live in a subdirectory of the monorepo, so each is released by a path-prefixed git tag:
+`sdks/go/vX.Y.Z` for the core and `sdks/go/integrations/<name>/vX.Y.Z` for each integration.
+
+1. Bump the `require github.com/makifbaysal/tasktrooper-telemetry/sdks/go… vX.Y.Z` lines in every
+   `integrations/*/go.mod` (and `examples/go.mod`) to the new version, run `scripts/test-all.sh`, commit.
+2. `scripts/tag.sh X.Y.Z` creates the annotated tags locally (refuses a dirty tree or existing tags) and prints the
+   `git push origin …` command.
+3. Pushing the tags runs `.github/workflows/release-go.yml`: `go vet` + `go test` for the tagged module, then
+   `go list -m` through `proxy.golang.org` so the version shows up on pkg.go.dev.
 
 Testing your own instrumentation: `troopertest.New(t, "svc")` installs an in-memory recorder with the trooper processor and
 propagator.

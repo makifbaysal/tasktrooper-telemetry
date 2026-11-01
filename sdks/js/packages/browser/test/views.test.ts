@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import type { RumEvent } from '@trooper/core';
+import type { RumEvent } from '@tasktrooper/core';
 import { setView } from '../src/index';
 import { setup, teardown } from './helpers';
 

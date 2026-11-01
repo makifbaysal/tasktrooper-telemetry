@@ -16,10 +16,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	trooper "github.com/tasktrooper/telemetry-go"
-	troopergin "github.com/tasktrooper/telemetry-go/integrations/gin"
-	trooperhttp "github.com/tasktrooper/telemetry-go/integrations/nethttp"
-	trooperslog "github.com/tasktrooper/telemetry-go/integrations/slog"
+	trooper "github.com/makifbaysal/tasktrooper-telemetry/sdks/go"
+	troopergin "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/gin"
+	trooperhttp "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/nethttp"
+	trooperslog "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog"
 )
 
 func main() {

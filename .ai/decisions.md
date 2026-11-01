@@ -83,11 +83,11 @@ ScyllaDB değerlendirilir; şu an trace-by-id `trace_index` tablosuyla ClickHous
 - **Client SDK'ları (web, RN, Flutter, Android, iOS) = RUM JSON** (`POST /v1/rum`, şema `proto/rum/v1/rum.proto`). OTel client
   SDK'ları ağır ve RUM kavramlarını (session, view, vital, crash, app start) kapsamıyor. Network istekleri `traceparent`
   header'ı ile backend trace'ine bağlanır.
-  - Web: `@trooper/browser` framework'süz çalışır (History API ile SPA route, window error, fetch/XHR, Web Vitals). Framework'ün
-    hataları yuttuğu yerler için ince paketler: `@trooper/react` (ErrorBoundary, React 19 root error callback'leri),
-    `@trooper/vue` (`app.config.errorHandler`), `@trooper/angular` (`ErrorHandler` provider). Svelte, Solid, Next.js, Nuxt ek paket istemez.
-  - `@trooper/react-native` (JS; react-navigation ekran takibi, ErrorUtils, fetch/XHR, AppState, offline kuyruk).
-  - `trooper_flutter` (Dart), `TaskTrooper` Android (Kotlin, AAR), `TaskTrooper` iOS (Swift Package).
+  - Web: `@tasktrooper/browser` framework'süz çalışır (History API ile SPA route, window error, fetch/XHR, Web Vitals). Framework'ün
+    hataları yuttuğu yerler için ince paketler: `@tasktrooper/react` (ErrorBoundary, React 19 root error callback'leri),
+    `@tasktrooper/vue` (`app.config.errorHandler`), `@tasktrooper/angular` (`ErrorHandler` provider). Svelte, Solid, Next.js, Nuxt ek paket istemez.
+  - `@tasktrooper/react-native` (JS; react-navigation ekran takibi, ErrorUtils, fetch/XHR, AppState, offline kuyruk).
+  - `tasktrooper_flutter` (Dart), `TaskTrooper` Android (Kotlin, AAR), `TaskTrooper` iOS (Swift Package).
 **Sonuç:** Backend dil kapsamı ucuz ve OTel kullanan müşteri SDK'sız gelebilir. Client tarafı tek şema → tek writer yolu.
 
 ## ADR-012 — Cloud entegrasyonları: AWS, Google Cloud, Vercel, Neon
@@ -256,7 +256,7 @@ New Relic bunu Pixie (eBPF) ile yapıyor.
   ARM'dan keşfedilir; Azure Monitor metrikleri **app** seviyesindedir (FunctionExecutionCount, FunctionExecutionUnits,
   Requests, Http5xx, HttpResponseTime, MemoryWorkingSet) → Azure'da bir "fonksiyon" satırı = bir Function App; içindeki
   fonksiyonlar `meta.functions`.
-- Trace/cold start: müşteri fonksiyonu OTel ile enstrümante eder (AWS: OTel/ADOT Lambda layer veya `@trooper/node`
+- Trace/cold start: müşteri fonksiyonu OTel ile enstrümante eder (AWS: OTel/ADOT Lambda layer veya `@tasktrooper/node`
   `wrapLambda`; Azure: Functions OpenTelemetry modu) ve OTLP'yi ingest-gw'ye yollar. Cold start sayısı span'lardaki
   `faas.coldstart=true`'dan hesaplanır (CloudWatch'ta yok).
 - Maliyet tahmini api'de: GB-saniye + istek fiyatı (sabitler config'te), UI'da "tahmini" etiketiyle.
@@ -267,14 +267,14 @@ New Relic bunu Pixie (eBPF) ile yapıyor.
 **Bağlam:** RUM oturumları sayı ve olay listesi olarak görünüyor; kullanıcının ekranda ne yaşadığı görünmüyor. New Relic web
 ve mobil session replay sunuyor. "Kapsam dışı (v1)" listesindeydi.
 **Karar:**
-- **Web:** kayıt `rrweb` (`@rrweb/record` 2.2.0) ile DOM snapshot + mutation; ayrı paket `@trooper/replay` (browser
-  SDK'yı şişirmemek için, `@trooper/browser`'a integration olarak takılır). Oynatma UI'da `@rrweb/replay` 2.2.0.
+- **Web:** kayıt `rrweb` (`@rrweb/record` 2.2.0) ile DOM snapshot + mutation; ayrı paket `@tasktrooper/replay` (browser
+  SDK'yı şişirmemek için, `@tasktrooper/browser`'a integration olarak takılır). Oynatma UI'da `@rrweb/replay` 2.2.0.
 - **Mobil (Android, iOS):** piksel/ekran görüntüsü **toplanmaz**. View hiyerarşisinden **wireframe** (dikdörtgen, tür, renk,
   maskeli metin) kare kare çıkarılır, sadece değişince ve en fazla 2 kare/sn; dokunmalar ayrı event. Oynatıcı bizim (SVG).
   Böylece görüntü içinde PII sızması yapısal olarak imkânsız.
 - **React Native:** RN native view'larla çizer → native SDK'nın replay'i (Android `trooper-replay`, iOS `TaskTrooperReplay`)
-  aynen çalışır; `@trooper/react-native` `TrooperRum` native module'ü üzerinden başlatır, oturum JS'ten `setContext` ile gelir.
-- **Flutter:** tek bir `FlutterView` yüzeyine çizdiği için native traversal işe yaramaz; `trooper_flutter` Dart tarafında
+  aynen çalışır; `@tasktrooper/react-native` `TrooperRum` native module'ü üzerinden başlatır, oturum JS'ten `setContext` ile gelir.
+- **Flutter:** tek bir `FlutterView` yüzeyine çizdiği için native traversal işe yaramaz; `tasktrooper_flutter` Dart tarafında
   **Element ağacından** wireframe çıkarır (widget tipi → kind, `Material`/`ColoredBox`/`DecoratedBox` → renk/radius,
   `RenderBox` → global rect), aynı wire formatı.
 - **Gizlilik default:** web'de tüm metin ve input maskeli (`maskAllText`, `maskAllInputs` true), password her zaman,
@@ -385,13 +385,13 @@ ve workflow lint doğrulanmalı; modül listesi iki yerde tutulamaz.
 operasyon için gerekli.
 **Karar:**
 - Platform verisi **ayrı bir projeye** gider (`TaskTrooper` / `tasktrooper`, `make self` → `api bootstrap`, ADR-028). Müşteri verisiyle karışmaz; production'da operatör kendi self projesinin DSN'ini verir.
-- Her Go servisi `main`'de `trooper.Start` çağırır (`github.com/tasktrooper/telemetry-go`, `replace` ile `sdks/go`).
+- Her Go servisi `main`'de `trooper.Start` çağırır (`github.com/makifbaysal/tasktrooper-telemetry/sdks/go`, `replace` ile `sdks/go`).
   DSN yoksa (default) hiçbir şey export edilmez — davranış bugünküyle aynı. Enstrümantasyon: HTTP (chi / net/http), pgx,
   go-redis, franz-go, slog → OTel logs, Go runtime metrikleri, opsiyonel profiling (`TROOPER_PROFILING`), codeintel'in
   Anthropic çağrıları `llm` transport'u ile (GenAI span; içerik kaydı kapalı). Prometheus `/metrics` aynen kalır.
 - Servis adları sabit: `tt-ingest-gw`, `tt-ingest-writer`, `tt-api`, `tt-alert-engine`, `tt-notifier`, `tt-trooper-cloud`,
   `tt-symbolicator`, `tt-codeintel`, `tt-loadtest-ctl`, `tt-loadtest-runner`, `tt-mcp`, `tt-trooper-agent`; dashboard RUM
-  app'i `tt-web` (`@trooper/browser` + `@trooper/react` + `@trooper/replay`, `VITE_TROOPER_DSN` yoksa kapalı).
+  app'i `tt-web` (`@tasktrooper/browser` + `@tasktrooper/react` + `@tasktrooper/replay`, `VITE_TROOPER_DSN` yoksa kapalı).
 - **Geri besleme döngüsü yasak:** ingest-gw ve ingest-writer, `TT_SELF_PROJECT_ID` projesine ait istek/kayıtlar için span
   ve log üretmez (sayaçlar/Prometheus devam eder). Aksi halde self trafiği kendi span'larını ingest edip sonsuz döngü kurar.
   SDK exporter'ının kendi HTTP çağrıları zaten enstrümante değildir; servisler outbound HTTP client'larını sararken
@@ -424,3 +424,34 @@ monitor/KPI/load test seed'i üretiyordu (api `source: "code"`'u reddettiği iç
 - `VITE_API_KEY` dev kısayolu kalkar; dashboard yalnızca oturum cookie'si ile çalışır.
 **Sonuç:** İlk açılışta dashboard boştur; veri, SDK bağlanınca (veya `make self` ile platformun kendisi) gelir. ADR-013'teki "mock mod
 korunur" maddesi ve contracts §11'deki `VITE_DATA` bu ADR ile geçersizdir.
+
+## ADR-029 — SDK'lar public registry'lerde yayınlanır (tag tetiklemeli release)
+**Bağlam:** SDK'lar yalnızca monorepo'dan local path/`replace` ile kullanılabiliyordu; müşteri (ve kendi uygulamalarımız) paket
+yöneticisinden sürümlü paket çekemiyordu. Paket isimleri yayınlanabilir değildi (`@trooper/*`, `github.com/makifbaysal/tasktrooper-telemetry/sdks/go`,
+`io.tasktrooper`/`com.tasktrooper`), repo'da lisans yoktu.
+**Karar:**
+- **Lisans:** SDK'lar Apache-2.0 (`sdks/LICENSE`, her paket kopyasını taşır). Servisler + web bu ADR'nin kapsamı dışında.
+- **İsimler:**
+  | Ekosistem | Registry | İsim |
+  |---|---|---|
+  | Go | proxy.golang.org (GitHub) | `github.com/makifbaysal/tasktrooper-telemetry/sdks/go[/integrations/<x>]` |
+  | JS | npm | `@tasktrooper/{core,browser,react,vue,angular,react-native,node,replay}` |
+  | JVM + Android | Maven Central (Central Portal) | groupId `ai.tasktrooper` (Java/Kotlin package isimleri değişmez) |
+  | .NET | NuGet | `TaskTrooper.Telemetry*` |
+  | Python | PyPI | `tasktrooper` |
+  | Flutter | pub.dev | `tasktrooper_flutter`, `tasktrooper_dio` |
+  | iOS | CocoaPods + SwiftPM | pod `TaskTrooper`; SwiftPM repo kökündeki `Package.swift` |
+- **Release:** her ekosistem bağımsız sürümlenir, tag ile tetiklenir; workflow tag sürümünü paket sürümüyle doğrular, test eder, yayınlar.
+  | Tag | Workflow | Kimlik doğrulama |
+  |---|---|---|
+  | `sdks/go/vX.Y.Z`, `sdks/go/integrations/<x>/vX.Y.Z` | `release-go.yml` (proxy ısıtma) | — |
+  | `js-vX.Y.Z` | `release-npm.yml` | npm trusted publishing (OIDC); ilk yayın `NPM_TOKEN` |
+  | `jvm-vX.Y.Z`, `android-vX.Y.Z` | `release-jvm.yml`, `release-android.yml` | `MAVEN_CENTRAL_*` user token + `GPG_*` imza |
+  | `dotnet-vX.Y.Z` | `release-dotnet.yml` (env `nuget`) | NuGet trusted publishing (OIDC) |
+  | `python-vX.Y.Z` | `release-python.yml` (env `pypi`) | PyPI trusted publishing (OIDC) |
+  | `tasktrooper_flutter-vX.Y.Z`, `tasktrooper_dio-vX.Y.Z` | `release-flutter.yml` | pub.dev automated publishing (OIDC); ilk yayın elle |
+  | `ios-vX.Y.Z` | `release-ios.yml` | `COCOAPODS_TRUNK_TOKEN`; SwiftPM için düz `X.Y.Z` tag'i workflow atar |
+- Mümkün olan her yerde uzun ömürlü token yerine OIDC trusted publishing kullanılır.
+- Repo içi kullanım (services, apps/web, örnekler) local path/workspace ile devam eder; dış uygulamalar registry paketini kullanır.
+**Sonuç:** "Paket yayınlama" roadmap maddesi kapanır. Paket isimleri artık public sözleşmedir; yeniden adlandırma breaking change'dir.
+Detay: sdk.md § Dağıtım.

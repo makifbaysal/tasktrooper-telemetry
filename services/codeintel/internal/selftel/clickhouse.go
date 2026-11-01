@@ -8,7 +8,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
-	trooper "github.com/tasktrooper/telemetry-go"
+	trooper "github.com/makifbaysal/tasktrooper-telemetry/sdks/go"
 )
 
 // ClickHouse wraps conn so Select/Query/QueryRow/Exec/PrepareBatch produce db.system=clickhouse client spans with

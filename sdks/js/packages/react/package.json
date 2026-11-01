@@ -1,8 +1,28 @@
 {
-  "name": "@trooper/react",
+  "name": "@tasktrooper/react",
   "version": "0.1.0",
-  "description": "React integration for @trooper/browser: provider, ErrorBoundary, router view names.",
+  "description": "React integration for @tasktrooper/browser: provider, ErrorBoundary, router view names.",
+  "keywords": [
+    "tasktrooper",
+    "observability",
+    "monitoring",
+    "react",
+    "rum",
+    "nextjs",
+    "react-router",
+    "error-boundary"
+  ],
   "license": "Apache-2.0",
+  "author": "Mehmet Akif Baysal",
+  "homepage": "https://tasktrooper.ai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/makifbaysal/tasktrooper-telemetry.git",
+    "directory": "sdks/js/packages/react"
+  },
+  "bugs": {
+    "url": "https://github.com/makifbaysal/tasktrooper-telemetry/issues"
+  },
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.cjs",
@@ -53,7 +73,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsup",
@@ -61,8 +82,8 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@trooper/browser": "workspace:*",
-    "@trooper/core": "workspace:*"
+    "@tasktrooper/browser": "workspace:*",
+    "@tasktrooper/core": "workspace:*"
   },
   "peerDependencies": {
     "react": ">=18",
@@ -94,5 +115,9 @@
     "react-router": "^7.18.4",
     "happy-dom": "^21.0.0",
     "@types/node": "^26.6.5"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

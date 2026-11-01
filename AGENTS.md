@@ -107,6 +107,6 @@ Tam kontrol (CI ile birebir aynı kapılar): `make check` → gofmt, `go vet`, t
 - [x] AI kullanım kotası (ADR-018), host/K8s/container izleme + opsiyonel eBPF (ADR-019), AWS Lambda + Azure Functions (ADR-020)
 - [x] Session replay (web rrweb + Android/iOS wireframe), continuous profiling (Go/JVM/Node, flame graph + diff), AI/LLM monitoring (GenAI span'ları, token/maliyet) — ADR-021/022/023
 - [x] Self-observability: platform kendi SDK'larıyla kendini izler (`make self`) — ADR-027
-- [ ] Paket yayınlama
+- [x] Paket yayınlama: npm, PyPI, Maven Central, NuGet, pub.dev, CocoaPods/SwiftPM, Go — ADR-029
 
 Sıradaki işler: [`.ai/roadmap.md`](.ai/roadmap.md).

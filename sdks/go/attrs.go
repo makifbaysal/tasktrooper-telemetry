@@ -5,7 +5,7 @@
 // conventions (route template, entry route, caller, consumer attempt/DLQ, sample rate).
 //
 // Framework integrations live in separate modules under
-// github.com/tasktrooper/telemetry-go/integrations/<name>.
+// github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/<name>.
 package trooper
 
 import "go.opentelemetry.io/otel/attribute"
@@ -17,7 +17,7 @@ const Version = "0.1.0"
 const DistroName = "trooper-go"
 
 // ScopeName is the instrumentation scope used by spans created by this module.
-const ScopeName = "github.com/tasktrooper/telemetry-go"
+const ScopeName = "github.com/makifbaysal/tasktrooper-telemetry/sdks/go"
 
 // Attribute keys defined by the TaskTrooper semantic conventions (.ai/contracts.md §4).
 const (

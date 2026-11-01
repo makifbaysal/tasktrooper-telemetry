@@ -15,12 +15,12 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	trooper "github.com/tasktrooper/telemetry-go"
-	trooperchi "github.com/tasktrooper/telemetry-go/integrations/chi"
-	trooperhttp "github.com/tasktrooper/telemetry-go/integrations/nethttp"
-	trooperpgx "github.com/tasktrooper/telemetry-go/integrations/pgx"
-	trooperslog "github.com/tasktrooper/telemetry-go/integrations/slog"
-	"github.com/tasktrooper/telemetry-go/llm"
+	trooper "github.com/makifbaysal/tasktrooper-telemetry/sdks/go"
+	trooperchi "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/chi"
+	trooperhttp "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/nethttp"
+	trooperpgx "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx"
+	trooperslog "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog"
+	"github.com/makifbaysal/tasktrooper-telemetry/sdks/go/llm"
 
 	"github.com/tasktrooper/telemetry/services/pkg/tenant"
 )

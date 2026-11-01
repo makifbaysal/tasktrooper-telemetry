@@ -39,9 +39,9 @@ require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
-	github.com/tasktrooper/telemetry-go v0.0.0
-	github.com/tasktrooper/telemetry-go/integrations/pgx v0.0.0
-	github.com/tasktrooper/telemetry-go/integrations/slog v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go v0.1.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog v0.0.0
 	golang.org/x/net v0.61.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
@@ -51,8 +51,8 @@ require (
 	google.golang.org/grpc v1.84.0 // indirect
 )
 
-replace github.com/tasktrooper/telemetry-go => ../../sdks/go
+replace github.com/makifbaysal/tasktrooper-telemetry/sdks/go => ../../sdks/go
 
-replace github.com/tasktrooper/telemetry-go/integrations/pgx => ../../sdks/go/integrations/pgx
+replace github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx => ../../sdks/go/integrations/pgx
 
-replace github.com/tasktrooper/telemetry-go/integrations/slog => ../../sdks/go/integrations/slog
+replace github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog => ../../sdks/go/integrations/slog

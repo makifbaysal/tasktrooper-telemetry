@@ -37,7 +37,7 @@ class MappingUploadFunctionalTest {
         File(dir, "mapping.txt").writeText("a.B -> c:\n")
         File(dir, "build.gradle.kts").writeText("""
             import com.tasktrooper.gradle.TrooperMappingUploadTask
-            plugins { id("com.tasktrooper.mapping-upload") version "$version" }
+            plugins { id("ai.tasktrooper.mapping-upload") version "$version" }
             trooper { app.set("courier-app") }
             tasks.register<TrooperMappingUploadTask>("uploadMapping") {
                 mappingFile.set(file("mapping.txt"))
@@ -63,7 +63,7 @@ class MappingUploadFunctionalTest {
         File(dir, "mapping.txt").writeText("x")
         File(dir, "build.gradle.kts").writeText("""
             import com.tasktrooper.gradle.TrooperMappingUploadTask
-            plugins { id("com.tasktrooper.mapping-upload") version "$version" }
+            plugins { id("ai.tasktrooper.mapping-upload") version "$version" }
             tasks.register<TrooperMappingUploadTask>("uploadMapping") { mappingFile.set(file("mapping.txt")); release.set("1+1") }
         """.trimIndent())
         val env = System.getenv().filterKeys { !it.startsWith("TROOPER_") }
@@ -77,7 +77,7 @@ class MappingUploadFunctionalTest {
         File(dir, "mapping.txt").writeText("x")
         File(dir, "build.gradle.kts").writeText("""
             import com.tasktrooper.gradle.TrooperMappingUploadTask
-            plugins { id("com.tasktrooper.mapping-upload") version "$version" }
+            plugins { id("ai.tasktrooper.mapping-upload") version "$version" }
             trooper { apiUrl.set("${server.url}"); apiKey.set("k"); app.set("a"); failOnError.set(true) }
             tasks.register<TrooperMappingUploadTask>("uploadMapping") { mappingFile.set(file("mapping.txt")); release.set("1+1") }
         """.trimIndent())
@@ -97,7 +97,7 @@ class MappingUploadFunctionalTest {
         File(dir, "build.gradle.kts").writeText("""
             plugins {
                 id("com.android.application") version "8.13.2"
-                id("com.tasktrooper.mapping-upload") version "$version"
+                id("ai.tasktrooper.mapping-upload") version "$version"
             }
             android {
                 namespace = "com.example.fixture"

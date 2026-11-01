@@ -29,7 +29,7 @@ export function ReplaysTab({ app }: { app: Service }) {
             : <ConnectSdk icon={<PlayCircle />} title="No recorded sessions in this range" group="frontend" setup={!mobile}>
                 {mobile
                   ? <>Enable replay in the mobile SDK (Android <span className="mono">TrooperReplay.install</span>, iOS / React Native <span className="mono">startReplay</span>, Flutter <span className="mono">replay:</span> option).</>
-                  : <>Add the <span className="mono">@trooper/replay</span> integration to the browser SDK: <span className="mono">init({'{'} dsn, service, integrations: [replayIntegration({'{'} sampleRate: 0.1, onErrorSampleRate: 1 {'}'})] {'}'})</span>.</>}
+                  : <>Add the <span className="mono">@tasktrooper/replay</span> integration to the browser SDK: <span className="mono">init({'{'} dsn, service, integrations: [replayIntegration({'{'} sampleRate: 0.1, onErrorSampleRate: 1 {'}'})] {'}'})</span>.</>}
               </ConnectSdk>}
           columns={[
             { key: 'start', header: 'Started', sortValue: (r) => r.startedAt, render: (r) => <span style={{ whiteSpace: 'nowrap' }}>{clock(r.startedAt)} <span className="muted">· {ago(r.startedAt)}</span></span> },

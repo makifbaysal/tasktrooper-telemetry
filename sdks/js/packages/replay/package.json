@@ -1,8 +1,26 @@
 {
-  "name": "@trooper/replay",
+  "name": "@tasktrooper/replay",
   "version": "0.1.0",
-  "description": "TaskTrooper Telemetry session replay for the web (rrweb recording, masking, sampling) — an integration for @trooper/browser.",
+  "description": "TaskTrooper Telemetry session replay for the web (rrweb recording, masking, sampling) — an integration for @tasktrooper/browser.",
+  "keywords": [
+    "tasktrooper",
+    "observability",
+    "monitoring",
+    "session-replay",
+    "rrweb",
+    "rum"
+  ],
   "license": "Apache-2.0",
+  "author": "Mehmet Akif Baysal",
+  "homepage": "https://tasktrooper.ai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/makifbaysal/tasktrooper-telemetry.git",
+    "directory": "sdks/js/packages/replay"
+  },
+  "bugs": {
+    "url": "https://github.com/makifbaysal/tasktrooper-telemetry/issues"
+  },
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.cjs",
@@ -24,7 +42,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsup",
@@ -36,11 +55,11 @@
     "@rrweb/record": "2.2.0"
   },
   "peerDependencies": {
-    "@trooper/browser": "workspace:^"
+    "@tasktrooper/browser": "workspace:^"
   },
   "devDependencies": {
-    "@trooper/browser": "workspace:*",
-    "@trooper/core": "workspace:*",
+    "@tasktrooper/browser": "workspace:*",
+    "@tasktrooper/core": "workspace:*",
     "typescript": "5.9.3",
     "tsup": "^9.0.0",
     "vitest": "^5.0.5",
@@ -49,5 +68,9 @@
     "@types/node": "^26.6.5"
   },
   "unpkg": "./dist/trooper-replay.iife.js",
-  "jsdelivr": "./dist/trooper-replay.iife.js"
+  "jsdelivr": "./dist/trooper-replay.iife.js",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
 }

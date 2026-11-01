@@ -1,4 +1,4 @@
-import { truncate, type ErrorPayload } from '@trooper/core';
+import { truncate, type ErrorPayload } from '@tasktrooper/core';
 
 const seen = new WeakSet<object>();
 

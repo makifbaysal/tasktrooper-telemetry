@@ -1,4 +1,4 @@
-module github.com/tasktrooper/telemetry-go
+module github.com/makifbaysal/tasktrooper-telemetry/sdks/go
 
 go 1.26.3
 

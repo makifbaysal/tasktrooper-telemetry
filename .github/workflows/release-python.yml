@@ -1,0 +1,69 @@
+name: Release Python
+
+# Publishes the Python SDK (sdks/python, PyPI project `tasktrooper`).
+# Trigger: push a tag python-vX.Y.Z whose version equals src/tasktrooper/_version.py.
+# Auth: PyPI trusted publishing (OIDC, environment `pypi`). See sdks/python/README.md § Releasing.
+
+on:
+  push:
+    tags: ["python-v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdks/python
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: tag version matches the package
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          want="${TAG#python-v}"
+          got=$(python -c 'import re; print(re.search(r"__version__\s*=\s*\"([^\"]+)\"", open("src/tasktrooper/_version.py").read()).group(1))')
+          if [ "$got" != "$want" ]; then
+            echo "::error file=sdks/python/src/tasktrooper/_version.py::tasktrooper is $got, tag says $want"
+            exit 1
+          fi
+      - name: install
+        run: python -m pip install --upgrade pip build twine && python -m pip install -e '.[dev,django]'
+      - name: test
+        run: python -m pytest -q
+      - name: build
+        run: python -m build
+      - name: check
+        run: python -m twine check --strict dist/*
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: python-dist
+          path: sdks/python/dist/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/tasktrooper/
+    permissions:
+      id-token: write # PyPI trusted publishing (OIDC)
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: python-dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3 (release/v1)

@@ -4,7 +4,7 @@ import org.gradle.api.Plugin
 import org.gradle.api.Project
 
 /**
- * `com.tasktrooper.mapping-upload`: after `minify<Variant>WithR8`, uploads `mapping.txt` to
+ * `ai.tasktrooper.mapping-upload`: after `minify<Variant>WithR8`, uploads `mapping.txt` to
  * `POST <apiUrl>/v1/artifacts` (kind=r8, app, release = versionName+versionCode).
  */
 class TrooperMappingUploadPlugin : Plugin<Project> {

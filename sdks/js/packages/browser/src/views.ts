@@ -1,4 +1,4 @@
-import { normalizePath, uuid, type Client } from '@trooper/core';
+import { normalizePath, uuid, type Client } from '@tasktrooper/core';
 import type { Activity } from './activity';
 import { perfNow } from './env';
 

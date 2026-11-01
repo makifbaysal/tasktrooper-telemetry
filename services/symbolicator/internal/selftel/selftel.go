@@ -15,11 +15,11 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
-	trooper "github.com/tasktrooper/telemetry-go"
-	trooperredis "github.com/tasktrooper/telemetry-go/integrations/goredis"
-	trooperhttp "github.com/tasktrooper/telemetry-go/integrations/nethttp"
-	trooperpgx "github.com/tasktrooper/telemetry-go/integrations/pgx"
-	trooperslog "github.com/tasktrooper/telemetry-go/integrations/slog"
+	trooper "github.com/makifbaysal/tasktrooper-telemetry/sdks/go"
+	trooperredis "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/goredis"
+	trooperhttp "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/nethttp"
+	trooperpgx "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx"
+	trooperslog "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog"
 )
 
 // Service is the fixed service name of this binary (ADR-027); TROOPER_SERVICE overrides it.

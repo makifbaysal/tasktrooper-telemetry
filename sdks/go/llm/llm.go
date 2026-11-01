@@ -39,11 +39,11 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/tasktrooper/telemetry-go/internal/sdkerr"
+	"github.com/makifbaysal/tasktrooper-telemetry/sdks/go/internal/sdkerr"
 )
 
 // ScopeName is the instrumentation scope of LLM spans.
-const ScopeName = "github.com/tasktrooper/telemetry-go/llm"
+const ScopeName = "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/llm"
 
 // Operation names (gen_ai.operation.name).
 const (

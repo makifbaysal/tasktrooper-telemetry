@@ -1,9 +1,9 @@
-module github.com/tasktrooper/telemetry-go/integrations/grpc
+module github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/grpc
 
 go 1.26.3
 
 require (
-	github.com/tasktrooper/telemetry-go v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go v0.1.0
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.72.0
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/sdk v1.47.0
@@ -37,4 +37,4 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260928230214-8a89bd6388cc // indirect
 )
 
-replace github.com/tasktrooper/telemetry-go => ../..
+replace github.com/makifbaysal/tasktrooper-telemetry/sdks/go => ../..

@@ -14,14 +14,23 @@ Thin OpenTelemetry distributions (ADR-011). All modules send OTLP/HTTP protobuf 
 | `trooper-otel-core` | Shared: DSN parsing, span processor, sampler, propagator, JFR profiler, GenAI span normalizer (used by all of the above) |
 | `trooper-llm` | LLM monitoring helpers (OTel API only): `TrooperLlm.start(…)`, Anthropic Java SDK wrapper, LangChain4j listener |
 
-Group `io.tasktrooper`, Java 17 bytecode. Build: `./gradlew build` (JDK 21; tests included).
+Published to Maven Central as `ai.tasktrooper:<module>` (Apache-2.0), Java 17 bytecode. Build: `./gradlew build` (JDK 21;
+tests included).
+
+```kotlin
+// build.gradle.kts
+repositories { mavenCentral() }
+dependencies { implementation("ai.tasktrooper:trooper-spring-boot-starter:0.1.0") }   // or any module above
+```
 
 ## Quick start
 
 ### Java agent (zero code)
 
 ```bash
-./gradlew :trooper-javaagent:trooperJavaagentJar        # → trooper-javaagent/build/libs/trooper-javaagent.jar
+curl -fsSLo trooper-javaagent.jar \
+  https://repo1.maven.org/maven2/ai/tasktrooper/trooper-javaagent/0.1.0/trooper-javaagent-0.1.0.jar
+# or build it: ./gradlew :trooper-javaagent:trooperJavaagentJar  → trooper-javaagent/build/libs/trooper-javaagent.jar
 export TROOPER_DSN=https://<ingest-key>@ingest.trooper.dev/<project>
 export TROOPER_SERVICE=orders-api TROOPER_ENV=production TROOPER_VERSION=$GIT_SHA
 java -javaagent:trooper-javaagent.jar -jar app.jar
@@ -33,7 +42,7 @@ pattern). All `otel.*` agent settings still work and override the TaskTrooper de
 ### Spring Boot 3 (no agent)
 
 ```kotlin
-implementation("io.tasktrooper:trooper-spring-boot-starter:0.1.0")
+implementation("ai.tasktrooper:trooper-spring-boot-starter:0.1.0")
 ```
 
 ```yaml
@@ -55,7 +64,7 @@ they then go through the same OTLP exporter.
 
 ```kotlin
 implementation("io.quarkus:quarkus-opentelemetry")
-implementation("io.tasktrooper:trooper-quarkus:0.1.0")
+implementation("ai.tasktrooper:trooper-quarkus:0.1.0")
 ```
 
 ```properties
@@ -75,7 +84,7 @@ if you set `quarkus.otel.propagators` yourself, keep `trooper` in the list).
 ### Ktor 3
 
 ```kotlin
-implementation("io.tasktrooper:trooper-ktor:0.1.0")
+implementation("ai.tasktrooper:trooper-ktor:0.1.0")
 
 fun Application.module() {
     install(TaskTrooper) {
@@ -234,6 +243,25 @@ starter (included) and with `TrooperSdk`.
   per thread, so purely reactive code that hops threads without spans is attributed only where spans start.
 - GenAI normalization and content stripping run on the exporter (javaagent, Spring Boot starter, `TrooperSdk`), not in
   Quarkus, where spans are exported as emitted.
+
+## Releasing
+
+Every module except `examples/` goes to Maven Central (`ai.tasktrooper:<module>`, namespace verified on
+central.sonatype.com) through the Sonatype Central Portal, with the
+[`com.vanniktech.maven.publish`](https://github.com/vanniktech/gradle-maven-publish-plugin) plugin (root
+`build.gradle.kts`): sources + javadoc jars, full POM, GPG signatures, automatic release after validation.
+`trooper-javaagent`'s main jar is the agent itself (no POM dependencies).
+
+1. Bump `version` in `gradle.properties` (one version for all modules).
+2. `./gradlew build publishToMavenLocal` and check `~/.m2/repository/ai/tasktrooper/`.
+3. Tag and push: `git tag jvm-vX.Y.Z && git push origin jvm-vX.Y.Z`. `.github/workflows/release-jvm.yml` checks that the
+   tag equals `version`, runs `./gradlew build`, then `./gradlew publishToMavenCentral --no-configuration-cache`.
+
+Version override for one-off builds: `-Pversion=X.Y.Z` or `VERSION_NAME=X.Y.Z` (env or `-P`, wins over `-Pversion`).
+Credentials are read only from the environment (`ORG_GRADLE_PROJECT_mavenCentralUsername`, `…mavenCentralPassword`,
+`…signingInMemoryKey`, `…signingInMemoryKeyPassword`; CI maps them from the `MAVEN_CENTRAL_USERNAME`,
+`MAVEN_CENTRAL_PASSWORD`, `GPG_PRIVATE_KEY`, `GPG_PASSPHRASE` repo secrets). Without them `build` and
+`publishToMavenLocal` still work (unsigned); any `*MavenCentral*` task requires the signing key.
 
 ## Layout / tests
 

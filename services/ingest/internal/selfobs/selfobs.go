@@ -23,7 +23,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	trooper "github.com/tasktrooper/telemetry-go"
+	trooper "github.com/makifbaysal/tasktrooper-telemetry/sdks/go"
 )
 
 // Configured reports whether an export destination is set (TROOPER_DSN or OTEL_EXPORTER_OTLP_ENDPOINT) and the SDK is

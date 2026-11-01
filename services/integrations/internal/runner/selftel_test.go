@@ -11,8 +11,8 @@ import (
 
 	"go.opentelemetry.io/otel/trace"
 
-	trooperhttp "github.com/tasktrooper/telemetry-go/integrations/nethttp"
-	"github.com/tasktrooper/telemetry-go/troopertest"
+	trooperhttp "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/nethttp"
+	"github.com/makifbaysal/tasktrooper-telemetry/sdks/go/troopertest"
 
 	"github.com/tasktrooper/telemetry/services/integrations/internal/model"
 )

@@ -1,5 +1,5 @@
 /**
- * Preload entry: `node --import @trooper/node/register app.mjs` (ESM) or `node --require @trooper/node/register app.js`
+ * Preload entry: `node --import @tasktrooper/node/register app.mjs` (ESM) or `node --require @tasktrooper/node/register app.js`
  * (CJS). Registers the ESM loader hook OpenTelemetry needs to patch ESM modules, then calls `init()` from the
  * environment (`TROOPER_DSN`, `TROOPER_SERVICE` …). Never throws.
  *

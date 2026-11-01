@@ -1,11 +1,11 @@
-module github.com/tasktrooper/telemetry-go/integrations/fiber
+module github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/fiber
 
 go 1.26.3
 
 require (
 	github.com/gofiber/contrib/otelfiber/v2 v2.2.3
 	github.com/gofiber/fiber/v2 v2.52.16
-	github.com/tasktrooper/telemetry-go v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go v0.1.0
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
 )
@@ -47,4 +47,4 @@ require (
 	google.golang.org/protobuf v1.36.12 // indirect
 )
 
-replace github.com/tasktrooper/telemetry-go => ../..
+replace github.com/makifbaysal/tasktrooper-telemetry/sdks/go => ../..

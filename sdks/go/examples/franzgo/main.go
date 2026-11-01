@@ -14,8 +14,8 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kgo"
 
-	trooper "github.com/tasktrooper/telemetry-go"
-	trooperfranz "github.com/tasktrooper/telemetry-go/integrations/franzgo"
+	trooper "github.com/makifbaysal/tasktrooper-telemetry/sdks/go"
+	trooperfranz "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/franzgo"
 )
 
 const (

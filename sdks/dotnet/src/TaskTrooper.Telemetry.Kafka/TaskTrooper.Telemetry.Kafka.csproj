@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFrameworks>$(LibraryTargetFrameworks)</TargetFrameworks>
-    <Description>TaskTrooper Telemetry integration for Kafka.</Description>
+    <Description>TaskTrooper Telemetry for Confluent.Kafka: consumer entry spans and traced producers with W3C trace context and caller propagation in message headers.</Description>
+    <PackageTags>$(PackageTags);kafka;confluent;messaging</PackageTags>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Confluent.Kafka" />

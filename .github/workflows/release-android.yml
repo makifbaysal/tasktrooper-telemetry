@@ -1,0 +1,57 @@
+name: Release Android
+
+# Publishes the Android SDK (sdks/android: trooper-android, -ndk, -okhttp, -compose, -replay AARs) and the
+# trooper-gradle-plugin (+ ai.tasktrooper.mapping-upload marker) to Maven Central as ai.tasktrooper:<module>
+# through the Sonatype Central Portal (com.vanniktech.maven.publish, automatic release). The sample app is not published.
+# Trigger: push a tag android-vX.Y.Z equal to `version` in sdks/android/gradle.properties.
+# See sdks/android/README.md § Releasing.
+
+on:
+  push:
+    tags: ["android-v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest # ships the Android SDK (ANDROID_HOME, sdkmanager)
+    defaults:
+      run:
+        working-directory: sdks/android
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-read-only: true
+      - name: tag version matches gradle.properties
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          want="${TAG#android-v}"
+          got=$(sed -n 's/^version=//p' gradle.properties)
+          if [ "$got" != "$want" ]; then
+            echo "::error file=sdks/android/gradle.properties::version is $got, tag says $want"
+            exit 1
+          fi
+      - name: install NDK + CMake (trooper-ndk)
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.0.12077973" "cmake;3.22.1" > /dev/null
+      - name: build + test
+        run: ./gradlew build --no-configuration-cache
+      - name: publish to Maven Central
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_PRIVATE_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
+        run: ./gradlew publishToMavenCentral --no-configuration-cache

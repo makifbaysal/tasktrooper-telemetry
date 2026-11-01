@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFrameworks>$(LibraryTargetFrameworks)</TargetFrameworks>
-    <Description>TaskTrooper Telemetry integration for RabbitMQ.</Description>
+    <Description>TaskTrooper Telemetry for RabbitMQ.Client 7: consumer conventions on the built-in subscriber spans, retry attempt from x-delivery-count/x-death, caller propagation.</Description>
+    <PackageTags>$(PackageTags);rabbitmq;amqp;messaging</PackageTags>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="RabbitMQ.Client" />

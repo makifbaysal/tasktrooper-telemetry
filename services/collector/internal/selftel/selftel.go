@@ -17,9 +17,9 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	trooper "github.com/tasktrooper/telemetry-go"
-	trooperhttp "github.com/tasktrooper/telemetry-go/integrations/nethttp"
-	trooperslog "github.com/tasktrooper/telemetry-go/integrations/slog"
+	trooper "github.com/makifbaysal/tasktrooper-telemetry/sdks/go"
+	trooperhttp "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/nethttp"
+	trooperslog "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog"
 )
 
 const scope = "github.com/tasktrooper/telemetry/services/collector"

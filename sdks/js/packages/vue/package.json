@@ -1,8 +1,26 @@
 {
-  "name": "@trooper/vue",
+  "name": "@tasktrooper/vue",
   "version": "0.1.0",
-  "description": "Vue 3 plugin for @trooper/browser.",
+  "description": "Vue 3 plugin for @tasktrooper/browser.",
+  "keywords": [
+    "tasktrooper",
+    "observability",
+    "monitoring",
+    "vue",
+    "rum",
+    "vue-router"
+  ],
   "license": "Apache-2.0",
+  "author": "Mehmet Akif Baysal",
+  "homepage": "https://tasktrooper.ai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/makifbaysal/tasktrooper-telemetry.git",
+    "directory": "sdks/js/packages/vue"
+  },
+  "bugs": {
+    "url": "https://github.com/makifbaysal/tasktrooper-telemetry/issues"
+  },
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.cjs",
@@ -23,7 +41,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsup",
@@ -31,8 +50,8 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@trooper/browser": "workspace:*",
-    "@trooper/core": "workspace:*"
+    "@tasktrooper/browser": "workspace:*",
+    "@tasktrooper/core": "workspace:*"
   },
   "peerDependencies": {
     "vue": "^3.3.0",
@@ -51,5 +70,9 @@
     "vue-router": "^5.0.0",
     "happy-dom": "^21.0.0",
     "@types/node": "^26.6.5"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

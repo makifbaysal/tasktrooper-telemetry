@@ -13,7 +13,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/tasktrooper/telemetry-go/troopertest"
+	"github.com/makifbaysal/tasktrooper-telemetry/sdks/go/troopertest"
 
 	"github.com/tasktrooper/telemetry/services/pkg/tenant"
 )

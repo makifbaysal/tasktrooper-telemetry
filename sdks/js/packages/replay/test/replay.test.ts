@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { captureError, clearUser, identify, track } from '@trooper/browser';
+import { captureError, clearUser, identify, track } from '@tasktrooper/browser';
 import { SEGMENT_BYTES, SEGMENT_MS } from '../src/index';
 import { KEY_PREFIX } from '../src/store';
 import { CLICK, emit, INPUT, MUTATION, rr, setup, teardown } from './helpers';
@@ -108,7 +108,7 @@ describe('session mode segments', () => {
       ['resource', 'session_id', 'segment', 'start_ts', 'end_ts', 'format', 'has_full_snapshot', 'view_id', 'view_name', 'user_id', 'anonymous_id', 'stats', 'events'].sort(),
     );
     expect(payload).toMatchObject({
-      resource: { service: 'shop-web', env: 'production', version: '1.4.0', platform: 'web', sdk_name: '@trooper/replay', sdk_version: '0.1.0' },
+      resource: { service: 'shop-web', env: 'production', version: '1.4.0', platform: 'web', sdk_name: '@tasktrooper/replay', sdk_version: '0.1.0' },
       session_id: sdk.client.sessionId(),
       segment: 0,
       format: 'rrweb',

@@ -7,23 +7,28 @@ to `POST /v1/rum` on ingest-gw (gzip, `x-trooper-key`), per ADR-011 and `.ai/con
 |---|---|
 | `trooper-android` | Core: init, sessions, views, app start, crashes, ANR, frames, batching, offline queue. No OkHttp dependency. |
 | `trooper-ndk` | Optional native (NDK) crash handler (C, async-signal-safe). Depends on `trooper-android`; picked up automatically. |
-| `trooper-gradle-plugin` | Gradle plugin `com.tasktrooper.mapping-upload` (included build): uploads R8 `mapping.txt`. |
+| `trooper-gradle-plugin` | Gradle plugin `ai.tasktrooper.mapping-upload` (included build): uploads R8 `mapping.txt`. |
 | `trooper-okhttp` | OkHttp `Interceptor` → `RESOURCE` events + W3C `traceparent` injection. |
 | `trooper-compose` | Navigation Compose screen tracking + `Modifier.trooperAction()`, `Modifier.trooperUnmask()` and the Compose wireframe mapper for replay. |
 | `trooper-replay` | Optional wireframe session replay (no screenshots) → `POST /v1/replay` (contracts.md §23, ADR-021). |
-| `trooper-android-sample` | Sample app wiring all three. |
+| `trooper-android-sample` | Sample app wiring all modules (not published). |
 
-minSdk 21, compileSdk 36. Built with AGP 8.13, Kotlin 2.2, Gradle 8.14 (wrapper).
+minSdk 21, compileSdk 36. Built with AGP 8.13, Kotlin 2.2, Gradle 8.14 (wrapper). Published to Maven Central as
+`ai.tasktrooper:<module>` (Apache-2.0).
 
 ## Setup
 
 ```kotlin
+// settings.gradle.kts
+dependencyResolutionManagement { repositories { google(); mavenCentral() } }
+
 // build.gradle.kts
 dependencies {
-    implementation("com.tasktrooper:trooper-android:0.1.0")
-    implementation("com.tasktrooper:trooper-ndk:0.1.0")      // optional: native crashes
-    implementation("com.tasktrooper:trooper-okhttp:0.1.0")   // optional
-    implementation("com.tasktrooper:trooper-compose:0.1.0")  // optional
+    implementation("ai.tasktrooper:trooper-android:0.1.0")
+    implementation("ai.tasktrooper:trooper-ndk:0.1.0")      // optional: native crashes
+    implementation("ai.tasktrooper:trooper-okhttp:0.1.0")   // optional
+    implementation("ai.tasktrooper:trooper-compose:0.1.0")  // optional
+    implementation("ai.tasktrooper:trooper-replay:0.1.0")   // optional: session replay
 }
 ```
 
@@ -134,9 +139,9 @@ Without Compose: `navController.addOnDestinationChangedListener(TrooperDestinati
 
 `TrooperHybridBridge` implements the shared context of contracts.md §9 (channel `dev.tasktrooper.telemetry/rum`):
 `setContext(map)` (session_id, anonymous_id, view_id, view_name, user_id), `getContext()`, `getProcessStartTime()` (unix ms).
-Flutter: the `trooper_flutter` plugin's MethodChannel `dev.tasktrooper.telemetry/rum`; React Native: the native module
+Flutter: the `tasktrooper_flutter` plugin's MethodChannel `dev.tasktrooper.telemetry/rum`; React Native: the native module
 `TrooperRum` (`TrooperHybridBridge.RN_MODULE`; JS falls back to a module named `dev.tasktrooper.telemetry/rum`). Those
-wrappers belong to the Flutter/RN SDKs and forward to these methods (depend on `com.tasktrooper:trooper-android`); native
+wrappers belong to the Flutter/RN SDKs and forward to these methods (depend on `ai.tasktrooper:trooper-android`); native
 crashes are then reported with the Dart/JS session and view. In hybrid apps consider `trackActivities = false` so the
 host activity does not appear as a screen.
 
@@ -246,11 +251,11 @@ The library ships consumer rules; nothing to add. Crash stacks from minified bui
 `mapping.txt` for every release with the Gradle plugin:
 
 ```kotlin
-// settings.gradle.kts: the plugin is not published yet; use it from this repo as an included build
-pluginManagement { includeBuild("path/to/sdks/android/trooper-gradle-plugin") }
+// settings.gradle.kts: the plugin and its marker are on Maven Central
+pluginManagement { repositories { gradlePluginPortal(); google(); mavenCentral() } }
 
 // app/build.gradle.kts
-plugins { id("com.tasktrooper.mapping-upload") }
+plugins { id("ai.tasktrooper.mapping-upload") version "0.1.0" }
 trooper {
     apiUrl.set("https://symbolicator.example.com")   // or env TROOPER_API_URL
     apiKey.set(providers.environmentVariable("TROOPER_API_KEY"))
@@ -270,8 +275,8 @@ Gradle TestKit, including a real AGP 8.13 minified app) run with `./gradlew buil
 ```bash
 ./gradlew build test            # all modules, unit tests, lint, minified sample
 ./gradlew testDebugUnitTest     # tests only
-./gradlew publishToMavenLocal   # com.tasktrooper:{trooper-android,trooper-ndk,trooper-okhttp,trooper-compose}:0.1.0
-                                # + com.tasktrooper:trooper-gradle-plugin and the com.tasktrooper.mapping-upload marker
+./gradlew publishToMavenLocal   # ai.tasktrooper:{trooper-android,-ndk,-okhttp,-compose,-replay}:<version>
+                                # + ai.tasktrooper:trooper-gradle-plugin and the ai.tasktrooper.mapping-upload marker
 ```
 
 `local.properties` (git-ignored) must contain `sdk.dir=...`. `trooper-ndk` needs NDK 27.0.12077973 and CMake 3.22.1
@@ -279,7 +284,27 @@ Gradle TestKit, including a real AGP 8.13 minified app) run with `./gradlew buil
 batching/flush, retry/backoff, disk queue cap, crash persistence + resend, ANR watchdog (fake looper/clock), app start
 classification, payload JSON vs. `rum.proto` (parsed at test time), OkHttp interceptor (MockWebServer), Compose route naming.
 
+## Releasing
+
+The library modules (release-variant AAR) and `trooper-gradle-plugin` (+ the `ai.tasktrooper.mapping-upload` plugin
+marker) go to Maven Central as `ai.tasktrooper:<module>` through the Sonatype Central Portal, with the
+[`com.vanniktech.maven.publish`](https://github.com/vanniktech/gradle-maven-publish-plugin) plugin (0.35.x, the last
+line supporting Gradle 8): sources + javadoc jars, full POM, GPG signatures, automatic release after validation. The
+sample app is not published.
+
+1. Bump `version` in `gradle.properties` (one version for all modules and the Gradle plugin).
+2. `./gradlew build publishToMavenLocal` and check `~/.m2/repository/ai/tasktrooper/`.
+3. Tag and push: `git tag android-vX.Y.Z && git push origin android-vX.Y.Z`. `.github/workflows/release-android.yml`
+   checks that the tag equals `version`, installs NDK/CMake, runs `./gradlew build`, then
+   `./gradlew publishToMavenCentral --no-configuration-cache` (SDK modules and the included plugin build).
+
+Version override for one-off builds: `-Pversion=X.Y.Z` or `VERSION_NAME=X.Y.Z` (env or `-P`, wins over `-Pversion`).
+Credentials are read only from the environment (`ORG_GRADLE_PROJECT_mavenCentralUsername`, `…mavenCentralPassword`,
+`…signingInMemoryKey`, `…signingInMemoryKeyPassword`; CI maps them from the `MAVEN_CENTRAL_USERNAME`,
+`MAVEN_CENTRAL_PASSWORD`, `GPG_PRIVATE_KEY`, `GPG_PASSPHRASE` repo secrets). Without them `build` and
+`publishToMavenLocal` still work (unsigned); any `*MavenCentral*` task requires the signing key.
+
 ## Not yet supported
 
 Protobuf transport; native crash stacks of threads other than the crashing one; publishing the Gradle plugin to the
-Plugin Portal; on-device (instrumented) native crash tests.
+Plugin Portal (it is on Maven Central); on-device (instrumented) native crash tests.

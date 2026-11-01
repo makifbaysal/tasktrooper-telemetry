@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppState, NativeModules, TurboModuleRegistry } from 'react-native';
-import type { RumBatch, RumEvent } from '@trooper/core';
+import type { RumBatch, RumEvent } from '@tasktrooper/core';
 import { captureError, clearUser, close, flush, getSdk, identify, init, markAppReady, NATIVE_CHANNEL, NATIVE_MODULE_NAME, trooperNavigation } from '../src/index';
 import { defaultNativeBridge } from '../src/bridge';
 
@@ -48,7 +48,7 @@ describe('react-native', () => {
     captureError(new Error('x'));
     await events();
     expect(batches[0]!.resource).toMatchObject({
-      app: 'courier-app', version: '2.1.0', platform: 'PLATFORM_REACT_NATIVE', sdk: { name: '@trooper/react-native' },
+      app: 'courier-app', version: '2.1.0', platform: 'PLATFORM_REACT_NATIVE', sdk: { name: '@tasktrooper/react-native' },
       os: { name: 'iOS', version: '19.0' }, device: { type: 'mobile', screen_width: 1179, screen_height: 2556 },
     });
   });
@@ -134,7 +134,7 @@ describe('react-native', () => {
   });
 
   it('setContext carries the JS sampling decision (hash of the session id), also after rotation', async () => {
-    const { hashToUnit } = await import('@trooper/core');
+    const { hashToUnit } = await import('@tasktrooper/core');
     const setContext = vi.fn();
     NativeModules[NATIVE_MODULE_NAME] = { getContext: async () => null, setContext };
     init({ ...OPTIONS, sampleRate: 0.5 });

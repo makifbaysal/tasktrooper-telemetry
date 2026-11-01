@@ -11,9 +11,9 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 
-	trooper "github.com/tasktrooper/telemetry-go"
-	troopersql "github.com/tasktrooper/telemetry-go/integrations/sql"
-	"github.com/tasktrooper/telemetry-go/troopertest"
+	trooper "github.com/makifbaysal/tasktrooper-telemetry/sdks/go"
+	troopersql "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/sql"
+	"github.com/makifbaysal/tasktrooper-telemetry/sdks/go/troopertest"
 )
 
 // fake driver ---------------------------------------------------------------

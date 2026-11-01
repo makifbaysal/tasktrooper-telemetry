@@ -1,6 +1,6 @@
-# @trooper/core
+# @tasktrooper/core
 
-Platform-neutral core shared by `@trooper/browser` and `@trooper/react-native`. Apps normally don't depend on it directly.
+Platform-neutral core shared by `@tasktrooper/browser` and `@tasktrooper/react-native`. Apps normally don't depend on it directly.
 
 - `types.ts` — hand-written mirror of `proto/rum/v1/rum.proto` (`RumBatch`, `RumEvent`, payloads). `test/proto.test.ts` parses the
   .proto and compares every message/enum, and checks a serialized payload uses only proto field names.

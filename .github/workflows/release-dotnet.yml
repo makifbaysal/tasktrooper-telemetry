@@ -1,0 +1,71 @@
+name: Release .NET
+
+# Publishes every packable .NET SDK project (sdks/dotnet/src/*: TaskTrooper.Telemetry, TaskTrooper.Telemetry.*) to nuget.org,
+# with .snupkg symbol packages. Trigger: push a tag dotnet-vX.Y.Z[-pre]; the tag is the package version (/p:Version).
+# Auth: NuGet trusted publishing (OIDC, environment `nuget`, user mkfbysl). See sdks/dotnet/README.md § Releasing.
+
+on:
+  push:
+    tags: ["dotnet-v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_VERSION: "10.0.x" # libraries target net8.0;net9.0;net10.0, tests net10.0
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: nuget
+    permissions:
+      id-token: write # NuGet trusted publishing (OIDC)
+      contents: read
+    defaults:
+      run:
+        working-directory: sdks/dotnet
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - name: version from tag
+        id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#dotnet-v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::tag $TAG is not dotnet-v<semver>"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - run: dotnet restore TaskTrooper.sln
+      - name: build
+        run: dotnet build TaskTrooper.sln -c Release --no-restore /p:Version=${{ steps.version.outputs.version }}
+      - name: test
+        run: dotnet test TaskTrooper.sln -c Release --no-build
+      - name: pack
+        run: |
+          for proj in src/*/*.csproj; do
+            dotnet pack "$proj" -c Release --no-build /p:Version=${{ steps.version.outputs.version }} -o out
+          done
+          ls -l out
+      - name: NuGet login (OIDC)
+        id: login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: mkfbysl
+      - name: push
+        # .snupkg files next to the .nupkg are pushed to the symbol server automatically.
+        run: >-
+          dotnet nuget push "out/*.nupkg"
+          --api-key ${{ steps.login.outputs.NUGET_API_KEY }}
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate

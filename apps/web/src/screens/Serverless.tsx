@@ -87,7 +87,7 @@ export function Serverless() {
           <EmptyState icon={<SquareFunction />} title="No serverless functions yet"
             action={<Button variant="primary" icon={<Plug size={14} />} onClick={() => nav('/settings/integrations')}>Connect AWS or Azure</Button>}>
             Turn on Lambda in an AWS integration or connect an Azure subscription. Functions are discovered every 10 minutes and their metrics read every minute.
-            Instrument them with OpenTelemetry (or <span className="mono">wrapLambda</span> from <span className="mono">@trooper/node</span>) to get traces and cold starts.
+            Instrument them with OpenTelemetry (or <span className="mono">wrapLambda</span> from <span className="mono">@tasktrooper/node</span>) to get traces and cold starts.
           </EmptyState>
         </Card>
       </>

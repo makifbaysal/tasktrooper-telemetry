@@ -1,9 +1,9 @@
-module github.com/tasktrooper/telemetry-go/integrations/amqp091
+module github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/amqp091
 
 go 1.26.3
 
 require (
-	github.com/tasktrooper/telemetry-go v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go v0.1.0
 	go.opentelemetry.io/otel v1.47.0
 )
 
@@ -37,4 +37,4 @@ require (
 	google.golang.org/protobuf v1.36.12 // indirect
 )
 
-replace github.com/tasktrooper/telemetry-go => ../..
+replace github.com/makifbaysal/tasktrooper-telemetry/sdks/go => ../..

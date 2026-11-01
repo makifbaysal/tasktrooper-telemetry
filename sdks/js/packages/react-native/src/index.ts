@@ -12,14 +12,14 @@ import {
   type Device,
   type KeyValueStorage,
   type PropagationTarget,
-} from '@trooper/core';
+} from '@tasktrooper/core';
 import { callBridge, defaultNativeBridge, type NativeBridge, type NativeContext, type NativeReplayOptions } from './bridge';
 import { toErrorPayload } from './errors';
 
 /** Captured as early as possible: import this package first in index.js for an accurate js_init app start. */
 const JS_START = Date.now();
 
-export const SDK_NAME = '@trooper/react-native';
+export const SDK_NAME = '@tasktrooper/react-native';
 export const SDK_VERSION = '0.1.0';
 
 /** Subset of `react-native-device-info` used (pass the default export). */
@@ -479,4 +479,4 @@ export async function isReplayRecording(): Promise<boolean> {
 }
 
 export { NATIVE_CHANNEL, NATIVE_MODULE_NAME, type NativeBridge, type NativeContext, type NativeReplayOptions } from './bridge';
-export type { KeyValueStorage, PropagationTarget, RumEvent } from '@trooper/core';
+export type { KeyValueStorage, PropagationTarget, RumEvent } from '@tasktrooper/core';

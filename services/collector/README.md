@@ -53,7 +53,7 @@ Resource: `service.name=trooper-agent`, `service.version`. Export interval = con
 ## Self-observability (ADR-027, contracts §27)
 
 Separate from the scraped data: the agent's **own** traces, logs and Go runtime metrics go through the Go SDK
-(`github.com/tasktrooper/telemetry-go`, `replace` → `sdks/go`) to the platform's self project. `TT_DSN` (the data the
+(`github.com/makifbaysal/tasktrooper-telemetry/sdks/go`, `replace` → `sdks/go`) to the platform's self project. `TT_DSN` (the data the
 agent collects, own non-global OTel providers in `internal/emit`) and `TROOPER_DSN` (the agent's own telemetry, global
 providers) never mix; they may point at the same project (`deploy/self/agent.yaml`).
 

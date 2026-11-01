@@ -316,7 +316,7 @@ func (x *Resource) GetAttributes() map[string]string {
 
 type Sdk struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"` // "@trooper/browser", "trooper_flutter", "TaskTrooper-iOS", ...
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"` // "@tasktrooper/browser", "trooper_flutter", "TaskTrooper-iOS", ...
 	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

@@ -2,6 +2,7 @@
   <PropertyGroup>
     <TargetFrameworks>$(LibraryTargetFrameworks)</TargetFrameworks>
     <Description>TaskTrooper Telemetry distribution of OpenTelemetry .NET: one-line setup (DSN, resource, sampling, OTLP export) plus trooper.* semantic conventions.</Description>
+    <PackageTags>$(PackageTags);distro</PackageTags>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" />

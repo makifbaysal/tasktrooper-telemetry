@@ -3,8 +3,8 @@ import { createEnvironmentInjector, ErrorHandler, Injector, type EnvironmentInje
 import { NavigationEnd, NavigationStart, Router } from '@angular/router';
 import { Subject } from 'rxjs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { close, flush } from '@trooper/browser';
-import type { RumBatch, RumEvent } from '@trooper/core';
+import { close, flush } from '@tasktrooper/browser';
+import type { RumBatch, RumEvent } from '@tasktrooper/core';
 import { angularRouteTemplate, provideTrooper, TrooperErrorHandler } from '../src/index';
 
 const OPTIONS = { dsn: 'http://tt_dev_ingest_key@localhost:4318/1', app: 'ng-app', persist: false, trackVitals: false, trackActions: false };

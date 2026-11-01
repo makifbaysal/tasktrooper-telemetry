@@ -1,11 +1,11 @@
-module github.com/tasktrooper/telemetry-go/integrations/echo
+module github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/echo
 
 go 1.26.3
 
 require (
 	github.com/labstack/echo-otel/v4 v4.0.0
 	github.com/labstack/echo/v4 v4.16.2
-	github.com/tasktrooper/telemetry-go v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go v0.1.0
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
 )
@@ -46,4 +46,4 @@ require (
 	google.golang.org/protobuf v1.36.12 // indirect
 )
 
-replace github.com/tasktrooper/telemetry-go => ../..
+replace github.com/makifbaysal/tasktrooper-telemetry/sdks/go => ../..

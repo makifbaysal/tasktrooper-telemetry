@@ -4,7 +4,7 @@ import TaskTrooperCrashC
 #endif
 
 /// Context shared with a JS / Dart RUM SDK running in the same app (contracts.md §9).
-/// - Flutter: the `trooper_flutter` plugin registers the MethodChannel `dev.tasktrooper.telemetry/rum`.
+/// - Flutter: the `tasktrooper_flutter` plugin registers the MethodChannel `dev.tasktrooper.telemetry/rum`.
 /// - React Native: the native module is named `TrooperRum` (the JS side falls back to a module named
 ///   `dev.tasktrooper.telemetry/rum`).
 /// Both map `setContext` / `getContext` / `getProcessStartTime` onto the `TaskTrooper` methods below.

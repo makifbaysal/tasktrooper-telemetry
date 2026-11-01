@@ -1,0 +1,6 @@
+# Local development: resolve the SDK packages from this monorepo instead of pub.dev.
+dependency_overrides:
+  tasktrooper_dio:
+    path: ../tasktrooper_dio
+  tasktrooper_flutter:
+    path: ../tasktrooper_flutter

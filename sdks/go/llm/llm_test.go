@@ -18,8 +18,8 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/tasktrooper/telemetry-go/llm"
-	"github.com/tasktrooper/telemetry-go/troopertest"
+	"github.com/makifbaysal/tasktrooper-telemetry/sdks/go/llm"
+	"github.com/makifbaysal/tasktrooper-telemetry/sdks/go/troopertest"
 )
 
 // fakeAPI is a base RoundTripper replaying a recorded response and recording the request body.

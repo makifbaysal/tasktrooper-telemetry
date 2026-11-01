@@ -26,12 +26,11 @@ dependencies {
 val extensionJar = project(":trooper-otel-extension").tasks.named<Jar>("jar")
 
 // "Distro" pattern from opentelemetry-java-instrumentation/examples/extension: the agent loads every jar found under
-// extensions/ inside its own jar.
-val trooperJavaagentJar by tasks.registering(Jar::class) {
-    group = "build"
+// extensions/ inside its own jar. The module's main jar *is* the agent, so the Maven Central artifact
+// ai.tasktrooper:trooper-javaagent is directly usable with -javaagent (it has no dependencies in its POM).
+tasks.jar {
     description = "Builds trooper-javaagent.jar"
     archiveFileName.set("trooper-javaagent.jar")
-    destinationDirectory.set(layout.buildDirectory.dir("libs"))
     dependsOn(extensionJar)
     from(provider { zipTree(upstreamAgent.singleFile) }) {
         exclude("META-INF/MANIFEST.MF")
@@ -56,11 +55,16 @@ val trooperJavaagentJar by tasks.registering(Jar::class) {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
-tasks.assemble { dependsOn(trooperJavaagentJar) }
+// Kept for docs/scripts: `./gradlew :trooper-javaagent:trooperJavaagentJar` → build/libs/trooper-javaagent.jar
+tasks.register("trooperJavaagentJar") {
+    group = "build"
+    description = "Builds trooper-javaagent.jar (alias of jar)"
+    dependsOn(tasks.jar)
+}
 
 tasks.test {
-    dependsOn(trooperJavaagentJar, tasks.named("testAppClasses"))
-    systemProperty("trooper.agentJar", trooperJavaagentJar.get().archiveFile.get().asFile.absolutePath)
+    dependsOn(tasks.jar, tasks.named("testAppClasses"))
+    systemProperty("trooper.agentJar", tasks.jar.get().archiveFile.get().asFile.absolutePath)
     systemProperty("trooper.testAppClasspath", testApp.runtimeClasspath.asPath)
-    inputs.file(trooperJavaagentJar.flatMap { it.archiveFile })
+    inputs.file(tasks.jar.flatMap { it.archiveFile })
 }

@@ -1,4 +1,4 @@
-import { setView } from '@trooper/browser';
+import { setView } from '@tasktrooper/browser';
 
 interface TanStackMatchLike {
   fullPath?: string;

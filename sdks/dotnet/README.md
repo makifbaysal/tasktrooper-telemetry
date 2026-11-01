@@ -17,6 +17,15 @@ Targets `net8.0`, `net9.0`, `net10.0`. OpenTelemetry 1.20.
 | `TaskTrooper.Telemetry.Redis` | StackExchange.Redis spans (OTel instrumentation, beta) |
 | `TaskTrooper.Telemetry.Profiling` | Continuous profiler: in-process EventPipe → `cpu` / `wall` / `alloc_space` / `lock`, per-endpoint flame graphs |
 
+## Install
+
+Packages are on [nuget.org](https://www.nuget.org/packages?q=TaskTrooper.Telemetry):
+
+```bash
+dotnet add package TaskTrooper.Telemetry
+dotnet add package TaskTrooper.Telemetry.AspNetCore     # + the integrations you need (Kafka, RabbitMQ, Profiling, …)
+```
+
 ## Quick start — ASP.NET Core
 
 ```csharp
@@ -224,3 +233,18 @@ No local `dotnet` needed — `./build.sh` runs in `mcr.microsoft.com/dotnet/sdk:
 
 Samples: `samples/MinimalApi` (ASP.NET Core), `samples/KafkaWorker` (worker service consuming `orders.created`) and
 `samples/ProfilingOverhead` (profiler overhead check: `dotnet run -c Release --project samples/ProfilingOverhead -- 30 4`).
+
+## Releasing
+
+Every project under `src/` is published to nuget.org (with `.snupkg` symbols and Source Link) by
+`.github/workflows/release-dotnet.yml`. The tag is the version — there is nothing to bump in the repo
+(`Directory.Build.props` holds the `0.1.0` default for local builds):
+
+```bash
+git tag dotnet-v0.1.0 && git push origin dotnet-v0.1.0
+```
+
+The workflow tests, packs with `/p:Version=<tag>` and pushes via NuGet trusted publishing (OIDC: environment `nuget`,
+NuGet user `mkfbysl`; no API key secret). Already-published versions are skipped. Local dry run: `./build.sh pack`.
+Package metadata (license Apache-2.0, authors, URLs, README, tags) lives in `Directory.Build.props`; each `.csproj` sets
+its own `Description` (and extra `PackageTags`).

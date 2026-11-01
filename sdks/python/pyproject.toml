@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling>=1.21"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
@@ -8,13 +8,14 @@ dynamic = ["version"]
 description = "TaskTrooper Telemetry for Python: an OpenTelemetry distribution with route-aware APM, continuous profiling and LLM monitoring"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "Apache-2.0" }
-authors = [{ name = "TaskTrooper" }]
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Mehmet Akif Baysal" }]
+maintainers = [{ name = "Mehmet Akif Baysal" }]
 keywords = ["opentelemetry", "apm", "observability", "profiling", "llm", "tracing"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.9",
@@ -22,7 +23,12 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Operating System :: OS Independent",
+  "Framework :: Django",
+  "Framework :: FastAPI",
+  "Framework :: Flask",
   "Topic :: System :: Monitoring",
+  "Topic :: Software Development :: Libraries :: Python Modules",
   "Typing :: Typed",
 ]
 dependencies = [
@@ -79,17 +85,22 @@ dev = [
 tasktrooper-run = "tasktrooper._run:main"
 
 [project.urls]
-Homepage = "https://github.com/tasktrooper/telemetry"
-Source = "https://github.com/tasktrooper/telemetry/tree/main/sdks/python"
+Homepage = "https://tasktrooper.ai"
+Source = "https://github.com/makifbaysal/tasktrooper-telemetry/tree/main/sdks/python"
+Issues = "https://github.com/makifbaysal/tasktrooper-telemetry/issues"
+Changelog = "https://github.com/makifbaysal/tasktrooper-telemetry/blob/main/sdks/python/CHANGELOG.md"
 
 [tool.hatch.version]
 path = "src/tasktrooper/_version.py"
 
+# Single source of the version: src/tasktrooper/_version.py (release-python.yml checks it equals the python-v* tag).
 [tool.hatch.build.targets.wheel]
 packages = ["src/tasktrooper"]
 
+# sdist: library + metadata only (no tests/examples); LICENSE is added via license-files.
 [tool.hatch.build.targets.sdist]
-include = ["src/tasktrooper", "README.md", "CHANGELOG.md", "pyproject.toml"]
+include = ["src/tasktrooper", "README.md", "CHANGELOG.md", "LICENSE", "pyproject.toml"]
+exclude = ["__pycache__", "*.py[cod]"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

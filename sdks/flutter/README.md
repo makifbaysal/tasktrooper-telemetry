@@ -5,22 +5,22 @@ RUM for Flutter apps: sessions, screen views, errors, network requests, frame vi
 
 | Package | What |
 |---|---|
-| [`trooper_flutter`](trooper_flutter) | Core SDK: `TaskTrooper`, `TrooperNavigatorObserver`, `TrooperHttpClient` (`package:http`) |
-| [`trooper_dio`](trooper_dio) | `TrooperDioInterceptor` (separate so Dio is not forced on you) |
+| [`tasktrooper_flutter`](tasktrooper_flutter) | Core SDK: `TaskTrooper`, `TrooperNavigatorObserver`, `TrooperHttpClient` (`package:http`) |
+| [`tasktrooper_dio`](tasktrooper_dio) | `TrooperDioInterceptor` (separate so Dio is not forced on you) |
 | [`example`](example) | go_router + http + Dio demo app |
 
 ## Install
 
 ```yaml
 dependencies:
-  trooper_flutter: ^0.1.0
-  trooper_dio: ^0.1.0   # only if you use Dio
+  tasktrooper_flutter: ^0.1.0
+  tasktrooper_dio: ^0.1.0   # only if you use Dio
 ```
 
 ## Init
 
 ```dart
-import 'package:trooper_flutter/trooper_flutter.dart';
+import 'package:tasktrooper_flutter/tasktrooper_flutter.dart';
 
 void main() {
   TaskTrooper.init(
@@ -72,7 +72,7 @@ instance to each `ShellRoute(observers: [...])` too.
 
 ```dart
 final client = TrooperHttpClient();                 // package:http, wraps http.Client()
-final dio = Dio()..interceptors.add(TrooperDioInterceptor());   // trooper_dio, add it first
+final dio = Dio()..interceptors.add(TrooperDioInterceptor());   // tasktrooper_dio, add it first
 ```
 
 Each request becomes a RESOURCE event (method, status — `0` on network error —, duration, sizes). For URLs matching
@@ -137,7 +137,7 @@ single `FlutterView`, so the native SDKs' view traversal cannot see it. **No scr
   `/v1/replay` with the ingest key; 429/5xx/network errors back off 1 s → 60 s, other 4xx drop. Unsent segments wait in
   `<app support dir>/tasktrooper/replay/` (≤ 2 MB, `maxQueueBytes`; new segments are dropped when full). Going to
   background seals and uploads the current segment. `resource.platform` is `android`/`ios`, `sdk_name` `trooper_flutter`.
-- **Platforms:** Android and iOS. Not started on web (use `@trooper/replay`) or desktop.
+- **Platforms:** Android and iOS. Not started on web (use `@tasktrooper/replay`) or desktop.
 - **Inspect:** `TrooperReplay.isRecording`, `TrooperReplay.stats` (captures, avg/max cost per capture, nodes),
   `TrooperReplay.flush()`. With `debug: true` the stats are printed every 20 captures.
 
@@ -195,7 +195,7 @@ in the same session, the Flutter SDK talks to them over `MethodChannel('dev.task
 | Dart → native | `isNativeReplayActive` | `bool` — the native replay is installed (Android; iOS always `false`), see [Session replay](#session-replay) |
 | native → Dart | `getContext` | returns the same map |
 
-`trooper_flutter` is a Flutter plugin (Android + iOS) that implements the native side of this channel. Web and
+`tasktrooper_flutter` is a Flutter plugin (Android + iOS) that implements the native side of this channel. Web and
 desktop have no implementation; there the calls fail silently (`MissingPluginException` is swallowed).
 
 ### Native plugin / hybrid apps
@@ -211,8 +211,8 @@ desktop have no implementation; there the calls fail silently (`MissingPluginExc
   `target 'Runner'`; the plugin then calls `TaskTrooper.setHybridContext` / `hybridContext()` / `processStartTimeMs()`:
 
   ```ruby
-  pod 'TaskTrooper', :git => 'https://github.com/tasktrooper/telemetry.git', :tag => 'ios-v0.1.0'
-  pod 'trooper_flutter/Native', :path => '.symlinks/plugins/trooper_flutter/ios'
+  pod 'TaskTrooper', '~> 0.1'
+  pod 'tasktrooper_flutter/Native', :path => '.symlinks/plugins/tasktrooper_flutter/ios'
   ```
 
 - **iOS (TaskTrooper via SPM in the app target):** implement `TrooperFlutterHybridBridge` in `AppDelegate` (three
@@ -224,7 +224,28 @@ Dart session id and does not emit its own SESSION_START).
 ## Development
 
 ```bash
-cd trooper_flutter && flutter analyze && flutter test
-cd trooper_dio && flutter analyze && flutter test
+cd tasktrooper_flutter && flutter analyze && flutter test
+cd tasktrooper_dio && flutter analyze && flutter test
 cd example && flutter analyze && flutter run --dart-define=TROOPER_DSN=http://<ingest-key>@10.0.2.2:4318/<project-id>
 ```
+
+`tasktrooper_dio` and `example` depend on the published versions (`^0.1.0`); their `pubspec_overrides.yaml` points them
+at the local packages for development (not published: `tasktrooper_dio/.pubignore`).
+
+## Releasing
+
+Both packages are published to pub.dev by `.github/workflows/release-flutter.yml` (automated publishing, GitHub OIDC,
+no stored secret). The wire `sdk_name` stays `trooper_flutter` (contracts.md) regardless of the package name.
+
+1. Bump `version` in the package's `pubspec.yaml` (for `tasktrooper_flutter` also `sdkVersion` in
+   `lib/src/version.dart`), add a `CHANGELOG.md` entry; commit.
+2. `git tag tasktrooper_flutter-v0.1.1 && git push origin tasktrooper_flutter-v0.1.1` (or `tasktrooper_dio-v…`).
+   Release `tasktrooper_flutter` first when a `tasktrooper_dio` release needs its new version: the workflow drops
+   `pubspec_overrides.yaml` and resolves dependencies from pub.dev.
+3. The workflow checks the tag against `pubspec.yaml`, runs `flutter analyze` / `flutter test`, then `dart pub publish --force`.
+
+One-time setup per package: publish the first version by hand (`cd tasktrooper_flutter && flutter pub publish`, then
+the same for `tasktrooper_dio`), then on pub.dev → package → Admin → Automated publishing enable GitHub Actions with
+repository `makifbaysal/tasktrooper-telemetry`, tag pattern `tasktrooper_flutter-v{{version}}` (resp.
+`tasktrooper_dio-v{{version}}`) and environment `pub.dev` (create that environment in the GitHub repository settings).
+Pre-release check: `flutter pub publish --dry-run` in each package.

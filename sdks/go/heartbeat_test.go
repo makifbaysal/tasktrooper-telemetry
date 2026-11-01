@@ -9,7 +9,7 @@ import (
 	colmetrics "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
 	"google.golang.org/protobuf/proto"
 
-	trooper "github.com/tasktrooper/telemetry-go"
+	trooper "github.com/makifbaysal/tasktrooper-telemetry/sdks/go"
 )
 
 // heartbeats returns the heartbeat values and the resource service.instance.id of the captured metric exports.
