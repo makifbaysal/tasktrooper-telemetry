@@ -3804,7 +3804,7 @@ components:
       required: [name, kind, target, condition, severity, channels]
       properties:
         name: { type: string }
-        kind: { type: string, description: "infra query: {entity: host|container|pod|node|workload, metric, agg?: max|avg, filter?: {cluster, namespace, host, workload, service}}; faas query: {functionId? | filter?: {provider, region, service}, metric, relativeToTimeout?}; llm query: {filter?: {service, provider, model, route, method, operation}, metric: cost_usd|cost_usd_per_hour|tokens|input_tokens|output_tokens|calls|errors|error_rate|p95_ms|ttft_p95_ms} (minRequests applies to error_rate / p95_ms / ttft_p95_ms) (contracts §20, §21, §25)" }
+        kind: { type: string, description: "infra query: {entity: host|container|pod|node|cluster|workload|database, metric, agg?: max|avg, filter?: {cluster, namespace, host, workload, service} (database: {database, engine})}; faas query: {functionId? | filter?: {provider, region, service}, metric, relativeToTimeout?}; llm query: {filter?: {service, provider, model, route, method, operation}, metric: cost_usd|cost_usd_per_hour|tokens|input_tokens|output_tokens|calls|errors|error_rate|p95_ms|ttft_p95_ms} (minRequests applies to error_rate / p95_ms / ttft_p95_ms) (contracts §20, §21, §25)" }
         target: { $ref: '#/components/schemas/MonitorTarget' }
         query: {}
         condition: { $ref: '#/components/schemas/MonitorCondition' }

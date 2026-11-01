@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router';
 import { Activity, BotMessageSquare, Bug, Clock, Code2, FileText, Gauge, GitMerge, Lock, Server, Sparkles, SquareFunction, TrendingUp } from 'lucide-react';
 import { Columns, TimeSeries } from '@/components/charts';
 import { Badge, Button, Callout, Card, Field, Input, MetricCard, PageHeader, Segmented, Select, StatusBadge, Toggle } from '@/components/ui';
-import { clusters, endpointsFor, groupsOfService, monitors, mutate, qs, seg, services, timestamps, type Monitor } from '@/data';
+import { clusters, databases, endpointsFor, groupsOfService, monitors, mutate, qs, seg, services, timestamps, type Monitor } from '@/data';
 import { postRemote, type ApiMonitor } from '@/data/api/ops';
 import { can, denied } from '@/data/auth';
 import { serverlessFunctions } from '@/data/serverless';
@@ -37,21 +37,28 @@ const SEVERITY_HINT: Record<string, string> = {
 const SAVABLE = new Set<Kind>(['metric_threshold', 'anomaly', 'composite', 'job_missed', 'error_new', 'infra', 'faas', 'llm']);
 
 // ---- infra (contracts §20) and faas (§21) rule shapes
-type InfraEntity = 'host' | 'container' | 'pod' | 'node' | 'workload';
-type InfraMetric = 'cpu' | 'memory' | 'disk' | 'load1' | 'cpu_ratio' | 'memory_ratio' | 'restarts' | 'throttled' | 'not_ready' | 'unavailable';
+type InfraEntity = 'host' | 'node' | 'cluster' | 'container' | 'pod' | 'workload' | 'database';
+type InfraMetric = 'cpu' | 'memory' | 'disk' | 'load1' | 'cpu_ratio' | 'memory_ratio' | 'restarts' | 'throttled' | 'not_ready' | 'unavailable'
+  | 'connections_ratio' | 'p95_ms' | 'repl_lag_ms' | 'hit_ratio' | 'evictions' | 'slow';
 const INFRA_ENTITIES: { value: InfraEntity; label: string }[] = [
-  { value: 'host', label: 'Host' }, { value: 'container', label: 'Container' }, { value: 'pod', label: 'Pod' }, { value: 'node', label: 'Kubernetes node' }, { value: 'workload', label: 'Workload' },
+  { value: 'host', label: 'Host' }, { value: 'node', label: 'Kubernetes node' }, { value: 'cluster', label: 'Kubernetes cluster' },
+  { value: 'container', label: 'Container' }, { value: 'pod', label: 'Pod' }, { value: 'workload', label: 'Workload' }, { value: 'database', label: 'Database' },
 ];
 const INFRA_METRIC_LABEL: Record<InfraMetric, string> = {
   cpu: 'CPU', memory: 'Memory', disk: 'Disk (fullest filesystem)', load1: 'Load (1 min)', cpu_ratio: 'CPU / limit', memory_ratio: 'Memory / limit',
   restarts: 'Restarts in window', throttled: 'CPU throttled', not_ready: 'Not ready (count)', unavailable: 'Unavailable replicas',
+  connections_ratio: 'Connections / max', p95_ms: 'Query p95', repl_lag_ms: 'Replication lag', hit_ratio: 'Cache hit ratio',
+  evictions: 'Evictions per minute', slow: 'Slow queries per minute',
 };
 const INFRA_METRICS: Record<InfraEntity, InfraMetric[]> = {
   host: ['cpu', 'memory', 'disk', 'load1'], container: ['cpu_ratio', 'memory_ratio', 'restarts', 'throttled'],
-  pod: ['cpu_ratio', 'memory_ratio', 'restarts', 'throttled', 'not_ready'], node: ['not_ready'], workload: ['unavailable'],
+  pod: ['cpu_ratio', 'memory_ratio', 'restarts', 'throttled', 'not_ready'], node: ['memory', 'disk', 'cpu', 'not_ready'],
+  cluster: ['disk', 'memory', 'cpu'], workload: ['unavailable'],
+  database: ['memory', 'disk', 'cpu', 'connections_ratio', 'p95_ms', 'repl_lag_ms', 'hit_ratio', 'evictions', 'slow'],
 };
 /** 0..1 metrics are typed as percentages */
-const INFRA_RATIO = new Set<InfraMetric>(['cpu', 'memory', 'disk', 'cpu_ratio', 'memory_ratio', 'throttled']);
+const INFRA_RATIO = new Set<InfraMetric>(['cpu', 'memory', 'disk', 'cpu_ratio', 'memory_ratio', 'throttled', 'connections_ratio', 'hit_ratio']);
+const INFRA_MS = new Set<InfraMetric>(['p95_ms', 'repl_lag_ms']);
 type FaasMetric = 'invocations' | 'errors' | 'error_rate' | 'throttles' | 'duration_p95' | 'duration_p99' | 'cold_starts' | 'concurrency' | 'iterator_age_ms';
 const FAAS_METRICS: { value: FaasMetric; label: string }[] = [
   { value: 'error_rate', label: 'Error rate' }, { value: 'errors', label: 'Errors' }, { value: 'throttles', label: 'Throttles' },
@@ -180,6 +187,7 @@ export function AlertEditor() {
   const [fHost, setFHost] = useState(str(qf.host));
   const [fWorkload, setFWorkload] = useState(str(qf.workload));
   const [fService, setFService] = useState(str(qf.service) || (kind === 'infra' ? svcParam ?? '' : ''));
+  const [fDatabase, setFDatabase] = useState(str(qf.database) || params.get('database') || '');
   // faas
   const fns = serverlessFunctions('1h');
   const [fnId, setFnId] = useState(str(q.functionId) || params.get('function') || (kind === 'faas' && (qf.provider || qf.region || qf.service) ? '*' : fns[0]?.id ?? '*'));
@@ -229,9 +237,13 @@ export function AlertEditor() {
   const fn = fns.find((f) => f.id === fnId);
   const ruleValue = (kind === 'infra' && INFRA_RATIO.has(infraMetric)) || (kind === 'faas' && faasMetric === 'error_rate') ? Number(ruleTh) / 100 : Number(ruleTh);
   const relative = kind === 'faas' && relTimeout && isDuration(faasMetric);
-  const ruleUnit = kind === 'infra' ? (INFRA_RATIO.has(infraMetric) ? '%' : infraMetric === 'load1' ? 'load' : 'count') : relative ? '× timeout' : faasUnit(faasMetric);
+  const ruleUnit = kind === 'infra' ? (INFRA_RATIO.has(infraMetric) ? '%' : INFRA_MS.has(infraMetric) ? 'ms' : infraMetric === 'load1' ? 'load' : 'count') : relative ? '× timeout' : faasUnit(faasMetric);
   const ruleLabel = ruleUnit === '%' ? `${ruleTh}%` : ruleUnit === 'ms' ? ms(Number(ruleTh) || 0) : relative ? `${ruleTh} × timeout` : ruleTh;
-  const infraFilter = Object.fromEntries(Object.entries({ cluster: fCluster, namespace: fNamespace, host: fHost, workload: fWorkload, service: fService }).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v));
+  const infraFilterAll = entity === 'database' ? { database: fDatabase }
+    : entity === 'cluster' ? { cluster: fCluster }
+    : entity === 'host' || entity === 'node' ? { cluster: fCluster, host: fHost, service: fService }
+    : { cluster: fCluster, namespace: fNamespace, host: fHost, workload: fWorkload, service: fService };
+  const infraFilter = Object.fromEntries(Object.entries(infraFilterAll).map(([k, v]) => [k, (v ?? '').trim()]).filter(([, v]) => v));
   const faasFilter = Object.fromEntries(Object.entries({ provider: fProvider, region: fRegion.trim(), service: fService.trim() }).filter(([, v]) => v));
   const templates = kind === 'infra' || kind === 'faas' || kind === 'llm' ? monitorTemplates(kind) : [];
   // llm pickers: providers / models / services / routes seen in the last 24 h
@@ -294,7 +306,7 @@ export function AlertEditor() {
     job_missed: `${process || svcLabel} missed run`,
     error_new: `New errors in ${errScope === '*' ? 'any service' : services.find((s) => s.id === errScope)?.name ?? errScope}`,
     log_match: `${svcLabel} log query`, consumer_lag: `${svcLabel} consumer lag`,
-    infra: `${INFRA_ENTITIES.find((e) => e.value === entity)!.label} ${INFRA_METRIC_LABEL[infraMetric].toLowerCase()}${fService || fCluster || fHost ? ` · ${fService || fCluster || fHost}` : ''}`,
+    infra: `${INFRA_ENTITIES.find((e) => e.value === entity)!.label} ${INFRA_METRIC_LABEL[infraMetric].toLowerCase()}${(() => { const f = infraFilter.database || infraFilter.service || infraFilter.cluster || infraFilter.host; return f ? ` · ${f}` : ''; })()}`,
     faas: `${fn && fnId !== '*' ? fn.name : 'Functions'} ${FAAS_METRICS.find((m) => m.value === faasMetric)!.label.toLowerCase()}`,
     llm: ['LLM ' + llmMeta(llmMetric).short, lService, lModel || (lProvider ? aiProviderLabel(lProvider) : ''), lRoute].filter(Boolean).join(' · '),
   };
@@ -320,7 +332,7 @@ export function AlertEditor() {
       condition: { op: '>', threshold: every + grace, forMin: 0, ...(Number(renotify) ? { renotifyMin: Number(renotify) } : {}) }, ...common,
     },
     infra: {
-      name: finalName, kind: 'infra', target: { service: infraFilter.service || undefined },
+      name: finalName, kind: 'infra', target: { service: entity !== 'database' && infraFilter.service || undefined },
       query: { entity, metric: infraMetric, filter: infraFilter, agg },
       condition: { op, threshold: Number.isFinite(ruleValue) ? ruleValue : 0, ...ruleExtra, ...rule }, ...common,
     },
@@ -584,15 +596,29 @@ export function AlertEditor() {
                   <Field label="Entity"><Select value={entity} onChange={(e) => { const v = e.target.value as InfraEntity; setEntity(v); setInfraMetric(INFRA_METRICS[v][0]); }} options={INFRA_ENTITIES} /></Field>
                   <Field label="Metric"><Select value={infraMetric} onChange={(e) => setInfraMetric(e.target.value as InfraMetric)} options={INFRA_METRICS[entity].map((m) => ({ value: m, label: INFRA_METRIC_LABEL[m] }))} /></Field>
                 </div>
-                <div className="grid grid-2" style={{ gap: 'var(--space-2)' }}>
-                  <Field label="Service" hint="Pods / containers of this service.">
-                    <Select value={fService} onChange={(e) => setFService(e.target.value)} options={[{ value: '', label: 'Any service' }, ...backend.map((s) => ({ value: s.id, label: s.name }))]} />
+                {entity === 'database' ? (
+                  <Field label="Database" hint={databases.length ? 'Each node of the database is measured; the worst one decides.' : 'No database connected yet (Infrastructure → Databases).'}>
+                    <Select value={fDatabase} onChange={(e) => setFDatabase(e.target.value)}
+                      options={[{ value: '', label: 'Every database' }, ...databases.map((d) => ({ value: d.id, label: d.name }))]} />
                   </Field>
-                  {entity === 'host'
-                    ? <Field label="Host"><Input mono value={fHost} placeholder="any" onChange={(e) => setFHost(e.target.value)} /></Field>
-                    : <Field label="Cluster"><Input mono value={fCluster} placeholder="any" onChange={(e) => setFCluster(e.target.value)} /></Field>}
-                </div>
-                {entity !== 'host' && entity !== 'node' && (
+                ) : entity === 'cluster' ? (
+                  <Field label="Cluster" hint="The cluster value is the average over its nodes. To catch a single full node, pick Kubernetes node.">
+                    <Input mono value={fCluster} placeholder="any" onChange={(e) => setFCluster(e.target.value)} />
+                  </Field>
+                ) : (
+                  <div className="grid grid-2" style={{ gap: 'var(--space-2)' }}>
+                    <Field label="Service" hint={entity === 'host' || entity === 'node' ? 'Hosts running this service.' : 'Pods / containers of this service.'}>
+                      <Select value={fService} onChange={(e) => setFService(e.target.value)} options={[{ value: '', label: 'Any service' }, ...backend.map((s) => ({ value: s.id, label: s.name }))]} />
+                    </Field>
+                    {entity === 'host' || entity === 'node'
+                      ? <Field label={entity === 'node' ? 'Node' : 'Host'}><Input mono value={fHost} placeholder="any" onChange={(e) => setFHost(e.target.value)} /></Field>
+                      : <Field label="Cluster"><Input mono value={fCluster} placeholder="any" onChange={(e) => setFCluster(e.target.value)} /></Field>}
+                  </div>
+                )}
+                {(entity === 'node') && (
+                  <Field label="Cluster"><Input mono value={fCluster} placeholder="any" onChange={(e) => setFCluster(e.target.value)} /></Field>
+                )}
+                {entity !== 'host' && entity !== 'node' && entity !== 'cluster' && entity !== 'database' && (
                   <div className="grid grid-2" style={{ gap: 'var(--space-2)' }}>
                     <Field label="Namespace"><Input mono value={fNamespace} placeholder="any" onChange={(e) => setFNamespace(e.target.value)} /></Field>
                     <Field label="Workload"><Input mono value={fWorkload} placeholder="any" onChange={(e) => setFWorkload(e.target.value)} /></Field>

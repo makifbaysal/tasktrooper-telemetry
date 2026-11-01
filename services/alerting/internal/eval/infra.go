@@ -11,7 +11,9 @@ import (
 	"github.com/tasktrooper/telemetry/services/alerting/internal/model"
 )
 
-// Monitor kind `infra` (contracts §20): hosts_1m, containers_1m, k8s_pods_1m, k8s_nodes_1m, k8s_workloads_1m.
+// Monitor kind `infra` (contracts §20): hosts_1m, containers_1m, k8s_pods_1m, k8s_nodes_1m, k8s_workloads_1m and
+// db_1m (entity database). Node cpu/memory/disk come from the agent's host rows on that node (hosts_1m.node); a cluster
+// value is the average over its nodes per minute.
 // Every entity matching query.filter gets a value over the window; the monitor value is the worst one (max, or min for
 // '<' conditions) and detail.entities lists the worst 5. Gauges that were not reported are -Inf in the tables and are
 // skipped (contracts §5). No matching entity with data → no_data.
@@ -28,8 +30,10 @@ var InfraMetrics = map[string][]string{
 	"host":      {"cpu", "memory", "disk", "load1"},
 	"container": {"cpu_ratio", "memory_ratio", "restarts", "throttled"},
 	"pod":       {"cpu_ratio", "memory_ratio", "restarts", "throttled", "not_ready"},
-	"node":      {"not_ready"},
+	"node":      {"not_ready", "cpu", "memory", "disk"},
+	"cluster":   {"cpu", "memory", "disk"},
 	"workload":  {"unavailable"},
+	"database":  {"cpu", "memory", "disk", "connections_ratio", "p95_ms", "repl_lag_ms", "hit_ratio", "evictions", "slow"},
 }
 
 // EntityValue is one entity's value (detail.entities element: labels + id + value).
@@ -73,6 +77,10 @@ func entityID(entity string, l map[string]string) string {
 		return l["node"]
 	case "workload":
 		return join(l["namespace"], l["kind"], l["name"])
+	case "cluster":
+		return l["cluster"]
+	case "database":
+		return join(l["database_id"], l["node"])
 	}
 	return ""
 }
@@ -164,6 +172,13 @@ func infraWhere(m *model.Monitor, table string, f model.InfraFilter, from, to ti
 	case "hosts_1m":
 		w.eq("cluster", f.Cluster).eq("host", f.Host)
 		sub("containers_1m", "host", map[string]string{"namespace": f.Namespace, "workload": f.Workload, "service": f.Service})
+	case "hosts_1m:node": // Kubernetes nodes: host rows the agent tagged with k8s.node.name; filter.host names the node
+		w.eq("cluster", f.Cluster).eq("node", f.Host).add("node != ''")
+		sub("k8s_pods_1m", "node", map[string]string{"namespace": f.Namespace, "workload": f.Workload, "service": f.Service})
+	case "hosts_1m:cluster":
+		w.eq("cluster", f.Cluster).add("cluster != ''")
+	case "db_1m":
+		w.eq("database_id", f.Database).eq("engine", f.Engine)
 	case "containers_1m":
 		w.eq("cluster", f.Cluster).eq("namespace", f.Namespace).eq("host", f.Host).eq("workload", f.Workload).eq("service", f.Service)
 	case "k8s_pods_1m":
@@ -182,7 +197,9 @@ func infraWhere(m *model.Monitor, table string, f model.InfraFilter, from, to ti
 }
 
 type infraShape struct {
-	table      string
+	table      string // ClickHouse table; where (if set) picks the infraWhere variant of a shared table
+	where      string
+	minuteAgg  string   // how entity rows combine per minute: max (default) or avg (cluster = mean over its nodes)
 	full, keys []string // per-minute key (full) and entity key (keys ⊆ full)
 	a, b       string   // value columns (b: ratio denominator)
 }
@@ -192,7 +209,18 @@ func infraShapeOf(entity, metric string) infraShape {
 	case "host":
 		return infraShape{table: "hosts_1m", full: []string{"cluster", "host"}, keys: []string{"cluster", "host"}, a: metric}
 	case "node":
+		if metric != "not_ready" {
+			return infraShape{table: "hosts_1m", where: "hosts_1m:node", full: []string{"cluster", "node", "host"}, keys: []string{"cluster", "node"}, a: metric}
+		}
 		return infraShape{table: "k8s_nodes_1m", full: []string{"cluster", "node"}, keys: []string{"cluster", "node"}, a: "ready"}
+	case "cluster":
+		return infraShape{table: "hosts_1m", where: "hosts_1m:cluster", full: []string{"cluster", "host"}, keys: []string{"cluster"}, a: metric, minuteAgg: "avg"}
+	case "database":
+		s := infraShape{table: "db_1m", full: []string{"database_id", "node"}, keys: []string{"database_id", "node"}, a: metric}
+		if metric == "connections_ratio" {
+			s.a, s.b = "connections", "max_connections"
+		}
+		return s
 	case "workload":
 		k := []string{"cluster", "namespace", "kind", "name"}
 		return infraShape{table: "k8s_workloads_1m", full: k, keys: k, a: "desired", b: "available"}
@@ -223,7 +251,17 @@ func infraShapeOf(entity, metric string) infraShape {
 // whose vals are only the offending entities (non-nil, possibly empty, when entities exist).
 func (e *Evaluator) infraValues(ctx context.Context, m *model.Monitor, entity, metric, agg string, f model.InfraFilter, from, to time.Time) ([]EntityValue, bool, error) {
 	s := infraShapeOf(entity, metric)
-	w := infraWhere(m, s.table, f, from, to)
+	variant := s.table
+	if s.where != "" {
+		variant = s.where
+	}
+	w := infraWhere(m, variant, f, from, to)
+	// -Inf marks an unreported gauge: max() skips it on its own (and stays -Inf → filtered when nothing reported);
+	// the mean must skip it explicitly (avgIf over no rows is nan → filtered).
+	minuteAgg := "max(a)"
+	if s.minuteAgg == "avg" {
+		minuteAgg = "avgIf(a, isFinite(a))"
+	}
 	full, keys := strings.Join(s.full, ", "), strings.Join(s.keys, ", ")
 	var q string
 	state := metric == "not_ready" || metric == "unavailable"
@@ -253,11 +291,11 @@ func (e *Evaluator) infraValues(ctx context.Context, m *model.Monitor, entity, m
 			SELECT %[1]s, minute, if(sumIf(b, %[3]s) > 0, sumIf(a, %[3]s) / sumIf(b, %[3]s), nan) AS v FROM (
 				SELECT %[4]s, minute, max(%[5]s) AS a, max(%[6]s) AS b FROM telemetry.%[7]s WHERE %[8]s GROUP BY %[4]s, minute)
 			GROUP BY %[1]s, minute) WHERE isFinite(v) GROUP BY %[1]s`, keys, agg, ok, full, s.a, s.b, s.table, w.sql())
-	default: // gauge (max over the entity's containers per minute)
+	default: // gauge: per minute the max over the entity's rows (containers, a node's hosts) or their mean (cluster)
 		q = fmt.Sprintf(`SELECT %[1]s, %[2]s(v) FROM (
-			SELECT %[1]s, minute, max(a) AS v FROM (
+			SELECT %[1]s, minute, %[7]s AS v FROM (
 				SELECT %[3]s, minute, max(%[4]s) AS a FROM telemetry.%[5]s WHERE %[6]s GROUP BY %[3]s, minute)
-			GROUP BY %[1]s, minute) WHERE isFinite(v) GROUP BY %[1]s`, keys, agg, full, s.a, s.table, w.sql())
+			GROUP BY %[1]s, minute) WHERE isFinite(v) GROUP BY %[1]s`, keys, agg, full, s.a, s.table, w.sql(), minuteAgg)
 	}
 	rows, err := e.CH.Query(ctx, q, w.args...)
 	if err != nil {

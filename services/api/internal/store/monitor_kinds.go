@@ -15,14 +15,19 @@ var InfraMetrics = map[string][]string{
 	"host":      {"cpu", "memory", "disk", "load1"},
 	"container": {"cpu_ratio", "memory_ratio", "restarts", "throttled"},
 	"pod":       {"cpu_ratio", "memory_ratio", "restarts", "throttled", "not_ready"},
-	"node":      {"not_ready"},
+	"node":      {"not_ready", "cpu", "memory", "disk"},
+	"cluster":   {"cpu", "memory", "disk"},
 	"workload":  {"unavailable"},
+	"database":  {"cpu", "memory", "disk", "connections_ratio", "p95_ms", "repl_lag_ms", "hit_ratio", "evictions", "slow"},
 }
 
 // FaasMetrics are the faas monitor metrics.
 var FaasMetrics = []string{"invocations", "errors", "error_rate", "throttles", "duration_p95", "duration_p99", "cold_starts", "concurrency", "iterator_age_ms"}
 
 var infraFilterKeys = map[string]bool{"cluster": true, "namespace": true, "host": true, "workload": true, "service": true}
+
+// dbFilterKeys are the filter keys of the database entity (db_1m: trooper.db.id and db.system).
+var dbFilterKeys = map[string]bool{"database": true, "engine": true}
 var faasFilterKeys = map[string]bool{"provider": true, "region": true, "service": true}
 
 func strictDecode(raw []byte, v any) error {
@@ -58,7 +63,8 @@ func stringFilter(raw json.RawMessage, allowed map[string]bool) (map[string]stri
 	return f, nil
 }
 
-// validateInfraQuery checks {entity, metric, filter: {cluster?, namespace?, host?, workload?, service?}, agg: max|avg}.
+// validateInfraQuery checks {entity, metric, filter: {cluster?, namespace?, host?, workload?, service?}, agg: max|avg};
+// entity database takes filter: {database?, engine?}.
 func validateInfraQuery(raw json.RawMessage) error {
 	var q struct {
 		Entity string          `json:"entity"`
@@ -71,7 +77,7 @@ func validateInfraQuery(raw json.RawMessage) error {
 	}
 	metrics, ok := InfraMetrics[q.Entity]
 	if !ok {
-		return Invalid("query.entity must be host|container|pod|node|workload")
+		return Invalid("query.entity must be host|container|pod|node|cluster|workload|database")
 	}
 	valid := false
 	for _, m := range metrics {
@@ -83,7 +89,11 @@ func validateInfraQuery(raw json.RawMessage) error {
 	if q.Agg != "" && q.Agg != "max" && q.Agg != "avg" {
 		return Invalid("query.agg must be max|avg")
 	}
-	_, err := stringFilter(q.Filter, infraFilterKeys)
+	keys := infraFilterKeys
+	if q.Entity == "database" {
+		keys = dbFilterKeys
+	}
+	_, err := stringFilter(q.Filter, keys)
 	return err
 }
 
