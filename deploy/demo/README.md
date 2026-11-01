@@ -47,7 +47,19 @@ cloudflared tunnel login
 cloudflared tunnel create trooper-demo
 cp deploy/demo/cloudflared.example.yml ~/.cloudflared/config.yml   # fill in the tunnel id and user
 for h in telemetry telemetry-api telemetry-ingest; do cloudflared tunnel route dns trooper-demo $h.tasktrooper.ai; done
-cloudflared service install
+sudo cloudflared service install       # system LaunchDaemon: runs at boot without a login
+```
+
+The daemon that `sudo cloudflared service install` writes starts `cloudflared` without arguments and exits ("use `cloudflared
+tunnel run`"). Copy `config.yml` and `<TUNNEL_ID>.json` to `/etc/cloudflared/` (credentials-file pointing there), then add
+the arguments and reload:
+
+```bash
+PL=/Library/LaunchDaemons/com.cloudflare.cloudflared.plist
+sudo launchctl bootout system/com.cloudflare.cloudflared
+for a in --config /etc/cloudflared/config.yml tunnel run; do sudo /usr/libexec/PlistBuddy -c "Add :ProgramArguments: string $a" "$PL"; done
+sudo launchctl bootstrap system "$PL"
+cloudflared tunnel info trooper-demo     # a CONNECTOR ID line = connected
 ```
 
 ## Deploy
@@ -57,6 +69,19 @@ infra up → `make migrate` → dashboard build (copied to `~/trooper-demo/web`)
 on api, ingest-gw and web. Data volumes (compose project `tasktrooper`) survive every deploy.
 
 By hand on the machine (from a checkout with `deploy/.env`): `deploy/demo/deploy.sh`.
+
+## Self-observability (ADR-027)
+Same as any customer: sign in, create a project (e.g. org **TaskTrooper**, project **tasktrooper**) in the dashboard and
+copy its DSN (`https://<ingest-key>@telemetry-ingest.tasktrooper.ai/<project-id>`). Store it as the `demo` environment
+secret **`DEMO_TROOPER_DSN`** and run deploy-demo. Then:
+- the Go services export traces, logs and metrics as `tt-ingest-gw`, `tt-ingest-writer`, `tt-api`, `tt-alert-engine`,
+  `tt-notifier` (env `demo`) through the public ingest host; ingest-gw/writer skip that project's own requests (loop guard,
+  `TT_SELF_PROJECT_ID` = the DSN's project id),
+- the dashboard sends RUM as `tt-web`,
+- `trooper-agent` (profile `self`, `deploy/demo/agent.yaml`) reports Postgres, Redis, Redpanda, the Docker VM and every
+  container.
+
+No secret = all of this is off.
 
 ## First sign-in
 Open `https://telemetry.tasktrooper.ai`, sign in with Google, onboarding creates the org, project and ingest key (DSN).
