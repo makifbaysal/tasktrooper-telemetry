@@ -53,7 +53,8 @@ function isService(n: MapNode) {
 const displayName = (n: MapNode) => (n.tier === 'client' && !isService(n) && CALLER_NAMES[n.id]) || n.name;
 const kindLabel = (n: MapNode) => (n.tier === 'external' ? 'External API' : n.system ? `${KIND_LABEL[n.kind] ?? n.kind} · ${n.system}` : KIND_LABEL[n.kind] ?? n.kind);
 const clip = (s: string, max = 24) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
-const nodeW = (label: string) => Math.round(Math.min(Math.max(clip(label).length * 8.4, 120) + 58, 262));
+/** Box width fits both lines: name (mono 14 px ≈ 8.4 px/char) and metric (mono 12 px ≈ 7.2 px/char), plus icon and padding. */
+const nodeW = (label: string, metric: string) => Math.round(Math.min(Math.max(clip(label).length * 8.4, clip(metric, 28).length * 7.2, 120) + 62, 290));
 const rank: Record<Health, number> = { ok: 0, warning: 1, critical: 2 };
 
 interface Placed { n: MapNode; x: number; y: number; w: number; label: string; rpm: number }
@@ -119,14 +120,14 @@ function layout(nodes: MapNode[], edges: MapEdge[]): Layout {
     }
   });
   const placed: Placed[] = [];
-  const widthOf = (ids: string[]) => ids.reduce((a, id) => a + nodeW(displayName(byId.get(id)!)), 0) + GAP_X * (ids.length - 1);
+  const widthOf = (ids: string[]) => ids.reduce((a, id) => { const n = byId.get(id)!; return a + nodeW(displayName(n), metricText(n, rpmOf(n))); }, 0) + GAP_X * (ids.length - 1);
   const inner = Math.max(...rows.map((r) => widthOf(r.ids)), 480);
   for (const r of rows) {
     let x = PAD_X + (inner - widthOf(r.ids)) / 2;
     for (const id of r.ids) {
       const n = byId.get(id)!;
       const label = displayName(n);
-      const w = nodeW(label);
+      const w = nodeW(label, metricText(n, rpmOf(n)));
       placed.push({ n, x: x + w / 2, y: r.y, w, label, rpm: rpmOf(n) });
       x += w + GAP_X;
     }
@@ -146,9 +147,10 @@ function edgePath(a: Placed, b: Placed) {
   return `M${a.x} ${y1} C${a.x} ${my} ${b.x} ${my} ${b.x} ${y2}`;
 }
 
-const metricLine = (p: Placed) => (p.rpm > 0
-  ? `${compact(p.rpm)}/min${p.n.p95 > 0 ? ` · p95 ${ms(p.n.p95)}` : ''}`
-  : kindLabel(p.n));
+function metricText(n: MapNode, rpm: number) {
+  return rpm > 0 ? `${compact(rpm)}/min${n.p95 > 0 ? ` · p95 ${ms(n.p95)}` : ''}` : kindLabel(n);
+}
+const metricLine = (p: Placed) => metricText(p.n, p.rpm);
 
 /** Everything `id` reaches downstream plus everything that reaches it upstream. */
 function neighbourhood(id: string, edges: MapEdge[]): Set<string> {

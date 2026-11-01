@@ -3,6 +3,21 @@
 
 .svcmap { position: relative; }
 
+/* In the app the map follows the theme (neutral surface, primary text) instead of the landing's navy field: the
+ * landing graph classes read the field tokens, so they are remapped here. Nodes sit one step above the canvas. */
+.svcmap {
+  --field-bg: var(--bg-sunken);
+  --field-raised: var(--bg-surface);
+  --field-line: var(--border);
+  --field-line-strong: var(--border-strong);
+  --field-ink: var(--text-primary);
+  --field-ink-secondary: var(--text-secondary);
+  --field-ink-muted: var(--text-secondary);
+}
+.svcmap .smap__box { filter: drop-shadow(0 1px 1px color-mix(in oklch, black 12%, transparent)); }
+.svcmap .smap__metric { fill: var(--text-secondary); }
+.svcmap .smap__icon { color: var(--text-secondary); }
+
 .svcmap__canvas {
   position: relative; overflow: hidden; height: max(34rem, calc(100vh - 19rem));
   border-radius: var(--radius-md); border: 1px solid var(--field-line);
@@ -39,9 +54,9 @@
 .svcmap__node.is-critical .svcmap__status { color: var(--status-critical); }
 .svcmap__ripple { stroke: var(--status-critical); }
 .svcmap__tag.is-critical rect { fill: var(--status-critical); }
-.svcmap__tag.is-critical text { fill: var(--field-ink); }
+.svcmap__tag.is-critical text { fill: var(--bg-surface); }
 .svcmap__tag.is-warning rect { fill: var(--status-warning); }
-.svcmap__tag.is-warning text { fill: var(--field-bg); }
+.svcmap__tag.is-warning text { fill: var(--bg-surface); }
 
 /* hover tooltip, anchored under the node */
 .svcmap__tip {
