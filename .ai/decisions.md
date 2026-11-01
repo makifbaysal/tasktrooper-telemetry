@@ -371,5 +371,10 @@ ve workflow lint doğrulanmalı; modül listesi iki yerde tutulamaz.
 - `.github/workflows/ci.yml` modül matrisini `services/go.work`'ten türetir; `make check` aynı kapıları lokal
   koşar — CI sözleşmesi = Makefile hedefleri.
 - PR CI unit-only'dir; integration/e2e (`make e2e-ingest`) local'dedir ve ertelenmiştir, CI'ya girmez.
-- Imaj build'leri ci.yml'de değil, `.github/workflows/docker.yml`'dedir (release/registry akışı).
+- Imaj build'leri ci.yml'de değil, `.github/workflows/docker.yml`'dedir (release/registry akışı). Matris
+  `services/*/Dockerfile`'dan türetilir (context `services/`, `GOWORK=off`; `CMD` arg'lı Dockerfile'lar binary başına
+  satır). PR: build + Trivy (CRITICAL, ignore-unfixed), push yok. `main`: `ghcr.io/<owner>/<repo>/<image>:{sha,main}`'e
+  push; `packages: write` yalnız bu job'da. Deploy adımı yok.
+- Imajlar `TT_ENV` set etmez; production ortamı `TT_ENV=production` + gerçek `TT_SECRETS_KEY` vermek zorunda, aksi halde
+  servis açılmaz (fail-closed, contracts §10).
 **Sonuç:** `go.work`'e modül eklemek CI'ı otomatik genişletir; matrix senkron derdi yok.

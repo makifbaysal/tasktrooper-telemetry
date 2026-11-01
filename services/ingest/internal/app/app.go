@@ -109,7 +109,9 @@ func RunGateway(ctx context.Context, cfg GatewayConfig, log *slog.Logger, ready 
 		srv.SetInternal(in)
 		log.Info("internal service credential enabled")
 	}
-	if skey, err := secrets.Key(); err != nil {
+	if skey, err := secrets.Key(); errors.Is(err, secrets.ErrDevKeyInProduction) {
+		return err // fail closed in production; elsewhere a bad key only disables drains
+	} else if err != nil {
 		log.Warn("TT_SECRETS_KEY invalid; drains disabled", "err", err)
 	} else {
 		srv.SetIntegrations(gw.NewIntegrationCache(gw.PGIntegrations{Pool: pool, Key: skey, Log: log}, log))

@@ -43,7 +43,8 @@ gerekirse küçük tutulur (tek harici bağımlılık `google.golang.org/protobu
 
 **Ortam değişkenleri** (default'lar host'tan docker-compose'a göre): `TT_POSTGRES_URL`, `TT_CLICKHOUSE_URL`
 (`clickhouse://trooper:trooper@localhost:9000/telemetry`), `TT_KAFKA_BROKERS` (`localhost:19092`; container içinden `redpanda:9092`),
-`TT_REDIS_URL`, `TT_LOG_LEVEL`. Servise özel değişkenler `TT_<SERVIS>_*` önekiyle (ör. `TT_INGEST_HTTP_ADDR`).
+`TT_REDIS_URL`, `TT_LOG_LEVEL`, `TT_ENV` (boş = development; `production` → production-only guard'lar, ör. §10 secrets anahtarı;
+`services/pkg/config.Production`). Servise özel değişkenler `TT_<SERVIS>_*` önekiyle (ör. `TT_INGEST_HTTP_ADDR`).
 
 ## 2. Ağ uçları ve kimlik doğrulama
 
@@ -255,7 +256,8 @@ offline kuyruktan gelen ≤ 24 saatlik event'ler kendi zamanlarında kalır.
   dokunulmaz (integration_id NULL ise). Kaynak silinirse satır silinmez, `meta.missing=true`.
 - `trooper-cloud` Postgres'e doğrudan bağlanır (servis içi; api ile aynı DB), `integrations.status/error/last_sync_at/resources`
   günceller. Secret çözümü: `secret:<id>` → `secrets` tablosu, AES-256-GCM, anahtar `TT_SECRETS_KEY` (base64 32 byte;
-  dev default `deploy/dev-secrets.key` yoksa sabit dev anahtarı + uyarı). Şifreleme formatı: `nonce(12) | ciphertext+tag`,
+  boşsa sabit dev anahtarı + uyarı; `TT_ENV=production`'da boş veya dev anahtarı ise servis başlamaz — fail-closed,
+  `secrets.ErrDevKeyInProduction`). Şifreleme formatı: `nonce(12) | ciphertext+tag`,
   AAD = `project_id` (ondalık string). api yazar, trooper-cloud okur — ikisi aynı küçük paketi kullanır: `services/pkg/secrets`.
 - Metrik/keşif aralığı: keşif 10 dk, metrik 60 sn (CloudWatch/Monitoring 1 dk çözünürlük; son tam dakika okunur).
 - **Vercel:** deploy'lar REST API'den (`GET /v6/deployments`) 60 sn'de bir → `deploy_markers` (source `vercel`, servis =
