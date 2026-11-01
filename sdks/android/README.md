@@ -43,7 +43,7 @@ class App : Application() {
 }
 ```
 
-Local stack: `http://tt_dev_ingest_key@10.0.2.2:4318/1` from the emulator.
+Local stack: `http://<ingest-key>@10.0.2.2:4318/<project-id>` from the emulator (key + project id from onboarding or `api bootstrap`).
 
 ```kotlin
 TaskTrooper.identify("user-42", mapOf("plan" to "pro"))   // opt-in traits; never inferred

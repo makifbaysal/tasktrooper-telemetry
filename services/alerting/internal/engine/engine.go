@@ -13,12 +13,16 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/tasktrooper/telemetry/services/alerting/internal/eval"
 	"github.com/tasktrooper/telemetry/services/alerting/internal/kpi"
 	"github.com/tasktrooper/telemetry/services/alerting/internal/leader"
 	"github.com/tasktrooper/telemetry/services/alerting/internal/model"
 	"github.com/tasktrooper/telemetry/services/alerting/internal/obs"
 	"github.com/tasktrooper/telemetry/services/alerting/internal/rca"
+	"github.com/tasktrooper/telemetry/services/alerting/internal/selftel"
 	"github.com/tasktrooper/telemetry/services/alerting/internal/statemachine"
 	"github.com/tasktrooper/telemetry/services/alerting/internal/store"
 )
@@ -124,7 +128,11 @@ func (e *Engine) Run(ctx context.Context) error {
 	defer t.Stop()
 	defer e.elector.Release()
 	for {
-		if err := e.Tick(ctx); err != nil && ctx.Err() == nil {
+		// one root span per evaluation cycle (ADR-027); evaluations, Postgres and ClickHouse are children
+		tctx, span := selftel.StartRoot(ctx, "alert.cycle")
+		err := e.Tick(tctx)
+		selftel.End(span, err)
+		if err != nil && ctx.Err() == nil {
 			e.log.Error("cycle failed", "err", err)
 		}
 		select {
@@ -144,6 +152,8 @@ func (e *Engine) Tick(ctx context.Context) error {
 		return fmt.Errorf("leader election: %w", err)
 	}
 	e.reg.Set("tt_alert_shards_held", float64(len(held)))
+	span := trace.SpanFromContext(ctx)
+	span.SetAttributes(attribute.Int("tt.alert.shards_held", len(held)))
 	if len(held) == 0 {
 		e.reg.Set("tt_alert_leader", 0)
 		if len(e.held) > 0 {
@@ -167,7 +177,9 @@ func (e *Engine) Tick(ctx context.Context) error {
 	}
 	e.mu.Lock()
 	e.sup = sup
+	monitors := len(e.monitors)
 	e.mu.Unlock()
+	span.SetAttributes(attribute.Int("tt.alert.monitors", monitors), attribute.Int("tt.alert.kpis", len(e.kpis)))
 	e.evalMonitors(ctx, now)
 	e.remindMonitors(ctx, now)
 	e.evalKpis(ctx, now)
@@ -293,6 +305,12 @@ func (e *Engine) lock(id int64) func() {
 // evalMonitor evaluates m against ClickHouse and applies the result. escalateOnly (stream triggers) only
 // applies breaches: recovery is decided by the periodic evaluation.
 func (e *Engine) evalMonitor(ctx context.Context, m *model.Monitor, now time.Time, escalateOnly bool) {
+	// child of alert.cycle; a root span for stream-triggered evaluations
+	ctx, span := selftel.StartSpan(ctx, "alert.evaluate", append(selftel.Tenant(int64(m.OrgID), int64(m.ProjectID)),
+		attribute.String("tt.monitor.kind", m.Kind), attribute.Int64("tt.monitor.id", m.ID),
+		attribute.Bool("tt.alert.stream", escalateOnly))...)
+	var serr error
+	defer func() { selftel.End(span, serr) }()
 	ectx, cancel := context.WithTimeout(ctx, e.cfg.EvalTimeout)
 	res, err := e.ev.Eval(ectx, m, now)
 	cancel()
@@ -302,10 +320,12 @@ func (e *Engine) evalMonitor(ctx context.Context, m *model.Monitor, now time.Tim
 		e.warnOnce(fmt.Sprintf("m%d", m.ID), "monitor cannot be evaluated; marking no_data", "monitor", m.ID, "kind", m.Kind, "err", err)
 		res = eval.Result{NoData: true}
 	default:
+		serr = err
 		e.reg.Add("tt_alert_evaluations_total", 1, "kind", m.Kind, "outcome", "error")
-		e.log.Error("evaluation failed", "monitor", m.ID, "kind", m.Kind, "err", err)
+		e.log.ErrorContext(ctx, "evaluation failed", "monitor", m.ID, "kind", m.Kind, "err", err)
 		return
 	}
+	span.SetAttributes(attribute.Bool("tt.alert.breached", res.Breached), attribute.Bool("tt.alert.no_data", res.NoData))
 	e.apply(ctx, m, res, now, escalateOnly)
 }
 

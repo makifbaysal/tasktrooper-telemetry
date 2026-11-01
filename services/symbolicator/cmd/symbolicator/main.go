@@ -20,9 +20,13 @@ import (
 	"github.com/tasktrooper/telemetry/services/pkg/logx"
 	"github.com/tasktrooper/telemetry/services/symbolicator/internal/auth"
 	"github.com/tasktrooper/telemetry/services/symbolicator/internal/native"
+	"github.com/tasktrooper/telemetry/services/symbolicator/internal/selftel"
 	"github.com/tasktrooper/telemetry/services/symbolicator/internal/server"
 	"github.com/tasktrooper/telemetry/services/symbolicator/internal/store"
 )
+
+// version is set at build time (-ldflags "-X main.version=..."); TROOPER_VERSION overrides it for telemetry.
+var version = ""
 
 func main() {
 	if err := run(); err != nil {
@@ -34,23 +38,35 @@ func main() {
 func run() error {
 	cfg := config.Load()
 	log := logx.New("symbolicator", cfg.LogLevel)
+	// Self telemetry (ADR-027): a no-op unless TROOPER_DSN is set; flushed after the HTTP server drained.
+	flush := selftel.Start(context.Background(), version, log)
+	defer flush()
+	log = selftel.Logger(log)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	startCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	objs, err := store.NewS3(startCtx, store.S3Config{
-		Endpoint:  config.String("TT_S3_ENDPOINT", "http://localhost:9002"),
-		Bucket:    config.String("TT_S3_BUCKET", "tt-artifacts"),
-		AccessKey: config.String("TT_S3_ACCESS_KEY", "trooper"),
-		SecretKey: config.String("TT_S3_SECRET_KEY", "trooper-secret"),
-		Region:    config.String("TT_S3_REGION", "us-east-1"),
+		Endpoint:   config.String("TT_S3_ENDPOINT", "http://localhost:9002"),
+		Bucket:     config.String("TT_S3_BUCKET", "tt-artifacts"),
+		AccessKey:  config.String("TT_S3_ACCESS_KEY", "trooper"),
+		SecretKey:  config.String("TT_S3_SECRET_KEY", "trooper-secret"),
+		Region:     config.String("TT_S3_REGION", "us-east-1"),
+		HTTPClient: selftel.Client("s3"),
 	})
 	if err != nil {
 		return fmt.Errorf("s3: %w", err)
 	}
 
-	pool, err := pgxpool.New(ctx, cfg.PostgresURL)
+	pcfg, err := pgxpool.ParseConfig(cfg.PostgresURL)
+	if err != nil {
+		return fmt.Errorf("postgres: %w", err)
+	}
+	if selftel.Enabled() {
+		pcfg.ConnConfig.Tracer = selftel.PGTracer()
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, pcfg)
 	if err != nil {
 		return fmt.Errorf("postgres: %w", err)
 	}
@@ -67,6 +83,9 @@ func run() error {
 		}
 		rc := redis.NewClient(opt)
 		defer rc.Close()
+		if err := selftel.Redis(rc); err != nil {
+			log.Warn("redis instrumentation failed", "err", err)
+		}
 		if err := rc.Ping(startCtx).Err(); err != nil {
 			log.Warn("redis not reachable; result cache degrades to misses", "err", err)
 		}

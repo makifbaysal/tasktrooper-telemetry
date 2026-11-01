@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { ArrowDownRight, ArrowUpRight, ChevronRight, Gauge, Play, Plus, Sparkles } from 'lucide-react';
-import { Badge, Button, Card, EmptyState, MethodBadge, Section, Table, useDrawer } from '@/components/ui';
+import { Badge, Button, Card, EmptyState, Section, Table, useDrawer } from '@/components/ui';
 import { runs, scenarios, services, type LoadTestRun, type LoadTestScenario } from '@/data';
 import { ago, compact, duration, ms, pct } from '@/lib/format';
-import { SPEC, levelsOf, liveRun, runCurves, runEndpoints, useLoadTests, type RunEndpoint } from '@/lib/loadtest';
+import { SPEC, levelsOf, liveRun, useLoadTests } from '@/lib/loadtest';
 import { scenarioState } from '@/data/loadtest';
 import { RunBlockedCallout, RunState, ScenarioDrawer, ScenarioSource, useRunStarter } from './LoadTests';
 
@@ -114,14 +114,11 @@ function Delta({ now, base }: { now: number; base: number }) {
   );
 }
 
-function Comparison({ runs: list, serviceId, scName }: { runs: LoadTestRun[]; serviceId: string; scName: (r: LoadTestRun) => string }) {
+/** Whole-run results side by side (per-step numbers live on each run's page). */
+function Comparison({ runs: list, scName }: { runs: LoadTestRun[]; serviceId: string; scName: (r: LoadTestRun) => string }) {
   const nav = useNavigate();
-  const perRun = list.map((r) => ({ run: r, eps: runEndpoints(r, runCurves(r)).filter((e) => e.serviceId === serviceId) }));
-  const keys = [...new Map(perRun.flatMap((p) => p.eps).map((e) => [`${e.method} ${e.route}`, e])).values()]
-    .sort((a, b) => b.rpm - a.rpm);
+  const perRun = list.map((r) => ({ run: r }));
   const base = perRun[0];
-  const cell = (p: (typeof perRun)[number], k: RunEndpoint) => p.eps.find((e) => e.id === k.id);
-  const sumReq = (p: (typeof perRun)[number]) => p.eps.reduce((a, e) => a + e.requests, 0);
 
   return (
     <Card flush>
@@ -131,7 +128,7 @@ function Comparison({ runs: list, serviceId, scName }: { runs: LoadTestRun[]; se
             <tr>
               <th rowSpan={2} style={{ verticalAlign: 'bottom' }}>Endpoint</th>
               {perRun.map((p, i) => (
-                <th key={p.run.id} colSpan={3} style={{ textAlign: 'left', borderLeft: '1px solid var(--divider)', textTransform: 'none', letterSpacing: 0 }}>
+                <th key={p.run.id} colSpan={2} style={{ textAlign: 'left', borderLeft: '1px solid var(--divider)', textTransform: 'none', letterSpacing: 0 }}>
                   <a href={`/load-tests/runs/${p.run.id}`} onClick={(e) => { e.preventDefault(); nav(`/load-tests/runs/${p.run.id}`); }} className="row" style={{ gap: 'var(--space-2)', color: 'inherit' }}>
                     <RunState state={p.run.state} />
                     <span style={{ fontWeight: 600 }}>{p.run.id}</span>
@@ -153,23 +150,10 @@ function Comparison({ runs: list, serviceId, scName }: { runs: LoadTestRun[]; se
               <td style={{ fontWeight: 600 }}>Whole run</td>
               {perRun.map((p, i) => (
                 <RunCells key={p.run.id}
-                  p95={p.run.p95} err={p.run.errorRate} req={sumReq(p)}
+                  p95={p.run.p95} err={p.run.errorRate}
                   baseP95={i ? base.run.p95 : undefined} baseErr={i ? base.run.errorRate : undefined} />
               ))}
             </tr>
-            {keys.map((k) => (
-              <tr key={k.id}>
-                <td><div className="row" style={{ gap: 'var(--space-2)', whiteSpace: 'nowrap' }}><MethodBadge method={k.method} /><span className="mono">{k.route}</span></div></td>
-                {perRun.map((p, i) => {
-                  const c = cell(p, k);
-                  const b = cell(base, k);
-                  return c
-                    ? <RunCells key={p.run.id} p95={c.runP95} err={c.runErr} req={c.requests}
-                        baseP95={i && b ? b.runP95 : undefined} baseErr={i && b ? b.runErr : undefined} />
-                    : <td key={p.run.id} colSpan={3} className="muted" style={{ borderLeft: '1px solid var(--divider)' }}>not in this run</td>;
-                })}
-              </tr>
-            ))}
           </tbody>
         </table>
       </div>
@@ -181,11 +165,10 @@ function FragmentHeaders() {
   return <>
     <th className="is-num" style={{ borderLeft: '1px solid var(--divider)' }}>p95</th>
     <th className="is-num">Errors</th>
-    <th className="is-num">Requests</th>
   </>;
 }
 
-function RunCells({ p95, err, req, baseP95, baseErr }: { p95: number; err: number; req: number; baseP95?: number; baseErr?: number }) {
+function RunCells({ p95, err, baseP95, baseErr }: { p95: number; err: number; baseP95?: number; baseErr?: number }) {
   return <>
     <td className="is-num" style={{ borderLeft: '1px solid var(--divider)' }}>
       <div>{ms(p95)}</div>{baseP95 !== undefined && <Delta now={p95} base={baseP95} />}
@@ -193,6 +176,5 @@ function RunCells({ p95, err, req, baseP95, baseErr }: { p95: number; err: numbe
     <td className="is-num">
       <div>{pct(err)}</div>{baseErr !== undefined && <Delta now={err} base={baseErr} />}
     </td>
-    <td className="is-num muted">{compact(req)}</td>
   </>;
 }

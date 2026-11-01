@@ -19,6 +19,7 @@ import (
 	"github.com/tasktrooper/telemetry/services/api/internal/blob"
 	"github.com/tasktrooper/telemetry/services/api/internal/cloudcheck"
 	"github.com/tasktrooper/telemetry/services/api/internal/conntest"
+	"github.com/tasktrooper/telemetry/services/api/internal/selftel"
 	"github.com/tasktrooper/telemetry/services/api/internal/server"
 	"github.com/tasktrooper/telemetry/services/api/internal/slack"
 	"github.com/tasktrooper/telemetry/services/api/internal/store"
@@ -30,16 +31,34 @@ import (
 	"github.com/tasktrooper/telemetry/services/pkg/secrets"
 )
 
+// version is set at build time (-ldflags "-X main.version=..."); TROOPER_VERSION overrides it for telemetry.
+var version = ""
+
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "bootstrap" { // ADR-028: org / project / ingest key without seed SQL
+		os.Exit(bootstrapMain(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	cfg := config.Load()
 	log := logx.New("api", cfg.LogLevel)
-	if err := run(cfg, log); err != nil {
+	// Self telemetry (ADR-027): a no-op unless TROOPER_DSN is set.
+	flush := selftel.Start(context.Background(), version, log)
+	log = selftel.Logger(log)
+	err := run(cfg, log)
+	if err != nil {
 		log.Error("api stopped", "err", err)
+	}
+	flush()
+	if err != nil {
 		os.Exit(1)
 	}
 }
 
 func run(cfg config.Common, log *slog.Logger) error {
+	if selftel.Enabled() { // outgoing calls to customer clouds / AI provider get client spans (ADR-027)
+		ai.HTTPTransport = selftel.LLMTransport()
+		cloudcheck.HTTPClient = selftel.Client(http.DefaultClient, "")
+		conntest.HTTPClient = selftel.Client(http.DefaultClient, "")
+	}
 	summarizer, err := ai.NewFromEnv()
 	if err != nil {
 		return fmt.Errorf("AI configuration: %w", err)
@@ -47,7 +66,14 @@ func run(cfg config.Common, log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	pool, err := pgxpool.New(ctx, cfg.PostgresURL)
+	pcfg, err := pgxpool.ParseConfig(cfg.PostgresURL)
+	if err != nil {
+		return fmt.Errorf("postgres: %w", err)
+	}
+	if selftel.Enabled() {
+		pcfg.ConnConfig.Tracer = selftel.PGTracer()
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, pcfg)
 	if err != nil {
 		return fmt.Errorf("postgres: %w", err)
 	}
@@ -63,21 +89,33 @@ func run(cfg config.Common, log *slog.Logger) error {
 		return fmt.Errorf("clickhouse: %w", err)
 	}
 	defer ch.Close()
+	traced := ch // ClickHouse client spans for the store; Ready pings the raw conn (untraced)
+	if selftel.Enabled() {
+		addr := ""
+		if len(opts.Addr) > 0 {
+			addr = opts.Addr[0]
+		}
+		traced = selftel.ClickHouse(ch, opts.Auth.Database, addr)
+	}
 
 	key, err := secrets.Key()
 	if err != nil {
 		return err
 	}
-	st := store.New(ch, pool)
+	st := store.New(traced, pool)
 	st.SecretsKey = key
 	if st.AIQuota, err = aiquota.FromEnv(); err != nil {
 		return err
+	}
+	sym := symbolicate.New(config.String("TT_SYMBOLICATOR_URL", "http://localhost:8095"))
+	if sym != nil {
+		sym.HTTP = selftel.Client(sym.HTTP, "tt-symbolicator")
 	}
 	srv := &server.Server{
 		Store:        st,
 		AI:           summarizer,
 		CloudTest:    cloudcheck.Run,
-		Symbolicator: symbolicate.New(config.String("TT_SYMBOLICATOR_URL", "http://localhost:8095")),
+		Symbolicator: sym,
 		Auth:         auth.NewPG(pool),
 		DevLogin:     config.Bool("TT_AUTH_DEV", false),
 		SessionTTL:   config.Duration("TT_SESSION_TTL", 7*24*time.Hour),
@@ -101,7 +139,7 @@ func run(cfg config.Common, log *slog.Logger) error {
 			ClientSecret: config.String("TT_OIDC_CLIENT_SECRET", ""),
 			RedirectURL:  config.String("TT_OIDC_REDIRECT_URL", "http://localhost:8080/api/v1/auth/callback"),
 			Scopes:       config.List("TT_OIDC_SCOPES", "openid,email,profile"),
-			HTTPClient:   &http.Client{Timeout: 10 * time.Second}}
+			HTTPClient:   selftel.Client(&http.Client{Timeout: 10 * time.Second}, "oidc")}
 		if srv.OIDC.ClientID == "" {
 			return errors.New("TT_OIDC_ISSUER is set but TT_OIDC_CLIENT_ID is empty")
 		}
@@ -112,16 +150,22 @@ func run(cfg config.Common, log *slog.Logger) error {
 	srv.StateKey = key
 	srv.PublicAPIURL = config.String("TT_PUBLIC_API_URL", "http://localhost:8080")
 	srv.PublicWebhookURL = config.String("TT_PUBLIC_WEBHOOK_URL", "http://localhost:8096")
+	srv.PublicIngestURL = config.String("TT_PUBLIC_INGEST_URL", store.DefaultPublicIngestURL)
+	if _, err := store.DSN(srv.PublicIngestURL, "k", 1); err != nil {
+		return fmt.Errorf("TT_PUBLIC_INGEST_URL: %w", err)
+	}
+	srv.MaxOrgsPerUser = config.Int("TT_MAX_ORGS_PER_USER", store.DefaultMaxOrgsPerUser)
 	if id := config.String("TT_SLACK_CLIENT_ID", ""); id != "" {
 		srv.Slack = &server.SlackApp{ClientID: id, ClientSecret: config.String("TT_SLACK_CLIENT_SECRET", ""),
 			SigningSecret: config.String("TT_SLACK_SIGNING_SECRET", ""),
-			API:           &slack.Client{BaseURL: config.String("TT_SLACK_API_URL", slack.DefaultAPIURL), HTTP: &http.Client{Timeout: 10 * time.Second}}}
+			API:           &slack.Client{BaseURL: config.String("TT_SLACK_API_URL", slack.DefaultAPIURL), HTTP: selftel.Client(&http.Client{Timeout: 10 * time.Second}, "slack")}}
 		if srv.Slack.ClientSecret == "" || srv.Slack.SigningSecret == "" {
 			return errors.New("TT_SLACK_CLIENT_ID is set but TT_SLACK_CLIENT_SECRET / TT_SLACK_SIGNING_SECRET is empty")
 		}
 	}
 	switch gh, err := githubapp.FromEnv(ctx); {
 	case err == nil:
+		gh.HTTP = selftel.Client(gh.HTTP, "github")
 		srv.GitHub = &server.GitHubApp{Client: gh, Slug: config.String("TT_GITHUB_APP_SLUG", ""), WebURL: config.String("TT_GITHUB_URL", "https://github.com")}
 		if srv.GitHub.Slug == "" {
 			return errors.New("TT_GITHUB_APP_ID is set but TT_GITHUB_APP_SLUG is empty")

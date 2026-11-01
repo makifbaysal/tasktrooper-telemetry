@@ -72,6 +72,20 @@ export function Databases() {
         subtitle="Databases and caches your services call — CPU, memory, connections and the queries behind them"
         actions={<Button variant="primary" icon={<Plus size={14} />} onClick={() => setConnect(true)}>Connect database</Button>} />
 
+      {databases.length === 0 && (
+        <Card>
+          <EmptyState icon={<DbIcon />} title="No databases connected yet"
+            action={<div className="row" style={{ gap: 'var(--space-2)', justifyContent: 'center' }}>
+              <Button variant="primary" icon={<Plus size={14} />} onClick={() => setConnect(true)}>Connect database</Button>
+              <Button variant="ghost" icon={<Cloud size={14} />} onClick={() => nav('/settings/integrations')}>Cloud integrations</Button>
+            </div>}>
+            PostgreSQL, MySQL, Redis and MongoDB report CPU, memory, connections and top queries through the TaskTrooper agent
+            (<span className="mono">trooper-agent</span>), a cloud integration (RDS, ElastiCache, Cloud SQL, Neon) or a read-only direct connection.
+            Services already instrumented with an SDK link their calls to the database by name.
+          </EmptyState>
+        </Card>
+      )}
+
       {bad.length > 0 && (
         <Section title="Needs attention">
           <div className="grid grid-3">
@@ -90,7 +104,7 @@ export function Databases() {
         </Section>
       )}
 
-      <Section title="All databases" subtitle={`${databases.length} connected`}>
+      {databases.length > 0 && <Section title="All databases" subtitle={`${databases.length} connected`}>
         <Card flush>
           <Table rows={databases} rowKey={(d) => d.id} onRowClick={open} defaultSort={{ key: 'status', dir: 'desc' }} columns={[
             { key: 'name', header: 'Database', sortValue: (d) => d.name, render: (d) => (
@@ -113,7 +127,7 @@ export function Databases() {
             } },
           ]} />
         </Card>
-      </Section>
+      </Section>}
 
       {connect && <ConnectDatabase onClose={() => setConnect(false)} onDone={(id) => { setConnect(false); nav(`/infrastructure/databases/${id}`); }} />}
     </>

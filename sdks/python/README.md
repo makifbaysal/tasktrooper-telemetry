@@ -158,7 +158,7 @@ Precedence: explicit argument > `OTEL_*` > `TROOPER_*` > default (`.ai/contracts
 | `traces` / `metrics` / `logs` | — | `True` |
 | `resource_attributes`, `metric_interval_s` (30), `export_timeout_s` (10), `batch_delay_s` (5), `max_queue_size` (2048) | — | |
 
-Local dev DSN: `http://tt_dev_ingest_key@localhost:4318/1`.
+Local dev DSN: `http://<ingest-key>@localhost:4318/<project-id>` (key + project id from onboarding or `api bootstrap`).
 
 ## Example
 

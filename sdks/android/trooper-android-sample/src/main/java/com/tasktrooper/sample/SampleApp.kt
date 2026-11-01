@@ -12,8 +12,9 @@ class SampleApp : Application() {
         TaskTrooper.init(
             this,
             TrooperConfig(
-                // 10.0.2.2 = host machine from the emulator (local docker-compose ingest-gw).
-                dsn = "http://tt_dev_ingest_key@10.0.2.2:4318/1",
+                // 10.0.2.2 = host machine from the emulator (local docker-compose ingest-gw). Replace the placeholder with
+                // your DSN (onboarding or `api bootstrap`); ingest-gw rejects the placeholder key.
+                dsn = "http://<ingest-key>@10.0.2.2:4318/<project-id>",
                 app = "sample-android",
                 version = BuildConfig.VERSION_NAME,
                 environment = "development",

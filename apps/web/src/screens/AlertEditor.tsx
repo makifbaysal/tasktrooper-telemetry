@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router';
 import { Activity, BotMessageSquare, Bug, Clock, Code2, FileText, Gauge, GitMerge, Lock, Server, Sparkles, SquareFunction, TrendingUp } from 'lucide-react';
 import { Columns, TimeSeries } from '@/components/charts';
 import { Badge, Button, Callout, Card, Field, Input, MetricCard, PageHeader, Segmented, Select, StatusBadge, Toggle } from '@/components/ui';
-import { clusters, endpointsFor, groupsOfService, isApi, monitors, mutate, qs, seg, series, services, timestamps, type Monitor } from '@/data';
+import { clusters, endpointsFor, groupsOfService, monitors, mutate, qs, seg, services, timestamps, type Monitor } from '@/data';
 import { postRemote, type ApiMonitor } from '@/data/api/ops';
 import { can, denied } from '@/data/auth';
 import { serverlessFunctions } from '@/data/serverless';
@@ -106,7 +106,6 @@ type Metric = 'error_rate' | 'p95' | 'rpm';
 const METRICS: { value: Metric; label: string }[] = [{ value: 'error_rate', label: 'Error rate' }, { value: 'p95', label: 'p95 latency' }, { value: 'rpm', label: 'Throughput' }];
 const unitOf = (m: Metric) => (m === 'error_rate' ? '%' : m === 'p95' ? 'ms' : 'req/min');
 const fmtOf = (m: Metric) => (m === 'error_rate' ? (v: number) => pct(v) : m === 'p95' ? ms : (v: number) => compact(v));
-const MOCK_BASE: Record<Metric, number> = { error_rate: 0.009, p95: 320, rpm: 1400 };
 
 type Sensitivity = 'low' | 'medium' | 'high';
 const Z: Record<Sensitivity, number> = { low: 4, medium: 3, high: 2 };
@@ -122,17 +121,6 @@ const toKind = (m?: ApiMonitor): Kind | undefined => {
 };
 const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
 
-/** Rolling z-score of each point against the previous `w` points (mock anomaly preview). */
-function zScores(data: number[], w = 16): number[] {
-  return data.map((v, i) => {
-    const win = data.slice(Math.max(0, i - w), i);
-    if (win.length < 4) return 0;
-    const mean = win.reduce((a, x) => a + x, 0) / win.length;
-    const sd = Math.sqrt(win.reduce((a, x) => a + (x - mean) ** 2, 0) / win.length) || mean * 0.05 || 1;
-    return (v - mean) / sd;
-  });
-}
-const episodesOf = (hit: boolean[]) => hit.filter((h, i) => h && !hit[i - 1]).length;
 
 export function AlertEditor() {
   useData();
@@ -160,7 +148,7 @@ export function AlertEditor() {
   const [minReq, setMinReq] = useState(String(editing?.rule?.minRequests ?? 50));
   const [renotify, setRenotify] = useState(String(editing?.rule?.renotifyMin ?? 0));
   const [severity, setSeverity] = useState<string>(editing?.severity ?? 'critical');
-  const [channels, setChannels] = useState<string[]>(editing?.channels ?? (isApi ? [] : ['slack:C01PAYALRT#payments-alerts', 'pagerduty:payments']));
+  const [channels, setChannels] = useState<string[]>(editing?.channels ?? []);
   // anomaly
   const [z, setZ] = useState(String(num(q.sensitivity, editing?.rule && kind === 'anomaly' ? editing.rule.threshold : 3)));
   const [baseline, setBaseline] = useState(String(q.baseline ?? '7d'));
@@ -250,24 +238,6 @@ export function AlertEditor() {
   const llmThLabel = llmUnit === '%' ? `${llmTh}%` : llmUnit === 'ms' ? ms(Number(llmTh) || 0) : llmUnit === 'USD' ? usd(Number(llmTh) || 0) : llmUnit === 'USD/h' ? `${usd(Number(llmTh) || 0)}/h` : compact(Number(llmTh) || 0);
   const { method: lMethod, route: lRoute } = splitEndpoint(lEndpoint);
   const llmFilter = Object.fromEntries(Object.entries({ service: lService, provider: lProvider, model: lModel, route: lRoute ?? '', method: lMethod ?? '', operation: lOperation }).filter(([, v]) => v));
-  /** mock preview baseline: the AI overview of the same scope, per window */
-  const llmBase = (() => {
-    if (!isLlm || isApi) return undefined;
-    const t = aiOverview('24h', { service: lService || undefined, provider: lProvider || undefined, model: lModel || undefined }).data.totals;
-    const perWin = windowMinutes(llmWindow) / 1440;
-    switch (llmMetric) {
-      case 'cost_usd_per_hour': return (t.costUsd ?? 0) / 24;
-      case 'cost_usd': return (t.costUsd ?? 0) * perWin;
-      case 'tokens': return (t.inputTokens + t.outputTokens) * perWin;
-      case 'input_tokens': return t.inputTokens * perWin;
-      case 'output_tokens': return t.outputTokens * perWin;
-      case 'calls': return t.calls * perWin;
-      case 'errors': return t.errors * perWin;
-      case 'error_rate': return t.errorRate;
-      case 'p95_ms': return t.p95Ms;
-      case 'ttft_p95_ms': return t.ttftP95Ms ?? t.p95Ms * 0.3;
-    }
-  })();
   /** Fill the form from a template (GET /monitor-templates); scope filters stay as picked. */
   const applyTemplate = (t: MonitorTemplate) => {
     const tq = t.query ?? {};
@@ -373,7 +343,7 @@ export function AlertEditor() {
 
   const save = async () => {
     if (readOnly) return;
-    if (!isApi || !SAVABLE.has(kind) || !body) return goBack();
+    if (!SAVABLE.has(kind) || !body) return goBack();
     const v = validate();
     if (v) return setError(v);
     setSaving(true); setError(undefined);
@@ -435,7 +405,7 @@ export function AlertEditor() {
           )}
           {lagOpen && lagCluster && <LagAlertEditor scope={{ clusterId: lagCluster, group: lagGroup?.id }} onClose={() => setLagOpen(false)}
             onSaved={() => { setLagOpen(false); if (svcParam) nav(back); else nav('/infrastructure/queues'); }} />}
-          {isApi && kind === 'log_match' && (
+          {kind === 'log_match' && (
             <Callout icon={<Sparkles size={16} />}>Log query monitors can’t be created from the editor yet — define them as YAML in the repository (<span className="mono">.trooper/monitors/</span>).</Callout>
           )}
 
@@ -701,20 +671,15 @@ export function AlertEditor() {
 
         <div className="stack" style={{ position: 'sticky', top: 'calc(var(--topbar-h) + var(--space-4))' }}>
           {kind === 'metric_threshold' && <ThresholdPreview body={body!} metric={metric} below={below} thValue={thValue} thLabel={metric === 'error_rate' ? `${threshold}%` : `${threshold} ${unitOf(metric)}`} />}
-          {kind === 'anomaly' && <AnomalyPreview body={body!} metric={metric} z={zValue} direction={direction} seed={`${service}|${endpoint}|${metric}`} />}
+          {kind === 'anomaly' && <AnomalyPreview body={body!} z={zValue} direction={direction} />}
           {kind === 'composite' && <CompositePreview picked={monitors.filter((m) => picked.includes(m.id))} op={compOp} />}
-          {kind === 'job_missed' && <JobPreview body={body!} every={every} grace={grace} seed={`${service}|${process}`} />}
-          {kind === 'error_new' && <ErrorNewPreview body={body!} seed={errScope} />}
-          {(kind === 'infra' || kind === 'faas') && <RulePreview cap={(kind === 'infra' && INFRA_RATIO.has(infraMetric)) || (kind === 'faas' && faasMetric === 'error_rate') ? 1 : undefined} body={body!} seed={JSON.stringify(body)} threshold={ruleValue} below={op === '<'} thLabel={ruleLabel}
+          {kind === 'job_missed' && <JobPreview body={body!} every={every} grace={grace} />}
+          {kind === 'error_new' && <ErrorNewPreview body={body!} />}
+          {(kind === 'infra' || kind === 'faas') && <RulePreview cap={(kind === 'infra' && INFRA_RATIO.has(infraMetric)) || (kind === 'faas' && faasMetric === 'error_rate') ? 1 : undefined} body={body!} threshold={ruleValue} below={op === '<'} thLabel={ruleLabel}
             label={kind === 'infra' ? INFRA_METRIC_LABEL[infraMetric] : FAAS_METRICS.find((m) => m.value === faasMetric)!.label}
             format={kind === 'infra' ? (INFRA_RATIO.has(infraMetric) ? (v: number) => pct(v, 0) : (v: number) => compact(v)) : relative ? (v: number) => `${v.toFixed(2)}×` : faasFmt(faasMetric)} />}
-          {kind === 'llm' && <RulePreview body={body!} seed={JSON.stringify(body)} threshold={llmValue} below={op === '<'} thLabel={llmThLabel}
-            label={llmMeta(llmMetric).label} format={llmFmt(llmMetric)} cap={llmMetric === 'error_rate' ? 1 : undefined} base={llmBase} />}
-          {kind === 'metric_threshold' && !isApi && (
-            <Card title={<span className="row"><Sparkles size={14} color="var(--accent)" />Recommendation</span>}>
-              <p className="secondary">14-day p99 error rate for this endpoint is <strong>1.9%</strong>. A 2% threshold with a 5-minute window would have caught the 2 incidents on Oct 19 and Oct 22 with no false positives.</p>
-            </Card>
-          )}
+          {kind === 'llm' && <RulePreview body={body!} threshold={llmValue} below={op === '<'} thLabel={llmThLabel}
+            label={llmMeta(llmMetric).label} format={llmFmt(llmMetric)} cap={llmMetric === 'error_rate' ? 1 : undefined} />}
         </div>
       </div>
       </fieldset>
@@ -733,7 +698,7 @@ function ForField({ value, onChange, label = 'For' }: { value: string; onChange:
 
 /** Api replay of the rule over the last 24 h (`POST /monitors/preview`); null until it lands or when the api can't preview the kind. */
 function useApiPreview(body: object): Preview | null {
-  return isApi ? postRemote<Preview | null>(`alert-editor:${JSON.stringify(body)}`, `/monitors/preview${qs({ range: '24h' })}`, body, null) : null;
+  return postRemote<Preview | null>(`alert-editor:${JSON.stringify(body)}`, `/monitors/preview${qs({ range: '24h' })}`, body, null);
 }
 function fit(d: number[], n: number) {
   return d.length >= n ? d.slice(d.length - n) : [...Array<number>(n - d.length).fill(0), ...d];
@@ -750,16 +715,8 @@ const alerts = (n: number) => `${n} alert${n === 1 ? '' : 's'}`;
 function ThresholdPreview({ body, metric, below, thValue, thLabel }: { body: object; metric: Metric; below: boolean; thValue: number; thLabel: string }) {
   const ts = timestamps('24h');
   const p = useApiPreview(body);
-  let data: number[];
-  let episodes: number;
-  if (isApi) {
-    data = fit(p?.data ?? [], ts.length);
-    episodes = p?.episodes ?? 0;
-  } else {
-    data = series('editor', '24h', { base: MOCK_BASE.error_rate, noise: 0.35, spikeAt: 0.62, spikeMul: 3.2 });
-    if (metric !== 'error_rate') data = series(`editor-${metric}`, '24h', { base: MOCK_BASE[metric], noise: 0.35, spikeAt: 0.62, spikeMul: metric === 'rpm' ? 0.3 : 3.2 });
-    episodes = episodesOf(data.map((v) => (below ? v < thValue : v > thValue)));
-  }
+  const data = fit(p?.data ?? [], ts.length);
+  const episodes = p?.episodes ?? 0;
   const breaches = data.filter((v) => (below ? v < thValue : v > thValue)).length;
   return (
     <PreviewCard value={alerts(episodes)} hint={<>would have fired · {breaches} of {data.length} intervals {below ? 'below' : 'above'} {thLabel}</>}>
@@ -770,16 +727,15 @@ function ThresholdPreview({ body, metric, below, thValue, thLabel }: { body: obj
   );
 }
 
-function AnomalyPreview({ body, metric, z, direction, seed }: { body: object; metric: Metric; z: number; direction: 'up' | 'down' | 'both'; seed: string }) {
+function AnomalyPreview({ body, z, direction }: { body: object; z: number; direction: 'up' | 'down' | 'both' }) {
   const ts = timestamps('24h');
   const p = useApiPreview(body);
-  if (isApi && !p) return <NoPreview />;
-  // api: data = deviation in σ per bucket; mock: rolling z of a plausible metric curve
-  const dev = isApi ? fit(p!.data, ts.length)
-    : zScores(series(`anomaly-${seed}`, '24h', { base: MOCK_BASE[metric], noise: 0.3, spikeAt: 0.7, spikeMul: metric === 'rpm' ? 0.35 : 3, spikeWidth: 2 }));
+  if (!p) return <NoPreview />;
+  // data = deviation in σ per bucket
+  const dev = fit(p.data, ts.length);
   const shown = direction === 'down' ? dev.map((v) => -v) : direction === 'both' ? dev.map(Math.abs) : dev;
   const hits = shown.map((v) => v > z);
-  const episodes = isApi ? p!.episodes : episodesOf(hits);
+  const episodes = p.episodes;
   return (
     <PreviewCard value={alerts(episodes)} hint={<>would have fired · {hits.filter(Boolean).length} of {shown.length} intervals beyond {z}σ {direction === 'down' ? 'below' : direction === 'both' ? 'from' : 'above'} the baseline</>}>
       <TimeSeries timestamps={ts} height={280} area format={(v) => `${v.toFixed(1)}σ`}
@@ -814,31 +770,12 @@ function CompositePreview({ picked, op }: { picked: Monitor[]; op: 'and' | 'or' 
   );
 }
 
-function JobPreview({ body, every, grace, seed }: { body: object; every: number; grace: number; seed: string }) {
+function JobPreview({ body, every, grace }: { body: object; every: number; grace: number }) {
   const ts = timestamps('24h');
   const p = useApiPreview(body);
-  if (isApi && !p) return <NoPreview />;
-  let runs: number[];
-  let episodes: number;
-  if (isApi) {
-    runs = fit(p!.data, ts.length);
-    episodes = p!.episodes;
-  } else {
-    // a run every `every` minutes; one outage around 60% of the window
-    const step = ts[1] - ts[0];
-    const gapFrom = ts[Math.floor(ts.length * 0.6)];
-    const gapTo = gapFrom + Math.max(3, Math.ceil(((every + grace) * 60_000 * 1.5) / step)) * step;
-    let h = 0; for (const c of seed) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-    const offset = (h % every) * 60_000;
-    runs = ts.map((t) => {
-      if (t >= gapFrom && t < gapTo) return 0;
-      let n = 0;
-      for (let x = Math.ceil((t - offset) / (every * 60_000)) * every * 60_000 + offset; x < t + step; x += every * 60_000) n++;
-      return n;
-    });
-    const missed = (gapTo - gapFrom) > (every + grace) * 60_000;
-    episodes = missed ? 1 : 0;
-  }
+  if (!p) return <NoPreview />;
+  const runs = fit(p.data, ts.length);
+  const episodes = p.episodes;
   return (
     <PreviewCard value={alerts(episodes)} hint={<>would have fired · a run is expected every {every >= 60 ? `${every / 60} h` : `${every} min`} (+{grace} min grace)</>}>
       <Columns timestamps={ts} height={220} format={(v) => compact(v)} series={[{ id: 'runs', label: 'Successful runs', data: runs, color: 'var(--series-1)' }]} />
@@ -846,13 +783,12 @@ function JobPreview({ body, every, grace, seed }: { body: object; every: number;
   );
 }
 
-function ErrorNewPreview({ body, seed }: { body: object; seed: string }) {
+function ErrorNewPreview({ body }: { body: object }) {
   const ts = timestamps('24h');
   const p = useApiPreview(body);
-  if (isApi && !p) return <NoPreview />;
-  const groups = isApi ? fit(p!.data, ts.length)
-    : series(`err-new-${seed}`, '24h', { base: seed === '*' ? 0.35 : 0.12, noise: 0.9, spikeAt: 0.8, spikeMul: 8, spikeWidth: 1 }).map((v) => Math.floor(v * 1.6));
-  const total = isApi ? p!.episodes : groups.reduce((a, v) => a + v, 0);
+  if (!p) return <NoPreview />;
+  const groups = fit(p.data, ts.length);
+  const total = p.episodes;
   return (
     <PreviewCard value={alerts(total)} hint="would have fired · one per new error group (first occurrence only)">
       <Columns timestamps={ts} height={220} format={(v) => compact(v)} series={[{ id: 'g', label: 'New error groups', data: groups, color: 'var(--series-8)' }]} />
@@ -860,23 +796,17 @@ function ErrorNewPreview({ body, seed }: { body: object; seed: string }) {
   );
 }
 
-/** infra / faas / llm: api replay when available, else a plausible curve around the threshold — or around `base` (mock). */
-function RulePreview({ body, seed, threshold, below, thLabel, label, format, cap, base }: {
-  body: object; seed: string; threshold: number; below: boolean; thLabel: string; label: string; format: (v: number) => string; cap?: number; base?: number;
+/** infra / faas / llm: the api replay of the rule. */
+function RulePreview({ body, threshold, below, thLabel, label, format, cap }: {
+  body: object; threshold: number; below: boolean; thLabel: string; label: string; format: (v: number) => string; cap?: number;
 }) {
   const ts = timestamps('24h');
   const p = useApiPreview(body);
-  if (isApi && !p) return <NoPreview />;
+  if (!p) return <NoPreview />;
   const th = Number.isFinite(threshold) ? threshold : 0;
-  const data = isApi ? fit(p!.data, ts.length)
-    : base !== undefined && base > 0
-      ? series(`rule-${seed}`, '24h', { base, noise: 0.3, spikeAt: 0.7, spikeMul: below ? 0.4 : 2.4, spikeWidth: 2 })
-        .map((v) => (cap === undefined ? v : Math.min(cap, v)))
-      : series(`rule-${seed}`, '24h', { base: th > 0 ? th * (below ? 1.4 : 0.62) : 0.3, noise: 0.3, spikeAt: 0.7, spikeMul: below ? 0.4 : th > 0 ? 1.9 : 9, spikeWidth: 2 })
-      .map((v) => (th === 0 || Number.isInteger(th) && th >= 1 && th < 50 ? Math.floor(v) : v))
-      .map((v) => (cap === undefined ? v : Math.min(cap, v)));
+  const data = fit(p.data, ts.length).map((v) => (cap === undefined ? v : Math.min(cap, v)));
   const hits = data.map((v) => (below ? v < th : v > th));
-  const episodes = isApi ? p!.episodes : episodesOf(hits);
+  const episodes = p.episodes;
   return (
     <PreviewCard value={alerts(episodes)} hint={<>would have fired · {hits.filter(Boolean).length} of {data.length} intervals {below ? 'below' : 'above'} {thLabel}</>}>
       <TimeSeries timestamps={ts} height={280} area format={format} threshold={{ value: th, label: thLabel }}

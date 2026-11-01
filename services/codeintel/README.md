@@ -45,7 +45,37 @@ VALUES (1, 'local', 'acme/shop', 'main', '/path/to/checkout');
 | `TT_CODEINTEL_CONCURRENCY` | `2` | parallel analyses (one per repository, always) |
 | `TT_LOG_LEVEL` | `info` | |
 
-The runtime image needs the `git` CLI (`Dockerfile`: alpine + git; build context `services/`).
+The runtime image needs the `git` CLI (`Dockerfile`: alpine + git; build context = repo root, ADR-027).
+
+## Self-observability (ADR-027, contracts §27)
+
+codeintel reports its own traces, logs and runtime metrics to the platform's self project with the Go SDK
+(`trooper-go`, `replace` → `sdks/go`). Without `TROOPER_DSN` nothing is started and behaviour is unchanged;
+`/metrics` stays as is.
+
+| Env | Default | |
+|---|---|---|
+| `TROOPER_DSN` | — | self project ingest DSN (dev: the DSN `make self` prints, `http://<ingest-key>@localhost:4318/<self-project-id>`) |
+| `TROOPER_SERVICE` | `tt-codeintel` | service name override |
+| `TROOPER_ENV` | `TT_ENV`, else `development` | |
+| `TROOPER_VERSION` | build version | deploy marker |
+| `TROOPER_PROFILING` | `false` | continuous profiling (`TROOPER_PROFILING_*` tune it) |
+| `TROOPER_LLM_CAPTURE_CONTENT` | `false` | record LLM prompts/completions (keep off: customer source code) |
+
+What is traced:
+
+- **HTTP server:** webhook routes (`POST /v1/webhooks/github|gitlab|bitbucket`) with route templates; `/healthz` and
+  `/metrics` produce no spans.
+- **Analysis runs:** one root span `codeintel.analyze` per run with `tt.org_id`, `tt.project_id`, `tt.repo.id`,
+  `tt.repo.provider`, `tt.analysis.full`, `tt.analysis.result`, item / observed / suggestion / scenario / LLM item counts and
+  `tt.analysis.llm_status`. Postgres (pgx, sanitized SQL), ClickHouse (`db.system=clickhouse` client spans, sanitized SQL)
+  and LLM calls are children; queries outside a span (scheduler polls) are not traced.
+- **LLM:** the Anthropic client uses the SDK's `llm` transport → GenAI client spans (provider, configured model, input /
+  output / cache tokens, finish reason) for the AI monitoring screen; content capture is off. The model id still comes
+  from `TT_CODEINTEL_MODEL`.
+- **GitHub API** (GitHub App installation tokens): client spans (`peer.service=github`). Clones run through the `git` CLI and
+  are not traced.
+- **Logs:** the JSON `slog` output is kept and also exported as OTel logs (with `trace_id` / `span_id`).
 
 ## Repository access
 

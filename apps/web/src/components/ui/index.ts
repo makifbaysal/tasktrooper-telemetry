@@ -9,3 +9,4 @@ export * from './misc';
 export * from './Drawer';
 export * from './Choice';
 export * from './Menu';
+export * from './SdkSetup';

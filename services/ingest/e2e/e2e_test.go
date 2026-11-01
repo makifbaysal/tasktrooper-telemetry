@@ -4,7 +4,7 @@
 // in-process, sends spans with the real OpenTelemetry Go SDK (OTLP/HTTP), a RUM JSON batch, OTLP/JSON
 // logs and metrics, a signed Vercel drain request (logs + speed insights), broker topic / queue-age metrics,
 // then waits until the rows show up in ClickHouse (raw tables and rollups). Test data uses the service
-// prefix "ingest2-e2e-" in project 1 and is deleted at the end (plus the temporary Vercel integration row).
+// prefix "ingest2-e2e-" in a fixture org/project/ingest key the test creates (ADR-028: no seed) and is deleted at the end.
 //
 //	cd services/ingest && go test -tags e2e -v ./e2e/
 package e2e
@@ -38,7 +38,11 @@ import (
 	"github.com/tasktrooper/telemetry/services/ingest/internal/vercel"
 )
 
-const ingestKey = "tt_dev_ingest_key"
+// Fixture tenant created by the test (no seed data, ADR-028).
+var (
+	ingestKey string
+	projectID int64
+)
 
 func TestEndToEnd(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
@@ -52,7 +56,7 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Vercel integration row (project 1) whose drain secret comes from an env reference.
+	// Vercel integration row (fixture project) whose drain secret comes from an env reference.
 	const drainSecret = "e2e-drain-secret"
 	t.Setenv("TT_E2E_VERCEL_DRAIN_SECRET", drainSecret)
 	pg, err := pgxpool.New(ctx, app.GatewayFromEnv().Common.PostgresURL)
@@ -60,10 +64,29 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pg.Close()
+	ingestKey = "tt_e2e_" + svc
+	var orgID int64
+	if err := pg.QueryRow(ctx, `INSERT INTO orgs (name, plan) VALUES ($1, 'team') RETURNING id`, svc).Scan(&orgID); err != nil {
+		t.Fatalf("insert org: %v", err)
+	}
+	if err := pg.QueryRow(ctx, `INSERT INTO projects (org_id, name, slug) VALUES ($1, $2, $2) RETURNING id`, orgID, svc).Scan(&projectID); err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+	if _, err := pg.Exec(ctx, `INSERT INTO api_keys (project_id, name, kind, hash, prefix) VALUES ($1, 'e2e ingest', 'ingest', digest($2::text, 'sha256'), left($2::text, 8))`,
+		projectID, ingestKey); err != nil {
+		t.Fatalf("insert ingest key: %v", err)
+	}
+	defer func() {
+		bg := context.Background()
+		_, _ = pg.Exec(bg, `DELETE FROM api_keys WHERE project_id = $1`, projectID)
+		_, _ = pg.Exec(bg, `DELETE FROM integrations WHERE project_id = $1`, projectID)
+		_, _ = pg.Exec(bg, `DELETE FROM projects WHERE id = $1`, projectID)
+		_, _ = pg.Exec(bg, `DELETE FROM orgs WHERE id = $1`, orgID)
+	}()
 	var integrationID int64
 	cfgJSON := fmt.Sprintf(`{"projectMap":{"%[1]s-vercel":"%[1]s-vercel","prj_%[1]s":"%[1]s-vweb"},"drainSecretRef":"env:TT_E2E_VERCEL_DRAIN_SECRET","verifyToken":"tok-%[1]s"}`, svc)
-	if err := pg.QueryRow(ctx, `INSERT INTO integrations (project_id, provider, name, config, status) VALUES (1, 'vercel', $1, $2::jsonb, 'ok') RETURNING id`,
-		svc, cfgJSON).Scan(&integrationID); err != nil {
+	if err := pg.QueryRow(ctx, `INSERT INTO integrations (project_id, provider, name, config, status) VALUES ($3, 'vercel', $1, $2::jsonb, 'ok') RETURNING id`,
+		svc, cfgJSON, projectID).Scan(&integrationID); err != nil {
 		t.Fatalf("insert integration: %v", err)
 	}
 	defer func() { _, _ = pg.Exec(context.Background(), `DELETE FROM integrations WHERE id = $1`, integrationID) }()
@@ -275,33 +298,33 @@ func TestEndToEnd(t *testing.T) {
 	}
 }
 
-// cleanup removes this run's rows (service / app / cluster prefixed with the run's svc) from project 1.
+// cleanup removes this run's rows (service / app / cluster prefixed with the run's svc) from the fixture project.
 func cleanup(t *testing.T, conn clickhouse.Conn, svc string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	like := svc + "%"
 	stmts := []string{
-		"ALTER TABLE spans DELETE WHERE project_id = 1 AND service LIKE '%s'",
-		"ALTER TABLE red_1m DELETE WHERE project_id = 1 AND service LIKE '%s'",
-		"ALTER TABLE red_1h DELETE WHERE project_id = 1 AND service LIKE '%s'",
-		"ALTER TABLE edges_1m DELETE WHERE project_id = 1 AND parent_service LIKE '%s'",
-		"ALTER TABLE callers_1m DELETE WHERE project_id = 1 AND service LIKE '%s'",
-		"ALTER TABLE consumer_1m DELETE WHERE project_id = 1 AND service LIKE '%s'",
-		"ALTER TABLE errors_1h DELETE WHERE project_id = 1 AND service LIKE '%s'",
-		"ALTER TABLE trace_index DELETE WHERE project_id = 1 AND arrayExists(s -> s LIKE '%s', services)",
-		"ALTER TABLE logs DELETE WHERE project_id = 1 AND service LIKE '%s'",
-		"ALTER TABLE log_patterns_1m DELETE WHERE project_id = 1 AND service LIKE '%s'",
-		"ALTER TABLE metrics DELETE WHERE project_id = 1 AND (service LIKE '%[1]s' OR name LIKE '%[1]s')",
-		"ALTER TABLE rum_events DELETE WHERE project_id = 1 AND app LIKE '%s'",
-		"ALTER TABLE rum_views_1m DELETE WHERE project_id = 1 AND app LIKE '%s'",
-		"ALTER TABLE rum_vitals_1m DELETE WHERE project_id = 1 AND app LIKE '%s'",
-		"ALTER TABLE rum_resources_1m DELETE WHERE project_id = 1 AND app LIKE '%s'",
-		"ALTER TABLE db_1m DELETE WHERE project_id = 1 AND database_id LIKE '%s'",
-		"ALTER TABLE broker_topics_1m DELETE WHERE project_id = 1 AND cluster_id LIKE '%s'",
-		"ALTER TABLE broker_lag_1m DELETE WHERE project_id = 1 AND cluster_id LIKE '%s'",
+		"ALTER TABLE spans DELETE WHERE project_id = %[2]d AND service LIKE '%[1]s'",
+		"ALTER TABLE red_1m DELETE WHERE project_id = %[2]d AND service LIKE '%[1]s'",
+		"ALTER TABLE red_1h DELETE WHERE project_id = %[2]d AND service LIKE '%[1]s'",
+		"ALTER TABLE edges_1m DELETE WHERE project_id = %[2]d AND parent_service LIKE '%[1]s'",
+		"ALTER TABLE callers_1m DELETE WHERE project_id = %[2]d AND service LIKE '%[1]s'",
+		"ALTER TABLE consumer_1m DELETE WHERE project_id = %[2]d AND service LIKE '%[1]s'",
+		"ALTER TABLE errors_1h DELETE WHERE project_id = %[2]d AND service LIKE '%[1]s'",
+		"ALTER TABLE trace_index DELETE WHERE project_id = %[2]d AND arrayExists(s -> s LIKE '%[1]s', services)",
+		"ALTER TABLE logs DELETE WHERE project_id = %[2]d AND service LIKE '%[1]s'",
+		"ALTER TABLE log_patterns_1m DELETE WHERE project_id = %[2]d AND service LIKE '%[1]s'",
+		"ALTER TABLE metrics DELETE WHERE project_id = %[2]d AND (service LIKE '%[1]s' OR name LIKE '%[1]s')",
+		"ALTER TABLE rum_events DELETE WHERE project_id = %[2]d AND app LIKE '%[1]s'",
+		"ALTER TABLE rum_views_1m DELETE WHERE project_id = %[2]d AND app LIKE '%[1]s'",
+		"ALTER TABLE rum_vitals_1m DELETE WHERE project_id = %[2]d AND app LIKE '%[1]s'",
+		"ALTER TABLE rum_resources_1m DELETE WHERE project_id = %[2]d AND app LIKE '%[1]s'",
+		"ALTER TABLE db_1m DELETE WHERE project_id = %[2]d AND database_id LIKE '%[1]s'",
+		"ALTER TABLE broker_topics_1m DELETE WHERE project_id = %[2]d AND cluster_id LIKE '%[1]s'",
+		"ALTER TABLE broker_lag_1m DELETE WHERE project_id = %[2]d AND cluster_id LIKE '%[1]s'",
 	}
 	for _, s := range stmts {
-		q := fmt.Sprintf(s, like)
+		q := fmt.Sprintf(s, like, projectID)
 		if err := conn.Exec(ctx, q); err != nil {
 			t.Logf("cleanup (ignored): %v: %s", err, q)
 		}

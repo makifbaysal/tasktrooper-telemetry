@@ -34,15 +34,21 @@ func TestIntegrationRepoHooks(t *testing.T) {
 	if err != nil {
 		t.Skipf("postgres: %v", err)
 	}
-	defer st.Close()
+	t.Cleanup(st.Close) // registered first: runs after the row cleanup
 	cleanup := func() {
 		_, _ = st.DB.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, hookProject)
+		_, _ = st.DB.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, hookProject)
 		_, _ = st.DB.Exec(context.Background(), `DELETE FROM codeintel_webhook_deliveries WHERE id LIKE '%:it-9402-%'`)
 	}
 	cleanup()
 	t.Cleanup(cleanup)
-	if _, err := st.DB.Exec(ctx, `INSERT INTO projects (id, org_id, name, slug) VALUES ($1, 1, 'codeintel-hooks-it', 'codeintel-hooks-it-9402')`, hookProject); err != nil {
-		t.Fatal(err)
+	for _, q := range []string{ // own org (org id = project id), no seeded rows
+		`INSERT INTO orgs (id, name) VALUES ($1, 'codeintel-hooks-it')`,
+		`INSERT INTO projects (id, org_id, name, slug) VALUES ($1, $1, 'codeintel-hooks-it', 'codeintel-hooks-it-9402')`,
+	} {
+		if _, err := st.DB.Exec(ctx, q, hookProject); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Setenv("IT_HOOK_SECRET", "s3cret-one")
 	var gl, bb int64

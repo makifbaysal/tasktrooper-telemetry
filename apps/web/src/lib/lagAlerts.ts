@@ -1,6 +1,6 @@
 import {
-  RANGE_POINTS, clusterOf, consumerGroups, isApi, isQueueKind, lagSeries, monitors, mutate, qs, readLag, services, timestamps, topicOf,
-  type BrokerKind, type ConsumerGroup, type GroupRead, type Monitor, type QueueRule, type Severity, type TimeRange,
+  clusterOf, consumerGroups, isQueueKind, monitors, mutate, qs, services, timestamps,
+  type BrokerKind, type ConsumerGroup, type Monitor, type QueueRule, type Severity, type TimeRange,
 } from '@/data';
 import { postRemote } from '@/data/api/ops';
 import { compact } from '@/lib/format';
@@ -27,51 +27,11 @@ export const lagMetricsFor = (kind: BrokerKind | undefined) =>
   LAG_METRICS.filter((m) => !(m.kafkaOnly && kind && isQueueKind(kind)) && !(m.queueOnly && kind !== 'sqs' && kind !== 'pubsub'));
 
 export const groupOf = (r: Pick<QueueRule, 'clusterId' | 'group'>) => consumerGroups.find((g) => g.clusterId === r.clusterId && g.id === r.group);
-const readsOf = (g: ConsumerGroup, topic?: string) => g.reads.filter((x) => !topic || x.topic === topic);
 
-const stepMin = (range: TimeRange) => RANGE_POINTS[range].stepMs / 60_000;
 
 /** The value the rule compares, over time. */
 export function ruleSeries(r: LagRule, range: TimeRange): number[] {
-  if (isApi) return evaluate(r, range).data;
-  const g = groupOf(r);
-  const n = timestamps(range).length;
-  if (!g) return Array(n).fill(0);
-  const reads = readsOf(g, r.topic);
-  const sum = (f: (x: GroupRead) => number[]) => reads.map(f).reduce((a, s) => a.map((v, i) => v + s[i]), Array(n).fill(0));
-  const lag = sum((x) => lagSeries(g, x, range));
-  switch (r.metric) {
-    case 'lag': return lag;
-    case 'time_behind': {
-      const rate = reads.reduce((a, x) => a + (topicOf(g.clusterId, x.topic)?.inPerSec ?? 0), 0) || 1;
-      return lag.map((v) => v / rate);
-    }
-    case 'partition_lag': {
-      const total = reads.reduce((a, x) => a + readLag(x), 0) || 1;
-      const max = Math.max(...reads.flatMap((x) => x.partitionLag));
-      return lag.map((v) => (v * max) / total);
-    }
-    case 'growing': {
-      // trend of the smoothed lag (msgs/min), so single noisy points don't count as growth
-      const w = 5;
-      const smooth = lag.map((_, i) => { const xs = lag.slice(Math.max(0, i - w + 1), i + 1); return xs.reduce((x, y) => x + y, 0) / xs.length; });
-      const k = 4;
-      return smooth.map((v, i) => (i < k + w ? 0 : (v - smooth[i - k]) / (k * stepMin(range))));
-    }
-    case 'not_drained': {
-      // hours since lag was last below 5% of its peak
-      const peak = Math.max(...lag) || 1;
-      let since = 0;
-      return lag.map((v) => { since = v < peak * 0.05 ? 0 : since + stepMin(range) / 60; return since; });
-    }
-    case 'oldest_age': {
-      // the age follows the backlog: scale the reported oldest age by the lag curve
-      const total = reads.reduce((a, x) => a + readLag(x), 0) || 1;
-      const age = Math.max(0, ...reads.map((x) => x.oldestAgeS ?? readLag(x) / (x.consumePerSec || 1)));
-      return lag.map((v) => (age * v) / total);
-    }
-    case 'rebalances': return lag.map((_, i) => Math.max(0, g.rebalancesPerHour * (0.7 + 0.6 * (((i * 7919) % 13) / 13))));
-  }
+  return evaluate(r, range).data;
 }
 
 /** Threshold drawn on the preview; `growing` fires above 0 msgs/min. */
@@ -98,26 +58,14 @@ function lagMonitorBody(r: LagRule, extra: { name?: string; severity?: Severity;
   };
 }
 
-/** Breach episodes in the series: values above the threshold for at least `forMin`. Api mode: POST /monitors/preview. */
+/** Breach episodes in the series: values above the threshold for at least `forMin` (POST /monitors/preview). */
 export function evaluate(r: LagRule, range: TimeRange): Evaluation {
-  if (isApi) {
-    const n = timestamps(range).length;
-    const fallback: Evaluation = { data: Array(n).fill(0), th: ruleThreshold(r), episodes: 0, firingNow: false, now: 0 };
-    const body = lagMonitorBody(r);
-    const out = postRemote<Evaluation>(`lag-preview:${range}:${JSON.stringify(body.queue)}`, `/monitors/preview${qs({ range })}`, body, fallback);
-    const d = out.data ?? [];
-    return { ...out, data: d.length >= n ? d.slice(d.length - n) : [...Array(n - d.length).fill(0), ...d] };
-  }
-  const data = ruleSeries(r, range);
-  const th = ruleThreshold(r);
-  const need = Math.max(1, Math.ceil(r.forMin / stepMin(range)));
-  let run = 0, episodes = 0, firingNow = false;
-  data.forEach((v, i) => {
-    run = v > th ? run + 1 : 0;
-    if (run === need) episodes++;
-    if (i === data.length - 1) firingNow = run >= need;
-  });
-  return { data, th, episodes, firingNow, now: data[data.length - 1] };
+  const n = timestamps(range).length;
+  const fallback: Evaluation = { data: Array(n).fill(0), th: ruleThreshold(r), episodes: 0, firingNow: false, now: 0 };
+  const body = lagMonitorBody(r);
+  const out = postRemote<Evaluation>(`lag-preview:${range}:${JSON.stringify(body.queue)}`, `/monitors/preview${qs({ range })}`, body, fallback);
+  const d = out.data ?? [];
+  return { ...out, data: d.length >= n ? d.slice(d.length - n) : [...Array(n - d.length).fill(0), ...d] };
 }
 
 export function describeRule(r: LagRule): string {
@@ -169,27 +117,24 @@ export interface LagAlertDraft { rule: LagRule; name: string; severity: Severity
 
 /**
  * Monitor targets read "service · process" for instrumented consumers so they also show on the service's Alerts tab.
- * Api mode: shown right away, POSTed to /monitors in the background (the list refreshes when it lands).
+ * Shown right away, POSTed to /monitors in the background (the list refreshes when it lands).
  */
 export function addLagMonitor(d: LagAlertDraft): Monitor {
   const g = groupOf(d.rule);
   const svc = services.find((s) => s.id === g?.serviceId);
   const target = svc ? `${svc.name} · ${g?.process ?? d.rule.group}` : `${clusterOf(d.rule.clusterId)?.name ?? d.rule.clusterId} · ${d.rule.group}`;
-  const { firingNow } = isApi ? { firingNow: false } : evaluate(d.rule, '1h');
   const m: Monitor = {
     id: `m${monitors.length + 1}-${Date.now() % 10000}`, name: d.name, kind: 'consumer_lag', target, condition: describeRule(d.rule),
-    severity: d.severity, state: firingNow ? 'pending' : 'ok', source: 'manual', lastChange: Date.now(), channels: d.channels, queue: asRule(d.rule),
+    severity: d.severity, state: 'ok', source: 'manual', lastChange: Date.now(), channels: d.channels, queue: asRule(d.rule),
   };
   monitors.push(m);
   emit();
-  if (isApi) {
-    const body = lagMonitorBody(d.rule, { name: d.name, severity: d.severity, channels: d.channels, service: svc?.id, process: svc ? g?.process ?? d.rule.group : undefined });
-    mutate('POST', '/monitors', body, ['/monitors']).catch((e: unknown) => {
-      console.warn('[data] POST /monitors', e);
-      const i = monitors.indexOf(m);
-      if (i >= 0) monitors.splice(i, 1);
-      emit();
-    });
-  }
+  const body = lagMonitorBody(d.rule, { name: d.name, severity: d.severity, channels: d.channels, service: svc?.id, process: svc ? g?.process ?? d.rule.group : undefined });
+  mutate('POST', '/monitors', body, ['/monitors']).catch((e: unknown) => {
+    console.warn('[data] POST /monitors', e);
+    const i = monitors.indexOf(m);
+    if (i >= 0) monitors.splice(i, 1);
+    emit();
+  });
   return m;
 }

@@ -42,7 +42,7 @@ Dört ana yetenek:
 apps/web/               Dashboard (React 19 + Vite + TypeScript)
 services/               Go servisleri: pkg, ingest (gw + writer), api, alerting (engine + notifier), collector, integrations (trooper-cloud), symbolicator, codeintel, loadtest (ctl + runner)
 sdks/                   go, jvm, dotnet, js/packages (browser, react, vue, angular, react-native, node), android, ios, flutter
-tools/                  demo (canlı demo dünyası, `make demo`), trooper-cli (sourcemap/dSYM/mapping upload)
+tools/                  trooper-cli (sourcemap/dSYM/mapping upload)
 proto/                  RUM wire şeması
 deploy/                 docker-compose + ClickHouse/Postgres şemaları
 skills/                 Agent Skills (kodlama agent'ları için; .claude/skills symlink'i)
@@ -71,7 +71,8 @@ pnpm build        # typecheck + production build
 pnpm typecheck
 ```
 
-Backend: `docker compose -f deploy/docker-compose.yml up -d` (altyapı), `make migrate`, `make build`, `make test`. Detay: `services/*/README.md`, `sdks/*/README.md`.
+Backend: `docker compose -f deploy/docker-compose.yml up -d` (altyapı), `make migrate`, `make build`, `make test`. Seed veri yok
+(ADR-028): ilk girişte dashboard onboarding'i ya da `api bootstrap` ile org/proje/key açılır; platformun kendi verisi için `make self`. Detay: `services/*/README.md`, `sdks/*/README.md`.
 
 Tam kontrol (CI ile birebir aynı kapılar): `make check` → gofmt, `go vet`, tüm Go modül birim testleri, web typecheck + build, JS SDK build + vitest, workflow lint.
 
@@ -93,18 +94,19 @@ Tam kontrol (CI ile birebir aynı kapılar): `make check` → gofmt, `go vet`, t
 
 - [x] Mimari dokümanlar (`.ai/`)
 - [x] Design system token'ları + temel komponentler (`apps/web`)
-- [x] İlk ekranlar (mock data): Overview, Services (web/mobil app'ler dahil), Service/Endpoint detail (KPI'lar, alert'ler ve loglar servis/endpoint altında), KPI detail, Load tests, Code insights, Infrastructure (Databases, Message queues — Kafka/RabbitMQ lag)
-- [x] KPI (SLO) + burn-rate alert'leri ve kök neden analizi UI'ı (mock, `src/lib/rca.ts`)
+- [x] İlk ekranlar: Overview, Services (web/mobil app'ler dahil), Service/Endpoint detail (KPI'lar, alert'ler ve loglar servis/endpoint altında), KPI detail, Load tests, Code insights, Infrastructure (Databases, Message queues — Kafka/RabbitMQ lag)
+- [x] KPI (SLO) + burn-rate alert'leri ve kök neden analizi UI'ı (`src/lib/rca.ts`)
 - [x] Altyapı (compose), ClickHouse/Postgres şemaları, RUM proto, sözleşme (`contracts.md`)
 - [x] Backend servisleri: ingest (gw + writer), api (90 endpoint, `services/api/openapi.yaml`), alerting (engine + notifier), collector (`trooper-agent`)
 - [x] SDK'lar: Go, JVM (agent, Spring Boot, Quarkus, Ktor), .NET, JS (browser/react/vue/angular/RN/node), Android, iOS, Flutter
-- [x] UI'ın `src/data/*` fonksiyonları api'ye bağlı (`VITE_DATA=api`; default mock) — ADR-013
+- [x] UI'ın `src/data/*` fonksiyonları yalnızca api'den okur (mock/seed/demo veri yok, onboarding + `api bootstrap`) — ADR-013, ADR-028
 - [x] Cloud entegrasyonları: AWS, Google Cloud, Neon, Vercel (`services/integrations`, Integrations ekranı) — ADR-012
-- [x] Symbolication servisi + `trooper-cli`; canlı demo (`make demo`)
+- [x] Symbolication servisi + `trooper-cli`
 - [x] OIDC auth + takım yönetimi (ADR-016), code intelligence (Faz 4, ADR-014), load test runner (Faz 5, ADR-015)
 - [x] Slack App (alert + kök neden/confidence, ack/mute) ve GitHub App (repo ekleme, push webhook → incremental analiz) — ADR-017
 - [x] AI kullanım kotası (ADR-018), host/K8s/container izleme + opsiyonel eBPF (ADR-019), AWS Lambda + Azure Functions (ADR-020)
 - [x] Session replay (web rrweb + Android/iOS wireframe), continuous profiling (Go/JVM/Node, flame graph + diff), AI/LLM monitoring (GenAI span'ları, token/maliyet) — ADR-021/022/023
+- [x] Self-observability: platform kendi SDK'larıyla kendini izler (`make self`) — ADR-027
 - [ ] Paket yayınlama
 
 Sıradaki işler: [`.ai/roadmap.md`](.ai/roadmap.md).

@@ -1,8 +1,8 @@
 /**
- * Ready-made infra / serverless / LLM monitors (contracts §20, §21, §25). Api: `GET /monitor-templates`; mock mirrors
+ * Ready-made infra / serverless / LLM monitors (contracts §20, §21, §25). Api: `GET /monitor-templates`; the built-in list mirrors
  * `services/alerting/internal/eval/templates.go` (the source of truth — keep ids and shapes in sync).
  */
-import { isApi, remote } from './remote';
+import { remote } from './remote';
 
 export interface MonitorTemplate {
   id: string;
@@ -15,7 +15,7 @@ export interface MonitorTemplate {
   condition: { op?: string; threshold?: number; window?: string; forMin?: number; minRequests?: number } & Record<string, unknown>;
 }
 
-const MOCK: MonitorTemplate[] = [
+const BUILTIN: MonitorTemplate[] = [
   { id: 'k8s-pod-crashloop', name: 'Pod restarting (CrashLoop)', description: 'A pod restarted more than 3 times in 10 minutes', kind: 'infra', severity: 'critical',
     query: { entity: 'pod', metric: 'restarts', filter: {} }, condition: { op: '>', threshold: 3, window: '10m', forMin: 0 } },
   { id: 'k8s-node-not-ready', name: 'Node NotReady', description: 'At least one Kubernetes node is NotReady for 5 minutes', kind: 'infra', severity: 'critical',
@@ -44,6 +44,6 @@ const MOCK: MonitorTemplate[] = [
 
 /** All templates; api falls back to the built-in list while loading or when the endpoint is missing. */
 export function monitorTemplates(kind?: string): MonitorTemplate[] {
-  const all = isApi ? remote<MonitorTemplate[]>('/monitor-templates', MOCK, (r: MonitorTemplate[] | null) => (Array.isArray(r) && r.length ? r : MOCK)) : MOCK;
+  const all = remote<MonitorTemplate[]>('/monitor-templates', BUILTIN, (r: MonitorTemplate[] | null) => (Array.isArray(r) && r.length ? r : BUILTIN));
   return kind ? all.filter((t) => t.kind === kind) : all;
 }

@@ -24,12 +24,12 @@ Panics inside a scraper are recovered the same way.
 cd services/collector
 make build test                      # GOWORK=off by default (module uses replace ../pkg)
 
-# static config, local ingest-gw
-TT_DSN=http://tt_dev_ingest_key@localhost:4318/1 \
+# static config, local ingest-gw (DSN from onboarding or `api bootstrap`, contracts §11)
+TT_DSN=http://<ingest-key>@localhost:4318/<project-id> \
 ORDERS_DB_PASSWORD=… go run ./cmd/trooper-agent --config examples/agent.yaml
 
 # targets from the api (+ optional static ones; static wins on id clashes)
-TT_DSN=… TT_API_URL=http://localhost:8080 TT_API_KEY=tt_dev_api_key go run ./cmd/trooper-agent
+TT_DSN=… TT_API_URL=http://localhost:8080 TT_API_KEY=<api-key> go run ./cmd/trooper-agent
 
 # "test connection": scrape every target twice (5 s apart), print samples as JSON lines, exit 1 if any failed
 go run ./cmd/trooper-agent --config examples/agent.yaml --once            # TT_DSN optional here
@@ -49,6 +49,29 @@ go run ./cmd/trooper-agent --config examples/agent.yaml --once            # TT_D
 | `--log-level` | `TT_LOG_LEVEL` | `info` | JSON logs (`services/pkg/logx`) |
 
 Resource: `service.name=trooper-agent`, `service.version`. Export interval = config `interval`.
+
+## Self-observability (ADR-027, contracts §27)
+
+Separate from the scraped data: the agent's **own** traces, logs and Go runtime metrics go through the Go SDK
+(`github.com/tasktrooper/telemetry-go`, `replace` → `sdks/go`) to the platform's self project. `TT_DSN` (the data the
+agent collects, own non-global OTel providers in `internal/emit`) and `TROOPER_DSN` (the agent's own telemetry, global
+providers) never mix; they may point at the same project (`deploy/self/agent.yaml`).
+
+| Env | Default | |
+|---|---|---|
+| `TROOPER_DSN` | — | self project DSN (dev: the DSN `make self` prints, `http://<ingest-key>@localhost:4318/<self-project-id>`); unset → nothing is started |
+| `TROOPER_SERVICE` | `tt-trooper-agent` | `service.name` override (`OTEL_SERVICE_NAME` wins) |
+| `TROOPER_ENV` | `TT_ENV`, else `development` | |
+| `TROOPER_VERSION` | build version | |
+| `TROOPER_PROFILING` | `false` | continuous profiling (contracts §24) |
+
+What is reported: one **root span `agent.scrape` per target scrape** (internal; `tt.collector.kind`,
+`tt.collector.target`, `tt.collector.up`, `tt.collector.samples`, status Error + exception on failure/panic), a client
+span for the remote config poll (`GET {TT_API_URL}/api/v1/internal/collector-config`, `peer.service=tt-api`), the JSON
+`slog` output also as OTel logs (local output unchanged, `trace_id`/`span_id` added inside a span) and Go runtime
+metrics. Not traced: the scrapers' database / broker / Docker / kubelet clients (customer infrastructure, volume) and the
+OTLP export to the ingest gateway (feedback loop). With `TROOPER_DSN` set, errors of the `TT_DSN` exporters go to the
+SDK's global OTel error handler (rate-limited stderr, `trooper.sdk.errors`) instead of the OTel default logger.
 
 ## Agent modes: `db`, `host`, `cluster` (contracts §20, ADR-019)
 
@@ -464,8 +487,8 @@ the host DaemonSet (`host.enabled`).
 ## Docker
 
 ```bash
-docker build -f services/collector/Dockerfile -t trooper-agent services/                       # context = services/ (needs ../pkg)
-docker build -f services/collector/Dockerfile.windows -t trooper-agent:0.3.0-windows services/ # HostProcess image (Windows host)
+docker build -f services/collector/Dockerfile -t trooper-agent .                               # context = repo root (needs services/pkg, sdks/go)
+docker build -f services/collector/Dockerfile.windows -t trooper-agent:0.3.0-windows .         # HostProcess image (Windows host)
 ```
 
 ## Tests

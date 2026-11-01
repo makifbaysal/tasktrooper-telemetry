@@ -50,7 +50,7 @@ pnpm --filter @trooper/replay size                 # replay add-on size (own cod
 Tests resolve sibling packages to their sources (`vitest.shared.mjs`), so they don't need a prior build; `typecheck` does.
 `core/test/proto.test.ts` parses `rum.proto` and fails if the TypeScript types drift from it.
 
-Example page: [`examples/browser/index.html`](examples/browser/index.html) (loads the IIFE build, DSN `http://tt_dev_ingest_key@localhost:4318/1`).
+Example page: [`examples/browser/index.html`](examples/browser/index.html) (loads the IIFE build, replace the placeholder DSN `http://<ingest-key>@localhost:4318/<project-id>` with yours).
 
 ## Ingest requirements (for the browser SDK)
 

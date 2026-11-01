@@ -40,6 +40,8 @@ var (
 	AWSEndpoint = ""
 	// Timeout bounds one check.
 	Timeout = 10 * time.Second
+	// HTTPClient sends the Vercel / Neon / Azure checks (main swaps in a traced client, ADR-027).
+	HTTPClient = http.DefaultClient
 )
 
 type cfg struct {
@@ -280,7 +282,7 @@ func checkVercel(ctx context.Context, c cfg, secret string) model.IntegrationTes
 	if strings.TrimSpace(secret) == "" {
 		return fail("a Vercel access token is required")
 	}
-	hc := http.DefaultClient
+	hc := HTTPClient
 	var u struct {
 		User struct {
 			Username string `json:"username"`
@@ -343,7 +345,7 @@ func checkNeon(ctx context.Context, c cfg, secret string) model.IntegrationTestR
 			RegionID string `json:"region_id"`
 		} `json:"projects"`
 	}
-	if code, err := getJSON(ctx, http.DefaultClient, NeonBase+"/api/v2/projects?"+q.Encode(), secret, &ps); err != nil {
+	if code, err := getJSON(ctx, HTTPClient, NeonBase+"/api/v2/projects?"+q.Encode(), secret, &ps); err != nil {
 		return fail("Neon API key check failed: " + errMsg(code, err))
 	}
 	res := model.IntegrationTestResult{OK: true, Message: "Neon API key accepted"}
@@ -370,7 +372,7 @@ func checkAzure(ctx context.Context, c cfg, secret string) model.IntegrationTest
 		return fail(err.Error())
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := HTTPClient.Do(req)
 	if err != nil {
 		return fail("Azure sign-in failed: " + truncate(err.Error(), 200))
 	}
@@ -395,7 +397,7 @@ func checkAzure(ctx context.Context, c cfg, secret string) model.IntegrationTest
 			State          string `json:"state"`
 		} `json:"value"`
 	}
-	if code, err := getJSON(ctx, http.DefaultClient, AzureARMBase+"/subscriptions?api-version=2022-12-01", tok.AccessToken, &subs); err != nil {
+	if code, err := getJSON(ctx, HTTPClient, AzureARMBase+"/subscriptions?api-version=2022-12-01", tok.AccessToken, &subs); err != nil {
 		return fail("listing subscriptions failed: " + errMsg(code, err))
 	}
 	visible := map[string]bool{}

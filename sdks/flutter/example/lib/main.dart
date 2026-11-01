@@ -5,8 +5,8 @@ import 'package:trooper_dio/trooper_dio.dart';
 import 'package:trooper_flutter/trooper_flutter.dart';
 
 // Local stack: `docker compose -f deploy/docker-compose.yml up -d` + ingest-gw.
-// Android emulator reaches the host as 10.0.2.2.
-const dsn = String.fromEnvironment('TROOPER_DSN', defaultValue: 'http://tt_dev_ingest_key@localhost:4318/1');
+// Android emulator reaches the host as 10.0.2.2. --dart-define=TROOPER_DSN=http://<ingest-key>@localhost:4318/<project-id> (empty = SDK off).
+const dsn = String.fromEnvironment('TROOPER_DSN', defaultValue: '');
 
 final httpClient = TrooperHttpClient();
 final dio = Dio()..interceptors.add(TrooperDioInterceptor());

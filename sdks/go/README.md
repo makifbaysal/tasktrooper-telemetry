@@ -15,7 +15,7 @@ import trooper "github.com/tasktrooper/telemetry-go"
 
 func main() {
 	shutdown, err := trooper.Start(context.Background(), trooper.Config{
-		DSN:         os.Getenv("TROOPER_DSN"), // http://tt_dev_ingest_key@localhost:4318/1
+		DSN:         os.Getenv("TROOPER_DSN"), // https://<ingest-key>@<host>/<project-id> (onboarding or `api bootstrap`)
 		Service:     "orders-api",
 		Environment: "production",
 		Version:     os.Getenv("GIT_SHA"),
@@ -75,7 +75,7 @@ Explicit fields win; then explicitly set `OTEL_*` variables; then `TROOPER_*` (c
   `trooper.entry.route` and `trooper.entry.method` onto **every** span started under that request — including DB, HTTP client
   and producer spans created by other instrumentation — so the backend can build `edges_1m`.
 - **Route templates:** `trooper.route` is the normalized template: `{id}` → `:id`, `{id:[0-9]+}` → `:id`, `{p...}` → `*p`.
-- **PII:** no headers, bodies, query strings, message payloads/keys or SQL literals are recorded. SQL text is sanitized with
+- **PII:** no headers, bodies, query strings (client spans: `url.full` is cut at `?`/`#`), message payloads/keys or SQL literals are recorded. SQL text is sanitized with
   `trooper.SanitizeSQL` (literals → `?`).
 
 ## API

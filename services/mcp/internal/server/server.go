@@ -12,6 +12,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/tasktrooper/telemetry/services/mcp/internal/apiclient"
+	"github.com/tasktrooper/telemetry/services/mcp/internal/selftel"
 )
 
 // ToolCount is asserted by the end-to-end test and printed at startup.
@@ -29,6 +30,7 @@ func New(api *apiclient.Client, log *slog.Logger) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "tasktrooper", Version: "v0.1.0"}, &mcp.ServerOptions{
 		Logger: log, // stderr; the SDK's default logger is discarded
 	})
+	srv.AddReceivingMiddleware(selftel.ToolMiddleware()) // one span per tools/call (ADR-027)
 	s.registerServiceTools(srv)
 	s.registerTraceTools(srv)
 	s.registerLogTools(srv)

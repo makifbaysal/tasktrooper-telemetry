@@ -149,6 +149,7 @@ export const mapLogLine = (r: RawLogLine): LogLine => ({
   id: r.id, ts: num(r.ts), level: level(r.level), service: r.service, message: r.message ?? '', ...(r.traceId ? { traceId: r.traceId } : {}),
   // Vercel log drains: attrs['vercel.source'] (contracts §16)
   ...((r.source || r.attrs?.['vercel.source']) ? { source: String(r.source || r.attrs?.['vercel.source']) } : {}),
+  ...(r.attrs && Object.keys(r.attrs).length ? { attrs: r.attrs } : {}),
 });
 export const mapLogPage = (raw: RawLogPage | null): LogLine[] => arr(raw?.lines).map(mapLogLine);
 

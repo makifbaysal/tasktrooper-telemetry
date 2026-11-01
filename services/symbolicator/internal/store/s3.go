@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -16,6 +17,8 @@ import (
 // S3Config configures the S3-compatible blob store (contracts.md §12).
 type S3Config struct {
 	Endpoint, Bucket, AccessKey, SecretKey, Region string
+	// HTTPClient sends the S3 requests (nil = SDK default; main passes a traced client, ADR-027).
+	HTTPClient *http.Client
 }
 
 // S3 implements Objects on an S3-compatible endpoint (path-style; SeaweedFS in dev).
@@ -29,7 +32,7 @@ func NewS3(ctx context.Context, cfg S3Config) (*S3, error) {
 	if cfg.Region == "" {
 		cfg.Region = "us-east-1"
 	}
-	c := s3.New(s3.Options{
+	opts := s3.Options{
 		Region:       cfg.Region,
 		BaseEndpoint: aws.String(cfg.Endpoint),
 		UsePathStyle: true,
@@ -37,7 +40,11 @@ func NewS3(ctx context.Context, cfg S3Config) (*S3, error) {
 		// SeaweedFS / MinIO: only send/validate checksums when required
 		RequestChecksumCalculation: aws.RequestChecksumCalculationWhenRequired,
 		ResponseChecksumValidation: aws.ResponseChecksumValidationWhenRequired,
-	})
+	}
+	if cfg.HTTPClient != nil {
+		opts.HTTPClient = cfg.HTTPClient
+	}
+	c := s3.New(opts)
 	o := &S3{c: c, bucket: cfg.Bucket}
 	if _, err := c.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: &o.bucket}); err == nil {
 		return o, nil

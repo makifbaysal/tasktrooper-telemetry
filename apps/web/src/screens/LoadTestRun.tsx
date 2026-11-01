@@ -1,19 +1,17 @@
 import { useData } from '@/data/remote';
 import { Link, useNavigate, useParams } from 'react-router';
-import { AlertTriangle, CheckCircle2, ChevronRight, CircleDashed, ExternalLink, Pencil, Play, Square, XCircle } from 'lucide-react';
-import { BarList, Sparkline, TimeSeries } from '@/components/charts';
+import { AlertTriangle, CheckCircle2, CircleDashed, ExternalLink, Pencil, Play, Square, XCircle } from 'lucide-react';
+import { BarList, TimeSeries } from '@/components/charts';
 import {
-  Button, Callout, Card, Delta, Drawer, DrawerSection, EmptyState, KeyValues, MethodBadge, MetricCard, Meter, PageHeader, Section, StatusBadge, Table, useDrawer,
+  Button, Callout, Card, Delta, EmptyState, MethodBadge, MetricCard, Meter, PageHeader, Section, StatusBadge, Table,
 } from '@/components/ui';
-import { isApi, runs, services, type LoadTestRun as Run } from '@/data';
+import { runs, services, type LoadTestRun as Run } from '@/data';
 import { compact, duration, int, ms, pct } from '@/lib/format';
 import {
-  SPEC, hasControl, levelState, limitOf, liveRun, runCurves, runEndpoints, scenarioOf, stageAt, stopRun, useLoadTests, type RunCurves, type RunEndpoint,
+  SPEC, limitOf, liveRun, scenarioOf, stageAt, stopRun, useLoadTests, type RunCurves,
 } from '@/lib/loadtest';
 import { previousRun, runError, scenarioState, useRunDetail, type StepStat, type TargetRed } from '@/data/loadtest';
 import { RunBlockedCallout, RunState, useRunStarter } from './LoadTests';
-import { LevelControl } from './LevelControl';
-import { latencyFromP95, latencyHint } from './apm';
 
 const EMPTY_CURVES: RunCurves = { ts: [], vus: [], rps: [], p95: [], err: [], load: [], upto: 0, step: 5000 };
 const last = (a: number[]) => a[a.length - 1] ?? 0;
@@ -24,7 +22,6 @@ export function LoadTestRun() {
   useLoadTests();
   const nav = useNavigate();
   const { runId = '' } = useParams();
-  const d = useDrawer<RunEndpoint>();
   const starter = useRunStarter();
   const stored = runs.find((r) => r.id === runId);
   const detail = useRunDetail(stored ? liveRun(stored) : undefined);
@@ -34,10 +31,9 @@ export function LoadTestRun() {
   const spec = SPEC[sc.id] ?? { services: [], stages: [], steps: [], thresholds: [] };
   const running = run.state === 'running';
   const queued = run.state === 'queued';
-  const error = runError(run.id, detail);
+  const error = runError(detail);
 
-  // api: the series endpoint; mock: the simulated curves
-  const c = isApi ? detail.curves ?? EMPTY_CURVES : runCurves(run);
+  const c = detail.curves ?? EMPTY_CURVES;
   const hasData = c.ts.length > 1;
   const live = detail.live;
   const progress = live?.progress ?? run.progress;
@@ -58,13 +54,8 @@ export function LoadTestRun() {
   });
   const failedCount = verdict.filter((t) => !t.passed).length;
   const stage = stageAt(sc, progress);
-  const eps = isApi ? [] : runEndpoints(run, c);
   const prev = !running && !queued && !error ? previousRun(run) : undefined;
   const totalReq = detail.steps.reduce((a, s) => a + s.requests, 0) || c.rps.reduce((a, v) => a + v, 0) * (c.step / 1000);
-  // level changes marked on the load charts
-  const marks = hasControl(run)
-    ? levelState(run).decisions.filter((x) => x.kind !== 'wait').map((x) => ({ ts: x.at, label: x.kind === 'hold' ? `${x.actor === 'ai' ? 'AI' : 'you'}: hold` : x.kind === 'back' ? 'step back' : x.kind === 'advance' ? (x.actor === 'ai' ? 'AI ↑' : x.actor === 'you' ? 'you ↑' : '↑') : x.kind }))
-    : undefined;
   const draft = scenarioState(sc.id) === 'draft';
 
   return (
@@ -91,15 +82,12 @@ export function LoadTestRun() {
         </Callout>
       )}
 
-      {/* 0 · who moves the load between levels */}
-      {hasControl(run) && <LevelControl run={run} />}
-
       {/* 1 · verdict */}
       {!error && (
         <Card>
           <div className="stack" style={{ gap: 'var(--space-4)' }}>
             {queued && <div className="row secondary" style={{ gap: 'var(--space-2)' }}><CircleDashed size={16} aria-hidden />Queued — waiting for a runner to pick it up. This page updates every 5 seconds.</div>}
-            {running && !hasControl(run) && (
+            {running && (
               <div>
                 <div className="row" style={{ justifyContent: 'space-between', marginBottom: 'var(--space-2)' }}>
                   <span className="secondary">{stage.count ? `Stage ${stage.index + 1} of ${stage.count} · ${stage.target === 0 ? 'ramping down' : `ramping to ${stage.target} VUs`}` : 'Running'}</span>
@@ -140,14 +128,14 @@ export function LoadTestRun() {
       {/* 2 · load generator: one chart per measure (single y-axis each) */}
       {!error && (
         <Section title="Load generator" subtitle={`Measured at the load generator, all regions · ${running ? 'live, every 5 s' : queued ? 'waiting for the first data points' : `over ${duration(sc.duration * progress)}`}`}>
-          {!hasData && isApi ? (
+          {!hasData ? (
             <Card><EmptyState icon={<CircleDashed size={20} />} title={running || queued ? 'Waiting for the first data points' : 'No load-generator series for this run'}>
               {running || queued ? 'Series appear within a few seconds of the runner starting.' : 'The api returned no series (older run, or the series endpoint is not available yet).'}
             </EmptyState></Card>
           ) : (
             <div className="grid grid-2">
               <MetricCard label="Response time · p95" value={ms(running ? nowP95 : run.p95)}
-                hint={`${latencyHint(latencyFromP95(running ? nowP95 : run.p95), 'p95')}${p95Limit !== undefined ? ` · threshold ${ms(p95Limit)}` : ''}`}>
+                hint={p95Limit !== undefined ? `Threshold ${ms(p95Limit)}` : undefined}>
                 <TimeSeries timestamps={c.ts} height={180} format={ms}
                   threshold={p95Limit !== undefined ? { value: p95Limit, label: ms(p95Limit) } : undefined}
                   series={[{ id: 'p95', label: 'p95', slot: 1, data: c.p95 }]} />
@@ -160,7 +148,7 @@ export function LoadTestRun() {
               </MetricCard>
               <MetricCard label="Virtual users" value={int(running ? live?.vus ?? last(c.vus) : peak(c.vus))} unit={running ? 'now' : 'peak'}
                 hint={(spec.levels ?? []).length ? spec.levels!.map((l) => l.target).join(' → ') + ' VUs' : spec.stages.map((s) => `${s.target} VUs / ${duration(s.duration)}`).join(' → ')}>
-                <TimeSeries timestamps={c.ts} height={140} events={marks} series={[{ id: 'vu', label: 'VUs', slot: 2, data: c.vus }]} />
+                <TimeSeries timestamps={c.ts} height={140} series={[{ id: 'vu', label: 'VUs', slot: 2, data: c.vus }]} />
               </MetricCard>
               <MetricCard label="Requests / sec" value={compact(running ? live?.rps ?? last(c.rps) : peak(c.rps))} unit={running ? 'now' : 'peak'}
                 hint={`${compact(totalReq)} requests sent`}>
@@ -175,7 +163,7 @@ export function LoadTestRun() {
       {!error && spec.services.length > 0 && (
         <Section title="Target services" subtitle="From Trooper SDK · load-test traffic (caller loadtest:<run>) vs all traffic in the same window">
           {detail.targets.length === 0
-            ? <Card><EmptyState icon={<CircleDashed size={20} />} title="No target-service data yet">{isApi ? 'Appears once the services report spans for this window (or when the api serves /target).' : 'Waiting for data.'}</EmptyState></Card>
+            ? <Card><EmptyState icon={<CircleDashed size={20} />} title="No target-service data yet">Appears once the services report spans for this window (or when the api serves /target).</EmptyState></Card>
             : <div className="stack" style={{ gap: 'var(--space-4)' }}>{detail.targets.map((t) => <TargetCard key={t.service} t={t} running={running} />)}</div>}
         </Section>
       )}
@@ -204,10 +192,9 @@ export function LoadTestRun() {
 
       {/* 5 · per step */}
       {!error && (
-        <Section title="Per-step results" subtitle={eps.length ? 'Each scenario step · click for its latency and errors over the run' : 'Each scenario step'}>
+        <Section title="Per-step results" subtitle="Each scenario step">
           <Card flush>
             <Table<StepStat> rows={detail.steps} rowKey={(s) => s.key} defaultSort={{ key: 'p95', dir: 'desc' }}
-              onRowClick={eps.length ? (s) => { const e = eps.find((x) => `${x.method} ${x.route}` === s.key); if (e) d.open(e); } : undefined}
               empty={running || queued ? 'Per-step numbers appear when the run reports them.' : 'No per-step stats for this run.'}
               columns={[
                 { key: 'ep', header: 'Step', render: (s) => { const [m, ...r] = s.key.split(' '); return <div className="row" style={{ gap: 'var(--space-2)' }}>{r.length ? <><MethodBadge method={m} /><span className="mono">{r.join(' ')}</span></> : <span className="mono">{s.key}</span>}</div>; } },
@@ -216,17 +203,11 @@ export function LoadTestRun() {
                 { key: 'p50', header: 'p50', numeric: true, sortValue: (s) => s.p50 ?? 0, render: (s) => (s.p50 !== undefined ? ms(s.p50) : '—') },
                 { key: 'p95', header: 'p95', numeric: true, sortValue: (s) => s.p95, render: (s) => ms(s.p95) },
                 { key: 'p99', header: 'p99', numeric: true, sortValue: (s) => s.p99 ?? 0, render: (s) => (s.p99 !== undefined ? ms(s.p99) : '—') },
-                ...(eps.length ? [
-                  { key: 'trend', header: 'p95 over run', render: (s: StepStat) => { const e = eps.find((x) => `${x.method} ${x.route}` === s.key); return e ? <Sparkline data={e.p95Series} width={100} height={24} /> : null; } },
-                  { key: 'go', header: '', width: 32, render: () => <ChevronRight size={16} className="muted" aria-hidden /> },
-                ] : []),
               ]} />
           </Card>
         </Section>
       )}
 
-      {d.item && <EndpointRunDrawer ep={d.item} ts={c.ts} run={run} onClose={d.close}
-        onOpen={() => nav(`/services/${d.item!.serviceId}/endpoints/${d.item!.id}`)} p95Limit={p95Limit} errLimit={errLimit} />}
     </>
   );
 }
@@ -276,35 +257,5 @@ function Comparison({ run, prev }: { run: Run; prev: Run }) {
         { key: 'd', header: 'Change', numeric: true, render: (r) => <Delta curr={r.cur} prev={r.prev} upIsGood={r.upIsGood} period="" /> },
       ]} />
     </Card>
-  );
-}
-
-function EndpointRunDrawer({ ep, ts, run, onClose, onOpen, p95Limit, errLimit }: {
-  ep: RunEndpoint; ts: number[]; run: Run; onClose: () => void; onOpen: () => void; p95Limit?: number; errLimit?: number;
-}) {
-  return (
-    <Drawer open onClose={onClose}
-      title={<span className="row" style={{ gap: 'var(--space-2)' }}><MethodBadge method={ep.method} /><span className="mono">{ep.route}</span></span>}
-      subtitle={`${ep.serviceId} · run ${run.id}`}
-      actions={<Button size="sm" icon={<ExternalLink size={12} />} onClick={onOpen}>Open endpoint</Button>}>
-      <DrawerSection title="Summary">
-        <KeyValues items={[
-          ['Requests', int(ep.requests)],
-          ['p95 in run', ms(ep.runP95)],
-          ['p95 in production', ms(ep.p95)],
-          ['Failed in run', pct(ep.runErr)],
-        ]} />
-      </DrawerSection>
-      <DrawerSection title="Response time · p95">
-        <TimeSeries timestamps={ts} height={160} format={ms}
-          threshold={p95Limit !== undefined ? { value: p95Limit, label: ms(p95Limit) } : undefined}
-          series={[{ id: 'p95', label: 'p95', slot: 1, data: ep.p95Series }]} />
-      </DrawerSection>
-      <DrawerSection title="Failed requests">
-        <TimeSeries timestamps={ts} height={160} format={(v) => pct(v)}
-          threshold={errLimit !== undefined ? { value: errLimit, label: pct(errLimit) } : undefined}
-          series={[{ id: 'err', label: 'Failed', slot: 8, data: ep.errSeries }]} />
-      </DrawerSection>
-    </Drawer>
   );
 }

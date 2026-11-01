@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"slices"
@@ -28,9 +29,13 @@ import (
 	"github.com/tasktrooper/telemetry/services/collector/internal/emit"
 	"github.com/tasktrooper/telemetry/services/collector/internal/infra"
 	"github.com/tasktrooper/telemetry/services/collector/internal/scrape"
+	"github.com/tasktrooper/telemetry/services/collector/internal/selftel"
 )
 
 var version = "dev"
+
+// service is the fixed self-observability service name (ADR-027; TROOPER_SERVICE overrides).
+const service = "tt-trooper-agent"
 
 type flags struct {
 	configPath   string
@@ -53,7 +58,7 @@ func parseFlags(args []string) (flags, error) {
 	fs.StringVar(&f.configPath, "config", config.String("TT_COLLECTOR_CONFIG", ""), "static YAML target list (env TT_COLLECTOR_CONFIG)")
 	fs.StringVar(&f.apiURL, "api-url", config.String("TT_API_URL", ""), "pull targets from {api-url}/api/v1/internal/collector-config (env TT_API_URL)")
 	fs.StringVar(&f.apiKey, "api-key", config.String("TT_API_KEY", ""), "api key for the config endpoint (env TT_API_KEY)")
-	fs.StringVar(&f.dsn, "dsn", config.String("TT_DSN", ""), "ingest DSN, e.g. http://tt_dev_ingest_key@localhost:4318/1 (env TT_DSN)")
+	fs.StringVar(&f.dsn, "dsn", config.String("TT_DSN", ""), "ingest DSN, e.g. http://<ingest-key>@localhost:4318/<project-id> (env TT_DSN)")
 	fs.StringVar(&f.modes, "modes", config.String("TT_COLLECTOR_MODES", ""), "only scrape targets whose collector is in this list (agent,direct,cloud); empty = all")
 	fs.BoolVar(&f.hostMetrics, "host-metrics", config.Bool("TT_COLLECTOR_HOST_METRICS", false), "report this host's CPU/memory/disk for agent-mode databases")
 	fs.StringVar(&f.hostDiskPath, "host-disk-path", config.String("TT_COLLECTOR_HOST_DISK_PATH", "/"), "filesystem whose usage is trooper.db.disk")
@@ -94,11 +99,19 @@ func main() {
 		os.Exit(2)
 	}
 	log := logx.New("trooper-agent", f.logLevel)
-	slog.SetDefault(log)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, f, log); err != nil {
+	// self-observability (ADR-027): TROOPER_DSN (the platform's self project), not TT_DSN (the scraped data);
+	// no-op without it
+	flush := selftel.Start(ctx, service, version, log)
+	log = selftel.Logger(log, service)
+	slog.SetDefault(log)
+	err = run(ctx, f, log)
+	if err != nil {
 		log.Error("exit", "err", err)
+	}
+	flush()
+	if err != nil {
 		os.Exit(1)
 	}
 }
@@ -194,7 +207,8 @@ func run(ctx context.Context, f flags, log *slog.Logger) error {
 			}
 			static = c
 		}
-		fetcher := ccfg.Fetcher{APIURL: f.apiURL, APIKey: f.apiKey}
+		fetcher := ccfg.Fetcher{APIURL: f.apiURL, APIKey: f.apiKey,
+			Client: &http.Client{Timeout: 15 * time.Second, Transport: selftel.Transport(nil)}}
 		load = func(ctx context.Context) (*ccfg.Config, error) {
 			if f.apiURL == "" {
 				return ccfg.Merge(static, nil), nil

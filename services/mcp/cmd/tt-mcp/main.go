@@ -22,8 +22,12 @@ import (
 
 	"github.com/tasktrooper/telemetry/services/mcp/internal/apiclient"
 	"github.com/tasktrooper/telemetry/services/mcp/internal/config"
+	"github.com/tasktrooper/telemetry/services/mcp/internal/selftel"
 	"github.com/tasktrooper/telemetry/services/mcp/internal/server"
 )
+
+// version is set at build time (-ldflags "-X main.version=..."); TROOPER_VERSION overrides it for telemetry.
+var version = ""
 
 func main() {
 	// Fail fast, loudly and on stderr: stdout belongs to the protocol.
@@ -43,11 +47,15 @@ func run() error {
 	log := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 		Level: cfg.LogLevel,
 	})).With("service", "mcp")
+	// Self telemetry (ADR-027): a no-op unless TROOPER_DSN is set. The SDK only ever writes to stderr.
+	flush := selftel.Start(context.Background(), version, log)
+	defer flush()
+	log = selftel.Logger(log)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	client := apiclient.New(cfg.APIURL, cfg.APIKey, 15*time.Second)
+	client := apiclient.New(cfg.APIURL, cfg.APIKey, 15*time.Second).WithTransport(selftel.Transport(nil))
 	if err := client.Check(ctx, log, cfg.OrgID, cfg.ProjectID); err != nil {
 		return err
 	}

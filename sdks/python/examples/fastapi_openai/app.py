@@ -3,7 +3,7 @@
 Run (from sdks/python, with the dev ingest stack up — `make infra && make run-gw && make run-writer`)::
 
     pip install -e '.[fastapi,httpx]' fastapi uvicorn openai
-    TROOPER_DSN=http://tt_dev_ingest_key@localhost:4318/1 python examples/fastapi_openai/app.py
+    TROOPER_DSN=http://<ingest-key>@localhost:4318/<project-id> python examples/fastapi_openai/app.py
     curl localhost:8000/ask/42?q=hello
 
 Without ``OPENAI_API_KEY`` the OpenAI client talks to an in-process fake (``httpx.MockTransport``), so the example

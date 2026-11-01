@@ -31,10 +31,16 @@ import (
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/observe"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/quota"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/runner"
+	"github.com/tasktrooper/telemetry/services/codeintel/internal/selftel"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/source"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/store"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/webhook"
 )
+
+// service is the fixed self-observability service name (ADR-027; TROOPER_SERVICE overrides).
+const service = "tt-codeintel"
+
+var version = "dev"
 
 func main() {
 	once := flag.Int64("once", 0, "analyze this repository id now (full scan), print the report and exit")
@@ -50,6 +56,10 @@ func run(once int64) error {
 	log := logx.New("codeintel", common.LogLevel)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// self-observability (ADR-027): no-op without TROOPER_DSN; flushed when run returns (also -once)
+	flush := selftel.Start(ctx, service, version, log)
+	defer flush()
+	log = selftel.Logger(log, service)
 
 	skey, err := secrets.Key()
 	if err != nil {
@@ -71,6 +81,9 @@ func run(once int64) error {
 		app = nil
 	case err != nil:
 		return err
+	}
+	if app != nil && app.HTTP != nil { // GitHub API (installation tokens): client spans, no secrets in URLs
+		app.HTTP.Transport = selftel.Transport(app.HTTP.Transport, "github")
 	}
 	webhookSecret, err := secretValue(ctx, os.Getenv("TT_GITHUB_WEBHOOK_SECRET"))
 	if err != nil {
@@ -144,7 +157,7 @@ func run(once int64) error {
 		mux.Handle("POST /v1/webhooks/"+p, &webhook.RepoHook{Provider: p, Store: st, RepoSecret: repoSecret, Metrics: reg, Log: log})
 	}
 	addr := config.String("TT_CODEINTEL_ADDR", ":8096")
-	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: time.Minute}
+	srv := &http.Server{Addr: addr, Handler: selftel.Handler(mux), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: time.Minute}
 	go func() {
 		<-ctx.Done()
 		sc, cancel := context.WithTimeout(context.Background(), 5*time.Second)

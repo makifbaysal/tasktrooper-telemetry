@@ -548,15 +548,14 @@ func (d *DB) CreateAPIKey(ctx context.Context, in model.APIKeyInput, createdBy i
 	if in.Kind == "api" && len(in.AllowedOrigins) > 0 {
 		return nil, Invalid("allowedOrigins only applies to ingest keys")
 	}
-	key := "tt_" + in.Kind + "_" + strings.NewReplacer("-", "", "_", "").Replace(randomToken(30))
-	h := sha256.Sum256([]byte(key))
+	key, hash, prefix := mintKey(in.Kind)
 	var by *int64
 	if createdBy > 0 {
 		by = &createdBy
 	}
 	var id int64
 	if err := d.pg.QueryRow(ctx, `INSERT INTO api_keys (project_id, name, kind, hash, prefix, allowed_origins, created_by)
-	  VALUES ({{project}}, $1, $2, $3, $4, $5, $6) RETURNING id`, in.Name, in.Kind, h[:], key[:12], in.AllowedOrigins, by).Scan(&id); err != nil {
+	  VALUES ({{project}}, $1, $2, $3, $4, $5, $6) RETURNING id`, in.Name, in.Kind, hash, prefix, in.AllowedOrigins, by).Scan(&id); err != nil {
 		return nil, err
 	}
 	k, err := scanAPIKey(d.pg.QueryRow(ctx, apiKeySelect+` WHERE {{tenant:k}} AND k.id = $1`, id))

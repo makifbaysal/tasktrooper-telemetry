@@ -7,12 +7,12 @@ import {
 } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
 import {
-  TIME_CATEGORIES, breakdownSeries, callerSeries, endpointBreakdown, endpointCallers, endpointCalls, endpointErrorSeries, endpointTrafficSeries,
-  endpointsFor, incidentShape, logs, series, services, suggestions, timestamps, tracesFor,
+  TIME_CATEGORIES, breakdownSeries, callerSeries, endpointBreakdown, endpointCallers, endpointCalls, endpointErrorSeries,
+  endpointsFor, inventory, logs, services, suggestions, timestamps, tracesFor,
   type CallerTraffic, type Dependency, type Endpoint, type LogLine, type TimeCategory,
 } from '@/data';
 import { ago, compact, dateTime, ms, pct } from '@/lib/format';
-import { CallerDrawer, DependencyDrawer, ErrorCell, TraceTable, epLabel, epRef, sourceLabel, latencyHint, latencySeries, statusSplit } from './apm';
+import { CallerDrawer, DependencyDrawer, ErrorCell, TraceTable, epLabel, epRef, sourceLabel, latencyHint, latencySeriesFor, statusSplitFor } from './apm';
 import { AlertCount, AlertsBody, OpenIncidents } from './Alerts';
 import { CALLER_KIND_LABEL, CriticalityBadge, DEP_KIND_LABEL, callerColorFor, categoryOf, traceUrl } from './shared';
 import { RootCauseCard, diagnose } from './rca';
@@ -39,11 +39,8 @@ export function EndpointDetail() {
 
   const ts = timestamps(range);
   const hot = ep.errorRate > 0.01;
-  const shape = incidentShape(serviceId, 0.25);
-  const spike = shape.stepAt ? shape : hot ? { spikeAt: 0.8, spikeMul: 2.8, spikeWidth: 6 } : {};
   const key = `${serviceId}-${endpointId}`;
   const suggestion = suggestions.find((s) => s.target.endsWith(` · ${epRef(ep)}`) && s.target.startsWith(svc.name));
-  const traffic = endpointTrafficSeries(ep, range);
   const err = endpointErrorSeries(ep, range);
   const callers = endpointCallers(ep);
   const callerColor = callerColorFor(callers.map((c) => c.caller.id));
@@ -53,6 +50,7 @@ export function EndpointDetail() {
   const lat = { p50: ep.p50, avg: breakdown.avgMs, p95: ep.p95, p99: ep.p99 };
   const sub = ep.sub;
   const ref = epRef(ep);
+  const code = inventory.find((i) => i.service === svc.name && i.key === (sub ? sub.process : ref));
   const unit = sub ? 'msg/min' : 'rpm';
   const unitOf = sub ? 'message' : 'request';
   const sharedWith = sub ? endpointsFor(serviceId).filter((x) => x.id !== ep.id && x.sub?.topic === sub.topic) : [];
@@ -68,7 +66,7 @@ export function EndpointDetail() {
     <>
       <PageHeader title={sub ? epLabel(ep) : <span><span className="mono muted">{ep.method}</span> {ep.route}</span>}
         crumbs={[{ label: categoryOf(svc.type).label, to: `/services?type=${categoryOf(svc.type).id}` }, { label: svc.name, to: `/services/${svc.id}` }, { label: epLabel(ep) }]}
-        subtitle={<span className="row"><CriticalityBadge c={ep.criticality} />{ep.monitored ? <Badge tone="good" icon={<Bell />}>Monitored</Badge> : <Badge>No monitor</Badge>}{sub && <span className="row" style={{ gap: 6 }}><span className="mono muted">{sourceLabel(ep)}</span><span className="mono">{sub.topic}</span>{sub.group && <span className="muted">· group {sub.group}</span>}{sub.schedule && <span className="muted">· {sub.schedule}</span>}</span>}<span className="row muted" style={{ gap: 4 }}><FileCode2 size={14} />{sub ? `src/consumers/${sub.process}.ts:18` : 'src/orders/orders.controller.ts:42'}</span></span>}
+        subtitle={<span className="row"><CriticalityBadge c={ep.criticality} />{ep.monitored ? <Badge tone="good" icon={<Bell />}>Monitored</Badge> : <Badge>No monitor</Badge>}{sub && <span className="row" style={{ gap: 6 }}><span className="mono muted">{sourceLabel(ep)}</span><span className="mono">{sub.topic}</span>{sub.group && <span className="muted">· group {sub.group}</span>}{sub.schedule && <span className="muted">· {sub.schedule}</span>}</span>}{code && <span className="row muted" style={{ gap: 4 }}><FileCode2 size={14} />{code.file}:{code.line}</span>}</span>}
         actions={<>
           <Button icon={<Play size={14} />} onClick={() => nav('/load-tests')}>Load test</Button>
         </>} />
@@ -85,20 +83,19 @@ export function EndpointDetail() {
 
       {/* Golden signals — each once. Status columns replace a separate status-code chart. */}
       <div className="grid grid-3">
-        <MetricCard className="span-2 metric--hero" label={sub ? 'Messages processed' : 'Requests'} value={compact(ep.rpm)} unit={unit} curr={ep.rpm} prev={ep.rpm * 0.94}
+        <MetricCard className="span-2 metric--hero" label={sub ? 'Messages processed' : 'Requests'} value={compact(ep.rpm)} unit={unit} curr={ep.rpm}
           hint={<>{compact(ep.rpm * ep.errorRate)} failed / min{sub && sub.source !== 'cron' && <> · lag <strong className="secondary">{compact(sub.lag)}</strong> msgs · {compact(sub.retriesPerMin)} retries / {compact(sub.dlqPerMin)} DLQ per min</>}</>}>
-          <Columns timestamps={ts} height={300} format={(v) => compact(v)} series={statusSplit(traffic, err, !!sub)} />
+          <Columns timestamps={ts} height={300} format={(v) => compact(v)} series={statusSplitFor(range, serviceId, !!sub, ep.id)} />
         </MetricCard>
         <div className="stack">
-          <MetricCard label="Error rate" value={pct(ep.errorRate)} curr={ep.errorRate} prev={ep.errorRate * (hot ? 0.3 : 1.05)} upIsGood={false}
+          <MetricCard label="Error rate" value={pct(ep.errorRate)} curr={ep.errorRate} upIsGood={false}
             badge={hot && ep.monitored ? <StatusBadge status="firing" label="Alert firing" /> : undefined}>
             <TimeSeries timestamps={ts} height={104} format={(v) => pct(v)} area
-              threshold={ep.monitored ? { value: 0.02, label: '2%' } : undefined}
               series={[{ id: 'err', label: 'Error rate', slot: 8, data: err }]} />
           </MetricCard>
-          <MetricCard label={sub ? 'Processing time · p95' : 'Latency · p95'} value={ms(ep.p95)} curr={ep.p95} prev={ep.p95 * (hot ? 0.7 : 1.02)} upIsGood={false}
+          <MetricCard label={sub ? 'Processing time · p95' : 'Latency · p95'} value={ms(ep.p95)} curr={ep.p95} upIsGood={false}
             hint={latencyHint(lat, 'p95')}>
-            <TimeSeries timestamps={ts} height={140} format={ms} series={latencySeries(key, range, lat, spike)} />
+            <TimeSeries timestamps={ts} height={140} format={ms} series={latencySeriesFor(range, serviceId, ep.id)} />
           </MetricCard>
         </div>
       </div>
@@ -192,28 +189,21 @@ export function EndpointDetail() {
 
 // ---------------------------------------------------------------- Error drawer
 function ErrorDrawer({ log, ep, onClose, onTrace }: { log: LogLine; ep: Endpoint; onClose: () => void; onTrace: () => void }) {
-  const { range } = useApp();
-  const ts = timestamps(range);
   const same = logs.filter((l) => l.message === log.message).length;
-  const occurrences = series(`errocc-${log.message}`, range, { base: Math.max(1, ep.rpm * ep.errorRate * 0.3), noise: 0.4, ...(ep.errorRate > 0.01 ? { spikeAt: 0.8, spikeMul: 3, spikeWidth: 6 } : {}) });
-  const fn = ep.route.split('/').filter(Boolean).pop()?.replace(/[^a-z]/gi, '') || 'handler';
+  const stack = log.attrs?.['exception.stacktrace'];
   return (
     <Drawer open onClose={onClose} title={<span className="mono">{log.message}</span>}
       subtitle={<><StatusBadge status="critical" label="Error" /><span className="muted">{log.service} · {ep.method} {ep.route}</span></>}
       actions={<Button size="sm" onClick={onTrace}>View trace <ArrowRight size={14} /></Button>}>
       <KeyValues items={[
         ['Last seen', dateTime(log.ts)], ['Trace', <span key="t" className="mono">{log.traceId ?? '—'}</span>],
-        ['Same message in range', same], ['Est. per minute now', compact(occurrences[occurrences.length - 1])],
+        ['Same message in loaded logs', same],
       ]} />
-      <DrawerSection title="Occurrences">
-        <TimeSeries timestamps={ts} height={150} area format={(v) => compact(v)} series={[{ id: 'n', label: 'Errors / min', slot: 8, data: occurrences }]} />
-      </DrawerSection>
-      <DrawerSection title="Stack trace">
-        <CodeBlock>{`Error: ${log.message}
-    at ${fn}Handler (src/${log.service.split('-')[0]}/${fn}.controller.ts:42:17)
-    at processTicksAndRejections (node:internal/process/task_queues:95:5)
-    at async Router.handle (node_modules/@trooper/node/dist/http.js:118:9)`}</CodeBlock>
-      </DrawerSection>
+      {typeof stack === 'string' && stack && (
+        <DrawerSection title="Stack trace">
+          <CodeBlock>{stack}</CodeBlock>
+        </DrawerSection>
+      )}
     </Drawer>
   );
 }

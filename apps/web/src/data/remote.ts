@@ -1,46 +1,33 @@
 /**
- * Data mode switch and remote cache (ADR-013, .ai/contracts.md §11).
+ * Remote cache (ADR-013, ADR-028, .ai/contracts.md §11). The dashboard reads only real api data.
  *
- * Screens call data functions synchronously. In api mode a function returns what is cached for its
- * request; on a miss it starts the request and returns a fallback. When the response lands the data
+ * Screens call data functions synchronously. A function returns what is cached for its request; on a miss it
+ * starts the request and returns an empty fallback (never fabricated values). When the response lands the data
  * version bumps and every component using useApp()/useData() re-renders with the real value.
  */
 import { useSyncExternalStore } from 'react';
 
-export type DataMode = 'mock' | 'api';
-export const DATA_MODE: DataMode = import.meta.env.VITE_DATA === 'api' ? 'api' : 'mock';
-export const isApi = DATA_MODE === 'api';
 export const API_URL: string = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:8080';
-const EXPLICIT_KEY = (import.meta.env.VITE_API_KEY as string | undefined) || undefined;
-/** VITE_API_KEY set explicitly: always send it (automation / dev), never show the login screen (ADR-016). */
-export const hasKeyOverride = !!EXPLICIT_KEY;
-const API_KEY: string = EXPLICIT_KEY ?? 'tt_dev_api_key';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public path: string) { super(message); }
 }
 
-// ── auth transport (ADR-016, contracts §15) ──
-// 'key': Bearer api key (default until data/auth.ts finds a session-capable api) · 'session': tt_session cookie + X-Trooper-Project
-let session = false;
+// ── auth transport (ADR-016, contracts §15): tt_session cookie + X-Trooper-Project ──
 let projectHeader: string | undefined;
 let onUnauthorized: (() => void) | undefined;
-/** Called by data/auth.ts once the auth mode and the selected project are known. */
-export function configureTransport(o: { session: boolean; projectId?: string; onUnauthorized?: () => void }) {
-  session = o.session;
+/** Called by data/auth.ts once the session and the selected project are known. */
+export function configureTransport(o: { projectId?: string; onUnauthorized?: () => void }) {
   projectHeader = o.projectId;
   onUnauthorized = o.onUnauthorized;
 }
 /** Headers + credentials for a request to the api (also used by data/auth.ts for /auth and /me). */
-export function authInit(init?: RequestInit, opts: { cookies?: boolean } = {}): RequestInit {
-  const cookies = session || !!opts.cookies;
+export function authInit(init?: RequestInit): RequestInit {
   return {
     ...init,
-    // cookies only when the api is session-capable: credentialed CORS needs Allow-Credentials on the api
-    credentials: cookies ? 'include' : 'same-origin',
+    credentials: 'include',
     headers: {
-      ...(!session || hasKeyOverride ? { Authorization: `Bearer ${API_KEY}` } : {}),
-      ...(session && projectHeader && !hasKeyOverride ? { 'X-Trooper-Project': projectHeader } : {}),
+      ...(projectHeader ? { 'X-Trooper-Project': projectHeader } : {}),
       ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
       ...init?.headers,
     },
@@ -50,7 +37,7 @@ export function authInit(init?: RequestInit, opts: { cookies?: boolean } = {}): 
 /** Fetch JSON from the api (`path` starts after /api/v1). */
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}/api/v1${path}`, authInit(init));
-  if (res.status === 401 && session && !hasKeyOverride) onUnauthorized?.();
+  if (res.status === 401) onUnauthorized?.();
   if (!res.ok) {
     let msg = res.statusText;
     try { const j = await res.json() as { error?: string; message?: string }; msg = j.error ?? j.message ?? msg; } catch { /* not json */ }
@@ -72,7 +59,7 @@ function bump() {
   // coalesce many responses into one render
   setTimeout(() => { scheduled = false; version++; listeners.forEach((l) => l()); }, 16);
 }
-/** Re-render data consumers without dropping anything (local/mock mutations). */
+/** Re-render data consumers without dropping anything (local state changes). */
 export function notifyData() { bump(); }
 export function subscribe(l: () => void) { listeners.add(l); return () => { listeners.delete(l); }; }
 export const dataVersion = () => version;
@@ -173,7 +160,7 @@ export async function mutate<T>(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', pat
 let timer: ReturnType<typeof setInterval> | undefined;
 /** Refresh lists and drop series every 60 s. */
 export function startPolling() {
-  if (!isApi || timer) return;
+  if (timer) return;
   timer = setInterval(() => { void hydrate().catch(() => undefined); for (const e of cache.values()) e.at = 0; bump(); }, TTL_MS);
 }
 

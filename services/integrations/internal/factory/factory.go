@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 
 	"github.com/tasktrooper/telemetry/services/pkg/secrets"
 
@@ -37,6 +38,9 @@ type Factory struct {
 	// IngestKeys / PublicIngestURL are used to create Vercel drains (config.createDrain).
 	IngestKeys      map[int64]string
 	PublicIngestURL string
+	// HTTP is used by providers that take a client (AWS, Azure); nil = provider default. Self telemetry passes a
+	// traced client (ADR-027).
+	HTTP *http.Client
 	// Log is handed to providers for one-off notices (may be nil).
 	Log *slog.Logger
 }
@@ -61,9 +65,9 @@ func (f *Factory) Build(ctx context.Context, in model.Integration) (model.Provid
 	}
 	switch in.Provider {
 	case "aws":
-		return aws.New(ctx, in.Config, cred, aws.Options{Endpoint: f.Endpoints.AWS})
+		return aws.New(ctx, in.Config, cred, aws.Options{Endpoint: f.Endpoints.AWS, HTTPClient: f.HTTP})
 	case "azure":
-		o := azure.Options{LoginURL: f.Endpoints.AzureLogin, ARMURL: f.Endpoints.AzureARM}
+		o := azure.Options{LoginURL: f.Endpoints.AzureLogin, ARMURL: f.Endpoints.AzureARM, HTTP: f.HTTP}
 		if f.Log != nil {
 			o.Log = f.Log.With("integration", in.ID)
 		}

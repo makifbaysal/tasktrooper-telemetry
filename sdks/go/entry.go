@@ -2,6 +2,7 @@ package trooper
 
 import (
 	"context"
+	"strings"
 	"sync"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -158,6 +159,9 @@ func (p *spanProcessor) OnStart(parent context.Context, s sdktrace.ReadWriteSpan
 			}
 		}
 	}
+	if s.SpanKind() == trace.SpanKindClient {
+		stripURLQuery(s)
+	}
 	if k := s.SpanKind(); k == trace.SpanKindServer || k == trace.SpanKindConsumer {
 		if parent := s.Parent(); !parent.IsValid() {
 			s.SetAttributes(AttrSampleRate.Float64(p.sampleRate))
@@ -175,3 +179,18 @@ func (p *spanProcessor) OnStart(parent context.Context, s sdktrace.ReadWriteSpan
 func (p *spanProcessor) OnEnd(sdktrace.ReadOnlySpan)      {}
 func (p *spanProcessor) Shutdown(context.Context) error   { return nil }
 func (p *spanProcessor) ForceFlush(context.Context) error { return nil }
+
+// stripURLQuery removes the query string and fragment from url.full on client spans (PII rule: no query params
+// by default). Instrumentations such as otelhttp set it at span start, so OnStart can still overwrite it.
+func stripURLQuery(s sdktrace.ReadWriteSpan) {
+	for _, kv := range s.Attributes() {
+		if kv.Key != "url.full" {
+			continue
+		}
+		v := kv.Value.AsString()
+		if i := strings.IndexAny(v, "?#"); i >= 0 {
+			s.SetAttributes(attribute.String("url.full", v[:i]))
+		}
+		return
+	}
+}

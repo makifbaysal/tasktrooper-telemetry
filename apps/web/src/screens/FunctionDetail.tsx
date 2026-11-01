@@ -4,7 +4,7 @@ import { AlertOctagon, Bell, Gauge, SquareFunction } from 'lucide-react';
 import { Columns, TimeSeries } from '@/components/charts';
 import { Badge, Button, Callout, Card, EmptyState, KeyValues, PageHeader, Section, StatTile, Table } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
-import { integrationOf, isApi, services, timestamps, useData } from '@/data';
+import { integrationOf, remoteStatus, services, timestamps, useData } from '@/data';
 import { pick } from '@/data/api/apm';
 import { FAAS_PROVIDER_LABEL, faasRank, serverlessFunction, serverlessFunctions, type FaasFunction, type FaasRecentError } from '@/data/serverless';
 import { ago, compact, dateTime, ms, pct } from '@/lib/format';
@@ -31,7 +31,7 @@ export function FunctionDetail() {
     return (
       <>
         <PageHeader title={functionId} crumbs={[...crumbs, { label: functionId }]} />
-        <Card><EmptyState icon={<SquareFunction />} title={isApi ? 'Loading function…' : 'Function not found'} /></Card>
+        <Card><EmptyState icon={<SquareFunction />} title={remoteStatus().pending > 0 ? 'Loading function…' : 'Function not found'} /></Card>
       </>
     );
   }

@@ -18,6 +18,7 @@ import (
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/ascode"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/model"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/observe"
+	"github.com/tasktrooper/telemetry/services/codeintel/internal/selftel"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/suggest"
 )
 
@@ -32,7 +33,12 @@ type Store struct{ DB *pgxpool.Pool }
 
 // Open connects to Postgres.
 func Open(ctx context.Context, url string) (*Store, error) {
-	p, err := pgxpool.New(ctx, url)
+	cfg, err := pgxpool.ParseConfig(url)
+	if err != nil {
+		return nil, err
+	}
+	cfg.ConnConfig.Tracer = selftel.PGTracer() // spans only under a recording parent (ADR-027)
+	p, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}

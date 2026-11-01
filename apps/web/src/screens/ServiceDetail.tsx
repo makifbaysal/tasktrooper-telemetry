@@ -10,12 +10,12 @@ import {
 import { useApp } from '@/components/layout/context';
 import {
   TIME_CATEGORIES, breakdownSeries, callerSeries, dependenciesFor, endpointBreakdown, endpointErrorSeries, endpointTrafficSeries,
-  endpointsFor, incidentShape, isClientApp, outgoingSeries, serviceBreakdown, serviceCallers, serviceErrorSeries, serviceTrafficSeries, services, timestamps,
+  endpointsFor, isClientApp, outgoingSeries, redSeries, serviceBreakdown, serviceCallers, serviceErrorSeries, services, timestamps,
   groupLag, groupsOfService, worst, groupHealth, deployEvents, deploysOf, DEPLOY_SOURCE_LABEL, type DeployMarker,
   type CallerTraffic, type Dependency, type Endpoint, type Service,
 } from '@/data';
 import { ago, compact, dateTime, ms, pct } from '@/lib/format';
-import { CallerDrawer, DependencyDrawer, ErrorCell, NameCell, epLabel, sourceLabel, latencyFromP95, latencyHint, latencySeriesFor, statusSplitFor } from './apm';
+import { CallerDrawer, DependencyDrawer, ErrorCell, NameCell, epLabel, sourceLabel, latencyHint, latencySeriesFor, statusSplitFor } from './apm';
 import { CALLER_KIND_LABEL, CriticalityBadge, DEP_KIND_LABEL, LINE_SLOTS, ServiceType, callerColorFor, categoryOf } from './shared';
 import { RootCauseCard, diagnose } from './rca';
 import { LogExplorer } from './Logs';
@@ -129,27 +129,26 @@ function LagBadge({ serviceId }: { serviceId: string }) {
  */
 function HealthSection({ svc, ts, unit, isConsumer, critical }: { svc: Service; ts: number[]; unit: string; isConsumer: boolean; critical: boolean }) {
   const { range } = useApp();
-  const spike = incidentShape(svc.id, svc.prevP95 / svc.p95);
-  const total = serviceTrafficSeries(svc.id, range);
   const err = serviceErrorSeries(svc.id, range);
-  const lat = latencyFromP95(svc.p95, serviceBreakdown(svc.id).avgMs);
+  const red = redSeries(range, svc.id);
+  const last = (xs: number[]) => xs.filter((v) => v > 0).at(-1) ?? 0;
+  const lat = { p50: last(red.p50), avg: serviceBreakdown(svc.id).avgMs, p99: last(red.p99) };
   return (
     <div className="grid grid-3">
       <MetricCard className="span-2 metric--hero" label={isConsumer ? 'Messages processed' : 'Requests'}
         value={compact(svc.rpm)} unit={unit} curr={svc.rpm} prev={svc.prevRpm}
         hint={<>{compact(svc.rpm * svc.errorRate)} failed / min{svc.lag !== undefined && <> · consumer lag <strong className="secondary">{compact(svc.lag)}</strong> msgs</>}</>}>
-        <Columns timestamps={ts} height={300} format={(v) => compact(v)} series={statusSplitFor(range, svc.id, total, err, isConsumer)} />
+        <Columns timestamps={ts} height={300} format={(v) => compact(v)} series={statusSplitFor(range, svc.id, isConsumer)} />
       </MetricCard>
       <div className="stack">
         <MetricCard label="Error rate" value={pct(svc.errorRate)} curr={svc.errorRate} prev={svc.prevErrorRate} upIsGood={false}
           badge={critical ? <StatusBadge status="firing" label="Alert firing" /> : undefined}>
           <TimeSeries timestamps={ts} format={(v) => pct(v)} height={104} area events={deployEvents(svc.id, ts[0])}
-            threshold={critical ? { value: 0.02, label: '2%' } : undefined}
             series={[{ id: 'err', label: 'Error rate', slot: 8, data: err }]} />
         </MetricCard>
         <MetricCard label={isConsumer ? 'Processing time · p95' : 'Latency · p95'} value={ms(svc.p95)} curr={svc.p95} prev={svc.prevP95} upIsGood={false}
           hint={latencyHint(lat, 'p95')}>
-          <TimeSeries timestamps={ts} format={ms} height={140} events={deployEvents(svc.id, ts[0])} series={latencySeriesFor(svc.id, range, lat, spike, svc.id)} />
+          <TimeSeries timestamps={ts} format={ms} height={140} events={deployEvents(svc.id, ts[0])} series={latencySeriesFor(range, svc.id)} />
         </MetricCard>
       </div>
     </div>

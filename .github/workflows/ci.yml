@@ -80,6 +80,9 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: build linked SDK packages # @trooper/browser, react, replay (+ core) — ADR-027
+        working-directory: apps/web
+        run: pnpm sdk:build
       - name: typecheck
         working-directory: apps/web
         run: pnpm exec tsc -b

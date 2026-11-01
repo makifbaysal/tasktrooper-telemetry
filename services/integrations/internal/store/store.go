@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tasktrooper/telemetry/services/integrations/internal/model"
+	"github.com/tasktrooper/telemetry/services/integrations/internal/selftel"
 )
 
 // Store wraps a pgx pool.
@@ -19,7 +20,14 @@ type Store struct{ DB *pgxpool.Pool }
 
 // Open connects to Postgres.
 func Open(ctx context.Context, url string) (*Store, error) {
-	p, err := pgxpool.New(ctx, url)
+	cfg, err := pgxpool.ParseConfig(url)
+	if err != nil {
+		return nil, err
+	}
+	if selftel.Enabled() {
+		cfg.ConnConfig.Tracer = selftel.PGTracer()
+	}
+	p, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}

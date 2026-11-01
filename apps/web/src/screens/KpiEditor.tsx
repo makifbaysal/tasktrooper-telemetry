@@ -1,11 +1,10 @@
 import { useData } from '@/data/remote';
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
-import { ArrowDown, ArrowUp, GitBranch, Plus, Trash2 } from 'lucide-react';
-import { TimeSeries } from '@/components/charts';
-import { Button, Callout, Card, Field, Input, Meter, PageHeader, Segmented, Select, StatusBadge, Toggle } from '@/components/ui';
-import { createKpi, endpointsFor, kpis, rumPagesFor, series, services, timestamps, type Kpi, type KpiSli, type Severity } from '@/data';
-import { ms, pct } from '@/lib/format';
+import { ArrowDown, ArrowUp, Eye, GitBranch, Plus, Trash2 } from 'lucide-react';
+import { Button, Callout, Card, EmptyState, Field, Input, PageHeader, Segmented, Select, Toggle } from '@/components/ui';
+import { createKpi, endpointsFor, kpis, rumPagesFor, services, type Kpi, type KpiSli, type Severity } from '@/data';
+import { ms } from '@/lib/format';
 import { KPI_KIND_LABEL, SLI_LABEL, objectivePct } from './Kpis';
 
 type Kind = Kpi['target']['kind'];
@@ -27,11 +26,13 @@ export function KpiEditor() {
   // KPIs live under their service; return to its KPIs tab
   const owner = params.get('app') ?? params.get('service') ?? (params.get('edit') ? kpis.find((k) => k.id === params.get('edit'))?.target.serviceId : undefined);
   const back = owner ? `/services/${owner}?tab=kpis` : '/';
-  const [app, setApp] = useState(params.get('app') ?? 'shop-web');
-  const [page, setPage] = useState(params.get('page') ?? rumPagesFor(params.get('app') ?? 'shop-web')[0]?.id ?? '');
-  const [service, setService] = useState(params.get('service') ?? 'orders-api');
-  const [endpoint, setEndpoint] = useState(params.get('endpoint') ?? endpointsFor(params.get('service') ?? 'orders-api')[0]?.id ?? '');
-  const [steps, setSteps] = useState(['shop-web · /cart', 'shop-web · /checkout', 'orders-api · POST /v1/orders', 'payments-api · POST /v1/charges']);
+  const initialApp = params.get('app') ?? clientApps()[0]?.id ?? '';
+  const initialService = params.get('service') ?? backendServices()[0]?.id ?? '';
+  const [app, setApp] = useState(initialApp);
+  const [page, setPage] = useState(params.get('page') ?? rumPagesFor(initialApp)[0]?.id ?? '');
+  const [service, setService] = useState(initialService);
+  const [endpoint, setEndpoint] = useState(params.get('endpoint') ?? endpointsFor(initialService)[0]?.id ?? '');
+  const [steps, setSteps] = useState<string[]>(['']);
   const [sli, setSli] = useState<KpiSli>(initialKind === 'endpoint' ? 'success_rate' : 'latency');
   const [threshold, setThreshold] = useState(initialKind === 'endpoint' ? 300 : initialKind === 'app_start' ? 2000 : 2500);
   const [noError, setNoError] = useState(true);
@@ -39,8 +40,8 @@ export function KpiEditor() {
   const [win, setWin] = useState<'7d' | '28d'>('28d');
   const [name, setName] = useState(params.get('name') ?? '');
   const [rules, setRules] = useState<Rule[]>([
-    { id: 1, mult: 6, long: '1h', short: '5m', severity: 'critical', channels: '#web-team, PagerDuty' },
-    { id: 2, mult: 3, long: '6h', short: '30m', severity: 'warning', channels: '#web-team' },
+    { id: 1, mult: 6, long: '1h', short: '5m', severity: 'critical', channels: '' },
+    { id: 2, mult: 3, long: '6h', short: '30m', severity: 'warning', channels: '' },
   ]);
 
   const pages = rumPagesFor(app);
@@ -52,28 +53,9 @@ export function KpiEditor() {
   const targetLabel = kind === 'page' ? `${appSvc?.name} · ${pageObj?.path}` : kind === 'endpoint' ? `${service} · ${ep ? `${ep.method} ${ep.route}` : '—'}` : kind === 'app_start' ? `${appSvc?.name} · Cold start` : `Journey · ${steps.length} steps`;
   const autoName = sli === 'latency' ? `${targetLabel} is fast` : sli === 'availability' ? `${targetLabel} is up` : `${targetLabel} succeeds`;
 
-  // ---- live preview (mock): bad-event share over the last 7 days
   const obj = Number(objective);
-  const allowed = 1 - obj;
-  const errRate = kind === 'endpoint' ? ep?.errorRate ?? 0.002 : kind === 'journey' ? 0.009 : pageObj?.errorRate ?? appSvc?.errorRate ?? 0.002;
-  const typical = kind === 'page' ? pageObj?.lcp ?? 2000 : kind === 'endpoint' ? (ep?.p95 ?? 200) * 0.75 : kind === 'app_start' ? (appSvc?.p95 ?? 1500) * 0.9 : 4200;
-  const slowShare = sli === 'latency' ? Math.min(0.9, 0.25 * Math.pow(typical / Math.max(1, threshold), 3)) : 0;
-  const base = Math.max(0.0004, slowShare + (sli === 'availability' ? errRate * 0.3 : noError || sli !== 'latency' ? errRate : 0));
-  const key = `${kind}-${app}-${page}-${service}-${endpoint}-${sli}`;
-  const ts = timestamps('7d');
-  const bad = series(`kpi-preview-${key}`, '7d', { base, noise: 0.35, daily: 0.3, spikeAt: 0.62, spikeMul: 3.2, spikeWidth: 3 }).map((v) => Math.min(1, v));
-  const fired = rules.map((r) => {
-    let n = 0;
-    let on = false;
-    for (const b of bad) {
-      const hot = b / allowed > r.mult;
-      if (hot && !on) n++;
-      on = hot;
-    }
-    return n;
-  });
-  const used = (bad.reduce((a, v) => a + v, 0) / bad.length / allowed) * (7 / (win === '7d' ? 7 : 28));
-  const budgetLeft = Math.max(0, 1 - used);
+  // the target's current value, when the api reports one (hint for the threshold)
+  const typical = kind === 'page' ? pageObj?.lcp : kind === 'endpoint' ? ep?.p95 : kind === 'app_start' ? appSvc?.p95 : undefined;
   const windowDays = win === '7d' ? 7 : 28;
 
   const [saving, setSaving] = useState(false);
@@ -159,7 +141,7 @@ export function KpiEditor() {
               <Segmented label="SLI type" value={sli} onChange={setSli} options={(['latency', 'availability', 'success_rate'] as KpiSli[]).map((s) => ({ id: s, label: SLI_LABEL[s] }))} />
               {sli === 'latency' && (
                 <div className="grid grid-2" style={{ alignItems: 'end' }}>
-                  <Field label={`${metricName} at most`} hint={`Typical now: ${ms(typical)}`}>
+                  <Field label={`${metricName} at most`} hint={typical ? `Now: ${ms(typical)}${kind === 'endpoint' ? ' p95' : ''}` : undefined}>
                     <div className="row" style={{ gap: 6 }}>
                       <Input type="number" min={1} value={threshold} onChange={(e) => setThreshold(Number(e.target.value) || 0)} style={{ width: 120 }} />
                       <span className="muted">ms</span>
@@ -183,7 +165,7 @@ export function KpiEditor() {
 
           <Card title="3 · Objective">
             <div className="grid grid-2">
-              <Field label="Share of good events" hint={`Allows ${objectivePct(allowed)} bad events — that's the error budget`}>
+              <Field label="Share of good events" hint={`Allows ${objectivePct(1 - obj)} bad events — that's the error budget`}>
                 <Select value={objective} onChange={(e) => setObjective(e.target.value)} options={OBJECTIVES.map((o) => ({ value: o, label: objectivePct(Number(o)) }))} />
               </Field>
               <Field label="Rolling window">
@@ -222,36 +204,10 @@ export function KpiEditor() {
 
         {/* live preview — the important bit, stays in view */}
         <div style={{ position: 'sticky', top: 'calc(var(--topbar-h) + var(--space-4))' }}>
-          <Card title="Preview · last 7 days" subtitle={name || autoName}>
-            <div className="stack">
-              <div className="row" style={{ alignItems: 'baseline', gap: 8 }}>
-                <span className="num" style={{ fontSize: 'var(--text-2xl)', fontWeight: 600 }}>{fired.reduce((a, n) => a + n, 0)}</span>
-                <span className="secondary">alerts would have fired</span>
-              </div>
-              {rules.length > 0 && (
-                <div className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: -8 }}>
-                  {rules.map((r, i) => `${r.mult}× ${r.long}: ${fired[i]}`).join(' · ')}
-                </div>
-              )}
-              <div>
-                <div className="muted" style={{ fontSize: 'var(--text-xs)', marginBottom: 4 }}>Bad events · line = allowed {objectivePct(allowed)}</div>
-                <TimeSeries timestamps={ts} height={180} area format={(v) => pct(v)}
-                  threshold={{ value: allowed, label: `allowed ${objectivePct(allowed)}` }}
-                  series={[{ id: 'bad', label: 'Bad events', slot: 8, data: bad }]} />
-              </div>
-              <div>
-                <div className="row muted" style={{ fontSize: 'var(--text-xs)', marginBottom: 4 }}>
-                  Error budget left ({win}) <span className="spacer" /><span className="num secondary">{Math.round(budgetLeft * 100)}%</span>
-                </div>
-                <Meter value={budgetLeft} tone={budgetLeft < 0.25 ? 'critical' : budgetLeft < 0.5 ? 'warning' : undefined} />
-              </div>
-              <div className="row" style={{ gap: 8 }}>
-                {base > allowed
-                  ? <StatusBadge status="warning" label="Would breach today" />
-                  : <StatusBadge status="ok" label="Would be on track" />}
-                <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>bad now ≈ {pct(base)}</span>
-              </div>
-            </div>
+          <Card title="Preview" subtitle={name || autoName}>
+            <EmptyState icon={<Eye />} title="Preview available after saving">
+              Good-event share, error budget and burn-rate alerts are computed from this target&apos;s telemetry once the KPI exists.
+            </EmptyState>
           </Card>
         </div>
       </div>

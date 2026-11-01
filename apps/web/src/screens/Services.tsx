@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
-import { ChevronRight, Plus } from 'lucide-react';
+import { ChevronRight, Plus, Server } from 'lucide-react';
 import { Sparkline } from '@/components/charts';
-import { Button, Card, PageHeader, Section, SearchInput, StatusBadge, Table } from '@/components/ui';
+import { Button, Card, ConnectSdk, PageHeader, Section, SearchInput, StatusBadge, Table } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
 import { appSummary, serviceErrorSeries, serviceTrafficSeries, services, type Service, type ServiceType as SType } from '@/data';
 import { change, compact, ms, pct } from '@/lib/format';
@@ -73,6 +73,14 @@ export function Services() {
         </Section>
       )}
 
+      {scoped.length === 0 ? (
+        <Card>
+          <ConnectSdk icon={<Server />} title={`No ${noun} reporting yet`} group={types && types.every((t) => t === 'web' || t === 'mobile') ? 'frontend' : 'all'}>
+            Every service, worker and web or mobile app that sends telemetry through a Trooper SDK appears here with its traffic,
+            error rate and latency.
+          </ConnectSdk>
+        </Card>
+      ) : (
       <Section title={`All ${noun}`}
         actions={<>
           <div style={{ width: 240 }}><SearchInput placeholder="Filter by name" value={q} onChange={(e) => setQ(e.target.value)} /></div>
@@ -92,8 +100,9 @@ export function Services() {
                   { key: 'rpm', header: 'Views', numeric: true, sortValue: (s) => s.rpm, render: (s) => <span>{compact(s.rpm)} <span className="muted">/min</span></span> },
                   { key: 'rpm-t', header: '', render: (s) => <Sparkline data={serviceTrafficSeries(s.id, range).slice(-24)} width={72} height={24} /> },
                   { key: 'err', header: 'JS error / crash rate', numeric: true, sortValue: (s) => s.errorRate, render: (s) => <span>{pct(s.errorRate)} <span className="muted">{s.type === 'mobile' ? 'crash' : 'JS'}</span></span> },
-                  { key: 'load', header: 'Load p75', numeric: true, sortValue: (s) => appSummary(s.id).vitals[0].value, render: (s) => {
+                  { key: 'load', header: 'Load p75', numeric: true, sortValue: (s) => appSummary(s.id).vitals[0]?.value ?? -1, render: (s) => {
                     const v = appSummary(s.id).vitals[0];
+                    if (!v) return <span className="muted">—</span>;
                     return <span>{ms(v.value)} <span className="muted">{v.label === 'LCP' ? 'LCP' : 'cold start'}</span></span>;
                   } },
                   { key: 'go', header: '', render: () => <ChevronRight size={14} className="muted" aria-hidden /> },
@@ -114,6 +123,7 @@ export function Services() {
           );
         })}
       </Section>
+      )}
     </>
   );
 }

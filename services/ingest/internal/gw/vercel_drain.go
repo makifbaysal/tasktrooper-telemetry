@@ -32,7 +32,7 @@ var (
 //     against the decompressed body and, for gzip requests, also against the bytes as sent.
 //   - Logs → tt.otlp.logs, traces (OTLP JSON or protobuf) → tt.otlp.traces, speed insights / web analytics → tt.rum.
 func (s *Server) vercelDrain() http.Handler {
-	return instrument(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return s.instrument(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := s.handleVercel(w, r); err != nil {
 			s.writeError(w, err)
 			return
@@ -61,16 +61,17 @@ func (s *Server) handleVercel(w http.ResponseWriter, r *http.Request) error {
 		s.log.Error("key lookup failed", "err", err)
 		return &ingestError{status: http.StatusServiceUnavailable, msg: "auth backend unavailable", retryAfter: 5}
 	}
+	ctx := s.begin(r.Context(), key)
 	id, err := strconv.ParseInt(r.URL.Query().Get("integration"), 10, 64)
 	if err != nil || id <= 0 {
 		return &ingestError{status: http.StatusBadRequest, msg: "integration query parameter required"}
 	}
-	in, err := s.integrations.Vercel(r.Context(), id)
+	in, err := s.integrations.Vercel(ctx, id)
 	if err != nil {
 		if errors.Is(err, ErrNoIntegration) {
 			return errNoIntegration
 		}
-		s.log.Error("integration lookup failed", "integration", id, "err", err)
+		s.log.ErrorContext(ctx, "integration lookup failed", "integration", id, "err", err)
 		return &ingestError{status: http.StatusServiceUnavailable, msg: "integration backend unavailable", retryAfter: 5}
 	}
 	if in.ProjectID != int64(key.Tenant.ProjectID) {
@@ -101,7 +102,7 @@ func (s *Server) handleVercel(w http.ResponseWriter, r *http.Request) error {
 	if !vercel.VerifySignature(in.Secret, body, sig) && (len(wire) == len(body) || !vercel.VerifySignature(in.Secret, wire, sig)) {
 		return errBadSignature
 	}
-	if err := s.allow(r.Context(), key); err != nil {
+	if err := s.allow(ctx, key); err != nil {
 		return err
 	}
 
@@ -128,17 +129,17 @@ func (s *Server) handleVercel(w http.ResponseWriter, r *http.Request) error {
 	// are not forwarded (country comes from the drain's own geo.country attribute).
 	m := meta{tenant: key.Tenant, receivedAt: s.now()}
 	if res.Logs != nil {
-		if err := s.publishMsg(sigLogs, res.Logs, m); err != nil {
+		if err := s.publishMsg(ctx, sigLogs, res.Logs, m); err != nil {
 			return err
 		}
 	}
 	for _, t := range res.Traces {
-		if err := s.publishMsg(sigTraces, t, m); err != nil {
+		if err := s.publishMsg(ctx, sigTraces, t, m); err != nil {
 			return err
 		}
 	}
 	for _, b := range res.RUM {
-		if err := s.publishMsg(sigRUM, b, m); err != nil {
+		if err := s.publishMsg(ctx, sigRUM, b, m); err != nil {
 			return err
 		}
 	}

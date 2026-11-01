@@ -94,6 +94,8 @@ export interface LogLine {
   traceId?: string;
   /** platform log source, e.g. Vercel drains: build | static | external | edge | lambda | redirect | firewall */
   source?: string;
+  /** log record + resource attributes as sent by the SDK */
+  attrs?: Record<string, unknown>;
 }
 
 export type MonitorKind =

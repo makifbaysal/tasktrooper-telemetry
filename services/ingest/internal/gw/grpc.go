@@ -23,6 +23,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	"github.com/tasktrooper/telemetry/services/ingest/internal/selfobs"
 	"github.com/tasktrooper/telemetry/services/pkg/topics"
 )
 
@@ -69,6 +70,11 @@ func (s *Server) grpcExport(ctx context.Context, sig signal, msg proto.Message) 
 	start := time.Now()
 	endpoint := "grpc:" + sig.topic
 	size := proto.Size(msg)
+	var req *selfobs.Request
+	if s.tel != nil {
+		method, _ := grpc.Method(ctx)
+		ctx, req = s.tel.WithRequest(ctx, "", method, true, start)
+	}
 	err := s.grpcExportInner(ctx, sig, msg, size)
 	var ie *ingestError
 	code := http.StatusOK
@@ -78,7 +84,11 @@ func (s *Server) grpcExport(ctx context.Context, sig signal, msg proto.Message) 
 		code = http.StatusInternalServerError
 	}
 	observe(endpoint, code, ie, size, start)
-	return toStatus(err)
+	st := toStatus(err)
+	if req != nil {
+		req.End(code, int(status.Code(st)), err)
+	}
+	return st
 }
 
 func (s *Server) grpcExportInner(ctx context.Context, sig signal, msg proto.Message, size int) error {
@@ -100,6 +110,7 @@ func (s *Server) grpcExportInner(ctx context.Context, sig signal, msg proto.Mess
 	if err != nil {
 		return err
 	}
+	ctx = s.begin(ctx, key)
 	if err := s.allow(ctx, key); err != nil {
 		return err
 	}
@@ -116,9 +127,9 @@ func (s *Server) grpcExportInner(ctx context.Context, sig signal, msg proto.Mess
 		m.clientIP = strings.TrimSpace(strings.Split(xff, ",")[0])
 	}
 	if req, ok := msg.(*colprofilespb.ExportProfilesServiceRequest); ok {
-		return s.publishOTLPProfiles(req, nil, nil, m)
+		return s.publishOTLPProfiles(ctx, req, nil, nil, m)
 	}
-	return s.publishMsg(sig, msg, m)
+	return s.publishMsg(ctx, sig, msg, m)
 }
 
 func first(md metadata.MD, k string) string {

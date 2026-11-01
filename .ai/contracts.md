@@ -19,7 +19,7 @@ services/                      Go 1.26, go.work ile çok modül
   loadtest/                    .../services/loadtest    loadtest-ctl + runner (ADR-015)
   mcp/                         .../services/mcp         cmd/tt-mcp (MCP sunucusu, stdio — ADR-025, §26)
 tools/
-  demo/                        github.com/tasktrooper/telemetry/tools/demo — demo trafiği (SDK'larla gerçek veri üretir)
+  trooper-cli/                 sourcemap / dSYM / mapping upload CLI (§12)
 deploy/
   docker-compose.yml           clickhouse, postgres, redpanda, redis (+ servisler profile "app" ile)
   clickhouse/*.sql             ClickHouse şeması (sıralı, idempotent: CREATE ... IF NOT EXISTS)
@@ -199,8 +199,8 @@ api key ile), DB'ye doğrudan bağlanmaz.
 
 `services/api/openapi.yaml` tek kaynak. Kurallar: JSON, camelCase alanlar; zaman `ts` unix ms; süreler ms; oranlar 0..1;
 `?range=1h|6h|24h|7d` (UI'daki `TimeRange`) ve `?env=`. Seriler `{ timestamps: number[], series: [{ id, label, data: number[] }] }`.
-Cevap şekilleri `apps/web/src/data/types.ts` (+ `infra.ts`) ile birebir — UI'da mock'tan fetch'e geçiş sadece `src/data/*`
-fonksiyonlarını değiştirir. Auth: `Authorization: Bearer <api key>` (dev) — OIDC session sonra.
+Cevap şekilleri `apps/web/src/data/types.ts` (+ `infra.ts`) ile birebir; UI'da api eşlemesi sadece `src/data/*`
+fonksiyonlarındadır. Auth: `Authorization: Bearer <api key>` (dev) — OIDC session sonra.
 
 ## 9. RUM
 
@@ -286,13 +286,27 @@ offline kuyruktan gelen ≤ 24 saatlik event'ler kendi zamanlarında kalır.
 - Bilinen boşluklar: Neon CPU/memory/connection metriği yok; RDS memory instance-class tablosundan (bilinmeyen sınıf →
   `config.instanceMemoryGb`); CloudWatch/GCP'den `max_connections` ve p95 yok; MSK Serverless'ta sadece lag.
 
-## 11. Dashboard veri modu (ADR-013)
+## 11. Dashboard veri modu (ADR-013, ADR-028)
 
-- `apps/web`: `VITE_DATA=mock|api` (default mock), `VITE_API_URL` (default `http://localhost:8080`), `VITE_API_KEY` (dev:
-  `tt_dev_api_key`). Altyapı `src/data/remote.ts`: `api()`, `remote(path, fallback, map?)`, `hydrateList(arr, path, map?)`,
+- `apps/web`: yalnızca api modu (mock yok, ADR-028). `VITE_API_URL` (default `http://localhost:8080`), `VITE_INGEST_URL` (SDK snippet'lerindeki
+  DSN'in host'u, default `http://localhost:4318` = api'nin `TT_PUBLIC_INGEST_URL` default'u); kimlik oturum cookie'si
+  (OIDC / dev login). Altyapı `src/data/remote.ts`: `api()`, `remote(path, fallback, map?)`, `hydrateList(arr, path, map?)`,
   `registerHydrator(fn)`, `invalidate(prefix)`, `mutate(method, path, body, invalidates[])`, `useData()`, `remoteStatus()`.
-- Her `src/data/*.ts` dosyası kendi hydrator'ını kaydeder ve fonksiyonlarını `isApi ? remote(...) : mock(...)` biçiminde yazar.
-  Mock implementasyonu silinmez.
+- Her `src/data/*.ts` dosyası kendi hydrator'ını kaydeder; fallback'ler boş/sıfırdır (sahte veri değil). Veri yoksa ekran
+  empty state gösterir.
+- **Onboarding:** `GET /me` boş `orgs` döndürürse UI "org + proje oluştur" ekranına gider → `POST /api/v1/orgs
+  {name, project: {name}}` → 201 `{org: {id, name, role: "owner"}, project: {id, name}, ingestKey: {id, prefix, key}, dsn}`
+  (key ve dsn bir kez; dsn = `TT_PUBLIC_INGEST_URL` (default `http://localhost:4318`) + key + proje id). Her oturumlu kullanıcı
+  org açabilir (kendi org'unun owner'ı olur); audit_log `org.create`. Var olan org'a proje: mevcut `POST /projects`.
+  Ayrıntılar: yalnız session (api key → 403); ad'lar trim, 1–100 karakter; `project.slug` opsiyonel (yoksa ad'dan, cevapta
+  `project.slug` da var); kullanıcı başına en fazla `TT_MAX_ORGS_PER_USER` (default 20) owner'ı olduğu org → 409. Org'suz
+  kullanıcıda `GET /me` → `orgs: []`, `currentProjectId: null`; `/me`, `/projects`, `/orgs*` geçersiz `X-Trooper-Project`'i
+  yok sayar (403 değil).
+- **Bootstrap:** `api bootstrap --org --project --owner [--ingest-key-out <dosya>] [--json]` (ADR-028), idempotent (advisory
+  lock); `--json` stdout'a tek obje: `{orgId, projectId, dsn, created: {org, project, key}}`, loglar stderr, hata → exit ≠ 0.
+  Org = owner'ın owner olduğu aynı adlı org; ingest key adı `bootstrap`. Dosya varsa ve içindeki key (çıplak key veya DSN)
+  aktifse yeniden kullanılır (aynı DSN); dosya yok/eski ise eski `bootstrap` key'leri revoke edilir, yenisi dosyaya yazılır
+  (dizin 0700, dosya 0600). `--ingest-key-out` verilmezse var olan key korunur ve `dsn` boş döner.
 
 ## 12. Symbolication (`services/symbolicator`)
 
@@ -1016,3 +1030,64 @@ Yerel kodlama agent'ları için salt okunur MCP sunucusu (`cmd/tt-mcp`, stdio; r
   MCP codeintel'e bağlanmaz; v2 envanter tool'ları da yalnız `GET /inventory` / `GET /suggestions` üzerinden sarılır.
 - **Bayrak:** `POST /api/v1/ai/incident-summary` main'e yeni (0764ad4) ve default mock sağlayıcı — v1'de sarılmadı.
   `Incident.rootCause` openapi'de şemasız (`rootCause: {}`); MCP bunu opaque JSON olarak geçirir.
+
+## 27. Self-observability (ADR-027)
+
+**Proje:** seed yok (ADR-028). `make self` → `api bootstrap --org TaskTrooper --project tasktrooper --owner <email>` self
+projesini idempotent oluşturur, ingest key'i `deploy/self/.run/dsn`'e yazar; `TT_SELF_PROJECT_ID` bu projenin id'sidir.
+
+**Go servisleri — env (hepsi opsiyonel; `TROOPER_DSN` yoksa export yok):**
+
+| Env | Default | Not |
+|---|---|---|
+| `TROOPER_DSN` | — | self projesinin ingest DSN'i |
+| `TROOPER_SERVICE` | binary'ye göre sabit (`tt-api` …, ADR-027) | override |
+| `TROOPER_ENV` | `TT_ENV` değeri, yoksa `development` | |
+| `TROOPER_VERSION` | build'deki `-ldflags` versiyonu / boş | deploy marker |
+| `TROOPER_SAMPLE_RATE` | `1` | yüksek trafikte ingest-gw için düşürülür |
+| `TROOPER_PROFILING` | `false` | §24 |
+| `TT_SELF_PROJECT_ID` | `0` (kapalı) | yalnız ingest-gw / ingest-writer: bu projenin istek/kayıtları için span/log üretilmez |
+
+Enstrümantasyon: gelen HTTP (route template'li), pgx, go-redis, franz-go (produce/consume), ClickHouse sorguları
+(`db.system=clickhouse` client span, SQL `SanitizeSQL`'den geçer), slog → OTel logs (mevcut `slog` handler'ı korunur, log
+seviyesi aynen), codeintel LLM çağrıları (§25, içerik kapalı). Health/metrics uçları (`/healthz`, `/readyz`, `/metrics`) span
+üretmez. Metrik etiketlerinde tenant id yok (kardinalite); tenant bilgisi gerekiyorsa span attribute'u `tt.org_id` /
+`tt.project_id` olarak sadece span'da.
+
+**ingest-gw / ingest-writer (döngü koruması, `services/ingest/internal/selfobs`):**
+- gw'de proje ancak key auth'tan sonra bilinir: server span auth'tan **sonra** açılır (başlangıç zamanı = isteğin geliş anı,
+  yeni root — müşterinin `traceparent`'ı span'ı başka projenin trace'ine çekmez). Self projede bunun yerine context'e sabit,
+  **sample edilmemiş** bir parent span context konur: parent-based sampler tüm child'ları (go-redis, pgx, producer) düşürür,
+  log handler'ı bu context'li kayıtları yalnız yerelde yazar. Kimliği doğrulanmayan istekler (401/403) span üretmez (yanlış
+  self key 401 döngüsü kurmasın). Kafka kaydı başına `send <topic>` producer span'ı (enqueue → ack); kayıtlara trace context
+  **enjekte edilmez** (müşteri kaydı değişmez).
+- writer: flush başına consumer span `process flush` (`trooper.process=flush`, `messaging.batch.message_count`,
+  `tt.self_records`) + tablo batch'i başına `INSERT <table>` (`db.system=clickhouse`, `db.operation.batch.size`; satır başına
+  span yok). Yalnız self kayıtlardan oluşan flush span/log üretmez; karışık flush izlenir (zaten diğer projeler yüzünden
+  oluşur, self veri ek flush tetiklemez). Çözülemeyen self kaydının uyarısı yalnız yerelde.
+- `TT_SELF_PROJECT_ID` = DSN'deki proje; `0` iken DSN verilmişse servis açılışta uyarı loglar. Telemetri kapalıyken
+  (`TROOPER_DSN` yok) hot path'te ek iş/allocation yok (`BenchmarkHTTPTraces` aynı).
+
+**Dashboard (`apps/web`):** `VITE_TROOPER_DSN` (ingest key DSN'i, RUM), `VITE_TROOPER_REPLAY_SAMPLE_RATE` (default `0`), app adı
+`tt-web`. api çağrılarına `traceparent` eklenir (api CORS `traceparent`, `tracestate`, `baggage` header'larına izin verir);
+böylece RUM → api → ClickHouse trace'i uçtan uca görünür. Replay maskeleme default (tüm metin maskeli).
+Ek (hepsi opsiyonel): `VITE_TROOPER_REPLAY_ON_ERROR_SAMPLE_RATE` (default `0`; >0 → diğer oturumlar son 60 sn'yi bufferlar,
+ilk hatada gönderir), `VITE_TROOPER_SAMPLE_RATE` (`1`), `VITE_TROOPER_ENV` (default Vite `MODE`), `VITE_TROOPER_VERSION`
+(default `<package version>+<git sha>`), `VITE_TROOPER_TRACE_PROPAGATION=false` (CORS'u ADR-027 öncesi olan api için;
+yoksa preflight düşer). DSN yoksa SDK chunk'ları build'e hiç girmez; iki replay oranı da 0 ise replay chunk'ı girmez.
+View adı react-router route template'i; `identify` yalnız internal user id (email/ad yok). Detay `apps/web/.env.example`.
+
+**Altyapı:** `deploy/self/agent.yaml` — trooper-agent; compose'daki Postgres, ClickHouse, Redpanda, Redis receiver'ları + host
+metrikleri → self projesi. `make self`: seed'i uygular, agent'ı başlatır, servisler için gereken env'i yazdırır.
+Agent `--agent-modes db,host` ile koşar (binary + log `deploy/self/.run/`, gitignore'da; `make self-down` durdurur, `make self`
+tekrar çağrılınca yeniden başlatır). db: Postgres `tt-postgres` (name `trooper` = pgx span'larının `db.namespace`'i), Redis
+`tt-redis`, Redpanda `tt-redpanda` (yalnız `^tt\.` topic'leri ve `^tt-` group'ları — aynı broker'daki demo topic'leri demo
+projesine ait; node metrikleri `:9644/public_metrics`). host: makine + Docker Engine API üzerinden tüm compose
+container'ları. **ClickHouse** için collector'da engine yok: şimdilik yalnız container metrikleri (`tasktrooper-clickhouse-1`).
+
+**Notlar:**
+- notifier'ın outbound client'ı otelhttp değil `RedactedTransport`: Slack/Teams/webhook URL'lerinin path'i secret taşır →
+  span'da sadece scheme+host, method, status, `peer.service`; `traceparent` yine eklenir.
+- Go SDK client span'lerinde `url.full` query string ve fragment olmadan yazılır (PII kuralı; tüm müşteri servisleri için de geçerli).
+- loadtest-ctl runner'a `TRACEPARENT`/`TRACESTATE` + `TROOPER_*` env'i geçer; k8s'de `TROOPER_DSN` (`TT_DSN` gibi) secret'ta olmalı.
+- Müşteri altyapısına giden istemciler (trooper-agent scraper'ları, loadtest hedef trafiği, cloud metrics OTLP gönderimi) trace edilmez.

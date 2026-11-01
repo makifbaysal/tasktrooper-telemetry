@@ -1,13 +1,15 @@
-# Build context: services/ (see deploy/docker-compose.yml). Build arg CMD selects the binary.
-#   docker build -f ingest/Dockerfile --build-arg CMD=ingest-writer services/
+# Build context: repo root (ADR-027; see deploy/docker-compose.yml). Build arg CMD selects the binary.
+#   docker build -f services/ingest/Dockerfile --build-arg CMD=ingest-writer .
+# services/pkg and sdks/go are copied for the go.mod replace directives (../pkg, ../../sdks/go).
 FROM golang:1.26-alpine AS build
 ENV CGO_ENABLED=0 GOWORK=off
 WORKDIR /src
-COPY pkg/ pkg/
-COPY ingest/go.mod ingest/go.sum ingest/
-WORKDIR /src/ingest
+COPY services/pkg/ services/pkg/
+COPY sdks/go/ sdks/go/
+COPY services/ingest/go.mod services/ingest/go.sum services/ingest/
+WORKDIR /src/services/ingest
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
-COPY ingest/ .
+COPY services/ingest/ .
 ARG CMD=ingest-gw
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
     go build -trimpath -ldflags="-s -w" -o /out/app ./cmd/${CMD}

@@ -3,7 +3,7 @@
 ## Faz 0 — Temel ✅
 - [x] Mimari ve ürün dokümanları
 - [x] Design system (token + temel komponentler)
-- [x] Dashboard ekranları mock data ile
+- [x] Dashboard ekranları (ilk sürüm mock data ile; ADR-028 ile mock kaldırıldı, yalnızca gerçek veri)
 - [x] `deploy/docker-compose.yml` (ClickHouse, Postgres, Redpanda, Redis) + şemalar (`deploy/clickhouse`, `deploy/postgres`)
 - [x] `services/pkg` ortak paketler, `proto/rum/v1`, servisler arası sözleşme (`contracts.md`)
 
@@ -11,7 +11,7 @@
 
 Durum: servisler (`ingest`, `api`, `alerting`, `collector`, `integrations` = `trooper-cloud`, `symbolicator`) ve SDK'lar (Go, JVM,
 .NET, JS, Android, iOS, Flutter, React Native) hazır; testler ve uçtan uca akış (SDK → gw → Redpanda → writer → ClickHouse → api → UI)
-çalışıyor. Dashboard `VITE_DATA=api` ile gerçek veriyi gösterir (ADR-013). `make demo` mock dünyayı gerçek pipeline üzerinden canlı üretir.
+çalışıyor. Dashboard yalnızca api'den gerçek veriyi gösterir (ADR-013, ADR-028); veri yoksa ekranlar SDK kurulum yönergeli empty state gösterir.
 
 - [x] UI `src/data/*` → api (APM, infra, alerting, KPI, load test, entegrasyonlar)
 - [x] `consumer_1m.messaging_system`, `broker_topics_1m`, `broker_lag_1m.oldest_age_s`; db metadata (version/zone/instance class/disk)
@@ -101,5 +101,22 @@ Durum: servisler (`ingest`, `api`, `alerting`, `collector`, `integrations` = `tr
   tek shared HTTP client, 64 KB sonuç cap'i (`truncated`/`total`/`hint`), `internal/redact` PII maskesi
 - [x] Testler: doğrulama/redact/hata eşlemesi (table-driven), in-memory e2e (12 tool + 3 çağrı),
   stdio stdout saflığı (gerçek binary subprocess)
-- [x] Dockerfile (distroless, `services/` build context); CI modül matrisi `go.work`'ten otomatik
+- [x] Dockerfile (distroless; build context `services/`, ADR-027 ile repo kökü); CI modül matrisi `go.work`'ten otomatik
 - [ ] Canlı stack üzerinde gerçek MCP client ile manuel doğrulama
+
+## Faz 9 — Self-observability (ADR-027)
+- [x] Sözleşme: ADR-027, contracts §27; self proje `make self` → `api bootstrap` (ADR-028)
+- [x] Go servisleri `trooper.Start` ile enstrümante (HTTP, pgx, go-redis, franz-go, ClickHouse, slog → OTel logs, runtime
+  metrikleri, opsiyonel profiling; codeintel LLM span'ları) — `TROOPER_DSN` yoksa export yok
+- [x] Geri besleme döngüsü koruması: ingest-gw / ingest-writer `TT_SELF_PROJECT_ID` trafiği için span/log üretmez
+- [x] api CORS: `traceparent`, `tracestate`, `baggage` (RUM → api trace'i uçtan uca)
+- [x] Docker build context repo kökü (Dockerfile'lar `sdks/go`'yu kopyalar)
+- [x] Dashboard RUM `tt-web` (`@trooper/browser` + `@trooper/react` + `@trooper/replay`, `VITE_TROOPER_DSN` yoksa SDK chunk'ı
+  yüklenmez): route template view adları, React root error handler'ları, Web Vitals, api'ye `traceparent`, kullanıcı yalnız
+  internal id ile `identify`, replay default kapalı + tüm metin maskeli
+- [x] Altyapı: `deploy/self/agent.yaml` (Postgres, Redis, Redpanda `tt.*` topic / `tt-*` group + host + Docker container'ları),
+  `make self` / `make self-down`
+- [ ] ClickHouse için collector'da `clickhouse` db engine'i (şimdilik yalnız container metrikleri: CPU/memory/net)
+- [x] Dummy veri yok (ADR-028): `tools/demo`, web mock modu ve Postgres seed'leri kaldırıldı; onboarding (`POST /orgs`) +
+  `api bootstrap`; testler kendi fixture'larını kurar
+- [ ] Self proje için ayrı kota/sampling ayarı; production'da self projesinin operatör tarafından açılması (runbook)

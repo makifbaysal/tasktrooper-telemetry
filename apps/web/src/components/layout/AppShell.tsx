@@ -248,19 +248,19 @@ function IntegrationErrors() {
 
 /** Org + project switcher (ADR-016). Switching re-scopes every request (X-Trooper-Project), drops the cache and rehydrates. */
 function ProjectSwitcher() {
-  const { me, org, project, mode } = useAuth();
+  const { me, org, project } = useAuth();
   const [busy, setBusy] = useState(false);
   const pick = (id: string) => { setBusy(true); void switchProject(id).finally(() => setBusy(false)); };
   const label = (
     <>
       <span className="dot" style={{ background: 'var(--series-3)' }} />
       <span style={{ flex: 1, minWidth: 0 }}>
-        <div className="truncate" style={{ fontWeight: 'var(--weight-medium)' }}>{org?.name ?? (mode === 'key' ? 'API key' : 'Project')}</div>
-        <div className="muted truncate" style={{ fontSize: 'var(--text-xs)' }}>{busy ? 'Switching…' : project?.name ?? (mode === 'key' ? 'project of the key' : '—')}</div>
+        <div className="truncate" style={{ fontWeight: 'var(--weight-medium)' }}>{org?.name ?? 'Project'}</div>
+        <div className="muted truncate" style={{ fontSize: 'var(--text-xs)' }}>{busy ? 'Switching…' : project?.name ?? '—'}</div>
       </span>
     </>
   );
-  // api-key mode: the key selects the project, nothing to switch
+  // a single project: nothing to switch
   if (!me || me.orgs.flatMap((o) => o.projects).length < 2) return <div className="sidebar__project" style={{ cursor: 'default' }}>{label}</div>;
   return (
     <Menu label="Switch project" block trigger={({ open, toggle }) => (
@@ -284,7 +284,7 @@ function ProjectSwitcher() {
 
 /** Avatar → account, role, settings shortcuts, sign out. */
 function UserMenu() {
-  const { me, org, role, mode } = useAuth();
+  const { me, org, role } = useAuth();
   const nav = useNavigate();
   const name = me ? me.user.name ?? me.user.email : 'API key';
   return (
@@ -299,7 +299,7 @@ function UserMenu() {
             {me ? <Avatar name={name} src={me.user.avatarUrl} size="lg" /> : <span className="avatar avatar--lg"><KeyRound size={16} /></span>}
             <div style={{ minWidth: 0 }}>
               <div className="truncate" style={{ fontWeight: 'var(--weight-medium)' }}>{name}</div>
-              <div className="muted truncate" style={{ fontSize: 'var(--text-sm)' }}>{me ? me.user.email : mode === 'key' ? 'Signed in with an api key' : 'Mock data'}</div>
+              <div className="muted truncate" style={{ fontSize: 'var(--text-sm)' }}>{me?.user.email ?? '—'}</div>
               {role && <div style={{ marginTop: 'var(--space-1)' }}><Badge tone={role === 'viewer' ? 'neutral' : 'accent'}>{org?.name} · {role}</Badge></div>}
             </div>
           </div>
@@ -308,10 +308,8 @@ function UserMenu() {
           <MenuItem icon={<Users size={14} />} onSelect={() => { close(); nav('/settings?tab=members'); }}>Members</MenuItem>
           <MenuItem icon={<KeyRound size={14} />} onSelect={() => { close(); nav('/settings?tab=keys'); }}>API keys</MenuItem>
           <MenuItem icon={<Sparkles size={14} />} onSelect={() => { close(); nav('/settings/usage'); }}>AI usage</MenuItem>
-          {mode === 'session' && <>
-            <MenuDivider />
-            <MenuItem icon={<LogOut size={14} />} onSelect={() => { close(); void logout(); }}>Sign out</MenuItem>
-          </>}
+          <MenuDivider />
+          <MenuItem icon={<LogOut size={14} />} onSelect={() => { close(); void logout(); }}>Sign out</MenuItem>
         </>
       )}
     </Menu>

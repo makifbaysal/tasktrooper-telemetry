@@ -133,19 +133,22 @@ func TestAnalyzeEndToEnd(t *testing.T) {
 	exec1(`ALTER TABLE repositories ADD COLUMN IF NOT EXISTS pending_paths text[]`)
 	cleanup := func() {
 		_, _ = st.DB.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, testProject)
+		_, _ = st.DB.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, testProject)
 		_, _ = st.DB.Exec(context.Background(), `DELETE FROM codeintel_webhook_deliveries WHERE id LIKE 'it-9401-%'`)
 		_ = chw.Exec(context.Background(), `ALTER TABLE telemetry.red_1m DELETE WHERE project_id = 9401 SETTINGS mutations_sync = 1`)
 	}
 	cleanup()
 	t.Cleanup(cleanup)
-	exec1(`INSERT INTO projects (id, org_id, name, slug) VALUES ($1, 1, 'codeintel-it', 'codeintel-it-9401')`, testProject)
+	// own org (org id = project id); nothing depends on seeded rows (ADR-028)
+	exec1(`INSERT INTO orgs (id, name) VALUES ($1, 'codeintel-it')`, testProject)
+	exec1(`INSERT INTO projects (id, org_id, name, slug) VALUES ($1, $1, 'codeintel-it', 'codeintel-it-9401')`, testProject)
 	exec1(`INSERT INTO broker_clusters (project_id, slug, name, kind, endpoint) VALUES ($1, 'kafka-main', 'Kafka', 'kafka', 'localhost:9092')`, testProject)
 
 	ins := func(service, route, method string, count, errs, p95 float64) {
 		t.Helper()
 		err := chw.Exec(ctx, `INSERT INTO telemetry.red_1m (org_id, project_id, service, env, version, route, method, minute, count, errors,
 			s2xx, s3xx, s4xx, s5xx, duration_sum, duration)
-			SELECT 1, 9401, ?, 'production', 'v1', ?, ?, toStartOfMinute(now() - INTERVAL 1 HOUR), ?, ?, 0, 0, 0, 0, 0,
+			SELECT 9401, 9401, ?, 'production', 'v1', ?, ?, toStartOfMinute(now() - INTERVAL 1 HOUR), ?, ?, 0, 0, 0, 0, 0,
 			  quantilesTDigestWeightedState(0.5, 0.75, 0.95, 0.99)(toFloat64(?), toUInt32(1))`, service, route, method, count, errs, p95)
 		if err != nil {
 			t.Fatal(err)
@@ -391,12 +394,18 @@ func TestWebhookState(t *testing.T) {
 	_, _ = st.DB.Exec(ctx, `ALTER TABLE repositories ADD COLUMN IF NOT EXISTS pending_paths text[]`)
 	cleanup := func() {
 		_, _ = st.DB.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, testProject)
+		_, _ = st.DB.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, testProject)
 		_, _ = st.DB.Exec(context.Background(), `DELETE FROM codeintel_webhook_deliveries WHERE id LIKE 'it-9401-%'`)
 	}
 	cleanup()
 	t.Cleanup(cleanup)
-	if _, err := st.DB.Exec(ctx, `INSERT INTO projects (id, org_id, name, slug) VALUES ($1, 1, 'codeintel-it', 'codeintel-it-9401')`, testProject); err != nil {
-		t.Fatal(err)
+	for _, q := range []string{ // own org (org id = project id), no seeded rows
+		`INSERT INTO orgs (id, name) VALUES ($1, 'codeintel-it')`,
+		`INSERT INTO projects (id, org_id, name, slug) VALUES ($1, $1, 'codeintel-it', 'codeintel-it-9401')`,
+	} {
+		if _, err := st.DB.Exec(ctx, q, testProject); err != nil {
+			t.Fatal(err)
+		}
 	}
 	var integ, repoID int64
 	if err := st.DB.QueryRow(ctx, `INSERT INTO integrations (project_id, provider, name, config, status)

@@ -17,8 +17,10 @@ import (
 	"github.com/tasktrooper/telemetry/services/pkg/secrets"
 
 	"github.com/tasktrooper/telemetry/services/integrations/internal/factory"
+	"github.com/tasktrooper/telemetry/services/integrations/internal/httpx"
 	"github.com/tasktrooper/telemetry/services/integrations/internal/otlp"
 	"github.com/tasktrooper/telemetry/services/integrations/internal/runner"
+	"github.com/tasktrooper/telemetry/services/integrations/internal/selftel"
 	"github.com/tasktrooper/telemetry/services/integrations/internal/store"
 )
 
@@ -36,10 +38,16 @@ func main() {
 func run(once int64) error {
 	common := config.Load()
 	log := logx.New("trooper-cloud", common.LogLevel)
+	// Self telemetry (ADR-027): a no-op unless TROOPER_DSN is set (not TT_DSN, which is where cloud metrics go).
+	flush := selftel.Start(context.Background(), version, log)
+	defer flush()
+	log = selftel.Logger(log)
+	httpx.Transport = selftel.Transport() // provider API calls only; otlp.Sender keeps its own untraced client
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	metricsURL, dsnKey, dsnProject, err := otlp.ParseDSN(config.String("TT_DSN", "http://tt_dev_ingest_key@localhost:4318/1"))
+	// Keyless default: metrics go with TT_INTERNAL_TOKEN (or per-project TT_CLOUD_INGEST_KEYS); no seeded key exists (ADR-028).
+	metricsURL, dsnKey, dsnProject, err := otlp.ParseDSN(config.String("TT_DSN", "http://localhost:4318"))
 	if err != nil {
 		return err
 	}
@@ -64,7 +72,7 @@ func run(once int64) error {
 
 	f := &factory.Factory{
 		Key: skey, Store: st, IngestKeys: keys, PublicIngestURL: os.Getenv("TT_PUBLIC_INGEST_URL"),
-		Log: log,
+		Log: log, HTTP: selftel.Client(30 * time.Second),
 		Endpoints: factory.Endpoints{
 			AWS: os.Getenv("TT_CLOUD_AWS_ENDPOINT"), GCP: os.Getenv("TT_CLOUD_GCP_ENDPOINT"),
 			Neon: os.Getenv("TT_CLOUD_NEON_URL"), Vercel: os.Getenv("TT_CLOUD_VERCEL_URL"),

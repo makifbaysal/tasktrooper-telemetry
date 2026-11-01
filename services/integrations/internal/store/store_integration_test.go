@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -28,15 +29,30 @@ func pgURL() string {
 	return "postgres://trooper:trooper@localhost:5432/trooper?sslmode=disable"
 }
 
+// fixtureProject creates its own org + project (org id = project id = id) — nothing depends on seeded rows
+// (ADR-028) — and deletes both afterwards (cascades everything under the project).
+func fixtureProject(t *testing.T, s *Store, id int64, name string) {
+	t.Helper()
+	ctx := context.Background()
+	drop := func() {
+		_, _ = s.DB.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, id)
+		_, _ = s.DB.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, id)
+	}
+	drop()
+	if _, err := s.DB.Exec(ctx, `INSERT INTO orgs (id, name) VALUES ($1, $2)`, id, name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.Exec(ctx, `INSERT INTO projects (id, org_id, name, slug) VALUES ($1, $1, $2, $3)`, id, name, name+"-"+strconv.FormatInt(id, 10)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(drop)
+}
+
 // Setup creates project 9301 + an integration; cleanup deletes the project (cascades).
 func Setup(t *testing.T, s *Store, provider string) model.Integration {
 	t.Helper()
 	ctx := context.Background()
-	_, _ = s.DB.Exec(ctx, `DELETE FROM projects WHERE id = $1`, testProject)
-	if _, err := s.DB.Exec(ctx, `INSERT INTO projects (id, org_id, name, slug) VALUES ($1, 1, 'cloud-it', 'cloud-it-9301')`, testProject); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _, _ = s.DB.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, testProject) })
+	fixtureProject(t, s, testProject, "cloud-it")
 	in := model.Integration{ProjectID: testProject, Provider: provider, Name: "it-" + provider}
 	if err := s.DB.QueryRow(ctx, `INSERT INTO integrations (project_id, provider, name, config) VALUES ($1, $2, $3, '{}') RETURNING id`,
 		testProject, provider, in.Name).Scan(&in.ID); err != nil {

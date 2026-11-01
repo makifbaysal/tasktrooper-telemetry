@@ -35,6 +35,13 @@ func New(baseURL, key string, timeout time.Duration) *Client {
 	}
 }
 
+// WithTransport sets the transport of the shared client (self telemetry: client spans + traceparent, ADR-027).
+// nil keeps http.DefaultTransport.
+func (c *Client) WithTransport(rt http.RoundTripper) *Client {
+	c.hc.Transport = rt
+	return c
+}
+
 // ToolError is a short, actionable message safe to hand to an LLM. It never
 // carries a stack trace, a secret, or a raw upstream body.
 type ToolError struct{ msg string }

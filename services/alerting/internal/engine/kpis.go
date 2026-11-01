@@ -6,10 +6,13 @@ import (
 	"math"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/tasktrooper/telemetry/services/alerting/internal/burn"
 	"github.com/tasktrooper/telemetry/services/alerting/internal/kpi"
 	"github.com/tasktrooper/telemetry/services/alerting/internal/model"
 	"github.com/tasktrooper/telemetry/services/alerting/internal/rca"
+	"github.com/tasktrooper/telemetry/services/alerting/internal/selftel"
 	"github.com/tasktrooper/telemetry/services/alerting/internal/statemachine"
 	"github.com/tasktrooper/telemetry/services/alerting/internal/store"
 )
@@ -22,6 +25,8 @@ const (
 )
 
 func (e *Engine) evalKpis(ctx context.Context, now time.Time) {
+	ctx, span := selftel.StartSpan(ctx, "alert.kpis", attribute.Int("tt.alert.kpis", len(e.kpis)))
+	defer span.End()
 	for _, k := range e.kpis {
 		if !kpi.Supported(k) {
 			e.warnOnce(fmt.Sprintf("k%d", k.ID), "KPI target not computable from rollups; skipped", "kpi", k.ID, "target", k.Target.Kind)

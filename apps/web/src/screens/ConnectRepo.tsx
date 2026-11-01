@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Check, ChevronDown, ChevronRight, FolderGit2, Lock, Plus, Webhook } from 'lucide-react';
 import { Badge, Button, Callout, CopyCode, Drawer, DrawerSection, EmptyState, Field, Input, SearchInput, Segmented, StatusBadge } from '@/components/ui';
-import { isApi } from '@/data';
 import {
-  baseUrlError, connectRepo, fullNameError, githubInstallUrl, githubInstallations, githubRepos, mockInstallGithub,
+  baseUrlError, connectRepo, fullNameError, githubInstallUrl, githubInstallations, githubRepos,
   type GithubInstallation, type GithubRepoOption, type RepoProvider, type RepoWebhook,
 } from '@/data/codeintel';
 
@@ -81,7 +80,6 @@ export function ConnectRepoDrawer({ open, onClose, integrationId }: { open: bool
 
   const installation = installs?.find((i) => i.id === inst);
   const install = () => {
-    if (!isApi) { const m = mockInstallGithub(); setInstalls([m]); setInst(m.id); return; }
     window.location.assign(githubInstallUrl());
   };
   const toggle = (name: string) => setPicked((p) => (p.includes(name) ? p.filter((x) => x !== name) : [...p, name]));

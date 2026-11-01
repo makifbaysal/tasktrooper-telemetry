@@ -14,29 +14,81 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
+// The session runs twice: plain, and with self telemetry on (ADR-027) against a fake collector with SDK debug
+// output enabled — the SDK must keep stdout clean too, propagate traceparent to the api and export the tool spans.
 func TestStdoutIsProtocolOnly(t *testing.T) {
-	// Fake services/api: only /me is needed, at startup.
-	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/me" {
-			http.NotFound(w, r)
-			return
+	bin := buildBinary(t)
+	for _, selfTel := range []bool{false, true} {
+		name := "plain"
+		if selfTel {
+			name = "self telemetry"
 		}
-		_, _ = io.WriteString(w, `{"currentProjectId":"1","orgs":[{"id":"1"}]}`)
+		t.Run(name, func(t *testing.T) { stdioSession(t, bin, selfTel) })
+	}
+}
+
+type recorder struct {
+	mu   sync.Mutex
+	seen []string
+}
+
+func (r *recorder) add(s string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.seen = append(r.seen, s)
+}
+
+func (r *recorder) has(s string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Contains(r.seen, s)
+}
+
+func stdioSession(t *testing.T, bin string, selfTel bool) {
+	// Fake services/api: /me at startup, /services for the tools/call.
+	var apiSeen recorder
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("traceparent") != "" {
+			apiSeen.add("traceparent " + r.URL.Path)
+		}
+		switch r.URL.Path {
+		case "/api/v1/me":
+			_, _ = io.WriteString(w, `{"currentProjectId":"1","orgs":[{"id":"1"}]}`)
+		case "/api/v1/services":
+			_, _ = io.WriteString(w, `[]`)
+		default:
+			http.NotFound(w, r)
+		}
 	}))
 	defer api.Close()
+	// Fake ingest gateway: rejects metrics (400, not retried) so the SDK logs errors (TROOPER_DEBUG) — they must go to stderr.
+	var collected recorder
+	collector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		collected.add(r.URL.Path)
+		if r.URL.Path == "/v1/metrics" {
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer collector.Close()
 
-	bin := buildBinary(t)
 	cmd := exec.Command(bin)
 	cmd.Env = append(os.Environ(),
 		"TT_API_URL="+api.URL,
 		"TT_API_KEY=tt_api_test_key",
 		"TT_LOG_LEVEL=debug", // debug logging on: it must still not touch stdout
+		"TROOPER_DSN=", "OTEL_EXPORTER_OTLP_ENDPOINT=",
 	)
+	if selfTel {
+		cmd.Env = append(cmd.Env, "TROOPER_DSN="+strings.Replace(collector.URL, "://", "://tt_test_ingest_key@", 1)+"/2",
+			"TROOPER_DEBUG=true")
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -59,6 +111,7 @@ func TestStdoutIsProtocolOnly(t *testing.T) {
 	writeLine(t, stdin, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"stdout-test","version":"0"}}}`)
 	writeLine(t, stdin, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
 	writeLine(t, stdin, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
+	writeLine(t, stdin, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"tt_list_services","arguments":{}}}`)
 
 	// Every stdout line must be a JSON-RPC message. Collect them until both
 	// responses arrive; a stray print would fail to parse or lack jsonrpc.
@@ -89,7 +142,7 @@ func TestStdoutIsProtocolOnly(t *testing.T) {
 			if _, isMsg := msg["id"]; isMsg {
 				responses = append(responses, msg)
 			}
-			if len(responses) >= 2 {
+			if len(responses) >= 3 {
 				return
 			}
 		}
@@ -97,17 +150,22 @@ func TestStdoutIsProtocolOnly(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):
-		t.Fatal("timed out waiting for initialize + tools/list responses")
+		t.Fatal("timed out waiting for initialize + tools/list + tools/call responses")
 	}
 	for _, v := range violations {
 		t.Error(v)
 	}
-	if len(responses) < 2 {
-		t.Fatalf("got %d response(s), want initialize + tools/list (stderr: %q)", len(responses), stderr.String())
+	if len(responses) < 3 {
+		t.Fatalf("got %d response(s), want initialize + tools/list + tools/call (stderr: %q)", len(responses), stderr.String())
 	}
 
 	// tools/list response must carry the 12 approved tools.
-	toolsResp := responses[len(responses)-1]
+	var toolsResp map[string]any // responses may arrive in any order
+	for _, r := range responses {
+		if id, _ := r["id"].(float64); id == 2 {
+			toolsResp = r
+		}
+	}
 	result, _ := toolsResp["result"].(map[string]any)
 	tools, _ := result["tools"].([]any)
 	if len(tools) != 12 {
@@ -127,6 +185,14 @@ func TestStdoutIsProtocolOnly(t *testing.T) {
 	// And the API key must never appear on either stream.
 	if strings.Contains(stderr.String(), "tt_api_test_key") {
 		t.Errorf("API key leaked to stderr")
+	}
+
+	// Self telemetry: traceparent on the api call of the tool, spans flushed on shutdown, nothing otherwise.
+	if got := apiSeen.has("traceparent /api/v1/services"); got != selfTel {
+		t.Errorf("traceparent on tools/call api request = %v, want %v", got, selfTel)
+	}
+	if got := collected.has("/v1/traces"); got != selfTel {
+		t.Errorf("spans exported = %v, want %v (stderr: %q)", got, selfTel, stderr.String())
 	}
 }
 

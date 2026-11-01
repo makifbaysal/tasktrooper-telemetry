@@ -49,7 +49,7 @@
 | `loadtest-ctl` | Go | Senaryo saklama, run orkestrasyonu, runner'lara iş dağıtma, sonuç toplama. | Küçük |
 | `loadtest-runner` | Go (k6 embed) | Senaryoyu koşar, metrikleri OTLP olarak kendi ingest'imize yollar. | K8s Job, çok bölge |
 
-Tüm servisler kendi SDK'mız ile enstrümante edilir (dogfooding).
+Tüm servisler kendi SDK'mız ile enstrümante edilir (dogfooding). Veri ayrı `TaskTrooper` projesine gider; ingest kendi projesinin trafiği için span üretmez (döngü yok). Bkz. ADR-027, contracts §27.
 
 ## Veri akışı kararları
 
@@ -107,14 +107,13 @@ Dağıtım: tek chart `deploy/helm/trooper-agent` — Linux host DaemonSet (`kub
 (`cluster` ve/veya `db`), `windows.enabled` → `kubernetes.io/os: windows` nodeSelector'lı HostProcess DaemonSet
 (`services/collector/Dockerfile.windows`), RBAC, Secret, opsiyonel OBI eBPF DaemonSet. Eski
 `services/collector/deploy/helm/trooper-agent` chart'ı kaldırıldı.
-Sözleşme: contracts.md §20 + §22; detay ve env listesi `services/collector/README.md`. Demo (`make demo`) aynı metrikleri
-`demo-eks` cluster'ı ve 4 Lambda fonksiyonu için simüle eder (`--infra-sim`).
+Sözleşme: contracts.md §20 + §22; detay ve env listesi `services/collector/README.md`.
 
 ## Lokal geliştirme (hedef)
 
 `make dev` → docker compose ile altyapı + servisler `air` ile hot reload + `apps/web` Vite dev server.
-Web dashboard şu an mock data ile bağımsız çalışır (`apps/web/src/data/mock.ts`); API hazır olunca `src/data/` altındaki
-fonksiyonlar fetch'e çevrilecek — ekranlar veri kaynağını bilmez.
+Web dashboard yalnızca api'den gerçek veri okur (ADR-013, ADR-028 — mock mod yok); `src/data/*` senkron fonksiyonlar + uzak cache,
+ekranlar veri kaynağını bilmez. İlk açılışta (org yoksa) onboarding ekranı org + ilk proje oluşturur; veri SDK bağlanınca gelir.
 
 ## Ölçek hedefleri (v1)
 

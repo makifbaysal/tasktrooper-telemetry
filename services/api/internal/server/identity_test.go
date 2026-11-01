@@ -242,7 +242,7 @@ func TestMeAndCORSCredentials(t *testing.T) {
 	w := cookieReq(h, "GET", "/api/v1/me", "sess-5", "", projectHeader, "43")
 	var me model.Me
 	_ = json.Unmarshal(w.Body.Bytes(), &me)
-	if w.Code != 200 || me.User == nil || me.CurrentProjectID != "43" || me.Role != "admin" || me.Auth != "session" {
+	if w.Code != 200 || me.User == nil || me.CurrentProjectID == nil || *me.CurrentProjectID != "43" || me.Role != "admin" || me.Auth != "session" {
 		t.Errorf("me: %d %s", w.Code, w.Body)
 	}
 	w = do(h, "OPTIONS", "/api/v1/me", "", "", "Origin", "http://localhost:5173", "Access-Control-Request-Method", "GET")
@@ -250,6 +250,11 @@ func TestMeAndCORSCredentials(t *testing.T) {
 	if hd.Get("Access-Control-Allow-Origin") != "http://localhost:5173" || hd.Get("Access-Control-Allow-Credentials") != "true" ||
 		!strings.Contains(hd.Get("Access-Control-Allow-Headers"), "X-Trooper-Project") {
 		t.Errorf("cors: %v", hd)
+	}
+	for _, h := range []string{"traceparent", "tracestate", "baggage"} { // RUM → api trace propagation (contracts §27)
+		if !strings.Contains(hd.Get("Access-Control-Allow-Headers"), h) {
+			t.Errorf("cors allow-headers misses %s: %q", h, hd.Get("Access-Control-Allow-Headers"))
+		}
 	}
 }
 
@@ -433,3 +438,82 @@ func TestOIDCExchangeRejectsBadPKCE(t *testing.T) {
 }
 
 var _ = tenant.Tenant{}
+
+func (f *identityFake) CreateOrg(_ context.Context, uid int64, in model.OrgInput, maxOrgs int, ingestURL string) (*model.OrgCreated, error) {
+	if uid == 5 && maxOrgs == 1 { // user 5 already owns orgs
+		return nil, store.Conflict("org limit reached")
+	}
+	if strings.TrimSpace(in.Name) == "" {
+		return nil, store.Invalid("name is required")
+	}
+	dsn, _ := store.DSN(ingestURL, "tt_ingest_x", 900)
+	return &model.OrgCreated{Org: model.CreatedOrg{ID: "90", Name: in.Name, Role: "owner"},
+		Project: model.CreatedProject{ID: "900", Name: in.Project.Name}, IngestKey: model.CreatedKey{ID: "9", Prefix: "tt_ingest_x", Key: "tt_ingest_x"}, DSN: dsn}, nil
+}
+
+// Onboarding (ADR-028): a user without orgs reads /me and creates an org; stale project headers do not lock them out.
+func TestOnboardingWithoutOrgs(t *testing.T) {
+	tests := []struct {
+		name, method, path, session, body string
+		hdr                               []string
+		max                               int
+		want                              int
+		check                             func(t *testing.T, body []byte)
+	}{
+		{name: "me without orgs", method: "GET", path: "/api/v1/me", session: "sess-6", want: 200, check: func(t *testing.T, b []byte) {
+			if !strings.Contains(string(b), `"orgs":[]`) || !strings.Contains(string(b), `"currentProjectId":null`) {
+				t.Errorf("me: %s", b)
+			}
+		}},
+		{name: "me with stale project header", method: "GET", path: "/api/v1/me", session: "sess-6", hdr: []string{projectHeader, "1"}, want: 200},
+		{name: "stale header elsewhere is still 403", method: "GET", path: "/api/v1/services", session: "sess-6", hdr: []string{projectHeader, "1"}, want: 403},
+		{name: "create org", method: "POST", path: "/api/v1/orgs", session: "sess-6", body: `{"name":"Acme","project":{"name":"Shop"}}`, want: 201,
+			check: func(t *testing.T, b []byte) {
+				var v model.OrgCreated
+				_ = json.Unmarshal(b, &v)
+				if v.Org.Role != "owner" || v.Project.ID != "900" || v.IngestKey.Key == "" || v.DSN != "http://tt_ingest_x@localhost:4318/900" {
+					t.Errorf("created: %s", b)
+				}
+			}},
+		{name: "create org with stale header", method: "POST", path: "/api/v1/orgs", session: "sess-6", hdr: []string{projectHeader, "1"},
+			body: `{"name":"Acme","project":{"name":"Shop"}}`, want: 201},
+		{name: "viewer of default org may create an org", method: "POST", path: "/api/v1/orgs", session: "sess-5", hdr: []string{projectHeader, "80"},
+			body: `{"name":"Mine","project":{"name":"p"}}`, want: 201},
+		{name: "invalid name", method: "POST", path: "/api/v1/orgs", session: "sess-6", body: `{"name":"  ","project":{"name":"Shop"}}`, want: 400},
+		{name: "org limit", method: "POST", path: "/api/v1/orgs", session: "sess-5", body: `{"name":"x","project":{"name":"y"}}`, max: 1, want: 409},
+		{name: "api key cannot create orgs", method: "POST", path: "/api/v1/orgs", body: `{"name":"x","project":{"name":"y"}}`,
+			hdr: []string{"Authorization", "Bearer good"}, want: 403},
+		{name: "foreign origin", method: "POST", path: "/api/v1/orgs", session: "sess-6", hdr: []string{"Origin", "https://evil.example"},
+			body: `{"name":"x","project":{"name":"y"}}`, want: 403},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newIdentityFake()
+			h := identityServer(t, f, func(s *Server) { s.MaxOrgsPerUser = tc.max }).Handler()
+			var w *httptest.ResponseRecorder
+			if tc.session != "" {
+				w = cookieReq(h, tc.method, tc.path, tc.session, tc.body, tc.hdr...)
+			} else {
+				w = do(h, tc.method, tc.path, "", tc.body, tc.hdr...)
+			}
+			if w.Code != tc.want {
+				t.Fatalf("status %d, want %d: %s", w.Code, tc.want, w.Body)
+			}
+			if tc.check != nil {
+				tc.check(t, w.Body.Bytes())
+			}
+			if tc.want == 201 {
+				var actions []string
+				for _, a := range f.audit {
+					actions = append(actions, a.Action)
+					if a.Action == "org.create" && (a.OrgID != 90 || a.Target != "90") {
+						t.Errorf("org.create audit: %+v", a)
+					}
+				}
+				if len(actions) != 1 || actions[0] != "org.create" {
+					t.Errorf("audit: %v", actions)
+				}
+			}
+		})
+	}
+}

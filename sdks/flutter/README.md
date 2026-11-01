@@ -226,5 +226,5 @@ Dart session id and does not emit its own SESSION_START).
 ```bash
 cd trooper_flutter && flutter analyze && flutter test
 cd trooper_dio && flutter analyze && flutter test
-cd example && flutter analyze && flutter run --dart-define=TROOPER_DSN=http://tt_dev_ingest_key@10.0.2.2:4318/1
+cd example && flutter analyze && flutter run --dart-define=TROOPER_DSN=http://<ingest-key>@10.0.2.2:4318/<project-id>
 ```

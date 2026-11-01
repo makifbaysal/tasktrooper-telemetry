@@ -58,6 +58,10 @@ func (c *Client) Get(ctx context.Context, path string, query url.Values, out any
 	return c.Do(ctx, http.MethodGet, path, query, nil, out)
 }
 
+// Transport is the transport of clients without HTTP (nil = http.DefaultTransport); main sets a traced one when
+// self telemetry is on (ADR-027). Only cloud provider APIs go through httpx, never the ingest gateway.
+var Transport http.RoundTripper
+
 // Do sends a JSON request and decodes the JSON answer into out (when non-nil).
 func (c *Client) Do(ctx context.Context, method, path string, query url.Values, body, out any) error {
 	var payload []byte
@@ -73,7 +77,7 @@ func (c *Client) Do(ctx context.Context, method, path string, query url.Values, 
 	}
 	hc := c.HTTP
 	if hc == nil {
-		hc = &http.Client{Timeout: 30 * time.Second}
+		hc = &http.Client{Timeout: 30 * time.Second, Transport: Transport}
 	}
 	attempts := c.MaxAttempts
 	if attempts <= 0 {

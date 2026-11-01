@@ -1,16 +1,16 @@
 import { useData } from '@/data/remote';
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
-import { AlertTriangle, Check, ChevronRight, Globe2, Pencil, Play, Plus, ShieldCheck, Sparkles, X } from 'lucide-react';
+import { AlertTriangle, Check, ChevronRight, Gauge, Globe2, Pencil, Play, Plus, ShieldCheck, Sparkles, X } from 'lucide-react';
 import { Sparkline, TimeSeries } from '@/components/charts';
 import {
-  Badge, Button, Callout, Card, CodeBlock, Drawer, DrawerSection, KeyValues, Meter, PageHeader, Section, StatusBadge, Table, useDrawer,
+  Badge, Button, Callout, Card, CodeBlock, Drawer, DrawerSection, EmptyState, KeyValues, Meter, PageHeader, Section, StatusBadge, Table, useDrawer,
   type Tone,
 } from '@/components/ui';
-import { NOW, runs, scenarios, series, type LoadTestRun, type LoadTestScenario } from '@/data';
+import { runs, scenarios, type LoadTestRun, type LoadTestScenario } from '@/data';
 import { ago, compact, duration, ms, pct } from '@/lib/format';
-import { SPEC, gateVerdict, levelState, levelsOf, liveRun, runCurves, useLoadTests } from '@/lib/loadtest';
-import { RunBlocked, approveScenario, runBlockers, scenarioState, startRunChecked } from '@/data/loadtest';
+import { SPEC, levelsOf, liveRun, stageAt, useLoadTests } from '@/lib/loadtest';
+import { RunBlocked, approveScenario, runBlockers, scenarioState, startRunChecked, useRunDetail } from '@/data/loadtest';
 import { Link } from 'react-router';
 
 export const RUN_STATE: Record<LoadTestRun['state'], { tone: Tone; label: string }> = {
@@ -45,16 +45,9 @@ function yamlFor(sc: Pick<LoadTestScenario, 'name' | 'target' | 'regions'>, spec
   ].join('\n');
 }
 
-/** Older runs per scenario, only for the history table/sparkline. Newly created scenarios have none. */
+/** Finished runs of a scenario, newest first (history table / sparkline). */
 function pastRuns(sc: LoadTestScenario) {
-  const real = runs.filter((r) => r.scenarioId === sc.id).map(liveRun).filter((r) => r.state !== 'running');
-  if (!['lt1', 'lt2', 'lt3'].includes(sc.id)) return real.map((r) => ({ ...r, real: true }));
-  const base = real[real.length - 1]?.p95 ?? 200;
-  const extra = series(`lt-hist-${sc.id}`, '7d', { base, noise: 0.25 }).slice(-5).map((p95, k) => ({
-    id: `${sc.id}-h${k}`, state: (p95 > base * 1.25 ? 'failed' : 'passed') as LoadTestRun['state'],
-    startedAt: NOW - (14 + k * 3) * 86400_000, p95, errorRate: p95 > base * 1.25 ? 0.014 : 0.002, real: false,
-  }));
-  return [...real.map((r) => ({ ...r, real: true })), ...extra].sort((a, b) => b.startedAt - a.startedAt);
+  return runs.filter((r) => r.scenarioId === sc.id && r.state !== 'running' && r.state !== 'queued').sort((a, b) => b.startedAt - a.startedAt);
 }
 
 // ---------- starting runs ----------
@@ -135,7 +128,11 @@ export function LoadTests() {
         ? `${drafts.length} generated from code analysis wait${drafts.length === 1 ? 's' : ''} for review — drafts can't run until approved`
         : 'Click a scenario for its spec and run history'}>
         <Card flush>
-          <Table rows={scenarios} rowKey={(s) => s.id} onRowClick={d.open} columns={[
+          <Table rows={scenarios} rowKey={(s) => s.id} onRowClick={d.open}
+            empty={<EmptyState icon={<Gauge />} title="No load test scenarios yet"
+              action={<Button variant="primary" icon={<Plus size={14} />} onClick={() => nav('/load-tests/new')}>New scenario</Button>}>
+              Define load levels and a traffic mix against a verified staging host. Connected services report how they respond under load.
+            </EmptyState>} columns={[
             { key: 'name', header: 'Scenario', render: (s) => <div><div style={{ fontWeight: 500 }}>{s.name}</div><div className="muted mono" style={{ fontSize: 'var(--text-xs)' }}>{s.target}</div></div> },
             { key: 'src', header: 'Source', render: (s) => <ScenarioSource s={s} /> },
             { key: 'vus', header: 'Peak VUs', numeric: true, sortValue: (s) => s.peakVus, render: (s) => s.peakVus },
@@ -175,21 +172,18 @@ export function LoadTests() {
 
 function RunningCard({ run, onOpen }: { run: LoadTestRun; onOpen: () => void }) {
   const sc = scenarios.find((s) => s.id === run.scenarioId)!;
-  const ls = levelState(run);
-  const lv = ls.levels[ls.index];
-  const next = ls.levels[ls.index + 1];
+  const detail = useRunDetail(run);
+  const stage = stageAt(sc, detail.live?.progress ?? run.progress);
   const unit = SPEC[sc.id].mode === 'rps' ? 'req/s' : 'VUs';
-  const g = ls.mode !== 'auto' && next && next.target > lv.target ? gateVerdict(run, ls.index) : undefined;
-  const status = ls.userHold ? 'held by you'
-    : ls.phase === 'waiting' ? (ls.mode === 'ai' ? `AI holding — ${next?.name ?? 'next level'} not safe` : `waiting for you to start ${next?.name}`)
-    : ls.phase === 'ramp' ? `ramping to ${lv.target} ${unit}` : `holding ${lv.target} ${unit}`;
-  const c = runCurves(run);
+  const status = stage.count ? `stage ${stage.index + 1} of ${stage.count} · ${stage.target === 0 ? 'ramping down' : `${stage.target} ${unit}`}` : 'running';
+  const c = detail.curves ?? { ts: [], vus: [], rps: [], p95: [], err: [] };
   const last = (a: number[]) => a[a.length - 1] ?? 0;
+  const live = detail.live;
   const facts: [string, string][] = [
-    ['Virtual users', String(last(c.vus))],
-    ['Requests / sec', compact(last(c.rps))],
-    ['p95', ms(last(c.p95))],
-    ['Failed', pct(last(c.err))],
+    ['Virtual users', String(live?.vus ?? last(c.vus))],
+    ['Requests / sec', compact(live?.rps ?? last(c.rps))],
+    ['p95', ms(live?.p95 ?? last(c.p95))],
+    ['Failed', pct(live?.errorRate ?? last(c.err))],
   ];
   return (
     <Card onClick={onOpen}>
@@ -207,11 +201,7 @@ function RunningCard({ run, onOpen }: { run: LoadTestRun; onOpen: () => void }) 
           <div className="stack" style={{ gap: 'var(--space-4)' }}>
             <div>
               <div className="row" style={{ justifyContent: 'space-between', marginBottom: 'var(--space-2)' }}>
-                <span className="secondary row" style={{ gap: 'var(--space-2)' }}>
-                  {lv.name} ({ls.index + 1} of {ls.levels.length}) · {status}
-                  {ls.mode === 'ai' && <Badge tone={ls.phase === 'waiting' ? 'warning' : 'accent'} icon={<Sparkles />}>{ls.phase === 'waiting' ? 'needs a look' : 'AI-guided'}</Badge>}
-                  {ls.mode === 'manual' && ls.phase === 'waiting' && !ls.userHold && <Badge tone="warning">your call{g && g.verdict !== 'go' ? ' · AI says hold' : ''}</Badge>}
-                </span>
+                <span className="secondary">{status}</span>
                 <span className="num">{Math.round(run.progress * 100)}%</span>
               </div>
               <Meter value={run.progress} />
@@ -304,7 +294,7 @@ export function ScenarioDrawer({ sc, running, onClose, onRun, onEdit, onOpenRun 
       </DrawerSection>
       <DrawerSection title="Run history">
         {hist.length === 0 ? <span className="muted">Not run yet.</span> : (
-          <Table rows={hist} rowKey={(r) => r.id} onRowClick={(r) => r.real && onOpenRun(r.id)} columns={[
+          <Table rows={hist} rowKey={(r) => r.id} onRowClick={(r) => onOpenRun(r.id)} columns={[
             { key: 'state', header: 'Result', render: (r) => <RunState state={r.state} /> },
             { key: 'p95', header: 'p95', numeric: true, render: (r) => ms(r.p95) },
             { key: 'err', header: 'Errors', numeric: true, render: (r) => pct(r.errorRate) },

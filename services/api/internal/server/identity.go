@@ -42,6 +42,7 @@ type IdentityStore interface {
 	ListProjects(ctx context.Context, userID int64) ([]model.Project, error)
 	GetProject(ctx context.Context, projectID int64, role string) ([]model.Project, error)
 	CreateProject(ctx context.Context, orgID int64, in model.ProjectInput) (*model.Project, error)
+	CreateOrg(ctx context.Context, userID int64, in model.OrgInput, maxOrgs int, ingestURL string) (*model.OrgCreated, error)
 	ListAPIKeys(ctx context.Context) ([]model.APIKey, error)
 	CreateAPIKey(ctx context.Context, in model.APIKeyInput, createdBy int64) (*model.APIKey, error)
 	RevokeAPIKey(ctx context.Context, id string) ([]byte, error)
@@ -113,7 +114,7 @@ func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, token 
 // noTenantPaths work for a signed-in user who has no project yet.
 func noTenantPath(path string) bool {
 	p := strings.TrimPrefix(path, "/api/v1")
-	return p == "/me" || p == "/projects" || strings.HasPrefix(p, "/orgs/")
+	return p == "/me" || p == "/projects" || p == "/orgs" || strings.HasPrefix(p, "/orgs/")
 }
 
 // authenticate resolves the caller: `Authorization: Bearer <api key>` first, then the tt_session cookie (the project
@@ -168,23 +169,30 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		}
 		p := &principal{UserID: uid, Session: true}
 		ctx = store.WithActor(ctx, store.Actor{UserID: uid})
-		if h := strings.TrimSpace(r.Header.Get(projectHeader)); h != "" {
+		h := strings.TrimSpace(r.Header.Get(projectHeader))
+		if h != "" {
 			pid, perr := strconv.ParseInt(h, 10, 64)
 			var org int64
 			var role string
 			if perr == nil && pid > 0 {
 				org, role, err = s.Store.ProjectAccess(ctx, uid, pid)
 			}
-			if perr != nil || pid <= 0 || errors.Is(err, store.ErrNotFound) {
+			switch {
+			case (perr != nil || pid <= 0 || errors.Is(err, store.ErrNotFound)) && noTenantPath(r.URL.Path):
+				// A stale header (project deleted, membership removed) must not lock the user out of /me,
+				// POST /orgs or project creation: fall back to the default project below.
+				h = ""
+			case perr != nil || pid <= 0 || errors.Is(err, store.ErrNotFound):
 				forbidden(w, "no access to project "+strconv.Quote(h))
 				return
-			}
-			if err != nil {
+			case err != nil:
 				s.fail(w, r, err)
 				return
+			default:
+				p.ProjectID, p.OrgID, p.Role = pid, org, role
 			}
-			p.ProjectID, p.OrgID, p.Role = pid, org, role
-		} else {
+		}
+		if h == "" {
 			pid, org, role, err := s.Store.DefaultProject(ctx, uid)
 			if err != nil && !errors.Is(err, store.ErrNotFound) {
 				s.fail(w, r, err)
@@ -217,7 +225,7 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			return
 		}
 		p := principalOf(r.Context())
-		if p.Role == "viewer" && !strings.HasPrefix(strings.TrimPrefix(r.URL.Path, "/api/v1"), "/orgs/") {
+		if path := strings.TrimPrefix(r.URL.Path, "/api/v1"); p.Role == "viewer" && path != "/orgs" && !strings.HasPrefix(path, "/orgs/") {
 			forbidden(w, "viewers have read-only access")
 			return
 		}
@@ -368,7 +376,7 @@ func (s *Server) authRoutes(r chi.Router) {
 		me, err := s.Store.Me(r.Context(), uid)
 		if err == nil {
 			if pid, _, role, perr := s.Store.DefaultProject(r.Context(), uid); perr == nil {
-				me.CurrentProjectID, me.Role = strconv.FormatInt(pid, 10), role
+				me.CurrentProjectID, me.Role = idPtr(pid), role
 			}
 			me.Auth = "session"
 		}
@@ -512,7 +520,7 @@ func (s *Server) identityRoutes(r chi.Router) {
 			me.Auth = "apiKey"
 		}
 		if p.ProjectID > 0 {
-			me.CurrentProjectID = strconv.FormatInt(p.ProjectID, 10)
+			me.CurrentProjectID = idPtr(p.ProjectID)
 		}
 		me.Role = p.Role
 		if err == nil && p.OrgID > 0 {
@@ -619,6 +627,26 @@ func (s *Server) identityRoutes(r chi.Router) {
 		}
 		v, err := s.Store.AIUsage(r.Context(), p.OrgID, p.UserID, month, store.RoleAtLeast(p.Role, "admin"))
 		s.reply(w, r, v, err)
+	})
+
+	// ---- onboarding (ADR-028, contracts §11): any signed-in user creates an org (+ first project + ingest key) and owns it.
+	r.Post("/orgs", func(w http.ResponseWriter, r *http.Request) {
+		p := principalOf(r.Context())
+		if !p.Session {
+			forbidden(w, "creating an org needs a user session (api keys are project scoped)")
+			return
+		}
+		var in model.OrgInput
+		if err := decode(r, &in); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		v, err := s.Store.CreateOrg(r.Context(), p.UserID, in, s.MaxOrgsPerUser, s.PublicIngestURL)
+		if err == nil {
+			s.auditAction(r, mustID(v.Org.ID), "org.create", v.Org.ID,
+				map[string]any{"name": v.Org.Name, "projectId": v.Project.ID, "ingestKeyId": v.IngestKey.ID})
+		}
+		s.created(w, r, v, err)
 	})
 
 	// ---- projects
@@ -758,4 +786,18 @@ func (s *Server) memberParam(r *http.Request, org int64, role string) (int64, er
 		return 0, errForbidden
 	}
 	return uid, nil
+}
+
+// idPtr is a JSON id, or nil (null) for 0.
+func idPtr(n int64) *string {
+	if n <= 0 {
+		return nil
+	}
+	s := strconv.FormatInt(n, 10)
+	return &s
+}
+
+func mustID(s string) int64 {
+	n, _ := strconv.ParseInt(s, 10, 64)
+	return n
 }

@@ -39,7 +39,7 @@ tool params, no write tools):
   `hint` on how to narrow the query. Trace span lists additionally cap at 200.
 - **PII:** log messages, span attrs/resource/events and incident event data pass through
   `internal/redact` (the single masking helper of this module): email, IPv4/IPv6, `Bearer …`,
-  `tt_api_`/`tt_ingest_`/`tt_dev_` keys, 16-digit card-like numbers. Tool names (`tt_list_*`) are
+  `tt_api_`/`tt_ingest_`/`tt_dev_` (legacy) keys, 16-digit card-like numbers. Tool names (`tt_list_*`) are
   deliberately not matched.
 - **Errors:** short and actionable, never a stack, secret or raw upstream body — `check TT_API_KEY`
   (401/403), `call tt_list_endpoints for valid endpoint ids` (404), API unavailable (5xx/timeout).
@@ -50,18 +50,36 @@ tool params, no write tools):
 
 | Env | Default |
 |---|---|
-| `TT_API_KEY` | **required** (dev: `tt_dev_api_key`) |
+| `TT_API_KEY` | **required** — a project api key (`POST /api/v1/api-keys`, dashboard Team → API keys) |
 | `TT_API_URL` | `http://localhost:8080` |
 | `TT_ORG_ID` / `TT_PROJECT_ID` | unset (optional cross-checks) |
 | `TT_LOG_LEVEL` | `info` (stderr JSON) |
 
 Connection recipes (OpenCode, Claude Code, `.mcp.json`): `.ai/mcp.md` § Bağlanma.
 
+## Self telemetry (ADR-027)
+
+`internal/selftel` (contracts §27), service `tt-mcp`:
+
+| Env | Default | |
+|---|---|---|
+| `TROOPER_DSN` | unset | self project ingest DSN (dev: the DSN `make self` prints, `http://<ingest-key>@localhost:4318/<self-project-id>`); unset = nothing is started, behaviour unchanged |
+| `TROOPER_SERVICE` | `tt-mcp` | service name override |
+| `TROOPER_ENV` | `TT_ENV`, else `development` | |
+| `TROOPER_VERSION` | `-X main.version` build value | deploy marker |
+| `TROOPER_SAMPLE_RATE`, `TROOPER_PROFILING`, `TROOPER_DEBUG` | SDK defaults | see `sdks/go/README.md` |
+
+Traced: one server span per `tools/call`, named after the tool (`tt_list_services`, …; `trooper.route` = tool name,
+`gen_ai.tool.name`, status Error on a failed call or an `isError` result; arguments and results are not recorded); the
+api GETs as client spans carrying `traceparent` so the trace continues in `tt-api`; slog → OTel logs. The SDK writes its
+diagnostics (`TROOPER_DEBUG`) to **stderr only** — `cmd/tt-mcp/main_test.go` runs the stdio session with self
+telemetry on against a fake collector and asserts stdout stays pure JSON-RPC.
+
 ## Development
 
 ```bash
 go test ./...                                     # units + in-memory e2e + stdio purity
-docker build -f mcp/Dockerfile -t tasktrooper/mcp services/   # distroless, no ports
+docker build -f services/mcp/Dockerfile -t tasktrooper/mcp .   # repo root; distroless, no ports
 ```
 
 Layout: `cmd/tt-mcp` (binary, stdout guard) · `internal/config` (TT_* load + validate) ·

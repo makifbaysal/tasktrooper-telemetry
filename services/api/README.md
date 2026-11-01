@@ -11,16 +11,50 @@ docker compose -f deploy/docker-compose.yml up -d          # infra (from the rep
 cd services/api
 GOWORK=off go run ./cmd/api                                 # :8080
 
-curl -H 'Authorization: Bearer tt_dev_api_key' 'localhost:8080/api/v1/services?range=1h'
-curl -H 'Authorization: Bearer tt_dev_api_key' 'localhost:8080/api/v1/services/checkout/endpoints/post-checkout/series?range=24h&env=production'
 curl localhost:8080/healthz
 
-# browser-style session (TT_AUTH_DEV=true): dev@tasktrooper.local is owner of org 1 (seeded by 007_auth.sql)
-curl -c /tmp/tt.jar -XPOST -H 'Content-Type: application/json' -d '{}' localhost:8080/api/v1/auth/dev-login
-curl -b /tmp/tt.jar -H 'X-Trooper-Project: 1' localhost:8080/api/v1/me
+# There is no seed data (ADR-028). Sign in (TT_AUTH_DEV=true) and onboard: org + first project + ingest key.
+curl -c /tmp/tt.jar -XPOST -H 'Content-Type: application/json' -d '{"email":"me@example.com"}' localhost:8080/api/v1/auth/dev-login
+curl -b /tmp/tt.jar localhost:8080/api/v1/me                      # {"orgs":[],"currentProjectId":null,...}
+curl -b /tmp/tt.jar -XPOST -H 'Content-Type: application/json' -d '{"name":"Acme","project":{"name":"Shop"}}' \
+  localhost:8080/api/v1/orgs                                       # 201 {org, project, ingestKey{id,prefix,key}, dsn} — key shown once
+# an api key for scripts: POST /api-keys {"name":"cli","kind":"api"} with the session (X-Trooper-Project: <id>)
+curl -H 'Authorization: Bearer <api key>' 'localhost:8080/api/v1/services?range=1h'
 ```
 
-Docker (build context `services/`): `docker build -f api/Dockerfile -t tasktrooper/api services/`, or the `api`
+### Onboarding without seed data (ADR-028, contracts §11)
+
+* `POST /api/v1/orgs {name, project: {name, slug?}}` — session only (api keys → 403). One transaction: org (plan
+  `free`), owner membership, project, ingest key `default`. Names are trimmed, 1–100 characters, no control characters;
+  slug = lowercased name with non-alphanumerics → `-` (≤ 63, `project` when empty). A user may own at most
+  `TT_MAX_ORGS_PER_USER` orgs (default 20) → 409. Audit action `org.create` (meta: name, projectId, ingestKeyId).
+* Signed-in users without any org get `GET /me` → `orgs: []`, `currentProjectId: null`. On `/me`, `/projects`, `/orgs`,
+  `/orgs/*` a stale `X-Trooper-Project` (no access) falls back to the default project instead of 403; viewers may
+  still create their own org.
+
+### `api bootstrap` (operators, CI, `make self`)
+
+```bash
+GOWORK=off go run ./cmd/api bootstrap --org TaskTrooper --project tasktrooper --owner ops@example.com \
+  --ingest-key-out ../../deploy/self/.run/ingest-key --json
+# stdout (one object): {"orgId":2,"projectId":3,"dsn":"http://tt_ingest_…@localhost:4318/3","created":{"org":true,"project":true,"key":true}}
+```
+
+Same Postgres env as the server (`TT_POSTGRES_URL`); logs on stderr, non-zero exit on error (2 = usage). Idempotent
+(serialized with a Postgres advisory lock): user by email (created if unknown), org of that name **owned by** that
+user, project by slug or name in it, ingest key named `bootstrap`. A key's plaintext cannot be read back, so:
+
+| State | Result |
+|---|---|
+| `--ingest-key-out` file exists and holds the active `bootstrap` key (bare key or a DSN) | key reused, same DSN |
+| file missing or stale (revoked key, other database) | active `bootstrap` keys revoked, new key minted and written (parent dir created 0700, file 0600, atomic rename) |
+| no `--ingest-key-out`, no key yet | key minted, printed once in `dsn` |
+| no `--ingest-key-out`, key exists | kept untouched, `dsn` empty |
+
+Without `--json`: `org_id=…`, `project_id=…`, `dsn=…` lines. `--ingest-url` (default `TT_PUBLIC_INGEST_URL`) sets the
+DSN base. Revoked keys stop working at ingest within the auth cache TTL (60 s).
+
+Docker (build context = repo root, ADR-027): `docker build -f services/api/Dockerfile -t tasktrooper/api .`, or the `api`
 service of `deploy/docker-compose.yml` (profile `app`).
 
 | Env | Default | |
@@ -41,6 +75,8 @@ service of `deploy/docker-compose.yml` (profile `app`).
 | `TT_OIDC_REDIRECT_URL` | `http://localhost:8080/api/v1/auth/callback` | must be registered at the IdP |
 | `TT_OIDC_SCOPES` | `openid,email,profile` | |
 | `TT_PUBLIC_API_URL` | `http://localhost:8080` | public base of this api (Slack OAuth redirect URI = `<it>/api/v1/integrations/slack/callback`) |
+| `TT_PUBLIC_INGEST_URL` | `http://localhost:4318` | ingest gateway as reachable by SDKs; base of the DSNs from `POST /orgs` and `api bootstrap` (`<scheme>://<key>@<host>[/path]/<project id>`). Invalid value = startup error |
+| `TT_MAX_ORGS_PER_USER` | `20` | orgs one user may own via `POST /orgs` (abuse guard; `api bootstrap` is not limited) |
 | `TT_PUBLIC_WEBHOOK_URL` | `http://localhost:8096` | public base of codeintel; repository webhook URLs returned by `POST /repos` = `<it>/v1/webhooks/<github\|gitlab\|bitbucket>` |
 | `TT_SLACK_CLIENT_ID`, `TT_SLACK_CLIENT_SECRET`, `TT_SLACK_SIGNING_SECRET` | – | Slack App (ADR-017); unset = Slack endpoints answer 501 |
 | `TT_SLACK_API_URL` | `https://slack.com/api` | tests / proxies |
@@ -61,6 +97,27 @@ service of `deploy/docker-compose.yml` (profile `app`).
 | `TT_S3_ENDPOINT`, `TT_S3_ACCESS_KEY`, `TT_S3_SECRET_KEY`, `TT_S3_REGION` | –, –, –, `us-east-1` | S3-compatible store of session replay segments (contracts §12, §23; dev SeaweedFS `http://localhost:9002`, `trooper` / `trooper-secret`). Unset endpoint = `GET /replays/{id}/segments/{n}` answers 503 (index endpoints still work) |
 | `TT_REPLAY_S3_BUCKET` | `tt-replays` | replay bucket (read only; the ingest writer creates it) |
 
+## Self telemetry (ADR-027)
+
+The api reports itself to the self project with the Go SDK (`internal/selftel`, contracts §27) as `tt-api`.
+
+| Env | Default | |
+|---|---|---|
+| `TROOPER_DSN` | unset | self project ingest DSN (the `dsn` printed by `api bootstrap`, e.g. via `make self`); unset = nothing is started, behaviour unchanged |
+| `TROOPER_SERVICE` | `tt-api` | service name override |
+| `TROOPER_ENV` | `TT_ENV`, else `development` | |
+| `TROOPER_VERSION` | `-X main.version` build value | deploy marker |
+| `TROOPER_SAMPLE_RATE`, `TROOPER_PROFILING`, `TROOPER_DEBUG` | SDK defaults | see `sdks/go/README.md` |
+
+Traced: incoming HTTP (chi, route template, e.g. `/api/v1/services/:service/endpoints`; `/healthz`, `/readyz`, `/metrics`
+and CORS preflights produce no span; incoming `traceparent`/`baggage` from the dashboard RUM SDK is continued — CORS allows
+`traceparent`, `tracestate`, `baggage`), every ClickHouse statement of the store (`db.system=clickhouse` client span
+`SELECT <table>`, `db.query.text` through `trooper.SanitizeSQL` so the inlined tenant ids become `?`, `db.collection.name`,
+`db.namespace`; `Ready` pings are untraced), pgx, outgoing HTTP to symbolicator, Slack, GitHub, the OIDC provider and the
+`/integrations/test` / `/connections/test` targets, the incident-summary provider as a GenAI span (`llm` transport,
+content capture off), slog → OTel logs (stdout JSON unchanged, plus `trace_id`/`span_id`). Tenant = span attributes
+`tt.org_id` / `tt.project_id` only, never metric labels. The ingest gateway is never called from here.
+
 ## Local AI development
 
 `POST /api/v1/ai/incident-summary` is an authenticated, explicit integration route. The default provider is a deterministic offline mock with zero token usage. `GOWORK=off go run ./cmd/ai-demo` tests it without Docker. For the dashboard's contextual AI buttons, run `GOWORK=off go run ./cmd/ai-playground` from `services/api` alongside the Vite web server; those `/local-ai/*` routes are also offline mocks.
@@ -75,6 +132,11 @@ GOWORK=off go build ./... && GOWORK=off go vet ./... && GOWORK=off go test ./...
 GOWORK=off go test -tags integration -count=1 ./internal/server/ -run Integration -v
 # replay / profiling / AI only (org 9821; needs deploy/clickhouse/005 + deploy/postgres/012 applied; uploads one blob to the dev S3)
 GOWORK=off go test -tags integration -count=1 ./internal/server/ -run IntegrationObs -v
+# onboarding (POST /orgs) and `api bootstrap`
+GOWORK=off go test -tags integration -count=1 ./internal/server/ ./cmd/api/ -run 'IntegrationOnboarding|IntegrationBootstrap' -v
+# No test depends on seed rows (ADR-028): every test creates its own org/project/keys/users (newFixture in
+# internal/server/fixture_integration_test.go) and deletes them. To prove it, point TT_POSTGRES_URL at a database
+# built from deploy/postgres/*.sql without the seed files.
 npx @redocly/cli lint openapi.yaml
 ```
 
@@ -82,7 +144,7 @@ npx @redocly/cli lint openapi.yaml
 
 | Package | |
 |---|---|
-| `cmd/api` | wiring, graceful shutdown |
+| `cmd/api` | wiring, graceful shutdown; `bootstrap` subcommand (`bootstrap.go`) |
 | `internal/server` | router, middleware (request id, panic recovery, JSON request log, CORS, gzip), auth, handlers. Handlers only parse parameters and call the `Store` interface (unit tests use a fake store) |
 | `internal/store` | all SQL. `apm.go`, `traces.go`, `logs.go`, `rum.go`, `alerting.go`, `kpi.go`, `infra.go`, `loadtest.go`, `replay.go`, `profiles.go`, `llm.go` |
 | `internal/tq` | tenant guard: every query must contain `{{tenant}}` / `{{tenant:alias}}` (→ `org_id = O AND project_id = P` in ClickHouse, `project_id = P` in Postgres) or `{{project}}` / `{{org}}` for inserts; queries without one are rejected |

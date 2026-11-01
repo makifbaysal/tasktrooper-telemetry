@@ -9,7 +9,7 @@
 ## How to test
 
 - [ ] `make check` ends with `check OK`
-- [ ] <!-- anything beyond unit tests: make demo, e2e, manual steps -->
+- [ ] <!-- anything beyond unit tests: make self, e2e, manual steps -->
 
 ## Out of scope
 

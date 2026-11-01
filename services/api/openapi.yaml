@@ -1971,6 +1971,29 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } }
         '401': { $ref: '#/components/responses/E401' }
         '500': { $ref: '#/components/responses/E500' }
+  /api/v1/orgs:
+    post:
+      tags: [Team]
+      operationId: postOrgs
+      summary: 'Onboarding (ADR-028): create an org + its first project + one ingest key in one transaction; the caller becomes owner'
+      description: |
+        Session only (api keys are project scoped → 403). Works for a user without any org. Names are trimmed,
+        1–100 characters, no control characters; the project slug is derived from the name unless given
+        (`project` when nothing is left). A user may own at most `TT_MAX_ORGS_PER_USER` (default 20) orgs → 409.
+        `ingestKey.key` and `dsn` (`TT_PUBLIC_INGEST_URL` + key + project id) are returned only here.
+        Audit action `org.create`.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/OrgInput' } } }
+      responses:
+        '201':
+          description: Created
+          content: { application/json: { schema: { $ref: '#/components/schemas/OrgCreated' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '409': { $ref: '#/components/responses/E409' }
+        '500': { $ref: '#/components/responses/E500' }
   /api/v1/orgs/{org}/members:
     parameters:
       - { name: org, in: path, required: true, schema: { type: string } }
@@ -2978,7 +3001,7 @@ paths:
         '500': { $ref: '#/components/responses/E500' }
 components:
   securitySchemes:
-    apiKey: { type: http, scheme: bearer, description: "Project API key (kind = api), e.g. tt_dev_api_key" }
+    apiKey: { type: http, scheme: bearer, description: "Project API key (kind = api), created with POST /api-keys" }
     session: { type: apiKey, in: cookie, name: tt_session, description: "httpOnly session cookie (7 day sliding); project via X-Trooper-Project" }
   parameters:
     range: { name: range, in: query, description: "Time range (default 1h)", schema: { type: string, enum: [15m, 30m, 1h, 6h, 24h, 7d], default: 1h } }
@@ -4205,7 +4228,7 @@ components:
     DevLoginInput:
       type: object
       properties:
-        email: { type: string, description: 'default dev@tasktrooper.local' }
+        email: { type: string, description: 'required; the user is created on first login' }
         name: { type: string }
     User:
       type: object
@@ -4228,10 +4251,47 @@ components:
       properties:
         user: { oneOf: [{ $ref: '#/components/schemas/User' }, { type: "null" }], description: 'null for api keys' }
         orgs: { type: array, items: { $ref: '#/components/schemas/MeOrg' } }
-        currentProjectId: { type: string }
+        currentProjectId: { type: [string, "null"], description: 'null for a user without any project (onboarding)' }
         role: { type: string }
         auth: { type: string, enum: [session, apiKey] }
         ai: { $ref: '#/components/schemas/MeAI', description: "Current org's AI usage this month (absent without a current org)" }
+    OrgInput:
+      type: object
+      required: [name, project]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        project:
+          type: object
+          required: [name]
+          properties:
+            name: { type: string, minLength: 1, maxLength: 100 }
+            slug: { type: string, maxLength: 63, description: 'default: derived from name' }
+    OrgCreated:
+      type: object
+      required: [org, project, ingestKey, dsn]
+      properties:
+        org:
+          type: object
+          required: [id, name, role]
+          properties:
+            id: { type: string }
+            name: { type: string }
+            role: { type: string, enum: [owner] }
+        project:
+          type: object
+          required: [id, name, slug]
+          properties:
+            id: { type: string }
+            name: { type: string }
+            slug: { type: string }
+        ingestKey:
+          type: object
+          required: [id, prefix, key]
+          properties:
+            id: { type: string }
+            prefix: { type: string }
+            key: { type: string, description: 'Plaintext, only in this response' }
+        dsn: { type: string, description: 'SDK DSN, e.g. http://<key>@localhost:4318/<project id>; only in this response' }
     Member:
       type: object
       required: [userId, email, name, role]

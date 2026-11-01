@@ -35,6 +35,12 @@ attribute'ları). Client SDK'ları kendi hafif RUM katmanıdır ve `POST /v1/rum
 Kütüphane başına özel kod sadece OTel'in vermediği bilgi için yazılır: route template (`trooper.route`), consumer process adı,
 çağıran servis (`tt.svc` baggage). Geri kalan her şey OTel instrumentation'ından gelir.
 
+**Dogfooding (ADR-027, contracts §27).** Platformun kendisi bu SDK'ların ilk kullanıcısıdır: Go servisleri
+`telemetry-go` ile (`TROOPER_DSN`), dashboard `apps/web` `@trooper/browser` + `@trooper/react` + `@trooper/replay` ile
+(`tt-web`, `VITE_TROOPER_DSN`; yoksa SDK chunk'ı hiç yüklenmez — dynamic import), altyapı `trooper-agent` ile
+(`deploy/self/agent.yaml`, `make self`) ayrı "TaskTrooper" projesine raporlar. `apps/web` paketleri root pnpm
+workspace'inden `workspace:*` ile bağlar (build edilmiş `dist`; `pnpm sdk:build` / `make check` önce SDK'ları build eder).
+
 ## API yüzeyi
 
 ### Node

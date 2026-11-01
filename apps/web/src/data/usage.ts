@@ -2,12 +2,9 @@
  * AI usage quota (ADR-018, .ai/contracts.md §19): monthly credits per org and member, where they went,
  * and the admin controls (org override, notify targets, per-member cap).
  *
- * Api mode: `GET /usage/ai?month=`, `GET /me` (`ai`), `PUT /orgs/{org}/ai-quota`, `PUT /orgs/{org}/members/{user}/ai-quota`.
- * Mock mode: a Team-plan org at 82 % of its month so the banner and every section have something to show.
+ * `GET /usage/ai?month=`, `GET /me` (`ai`), `PUT /orgs/{org}/ai-quota`, `PUT /orgs/{org}/members/{user}/ai-quota`.
  */
-import { NOW } from './mock';
-import { authState } from './auth';
-import { invalidate, isApi, mutate, notifyData, qs, remote, seg } from './remote';
+import { invalidate, mutate, qs, remote, seg } from './remote';
 import type { SeriesSet } from './api/apm';
 
 // ---------------------------------------------------------------- types
@@ -59,62 +56,6 @@ const toMs = (v: unknown): number => {
 const monthOf = (ts: number) => new Date(ts).toISOString().slice(0, 7);
 const nextMonth = (period: string) => { const [y, m] = period.split('-').map(Number); return Date.UTC(m === 12 ? y + 1 : y, m === 12 ? 0 : m, 1); };
 
-// ---------------------------------------------------------------- mock
-
-const MOCK_PERIOD = monthOf(NOW);
-const DAY = 86400_000;
-function mockDaily(period: string): SeriesSet {
-  const [y, m] = period.split('-').map(Number);
-  const start = Date.UTC(y, m - 1, 1);
-  const days = Math.max(1, Math.min(new Date(Date.UTC(y, m, 0)).getUTCDate(), Math.floor((NOW - start) / DAY) + 1));
-  const timestamps = Array.from({ length: days }, (_, i) => start + i * DAY);
-  // weekday work, a full re-analysis on day 3 and a busy last week
-  const data = timestamps.map((t, i) => {
-    const wd = new Date(t).getUTCDay();
-    const base = wd === 0 || wd === 6 ? 28 : 120 + ((i * 37) % 60);
-    return +(base * (i === 2 ? 4.2 : 1) * (i >= days - 7 ? 1.6 : 1)).toFixed(2);
-  });
-  return { timestamps, series: [{ id: 'credits', label: 'Credits', data }] };
-}
-
-let mockOrgOverride: number | null = null;
-let mockNotify: string[] = ['slack:C01PLATFORM#platform', 'email:ada@shop.com'];
-const mockUsers: AiUserUsage[] = [
-  { userId: 'u-ada', email: 'ada@shop.com', name: 'Ada Yılmaz', limit: null, used: 1480.25 },
-  { userId: 'u-mert', email: 'mert@shop.com', name: 'Mert Kaya', limit: 1500, used: 1212.4 },
-  { userId: 'u-deniz', email: 'deniz@shop.com', name: 'Deniz Arslan', limit: 500, used: 498.1 },
-  { userId: 'u-selin', email: 'selin@shop.com', name: 'Selin Demir', limit: null, used: 0 },
-];
-
-function mockUsage(month?: string): AiUsage {
-  const period = month ?? MOCK_PERIOD;
-  const daily = mockDaily(period);
-  const used = +daily.series[0].data.reduce((a, v) => a + v, 0).toFixed(2);
-  const planDefault = PLAN_CREDITS.team;
-  const limit = mockOrgOverride === -1 ? null : mockOrgOverride ?? planDefault;
-  // scale the mock so the current org sits at ~82 % of the Team plan
-  const scale = ((period === MOCK_PERIOD ? 0.82 : 0.64) * 5000) / used;
-  const scaled = { ...daily, series: [{ ...daily.series[0], data: daily.series[0].data.map((v) => +(v * scale).toFixed(2)) }] };
-  const total = +(used * scale).toFixed(2);
-  return {
-    period, resetsAt: nextMonth(period), plan: 'team',
-    org: { limit, used: total, remaining: limit === null ? null : Math.max(0, +(limit - total).toFixed(2)) },
-    me: { limit: mockUsers[0].limit, used: mockUsers[0].used },
-    byUser: mockUsers.map((u) => ({ ...u })),
-    byFeature: [
-      { feature: 'codeintel.enrich', credits: +(total * 0.71).toFixed(2), calls: 1840 },
-      { feature: 'codeintel.suggest', credits: +(total * 0.19).toFixed(2), calls: 412 },
-      { feature: 'rca', credits: +(total * 0.08).toFixed(2), calls: 96 },
-      { feature: 'other', credits: +(total * 0.02).toFixed(2), calls: 21 },
-    ],
-    byProject: [
-      { projectId: 'shop-platform', name: 'shop-platform', credits: +(total * 0.86).toFixed(2) },
-      { projectId: 'shop-staging', name: 'shop-staging', credits: +(total * 0.14).toFixed(2) },
-    ],
-    daily: scaled,
-  };
-}
-
 // ---------------------------------------------------------------- api mapping
 
 interface RawMeter { limit?: number | null; used?: number | null; remaining?: number | null }
@@ -145,24 +86,14 @@ const EMPTY: AiUsage = {
 
 // ---------------------------------------------------------------- reads
 
-/** `GET /usage/ai?month=YYYY-MM` (default: this month). Undefined while loading in api mode. */
+/** `GET /usage/ai?month=YYYY-MM` (default: this month). Undefined while loading. */
 export function aiUsage(month?: string): AiUsage | undefined {
-  if (!isApi) return mockUsage(month);
   return remote<AiUsage | undefined>(`/usage/ai${qs({ month })}`, undefined, (r: RawUsage | null) => mapUsage(r));
 }
 export const emptyUsage = EMPTY;
 
 /** `/me` → `ai` (the banner's source). Undefined when the api has no session user or no `ai` field. */
 export function meAi(): MeAi | undefined {
-  if (!isApi) {
-    const u = mockUsage();
-    return { period: u.period, limit: u.org.limit, used: u.org.used, userLimit: u.me.limit, userUsed: u.me.used };
-  }
-  // api-key mode has no /me user: read the org meter from the usage endpoint instead
-  if (authState().mode !== 'session') {
-    const u = aiUsage();
-    return u && { period: u.period, limit: u.org.limit, used: u.org.used, userLimit: u.me.limit, userUsed: u.me.used };
-  }
   return remote<MeAi | undefined>('/me', undefined, (r: { ai?: Partial<MeAi> | null } | null) => r?.ai ? ({
     period: r.ai.period ?? monthOf(Date.now()), limit: lim(r.ai.limit), used: num(r.ai.used), userLimit: lim(r.ai.userLimit), userUsed: num(r.ai.userUsed),
   }) : undefined);
@@ -170,7 +101,6 @@ export function meAi(): MeAi | undefined {
 
 /** Current org settings. The api returns them only through the usage limit; the override is inferred from plan vs limit. */
 export function aiQuotaSettings(u: AiUsage | undefined): AiQuotaSettings {
-  if (!isApi) return { monthlyCredits: mockOrgOverride, notify: [...mockNotify] };
   const def = u ? PLAN_CREDITS[u.plan] ?? PLAN_CREDITS.free : null;
   const limit = u?.org.limit ?? null;
   return { monthlyCredits: !u ? null : limit === null ? (def === null ? null : -1) : limit === def ? null : limit, notify: storedNotify ?? [] };
@@ -182,19 +112,12 @@ let storedNotify: string[] | undefined;
 
 /** `PUT /orgs/{org}/ai-quota` (admin+). */
 export async function setOrgAiQuota(orgId: string, s: AiQuotaSettings): Promise<void> {
-  if (!isApi) { mockOrgOverride = s.monthlyCredits; mockNotify = [...s.notify]; notifyData(); return; }
   await mutate('PUT', `/orgs/${seg(orgId)}/ai-quota`, { monthlyCredits: s.monthlyCredits, notify: s.notify }, ['/usage/ai', '/me', '/audit-log']);
   storedNotify = [...s.notify];
 }
 
 /** `PUT /orgs/{org}/members/{user}/ai-quota` (admin+). null = no cap. */
 export async function setMemberAiQuota(orgId: string, userId: string, monthlyCredits: number | null): Promise<void> {
-  if (!isApi) {
-    const u = mockUsers.find((x) => x.userId === userId);
-    if (u) u.limit = monthlyCredits;
-    notifyData();
-    return;
-  }
   await mutate('PUT', `/orgs/${seg(orgId)}/members/${seg(userId)}/ai-quota`, { monthlyCredits }, ['/usage/ai', `/orgs/${seg(orgId)}/members`, '/me', '/audit-log']);
   invalidate('/usage/ai');
 }

@@ -15,8 +15,11 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/tasktrooper/telemetry/services/integrations/internal/model"
 	"github.com/tasktrooper/telemetry/services/integrations/internal/otlp"
+	"github.com/tasktrooper/telemetry/services/integrations/internal/selftel"
 )
 
 // Store is the subset of store.Store the runner needs.
@@ -283,7 +286,15 @@ func (s *session) build(ctx context.Context) (err error) {
 	return nil
 }
 
+// spanAttrs describe the integration on the step's root span (tenant as span attribute only, ADR-027).
+func (s *session) spanAttrs() []attribute.KeyValue {
+	return []attribute.KeyValue{attribute.Int64("tt.project_id", s.in.ProjectID), attribute.Int64("tt.integration.id", s.in.ID),
+		attribute.String("cloud.provider", s.in.Provider)}
+}
+
 func (s *session) discover(ctx context.Context) (err error) {
+	ctx, span := selftel.StartRoot(ctx, "discover "+s.in.Provider, s.spanAttrs()...)
+	defer func() { selftel.End(span, err) }()
 	defer s.recover(&err)
 	cctx, cancel := context.WithTimeout(ctx, s.r.o.DiscoverTimeout)
 	defer cancel()
@@ -323,6 +334,8 @@ func (s *session) discover(ctx context.Context) (err error) {
 }
 
 func (s *session) collect(ctx context.Context) (err error) {
+	ctx, span := selftel.StartRoot(ctx, "collect "+s.in.Provider, s.spanAttrs()...)
+	defer func() { selftel.End(span, err) }()
 	defer s.recover(&err)
 	cctx, cancel := context.WithTimeout(ctx, s.r.o.MetricsTimeout)
 	defer cancel()

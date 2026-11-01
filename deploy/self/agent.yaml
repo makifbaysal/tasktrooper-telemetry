@@ -1,0 +1,55 @@
+# trooper-agent static config for the platform's OWN infrastructure (ADR-027, .ai/contracts.md §27).
+# Targets: the deploy/docker-compose.yml containers, reported to the self project (`make self` → `api bootstrap`, ADR-028).
+#
+#   make self        # bootstraps the TaskTrooper project, builds + starts the agent with this file (modes db,host), prints the env
+#   make self-down
+#
+# Run by hand (repo root):
+#   (cd services/collector && GOWORK=off go build -o ../../deploy/self/.run/bin/trooper-agent ./cmd/trooper-agent)
+#   TT_SELF_PG_PASSWORD=trooper deploy/self/.run/bin/trooper-agent --config deploy/self/agent.yaml \
+#     --agent-modes db,host --dsn "$(cat deploy/self/.run/bootstrap.json | sed -E 's/.*"dsn":"([^"]*)".*/\1/')"      # add --once to test the targets
+#
+# Modes are flags, not config: `db` scrapes the targets below; `host` reports this machine (CPU, memory, disk, network,
+# top processes) and every Docker container through the Docker Engine API — that is how ClickHouse (no `clickhouse`
+# db engine in the collector yet) and SeaweedFS show up: as containers tasktrooper-clickhouse-1 / -s3-1.
+# Field reference: services/collector/README.md § Config reference. Unknown fields are rejected.
+interval: 15s
+timeout: 10s
+
+databases:
+  # metadata store (orgs, projects, monitors, users). name = db.namespace of the services' pgx spans, so the
+  # dependency "postgresql · trooper" links to this database.
+  - id: tt-postgres
+    name: trooper
+    engine: postgres
+    host: localhost
+    port: 5432
+    user: trooper                         # dev superuser; in production a trooper_monitor role with pg_monitor
+    database: trooper
+    tls: disable
+    collector: agent
+    credentialsRef: env:TT_SELF_PG_PASSWORD   # `make self` sets it to the compose default (trooper)
+    node: tasktrooper-postgres-1
+    slowQueryMs: 500                      # top queries need pg_stat_statements (not enabled in the dev image)
+
+  # rate limits / caches (ingest-gw, api)
+  - id: tt-redis
+    name: tt-redis
+    engine: redis
+    dsn: redis://localhost:6379/0
+    collector: agent
+    node: tasktrooper-redis-1
+
+brokerClusters:
+  # ingest buffer (Kafka API). Only the platform's own topics / groups: customer apps tested locally may use the same broker,
+  # and their topics belong to their own projects, not to the self project.
+  - id: tt-redpanda
+    name: tt-redpanda
+    kind: kafka
+    endpoint: localhost:19092
+    auth: { mechanism: none }
+    collector: agent
+    topicFilter: '^tt\.'                  # tt.otlp.traces|metrics|logs, tt.rum, tt.replay, tt.profiles
+    groupFilter: '^tt-'                   # tt-ingest-writer, tt-alert-stream, …
+    nodes:
+      - { name: redpanda-0, brokerId: 0, metricsUrl: "http://localhost:9644/public_metrics" }

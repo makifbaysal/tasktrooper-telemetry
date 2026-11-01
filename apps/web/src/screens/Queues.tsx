@@ -72,7 +72,7 @@ function GroupsTable({ rows, showCluster, onOpen }: { rows: ConsumerGroup[]; sho
   const worstRead = (g: ConsumerGroup) => g.reads.reduce((a, r) => (RANK[readHealth(g, r)] > RANK[readHealth(g, a)] ? r : a), g.reads[0]);
   const trend = (g: ConsumerGroup) => {
     const s = g.reads.map((r) => lagSeries(g, r, range).slice(-24));
-    return s[0].map((_, i) => s.reduce((a, x) => a + x[i], 0));
+    return s.length ? s[0].map((_, i) => s.reduce((a, x) => a + x[i], 0)) : [];
   };
   return (
     <Card flush>
@@ -159,6 +159,18 @@ export function Queues() {
       <PageHeader title="Message queues" subtitle="Kafka, RabbitMQ, Amazon SQS and Google Pub/Sub — lag per topic, queue and subscription, per consumer"
         actions={<Button variant="primary" icon={<Plus size={14} />} onClick={() => setConnect(true)}>Connect broker</Button>} />
 
+      {clusters.length === 0 ? (
+        <Card>
+          <EmptyState icon={<Waypoints />} title="No message brokers connected yet"
+            action={<div className="row" style={{ gap: 'var(--space-2)', justifyContent: 'center' }}>
+              <Button variant="primary" icon={<Plus size={14} />} onClick={() => setConnect(true)}>Connect broker</Button>
+              <Button variant="ghost" onClick={() => nav('/settings/integrations')}>Cloud integrations</Button>
+            </div>}>
+            Kafka and RabbitMQ lag comes from the TaskTrooper agent (<span className="mono">trooper-agent</span>) or a read-only connection; Amazon SQS and
+            Google Pub/Sub from a cloud integration. Consumers instrumented with an SDK show processing time, retries and DLQ next to their lag.
+          </EmptyState>
+        </Card>
+      ) : <>
       <Section title="Clusters">
         <div className="grid grid-2">{clusters.map((c) => <ClusterCard key={c.id} c={c} onClick={() => nav(`/infrastructure/queues/${c.id}`)} />)}</div>
       </Section>
@@ -174,6 +186,7 @@ export function Queues() {
         {tab === 'groups' && <GroupsTable rows={consumerGroups.filter(inCluster).filter(matchGroup(q))} showCluster onOpen={d.openGroup} />}
         {tab === 'topics' && <TopicsTable rows={topics.filter(inCluster).filter(matchTopic(q))} showCluster onOpen={d.openTopic} />}
       </Section>
+      </>}
 
       {d.drawers}
       {connect && <ConnectBroker onClose={() => setConnect(false)} onDone={(id) => { setConnect(false); nav(`/infrastructure/queues/${id}`); }} />}
@@ -400,7 +413,7 @@ const PROVIDERS: Record<DirectKind, string[]> = {
 };
 const PERMS: Record<DirectKind, string> = {
   kafka: "# read-only: describe cluster, topics and groups — never consumes your messages\nkafka-acls --bootstrap-server … --add --allow-principal User:trooper \\\n  --operation Describe --operation DescribeConfigs \\\n  --cluster --topic '*' --group '*'",
-  rabbitmq: "rabbitmqctl add_user trooper '…'\nrabbitmqctl set_user_tags trooper monitoring\n# no configure / write / read rights on any vhost\nrabbitmqctl set_permissions -p /shop trooper '^$' '^$' '^$'",
+  rabbitmq: "rabbitmqctl add_user trooper '…'\nrabbitmqctl set_user_tags trooper monitoring\n# no configure / write / read rights on any vhost\nrabbitmqctl set_permissions -p / trooper '^$' '^$' '^$'",
 };
 
 function ConnectBroker({ onClose, onDone }: { onClose: () => void; onDone: (id: string) => void }) {

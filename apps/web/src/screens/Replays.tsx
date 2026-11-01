@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { PlayCircle, UserRound } from 'lucide-react';
-import { Badge, Card, SearchInput, Segmented, StatusBadge, Table } from '@/components/ui';
+import { Badge, Card, ConnectSdk, EmptyState, SearchInput, Segmented, StatusBadge, Table } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
 import { replayUrl, replaysFor, type ReplaySummary, type Service } from '@/data';
 import { ago, clock, duration } from '@/lib/format';
@@ -24,7 +24,13 @@ export function ReplaysTab({ app }: { app: Service }) {
       </div>
       <Card flush subtitle={`Text and inputs are masked. The SDK records ${mobile ? 'a wireframe of the view hierarchy, never pixels' : 'the DOM with rrweb'}; by default 10% of sessions plus every session with an error.`}>
         <Table<ReplaySummary> rows={rows} rowKey={(r) => r.sessionId} defaultSort={{ key: 'start', dir: 'desc' }} onRowClick={(r) => nav(replayUrl(r.sessionId))}
-          empty={<span className="muted">No recorded sessions{q || only === 'errors' ? ' match these filters' : ' in range'}.</span>}
+          empty={q || only === 'errors'
+            ? <EmptyState icon={<PlayCircle />} title="No recordings match these filters" />
+            : <ConnectSdk icon={<PlayCircle />} title="No recorded sessions in this range" group="frontend" setup={!mobile}>
+                {mobile
+                  ? <>Enable replay in the mobile SDK (Android <span className="mono">TrooperReplay.install</span>, iOS / React Native <span className="mono">startReplay</span>, Flutter <span className="mono">replay:</span> option).</>
+                  : <>Add the <span className="mono">@trooper/replay</span> integration to the browser SDK: <span className="mono">init({'{'} dsn, service, integrations: [replayIntegration({'{'} sampleRate: 0.1, onErrorSampleRate: 1 {'}'})] {'}'})</span>.</>}
+              </ConnectSdk>}
           columns={[
             { key: 'start', header: 'Started', sortValue: (r) => r.startedAt, render: (r) => <span style={{ whiteSpace: 'nowrap' }}>{clock(r.startedAt)} <span className="muted">· {ago(r.startedAt)}</span></span> },
             { key: 'user', header: 'User', sortValue: (r) => r.user.id ?? r.user.anonymousId, render: (r) => (

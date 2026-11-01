@@ -24,6 +24,10 @@ type Input struct {
 const IncidentSummaryMaxInputBytes = 4000
 const IncidentSummaryMaxOutputTokens = 150
 
+// HTTPTransport is the transport of paid-provider clients built by NewFromEnv (nil = http.DefaultTransport; main
+// sets a GenAI-instrumented one when self telemetry is on, ADR-027).
+var HTTPTransport http.RoundTripper
+
 var ErrInputTooLarge = errors.New("incident summary input exceeds 4000 bytes")
 
 func ValidateInput(in Input) error {
@@ -99,7 +103,7 @@ func NewFromEnv() (Summarizer, error) {
 		model = v
 	}
 	return &remote{provider: provider, endpoint: endpoint, model: model, key: key,
-		client: &http.Client{Timeout: 15 * time.Second}}, nil
+		client: &http.Client{Timeout: 15 * time.Second, Transport: HTTPTransport}}, nil
 }
 
 func (p *remote) Summarize(ctx context.Context, in Input) (Result, error) {

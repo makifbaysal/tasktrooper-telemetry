@@ -6,7 +6,9 @@ code to propose alerts and load-test scenarios.
 
 - **Start here:** [`AGENTS.md`](AGENTS.md) — repo map, stack, working rules (for humans and agents).
 - **Design docs:** [`.ai/`](.ai/README.md) (Turkish, technical terms in English).
-- **Local stack with live data:** `make infra migrate && make demo` — see [`tools/demo/README.md`](tools/demo/README.md).
+- **Local stack:** `make infra migrate`, then the services (`docker compose -f deploy/docker-compose.yml --profile app up -d --build`).
+  There is no seed or demo data (ADR-028): sign in on the dashboard (`cd apps/web && pnpm dev`, dev login), create an
+  org + project in onboarding and connect an SDK. `make self` makes the platform report its own telemetry (ADR-027).
 
 ## Use TaskTrooper from your coding agent
 
@@ -22,11 +24,17 @@ Design, tool contract and known gaps: [`.ai/mcp.md`](.ai/mcp.md); skills setup: 
 Needs Go 1.26 and Docker. Run every command from the repo root.
 
 **1. Platform with data.** `tt-mcp` calls `GET /api/v1/me` at startup and refuses to start without a reachable API.
-`make demo` starts the platform services (api on `:8080`) plus a demo world with incidents, and runs until Ctrl-C:
+There is no demo data (ADR-028); the quickest real data is the platform's own telemetry:
 
 ```bash
-make infra migrate && make demo          # terminal 1, leave it running
+make infra migrate
+docker compose -f deploy/docker-compose.yml --profile app up -d --build   # api on :8080, ingest on :4318
+make self SELF_OWNER=you@example.com     # bootstraps the TaskTrooper project, prints TROOPER_DSN / TT_SELF_PROJECT_ID
 ```
+
+For compose, set `TROOPER_SELF_DSN` to the printed DSN with host `ingest-gw` instead of `localhost`, plus `TT_SELF_PROJECT_ID`, and restart the
+services so they report to that project, or connect your own app with an SDK. Then create a project API key in the dashboard
+(Settings → API keys) for the project you want to query.
 
 **2. Build the server.**
 
@@ -39,7 +47,7 @@ command -v tt-mcp || echo "not on PATH: use $(go env GOPATH)/bin/tt-mcp as the c
 
 | Env | |
 |---|---|
-| `TT_API_KEY` | required; project API key (dev: `tt_dev_api_key`). Org and project come from the key |
+| `TT_API_KEY` | required; project API key (dashboard Settings → API keys). Org and project come from the key |
 | `TT_API_URL` | default `http://localhost:8080` |
 | `TT_ORG_ID`, `TT_PROJECT_ID` | optional; checked against `/me` at startup, the server refuses to start on a mismatch |
 | `TT_LOG_LEVEL` | default `info` (JSON on stderr) |
@@ -48,8 +56,7 @@ command -v tt-mcp || echo "not on PATH: use $(go env GOPATH)/bin/tt-mcp as the c
 
 ```bash
 claude mcp add tasktrooper \
-  -e TT_API_URL=http://localhost:8080 -e TT_API_KEY=tt_dev_api_key \
-  -e TT_ORG_ID=1 -e TT_PROJECT_ID=1 \
+  -e TT_API_URL=http://localhost:8080 -e TT_API_KEY=<api-key> \
   -- tt-mcp
 claude mcp list                          # tasktrooper: tt-mcp - ✔ Connected
 ```
@@ -64,9 +71,7 @@ OpenCode (`~/.config/opencode/opencode.json` or a project `opencode.json`):
       "command": ["tt-mcp"],
       "environment": {
         "TT_API_URL": "http://localhost:8080",
-        "TT_API_KEY": "tt_dev_api_key",
-        "TT_ORG_ID": "1",
-        "TT_PROJECT_ID": "1"
+        "TT_API_KEY": "<api-key>"
       },
       "enabled": true
     }
@@ -82,10 +87,9 @@ symlinks: see [`.ai/mcp.md` § Agent Skills](.ai/mcp.md#agent-skills-skills).
 
 **6. Try it.**
 
-> Something looks wrong with payments-api in the last 15 minutes. Find out why.
+> Something looks wrong with tt-api in the last 15 minutes. Find out why.
 
 The agent should load `trooper-diagnose` and walk incidents → service KPIs → endpoint RCA → traces → logs → deploys.
-A rehearsable end-to-end run with the expected tool calls: [`docs/demo-mcp.md`](docs/demo-mcp.md).
 
 ## CI/CD
 

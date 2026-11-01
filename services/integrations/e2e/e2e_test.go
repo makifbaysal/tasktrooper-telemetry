@@ -90,8 +90,11 @@ func TestCloudToClickHouse(t *testing.T) {
 	t.Cleanup(st.Close) // registered first → runs after the row cleanup below (LIFO)
 
 	// ── Postgres fixtures: project 9301, ingest key, secrets, integrations ──
+	// own org (org id = project id); nothing depends on seeded rows (ADR-028)
 	_, _ = st.DB.Exec(ctx, `DELETE FROM projects WHERE id = $1`, project)
-	mustExec(t, st, `INSERT INTO projects (id, org_id, name, slug) VALUES ($1, 1, 'cloud-e2e', 'cloud-e2e-9301')`, project)
+	_, _ = st.DB.Exec(ctx, `DELETE FROM orgs WHERE id = $1`, project)
+	mustExec(t, st, `INSERT INTO orgs (id, name) VALUES ($1, 'cloud-e2e')`, project)
+	mustExec(t, st, `INSERT INTO projects (id, org_id, name, slug) VALUES ($1, $1, 'cloud-e2e', 'cloud-e2e-9301')`, project)
 	mustExec(t, st, `INSERT INTO api_keys (project_id, name, kind, hash, prefix) VALUES ($1, 'cloud e2e', 'ingest', digest($2::text, 'sha256'), 'tt_cloud')`, project, ingestKey)
 	cleanCH := func() {
 		for _, tbl := range []string{"db_1m", "broker_lag_1m", "broker_nodes_1m", "metrics"} {
@@ -101,6 +104,7 @@ func TestCloudToClickHouse(t *testing.T) {
 	cleanCH()
 	t.Cleanup(func() {
 		_, _ = st.DB.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, project)
+		_, _ = st.DB.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, project)
 		cleanCH()
 	})
 	key, _ := secrets.Key()
