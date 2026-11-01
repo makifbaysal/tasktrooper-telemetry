@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"go.opentelemetry.io/otel/codes"
@@ -88,7 +89,7 @@ func TestClickHouseSpans(t *testing.T) {
 		t.Fatalf("orphan spans: %d", n)
 	}
 
-	ctx, root := StartRoot(context.Background(), "alert.cycle")
+	ctx, root := StartJob(context.Background(), "alert.cycle")
 	if err := conn.Select(ctx, nil, "SELECT count() FROM spans WHERE org_id = 42 AND name = 'secret'"); err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +133,7 @@ func TestRedactedTransport(t *testing.T) {
 	}))
 	defer srv.Close()
 	hc := &http.Client{Transport: RedactedTransport(nil, "slack")}
-	ctx, root := StartRoot(context.Background(), "notify.deliver")
+	ctx, root := StartJob(context.Background(), "notify.deliver")
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, srv.URL+"/services/T000/B000/SECRET?token=x", nil)
 	resp, err := hc.Do(req)
 	if err != nil {
@@ -154,5 +155,43 @@ func TestRedactedTransport(t *testing.T) {
 	}
 	if !strings.Contains(gotTP, s.SpanContext().TraceID().String()) {
 		t.Errorf("traceparent %q not propagated", gotTP)
+	}
+}
+
+func TestStartJob(t *testing.T) {
+	tests := []struct {
+		name  string
+		start func(ctx context.Context) (context.Context, trace.Span)
+		job   string
+	}{
+		{"cycle", func(ctx context.Context) (context.Context, trace.Span) { return StartJob(ctx, "alert.cycle") }, "alert.cycle"},
+		{"at", func(ctx context.Context) (context.Context, trace.Span) {
+			return StartJobAt(ctx, "alert.cycle", time.Now().Add(-time.Second), Tenant(1, 2)...)
+		}, "alert.cycle"},
+		{"delivery", func(ctx context.Context) (context.Context, trace.Span) { return StartJob(ctx, "notify.deliver") }, "notify.deliver"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := troopertest.New(t, "tt-alert-engine")
+			// a local span in ctx (e.g. the stream consumer) must not become the job's parent: the job is an entry
+			pctx, outer := StartSpan(context.Background(), "outer")
+			ctx, job := tt.start(pctx)
+			_, child := StartSpan(ctx, "alert.evaluate")
+			End(child, nil)
+			End(job, errors.New("boom"))
+			outer.End()
+			s := h.SpanByName(tt.job)
+			if s == nil || s.SpanKind() != trace.SpanKindConsumer || s.Parent().IsValid() {
+				t.Fatalf("job span %v", s)
+			}
+			if troopertest.AttrString(s, "trooper.process") != tt.job || troopertest.AttrString(s, "trooper.entry.method") != "JOB" ||
+				s.Status().Code != codes.Error {
+				t.Errorf("attrs %v status %v", s.Attributes(), s.Status())
+			}
+			c := h.SpanByName("alert.evaluate")
+			if c.Parent().SpanID() != s.SpanContext().SpanID() || troopertest.AttrString(c, "trooper.entry.route") != tt.job {
+				t.Errorf("child %v", c.Attributes())
+			}
+		})
 	}
 }

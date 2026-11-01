@@ -106,11 +106,11 @@ loadtest-ctl passes these to every runner (`TROOPER_ENV` resolved; `TROOPER_SERV
 
 What is traced (one trace per run):
 
-- ctl `loadtest.claim` (root, only when a run was claimed — idle polls produce no spans): admission result, regions, mode,
+- ctl `loadtest.claim` (job entry, contracts §4; only when a run was claimed — idle polls produce no spans): admission result, regions, mode,
   peak VUs, duration, executor; `tt.project_id`, `tt.loadtest.run_id`. Its W3C context goes to each runner as `TRACEPARENT`.
 - ctl `loadtest.abort` (reason `user` | `gate` | `deadline`) and `loadtest.finish` (state, requests, error rate, VU-minutes)
-  in the same trace; `loadtest.verify_domains` (root) only when verifications are pending.
-- runner `loadtest.run` (child of the claim span): region, share, VU cap, mode, result state / requests / errors / abort
+  in the same trace; `loadtest.verify_domains` (job entry) only when verifications are pending.
+- runner `loadtest.run` (job entry of tt-loadtest-runner; its remote parent is the claim span): region, share, VU cap, mode, result state / requests / errors / abort
   reason; one `loadtest.stage` child per scheduled stage (reconstructed from the plan, truncated by an abort).
 - Postgres (`pgx`, sanitized SQL) only under these spans; the per-second abort poll and per-tick shard updates are untraced.
 - slog → OTel logs (local JSON output unchanged).

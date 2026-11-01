@@ -65,7 +65,7 @@ providers) never mix; they may point at the same project (`deploy/self/agent.yam
 | `TROOPER_VERSION` | build version | |
 | `TROOPER_PROFILING` | `false` | continuous profiling (contracts §24) |
 
-What is reported: one **root span `agent.scrape` per target scrape** (internal; `tt.collector.kind`,
+What is reported: one **job entry `agent.scrape` per target scrape** (consumer kind, `trooper.entry.method=JOB`, contracts §4; `tt.collector.kind`,
 `tt.collector.target`, `tt.collector.up`, `tt.collector.samples`, status Error + exception on failure/panic), a client
 span for the remote config poll (`GET {TT_API_URL}/api/v1/internal/collector-config`, `peer.service=tt-api`), the JSON
 `slog` output also as OTel logs (local output unchanged, `trace_id`/`span_id` added inside a span) and Go runtime

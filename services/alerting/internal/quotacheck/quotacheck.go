@@ -104,7 +104,7 @@ func (c *Checker) Run(ctx context.Context) {
 	t := time.NewTicker(c.Interval)
 	defer t.Stop()
 	for {
-		octx, span := selftel.StartRoot(ctx, "alert.ai_quota_check")
+		octx, span := selftel.StartJob(ctx, "alert.ai_quota_check")
 		n, err := c.Once(octx)
 		span.SetAttributes(attribute.Int("tt.alert.orgs_notified", n))
 		selftel.End(span, err)
