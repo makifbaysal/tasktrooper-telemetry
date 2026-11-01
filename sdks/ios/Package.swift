@@ -1,4 +1,6 @@
 // swift-tools-version:5.9
+// Local-development manifest (run swift build/test from sdks/ios). Published SwiftPM consumers use the
+// repository-root Package.swift, which mirrors this file with sdks/ios/-prefixed paths: keep both in sync.
 import PackageDescription
 
 let strictConcurrency: [SwiftSetting] = [.enableExperimentalFeature("StrictConcurrency")]

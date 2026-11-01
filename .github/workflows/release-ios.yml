@@ -1,0 +1,62 @@
+name: Release iOS SDK
+
+# Publishes the TaskTrooper iOS/tvOS SDK (sdks/ios) on tag ios-v<version>:
+#   1. CocoaPods trunk: `pod trunk push sdks/ios/TaskTrooper.podspec` (podspec paths are relative to the repo root;
+#      trunk validates by fetching the ios-v<version> tag).
+#   2. Swift Package Manager: pushes the plain semver tag <version> that SwiftPM resolves against the root Package.swift.
+# Requires repo secret COCOAPODS_TRUNK_TOKEN (sdks/ios/README.md § Releasing).
+
+on:
+  push:
+    tags:
+      - "ios-v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-latest
+    permissions:
+      contents: write # push the SwiftPM semver tag
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check podspec version matches tag
+        id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#ios-v}"
+          declared=$(sed -nE "s/^[[:space:]]*s\.version[[:space:]]*=[[:space:]]*['\"]([^'\"]+)['\"].*/\1/p" sdks/ios/TaskTrooper.podspec)
+          if [ "$declared" != "$version" ]; then
+            echo "::error::tag version $version != sdks/ios/TaskTrooper.podspec version $declared"
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$version" >/dev/null; then
+            echo "::error::SwiftPM tag $version already exists"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: swift build (root Package.swift)
+        run: swift build
+
+      - name: swift test (root Package.swift)
+        run: swift test
+
+      - name: pod trunk push
+        env:
+          COCOAPODS_TRUNK_TOKEN: ${{ secrets.COCOAPODS_TRUNK_TOKEN }}
+        run: pod trunk push sdks/ios/TaskTrooper.podspec --allow-warnings
+
+      - name: Push SwiftPM semver tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git tag "$VERSION" "$GITHUB_SHA"
+          git push origin "refs/tags/$VERSION"
