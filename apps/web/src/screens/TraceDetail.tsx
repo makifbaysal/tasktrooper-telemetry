@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import { AlertOctagon, ArrowRight, Boxes, ChevronDown, ChevronRight, FileText, ListTree, Loader2, Server, X } from 'lucide-react';
-import { Badge, Button, Callout, Card, CodeBlock, EmptyState, PageHeader, StatTile, StatusBadge } from '@/components/ui';
+import { AlertOctagon, ArrowRight, Boxes, ChevronDown, ChevronRight, FileText, ListTree, Server, X } from 'lucide-react';
+import { Badge, Button, Callout, Card, CodeBlock, EmptyState, PageHeader, SkeletonPage, StatTile, StatusBadge } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
 import {
   TIME_CATEGORIES, endpointsFor, k8sPods, services, traceDetail, useData,
@@ -76,7 +76,7 @@ export function TraceDetail() {
   const { traceId = '' } = useParams();
   const st = traceDetail(traceId);
   if (!st.trace) {
-    if (st.loading) return <EmptyState icon={<Loader2 />} title="Loading trace…" />;
+    if (st.loading) return <SkeletonPage label="Loading trace" />;
     return (
       <EmptyState icon={<ListTree />} title={st.notFound || !st.error ? 'Trace not found' : 'Could not load the trace'}
         action={<Link to="/services">Back to services</Link>}>

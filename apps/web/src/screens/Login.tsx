@@ -1,14 +1,17 @@
 import { useState, type FormEvent } from 'react';
-import { KeyRound, LogIn, Mail } from 'lucide-react';
+import { ArrowLeft, KeyRound, LogIn, Mail } from 'lucide-react';
 import { Button, Callout, Field, Input } from '@/components/ui';
 import { Logo } from '@/components/layout/Logo';
+import { ServiceGraph } from '@/components/public/ServiceMap';
 import { devLogin, loginUrl, type AuthConfig } from '@/data/auth';
 
 /**
- * Sign-in (ADR-016). OIDC → the api's /auth/login redirect; dev login (TT_AUTH_DEV, no issuer) → e-mail only.
- * Rendered by main.tsx outside the router, before any data is loaded.
+ * Sign-in (ADR-016), its own page at `/login`. OIDC → the api's /auth/login redirect; dev login (TT_AUTH_DEV, no
+ * issuer) → e-mail only. There is no sign-up: teammates are invited; the first sign-in sets up the organisation (onboarding).
+ * Also rendered outside any router when a session expires mid-use, so it links with plain anchors.
+ * `next` is the in-app path to land on after signing in.
  */
-export function Login({ config, expired, onSignedIn }: { config: AuthConfig; expired?: boolean; onSignedIn: () => void }) {
+export function Login({ config, expired, next = '/', onSignedIn }: { config: AuthConfig; expired?: boolean; next?: string; onSignedIn: () => void }) {
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -21,34 +24,46 @@ export function Login({ config, expired, onSignedIn }: { config: AuthConfig; exp
   };
 
   return (
-    <div className="login">
-      <div className="login__card">
-        <div className="login__brand">
-          <span className="sidebar__logo"><Logo /></span>
-          <span className="sidebar__name"><strong>TaskTrooper</strong><span>Telemetry</span></span>
+    <div className="signin">
+      <aside className="signin__field">
+        <a href="/" className="pnav__brand">
+          <Logo className="pnav__mark" />
+          <span>TaskTrooper <span className="pnav__product">Telemetry</span></span>
+        </a>
+        <div className="signin__pitch">
+          <p className="signin__statement">Know why it’s slow, not just that it is.</p>
+          <p>Backend, web and mobile in one place, with the cause named when something breaks.</p>
         </div>
-        <div>
-          <div className="login__title">Sign in</div>
-          <p className="secondary">{expired ? 'Your session expired. Sign in again to continue.' : 'Use your company account to open the dashboard.'}</p>
-        </div>
+        <ServiceGraph narrow className="signin__graph" />
+      </aside>
 
-        {config.oidc && (
-          <Button variant="primary" icon={<LogIn size={16} />} onClick={() => { window.location.href = loginUrl(); }}>Continue with SSO</Button>
-        )}
-        {config.oidc && config.devLogin && <div className="login__or">or</div>}
-        {config.devLogin && (
-          <form className="stack" style={{ gap: 'var(--space-3)' }} onSubmit={(e) => void submit(e)}>
-            <Field label="E-mail" hint="Development sign-in — no password, only enabled when the api runs with TT_AUTH_DEV=true.">
-              <Input type="email" autoComplete="email" autoFocus placeholder="you@company.com" value={email} onChange={(e) => setEmail(e.target.value)} />
-            </Field>
-            <Button type="submit" variant={config.oidc ? 'secondary' : 'primary'} icon={<Mail size={16} />} disabled={busy}>{busy ? 'Signing in…' : 'Sign in with e-mail'}</Button>
-          </form>
-        )}
-        {!config.oidc && !config.devLogin && (
-          <Callout icon={<KeyRound size={16} />}>Sign-in isn’t configured on this api. Set <span className="mono">TT_OIDC_ISSUER</span> (OIDC), or <span className="mono">TT_AUTH_DEV=true</span> for local development.</Callout>
-        )}
-        {error && <Callout icon={<KeyRound size={16} color="var(--status-critical)" />}>{error}</Callout>}
-      </div>
+      <main className="signin__main">
+        <a href="/" className="signin__back"><ArrowLeft size={14} aria-hidden /> Back to the site</a>
+        <div className="signin__form">
+          <div>
+            <h1 className="signin__title">{expired ? 'Session expired' : 'Sign in'}</h1>
+            <p className="secondary">{expired ? 'Sign in again to continue where you left off.' : 'Use your company account to open the dashboard.'}</p>
+          </div>
+
+          {config.oidc && (
+            <Button variant="primary" icon={<LogIn size={16} />} onClick={() => { window.location.href = loginUrl(new URL(next, window.location.origin).href); }}>Continue with SSO</Button>
+          )}
+          {config.oidc && config.devLogin && <div className="signin__or">or</div>}
+          {config.devLogin && (
+            <form className="signin__email" onSubmit={(e) => void submit(e)}>
+              <Field label="E-mail" hint="Development sign-in: no password. Only enabled when the api runs with TT_AUTH_DEV=true.">
+                <Input type="email" autoComplete="email" autoFocus placeholder="you@company.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+              </Field>
+              <Button type="submit" variant={config.oidc ? 'secondary' : 'primary'} icon={<Mail size={16} />} disabled={busy}>{busy ? 'Signing in…' : 'Sign in with e-mail'}</Button>
+            </form>
+          )}
+          {!config.oidc && !config.devLogin && (
+            <Callout icon={<KeyRound size={16} />}>Sign-in isn’t configured on this api. Set <span className="mono">TT_OIDC_ISSUER</span> (OIDC), or <span className="mono">TT_AUTH_DEV=true</span> for local development.</Callout>
+          )}
+          {error && <Callout icon={<KeyRound size={16} color="var(--status-critical)" />}>{error}</Callout>}
+          <p className="signin__fine">No account? Ask a teammate to invite you. The first person to sign in sets up the organisation.</p>
+        </div>
+      </main>
     </div>
   );
 }

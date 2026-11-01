@@ -7,7 +7,7 @@ import { Link, useParams, useSearchParams } from 'react-router';
 import {
   AlertTriangle, ArrowRight, Eye, FastForward, Gauge, Globe, Loader2, Lock, MousePointerClick, Pause, Play, RotateCcw, UserRound,
 } from 'lucide-react';
-import { Badge, Button, Card, CodeBlock, Drawer, DrawerSection, EmptyState, KeyValues, PageHeader, Segmented, StatusBadge, Toggle } from '@/components/ui';
+import { Badge, Button, Card, CodeBlock, Drawer, DrawerSection, EmptyState, KeyValues, PageHeader, Segmented, Skeleton, SkeletonText, StatusBadge, Toggle } from '@/components/ui';
 import { ReplayPlayer, WireframePlayer } from '@/components/replay';
 import { useApp } from '@/components/layout/context';
 import {
@@ -54,7 +54,7 @@ export function ReplayDetailScreen() {
     return (
       <>
         <PageHeader title="Session replay" crumbs={[{ label: 'Services', to: '/services' }, { label: sessionId }]} />
-        <Card><div className="row muted" style={{ gap: 'var(--space-2)' }}><Loader2 size={14} className="spin" aria-hidden />Loading replay…</div></Card>
+        <Card><div className="replay-skel" role="status" aria-label="Loading replay"><Skeleton w="100%" h="min(60vh, 32rem)" radius="md" /><SkeletonText lines={2} /></div></Card>
       </>
     );
   }

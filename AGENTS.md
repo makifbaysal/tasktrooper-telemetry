@@ -108,5 +108,6 @@ Tam kontrol (CI ile birebir aynı kapılar): `make check` → gofmt, `go vet`, t
 - [x] Session replay (web rrweb + Android/iOS wireframe), continuous profiling (Go/JVM/Node, flame graph + diff), AI/LLM monitoring (GenAI span'ları, token/maliyet) — ADR-021/022/023
 - [x] Self-observability: platform kendi SDK'larıyla kendini izler (`make self`) — ADR-027
 - [x] Paket yayınlama: npm, PyPI, Maven Central, NuGet, pub.dev, CocoaPods/SwiftPM, Go — ADR-029
+- [x] Public site (`telemetry.tasktrooper.ai`): landing (animasyonlu servis haritası), `/docs` (SDK kurulumları, MCP server, agent skill'leri), ayrı `/login`; sign-up yok
 
 Sıradaki işler: [`.ai/roadmap.md`](.ai/roadmap.md).

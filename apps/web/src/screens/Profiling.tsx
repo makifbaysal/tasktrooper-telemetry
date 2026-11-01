@@ -3,9 +3,9 @@
  */
 import { useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import { ArrowRight, Cpu, Flame, Info, Loader2 } from 'lucide-react';
+import { ArrowRight, Cpu, Flame, Info } from 'lucide-react';
 import { FlameDiffLegend, FlameGraph, TimeSeries, framePackage, signedPp } from '@/components/charts';
-import { Callout, Card, CopyCode, EmptyState, Section, Segmented, Select, Table } from '@/components/ui';
+import { Callout, Card, CopyCode, EmptyState, Section, Segmented, Select, SkeletonRows, Table } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
 import {
   PROFILE_TYPES, RANGE_POINTS, deployEvents, diffChanges, flameGraph, formatProfileValue, isGaugeType, profileDiff, profileSeries,
@@ -24,8 +24,8 @@ function valueFormat(d: Pick<FlameGraphData, 'type' | 'unit' | 'profiles'>) {
   return (v: number) => formatProfileValue(d.unit, v / div);
 }
 
-function Loading({ label = 'Loading profiles…' }: { label?: string }) {
-  return <div className="row muted" style={{ gap: 'var(--space-2)', padding: 'var(--space-4)' }}><Loader2 size={14} className="spin" aria-hidden />{label}</div>;
+function Loading({ label = 'Loading profiles' }: { label?: string }) {
+  return <div style={{ padding: 'var(--space-4)' }}><SkeletonRows rows={5} label={label} /></div>;
 }
 
 // ---------------------------------------------------------------- setup

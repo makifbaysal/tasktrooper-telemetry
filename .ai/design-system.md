@@ -11,7 +11,7 @@ değişirse bu dosya ve `tokens.css` aynı PR'da güncellenir.
 ## İlkeler
 
 1. **Veri yüksek sesle konuşur, arayüz sessiz kalır.** Hue-265 soğuk nötrler, primary = TaskTrooper laciverti (`--accent`), marka işareti `--brand-mark #15214b`, sıcak amber (`--accent-warm`) sadece seçim/vurgu. Renk sadece veri ve durum için.
-2. **Yoğun ama ferah.** Body 14px (Inter), 4px grid, tablolar sıkı; kartlar arası 16px. Micro etiketler (`.eyebrow`, tablo başlığı, metric label) 11px uppercase + letter-spacing.
+2. **Yoğun ama ferah.** Body 14px (Inter), 4px grid, tablolar sıkı; kartlar arası 16px. Etiketler (`.eyebrow`, tablo başlığı, metric label) sentence case, 12–14px; büyük harf yalnızca sidebar grup adlarında.
 3. **Durum asla tek başına renk değildir.** Status her zaman ikon + etiket (`StatusBadge`).
 4. **Light ve dark eşit vatandaş.** Dark tema aynı rampalardan seçilmiş ayrı adımlar, otomatik ters çevirme değil. Tema: `system | light | dark` (topbar'dan), `data-theme` attribute'u ile.
 5. **Ham değer yasak.** Komponentlerde hex, px font size, rastgele spacing yazılmaz; token kullanılır.
@@ -50,18 +50,24 @@ Eşleme: `ok/resolved → good`, `warning/pending → warning`, `acknowledged �
 | `--text-sm` | 12/16 | caption: ikincil metin, meta |
 | `--text-md` | 14/20 | **body default** |
 | `--text-lg` | 16/24 | heading: section ve kart başlığı |
-| `--text-xl` | 20/28 | title: sayfa başlığı (h1) |
-| `--text-2xl` | 28/36 | display: stat / metric değeri |
+| `--text-xl` | 20/28 | title: drawer / ikincil başlık |
+| `--text-2xl` | 28/36 | sayfa başlığı (PageHeader h1, `-0.022em`), stat / metric değeri |
 | `--text-hero` | 44/48 | Sayfa başına en fazla bir hero sayı |
+
+Public sayfalar (landing, docs, login) için akışkan adımlar: `--text-display` (40→68px, hero h1), `--text-headline` (28→40px, bölüm başlığı), `--text-lede` (16→19px); gövde ölçüsü `--measure` 68ch. App shell içinde kullanılmaz.
+
+Etiketler sentence case: metric label (`--text-md`, secondary), tablo başlığı (`--text-sm`, secondary) ve `.eyebrow` (`--text-sm`) büyük harf/tracking taşımaz; büyük harf yalnızca sidebar grup adlarında. Başlık üstünde kicker/eyebrow yasak.
 
 Font: `--font-sans` (Inter), `--font-mono` (JetBrains Mono — route, log, kod, trace id, yol chip'leri). Sayılar `tabular-nums`, büyük değerler `letter-spacing: -0.02em`.
 
 ### Spacing, radius, layout
-- Spacing: `--space-1..12` (4px grid).
+- Spacing: `--space-1..12` (4px grid) + public sayfalar için `--space-16/24/32`.
 - Radius: `--radius-xs 4` (bar ucu) · `sm 6` (chip, segmented item) · `md 8` (buton, input, nav item) · `lg 14` (kart, rounded-xl) · `full` (badge).
 - Kontrol yükseklikleri: `--control-h-sm 30`, `--control-h-md 36`.
 - Layout: sidebar 240px (topbar'daki butonla daraltılır, localStorage `trooper-sidebar`), topbar 56px (yarı saydam + blur), içerik max 1440px. 900px altı sidebar `--scrim` üstünde overlay drawer (aynı buton açar; navigasyon, Escape veya scrim'e dokunma kapatır); 640px altı topbar iki satıra sarılır, zaman aralığı kendi satırında. Topbar'da hızlı geçiş (`GlobalSearch`: servis + sayfa, `/` veya ⌘K). Topbar'daki env seçici ve zaman aralığı sadece onları okuyan ekranlarda görünür (`scopeFor`, `AppShell.tsx`): Overview, servis/endpoint/trace, altyapı, KPI detay, AI monitoring; Incidents, Settings, Load tests, Code insights'ta gizli. Ekran düzeni (Overview, Incidents, Services) `styles/screens.css`'te, sadece yapı.
-- Kartlar: `--shadow-sm` (TaskTrooper shadow-raised). Alarm durumundaki kart: sol 4px status rail (`.card--rail-critical` / `.card--rail-warning`).
+- Kartlar düz: gölge yok, `1px --divider` çerçeve, `--radius-md`; hover'da (`card--interactive`) sadece `--border-strong`. Kart içindeki kart kutu olmaz, ebeveyninin bölgesi olur (çerçevesiz, aralarında hairline). Alarm durumundaki kart (`.card--rail-*`, `.rca`): status rengine karışmış çerçeve + üstte 2px inset çizgi; renkli sol/sağ kenar (>1px) yasak.
+- İçerik ritmi: `.content` padding `--space-8`, bölümler arası `--space-8`, bölüm içi `--space-4`.
+- Public sayfalar: `--public-max` 1200px kolon, `--public-nav-h` 72px; nav, hero ve bölümler aynı iç kenara (`--inline`) hizalı. Marka zemini `--field-*` (lacivert, iki temada aynı): hero, kod bandı, kod blokları, login paneli. Hero animasyonu `--ease-out-expo`; reduced motion son kareyi gösterir. Kök neden bulgusu (`.finding`) grafiğin son lane'i: geniş düzende SVG'nin `FINDING_Y` çizgisinin altına absolute oturur (sabit oran, sahne yeniden boyutlanmaz), reco-db'den inen kesikli çizgi bağlar; kart/gölge yok, sinyal tonlu ince bant. Dört adım: belirti → yol → neden → önerilen çözüm; dar düzende (≤720px) grafiğin altına iner.
 
 ## Komponentler (`components/ui`)
 
@@ -77,6 +83,7 @@ Font: `--font-sans` (Inter), `--font-mono` (JetBrains Mono — route, log, kod, 
 | `Field`, `Input`, `Textarea`, `SearchInput`, `Select`, `Toggle` | Form elemanları (`Textarea mono` JSON/header şablonları için) |
 | `PageHeader` | breadcrumb + başlık + alt başlık + aksiyonlar |
 | `EmptyState`, `Meter`, `CodeBlock`, `Callout` | Yardımcılar |
+| `Skeleton`, `SkeletonText`, `SkeletonRows`, `SkeletonPage` | Yükleme hali: içeriğin şeklinde shimmer blokları (`.skel`, `prefers-reduced-motion` → düz). Ortada "Loading…" yazısı veya spinner yok; spinner yalnızca buton içi aksiyonlar ve replay buffering için. Grup başına tek `role="status"` + `label`. Boot ekranı (`main.tsx` `renderLoading`): oturum ipucu (`trooper-signed-in`) varsa app shell iskeleti, yoksa navy field zemini |
 | `ChoiceChips` | Çoklu seçim (region, servis, drain tipi): `Segmented` görünümü, birden çok `aria-pressed`, dar ekranda satır kırar |
 | `CopyCode` | Kopyala butonlu `CodeBlock` (IAM policy, CloudFormation/Terraform, drain URL); `wrap` tek satırlık uzun değeri (URL, ARN) kırar |
 | `Menu`, `MenuItem`, `MenuLabel`, `MenuDivider` | Trigger'a bağlı popover menü (kullanıcı menüsü, org/proje seçici). `trigger({open, toggle})` kendi butonunu çizer; Esc / dış tık / seçim kapatır; `align` start/end, `placement` below/above, `block` tam genişlik. `MenuItem selected` → check ikonu, `danger`, `hint` ikinci satır. Stil `styles/account.css` (`--bg-raised`, `--shadow-lg`) |
@@ -98,7 +105,7 @@ arama, Private/Added badge'leri, çoklu seçim; token / local path "Advanced" al
 `LoadTestDomains` (`screens/LoadTestDomains.tsx` — TXT kaydı ve `/.well-known/trooper-verify` talimatları `CopyCode` ile, Verify / Checking… durumu),
 run ekranı `TargetCard` (hedef servis RED: "All traffic" slot 1 vs "Load test" slot 2, ölçü başına ayrı grafik).
 
-Hesap / bildirim kalıpları: `Login` (`screens/Login.tsx`, router dışında, `.login__card`), `Onboarding` (`screens/Onboarding.tsx`, router dışında, aynı kart; adım 1 org + ilk proje formu → `POST /orgs`, adım 2 geniş kart `.onboarding__card`: DSN ve ingest key bir kez `CopyCode` + uyarı `Callout` + `SdkQuickstart` + "Continue to the dashboard"), `NotifyPicker` (`screens/NotifyPicker.tsx` — chip'li hedef girişi: Slack kanalı `#ad`, private kilit ikonu, serbest hedef mono; arama listesi `Menu` stilinde), `MonitorSourceBadge` (`code` → accent + kilit "Managed in repository", `suggestion` → accent + ✨), `LikelyCause` (özet + güven badge'i; < %30 warning tonunda "low confidence"). Rol gereği kapalı aksiyonlar gizlenir ya da `disabled` + `title` ile nedeni söylenir (`denied()`); salt okunur formlar `<fieldset disabled>`.
+Hesap / bildirim kalıpları: `Login` (`screens/Login.tsx`, `/login` sayfası: sol `--field-*` marka paneli + sağda form, `.signin*` sınıfları `public.css`'te; oturum düşünce router dışında da render edilir), `Onboarding` (`screens/Onboarding.tsx`, router dışında, `.login__card`; adım 1 org + ilk proje formu → `POST /orgs`, adım 2 geniş kart `.onboarding__card`: DSN ve ingest key bir kez `CopyCode` + uyarı `Callout` + `SdkQuickstart` + "Continue to the dashboard"), `NotifyPicker` (`screens/NotifyPicker.tsx` — chip'li hedef girişi: Slack kanalı `#ad`, private kilit ikonu, serbest hedef mono; arama listesi `Menu` stilinde), `MonitorSourceBadge` (`code` → accent + kilit "Managed in repository", `suggestion` → accent + ✨), `LikelyCause` (özet + güven badge'i; < %30 warning tonunda "low confidence"). Rol gereği kapalı aksiyonlar gizlenir ya da `disabled` + `title` ile nedeni söylenir (`denied()`); salt okunur formlar `<fieldset disabled>`.
 
 Altyapı / K8s kalıpları (`screens/k8sShared.tsx`): `InfraStatusBadge` (ok/warning/critical + `stale` → nötr saat ikonu "Stale"), `PodPhaseBadge` (reason varsa onu gösterir — CrashLoopBackOff/OOMKilled/ImagePullBackOff critical, diğerleri warning; yoksa phase), `UsageCell` / `LimitCell` (0..1 meter; kullanılan / limit, limit yoksa "no limit"), `EventList` (K8s Warning event akışı), `AgentSetup` (veri yokken Helm + `docker run` talimatı, eBPF opsiyonel notu), `EbpfBadge` (accent, SDK'sız eBPF servisi). Kapasite grafikleri birim başına tek grafik: used / requested / allocatable (veya usage / request / limit) `LINE_SLOTS` 1-2-3.
 
@@ -175,7 +182,7 @@ Grafikler `components/charts` altında, saf SVG: `TimeSeries`, `Columns` (stacke
 2. **Bir bilgi bir kez.** Aynı metrik sayfada iki yerde görünmez: `StatTile` + ayrı grafik kartı yasak → `MetricCard` (değer + delta + grafik tek kartta). Tablo kolonu ile yanındaki liste aynı sayıyı tekrar etmez.
 3. **Özet sayfada, detay tıklayınca.** Liste satırı / kart tıklanınca `Drawer` (sağ panel) açılır: zaman grafikleri, kırılımlar, ilişkili kayıtlar orada. Ayrı tam sayfası olan varlıklar (servis, endpoint, run) için drawer başlığında "Open" aksiyonu.
 4. Tıklanabilir satır/kart görsel ipucu taşır (`card--interactive`, satır hover, chevron).
-5. Sayfa bölümleri arası boşluk `--space-6`, bölüm içi `--space-3/4`.
+5. Sayfa bölümleri arası boşluk `--space-8`, bölüm içi `--space-4`.
 
 | Komponent | Kullanım |
 |---|---|

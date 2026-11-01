@@ -4,6 +4,7 @@ import { Check, Infinity as InfinityIcon, Pencil, ShieldAlert, Sparkles, X } fro
 import { BarList, Columns } from '@/components/charts';
 import {
   Avatar, Badge, Button, Callout, Card, EmptyState, Field, Input, Meter, MetricCard, Section, Segmented, Select, Table,
+  SkeletonRows,
 } from '@/components/ui';
 import { useData } from '@/data';
 import { can, denied, useAuth } from '@/data/auth';
@@ -34,7 +35,7 @@ export function UsageTab() {
 
   const picker = <Select aria-label="Month" value={month} onChange={(e) => setMonth(e.target.value)} options={periods.map((p) => ({ value: p, label: periodLabel(p) }))} />;
   if (!u) {
-    return <Section title="AI usage" actions={picker}><Card><EmptyState icon={<Sparkles />} title="Loading usage…" /></Card></Section>;
+    return <Section title="AI usage" actions={picker}><Card><SkeletonRows rows={4} label="Loading usage" /></Card></Section>;
   }
   const orgRatio = usedRatio(u.org);
   const meRatio = usedRatio(u.me);

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { AlertOctagon, Bell, Gauge, SquareFunction } from 'lucide-react';
 import { Columns, TimeSeries } from '@/components/charts';
-import { Badge, Button, Callout, Card, EmptyState, KeyValues, PageHeader, Section, StatTile, Table } from '@/components/ui';
+import { Badge, Button, Callout, Card, EmptyState, KeyValues, PageHeader, Section, SkeletonPage, StatTile, Table } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
 import { integrationOf, remoteStatus, services, timestamps, useData } from '@/data';
 import { pick } from '@/data/api/apm';
@@ -31,7 +31,7 @@ export function FunctionDetail() {
     return (
       <>
         <PageHeader title={functionId} crumbs={[...crumbs, { label: functionId }]} />
-        <Card><EmptyState icon={<SquareFunction />} title={remoteStatus().pending > 0 ? 'Loading function…' : 'Function not found'} /></Card>
+        {remoteStatus().pending > 0 ? <SkeletonPage label="Loading function" /> : <Card><EmptyState icon={<SquareFunction />} title="Function not found" /></Card>}
       </>
     );
   }
