@@ -15,7 +15,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.51.5
 	github.com/aws/smithy-go v1.28.6
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/makifbaysal/tasktrooper-telemetry/sdks/go v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go v0.1.0
 	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/nethttp v0.0.0-00010101000000-000000000000
 	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx v0.0.0-00010101000000-000000000000
 	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog v0.0.0-00010101000000-000000000000

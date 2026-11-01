@@ -3,10 +3,10 @@ module github.com/tasktrooper/telemetry/services/mcp
 go 1.26.3
 
 require (
-	github.com/modelcontextprotocol/go-sdk v1.7.0
-	github.com/makifbaysal/tasktrooper-telemetry/sdks/go v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go v0.1.0
 	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/nethttp v0.0.0-00010101000000-000000000000
 	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog v0.0.0-00010101000000-000000000000
+	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/tasktrooper/telemetry/services/pkg v0.0.0
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0

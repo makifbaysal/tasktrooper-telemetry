@@ -14,9 +14,9 @@ require (
 	github.com/go-chi/chi/v5 v5.5.0
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/makifbaysal/tasktrooper-telemetry/sdks/go v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go v0.1.0
 	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/chi v0.0.0-00010101000000-000000000000
-	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/nethttp v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/nethttp v0.1.0
 	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx v0.0.0-00010101000000-000000000000
 	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog v0.0.0-00010101000000-000000000000
 	github.com/tasktrooper/telemetry/services/pkg v0.0.0
