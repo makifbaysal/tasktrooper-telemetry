@@ -1,7 +1,6 @@
-# Docker build context = repo root (ADR-027). Allow-list: Go service images need only services/ and sdks/go/.
+# Docker build context = repo root (ADR-027). Allow-list: Go service images need only services/ (the Go SDK comes from proxy.golang.org).
 *
 !services/
-!sdks/go/
 
 # inside the allowed trees
 **/.git
@@ -12,4 +11,3 @@
 **/bin/
 **/dist/
 **/.DS_Store
-sdks/go/examples/

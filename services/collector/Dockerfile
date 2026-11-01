@@ -1,10 +1,9 @@
-# Build context: repo root (ADR-027; the collector module depends on ../pkg and ../../sdks/go)
+# Build context: repo root (ADR-027; the collector module depends on ../pkg; the Go SDK comes from proxy.golang.org)
 #   docker build -f services/collector/Dockerfile -t trooper-agent .
 FROM golang:1.26-alpine AS build
 WORKDIR /src
 ENV GOWORK=off CGO_ENABLED=0
 COPY services/pkg/ services/pkg/
-COPY sdks/go/ sdks/go/
 COPY services/collector/go.mod services/collector/go.sum services/collector/
 RUN cd services/collector && go mod download
 COPY services/collector/ services/collector/

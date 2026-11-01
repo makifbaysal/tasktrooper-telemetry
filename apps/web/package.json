@@ -4,17 +4,16 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "sdk:build": "pnpm --filter \"@tasktrooper/web^...\" build",
-    "dev": "pnpm sdk:build && vite",
-    "build": "pnpm sdk:build && tsc -b && vite build",
-    "typecheck": "pnpm sdk:build && tsc -b",
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b",
     "preview": "vite preview"
   },
   "dependencies": {
     "@rrweb/replay": "2.2.0",
-    "@tasktrooper/browser": "workspace:*",
-    "@tasktrooper/react": "workspace:*",
-    "@tasktrooper/replay": "workspace:*",
+    "@tasktrooper/browser": "^0.1.0",
+    "@tasktrooper/react": "^0.1.0",
+    "@tasktrooper/replay": "^0.1.0",
     "lucide-react": "^1.61.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

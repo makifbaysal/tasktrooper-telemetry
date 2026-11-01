@@ -1,9 +1,8 @@
 # Build context: repo root (ADR-027)  ·  docker build -f services/mcp/Dockerfile -t tasktrooper/mcp .
-# services/pkg and sdks/go are copied for the go.mod replace directives (../pkg, ../../sdks/go).
+# services/pkg is copied for the go.mod replace directive (../pkg); the Go SDK comes from proxy.golang.org (ADR-029).
 FROM golang:1.26 AS build
 WORKDIR /src
 COPY services/pkg/ services/pkg/
-COPY sdks/go/ sdks/go/
 COPY services/mcp/go.mod services/mcp/go.sum services/mcp/
 WORKDIR /src/services/mcp
 RUN GOWORK=off go mod download

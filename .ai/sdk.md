@@ -41,8 +41,8 @@ Kütüphane başına özel kod sadece OTel'in vermediği bilgi için yazılır: 
 **Dogfooding (ADR-027, contracts §27).** Platformun kendisi bu SDK'ların ilk kullanıcısıdır: Go servisleri
 `telemetry-go` ile (`TROOPER_DSN`), dashboard `apps/web` `@tasktrooper/browser` + `@tasktrooper/react` + `@tasktrooper/replay` ile
 (`tt-web`, `VITE_TROOPER_DSN`; yoksa SDK chunk'ı hiç yüklenmez — dynamic import), altyapı `trooper-agent` ile
-(`deploy/self/agent.yaml`, `make self`) ayrı "TaskTrooper" projesine raporlar. `apps/web` paketleri root pnpm
-workspace'inden `workspace:*` ile bağlar (build edilmiş `dist`; `pnpm sdk:build` / `make check` önce SDK'ları build eder).
+(`deploy/self/agent.yaml`, `make self`) ayrı "TaskTrooper" projesine raporlar. Platform SDK'ları yayınlanmış
+sürümden kullanır (ADR-029): Go servisleri proxy.golang.org'dan `v0.1.0`, `apps/web` npm'den `^0.1.0`.
 
 ## API yüzeyi
 
@@ -280,4 +280,5 @@ trusted publishing'dir (npm, PyPI, NuGet, pub.dev); Maven Central ve CocoaPods r
 | Flutter | `tasktrooper_flutter: ^<v>` |
 | iOS | SwiftPM `https://github.com/makifbaysal/tasktrooper-telemetry` veya `pod 'TaskTrooper'` |
 
-Repo içi kullanım (services, `apps/web`, örnekler) local path / pnpm workspace ile kalır; dış uygulamalar registry paketini kullanır.
+Platformun kendisi (services, `apps/web`) de registry paketini kullanır; SDK değişikliği platforma ancak yeni sürüm yayınlanıp
+bağımlılık yükseltilince girer. SDK örnekleri (`sdks/*/examples`) local path ile kalır.

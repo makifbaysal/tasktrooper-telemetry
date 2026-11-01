@@ -385,7 +385,7 @@ ve workflow lint doğrulanmalı; modül listesi iki yerde tutulamaz.
 operasyon için gerekli.
 **Karar:**
 - Platform verisi **ayrı bir projeye** gider (`TaskTrooper` / `tasktrooper`, `make self` → `api bootstrap`, ADR-028). Müşteri verisiyle karışmaz; production'da operatör kendi self projesinin DSN'ini verir.
-- Her Go servisi `main`'de `trooper.Start` çağırır (`github.com/makifbaysal/tasktrooper-telemetry/sdks/go`, `replace` ile `sdks/go`).
+- Her Go servisi `main`'de `trooper.Start` çağırır (`github.com/makifbaysal/tasktrooper-telemetry/sdks/go`; ADR-029 ile proxy.golang.org'dan sürümlü).
   DSN yoksa (default) hiçbir şey export edilmez — davranış bugünküyle aynı. Enstrümantasyon: HTTP (chi / net/http), pgx,
   go-redis, franz-go, slog → OTel logs, Go runtime metrikleri, opsiyonel profiling (`TROOPER_PROFILING`), codeintel'in
   Anthropic çağrıları `llm` transport'u ile (GenAI span; içerik kaydı kapalı). Prometheus `/metrics` aynen kalır.
@@ -452,6 +452,8 @@ yöneticisinden sürümlü paket çekemiyordu. Paket isimleri yayınlanabilir de
   | `tasktrooper_flutter-vX.Y.Z`, `tasktrooper_dio-vX.Y.Z` | `release-flutter.yml` | pub.dev automated publishing (OIDC); ilk yayın elle |
   | `ios-vX.Y.Z` | `release-ios.yml` | `COCOAPODS_TRUNK_TOKEN`; SwiftPM için düz `X.Y.Z` tag'i workflow atar |
 - Mümkün olan her yerde uzun ömürlü token yerine OIDC trusted publishing kullanılır.
-- Repo içi kullanım (services, apps/web, örnekler) local path/workspace ile devam eder; dış uygulamalar registry paketini kullanır.
+- Platformun kendisi de yayınlanmış SDK'yı kullanır (gerçek dogfooding): Go servisleri `sdks/go` için `replace` kullanmaz,
+  proxy.golang.org'dan sürümlü modül çeker; `apps/web` npm'den `@tasktrooper/*` kurar. SDK değişikliği platforma yeni sürüm
+  yayınlanıp bağımlılık yükseltilince girer. SDK örnekleri local path ile kalır.
 **Sonuç:** "Paket yayınlama" roadmap maddesi kapanır. Paket isimleri artık public sözleşmedir; yeniden adlandırma breaking change'dir.
 Detay: sdk.md § Dağıtım.

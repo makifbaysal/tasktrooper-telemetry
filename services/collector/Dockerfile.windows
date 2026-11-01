@@ -1,11 +1,10 @@
 # Windows HostProcess image (Helm windows.enabled). Build context: repo root (ADR-027; the collector module depends on
-# ../pkg and ../../sdks/go)
+# ../pkg; the Go SDK comes from proxy.golang.org)
 #   docker buildx build --platform windows/amd64 -f services/collector/Dockerfile.windows -t trooper-agent:<ver>-windows .
 FROM --platform=linux/amd64 golang:1.26 AS build
 WORKDIR /src
 ENV GOWORK=off CGO_ENABLED=0 GOOS=windows GOARCH=amd64
 COPY services/pkg/ services/pkg/
-COPY sdks/go/ sdks/go/
 COPY services/collector/go.mod services/collector/go.sum services/collector/
 RUN cd services/collector && go mod download
 COPY services/collector/ services/collector/
