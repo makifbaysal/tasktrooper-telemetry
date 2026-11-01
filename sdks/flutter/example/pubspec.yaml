@@ -12,10 +12,8 @@ dependencies:
     sdk: flutter
   go_router: ^17.5.0
   http: ^1.6.0
-  trooper_dio:
-    path: ../trooper_dio
-  trooper_flutter:
-    path: ../trooper_flutter
+  tasktrooper_dio: ^0.1.0
+  tasktrooper_flutter: ^0.1.0
 
 dev_dependencies:
   flutter_lints: ^6.0.0

@@ -1,0 +1,5 @@
+# Local development: resolve tasktrooper_flutter from this monorepo instead of pub.dev.
+# Excluded from the published archive (.pubignore).
+dependency_overrides:
+  tasktrooper_flutter:
+    path: ../tasktrooper_flutter

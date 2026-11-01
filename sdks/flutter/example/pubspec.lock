@@ -61,10 +61,10 @@ packages:
     dependency: transitive
     description:
       name: crypto
-      sha256: c8ea0233063ba03258fbcf2ca4d6dadfefe14f02fab57702265467a19f27fadf
+      sha256: e3626ae6270383c9e3a549f34c9e4cd26c09ae6a9adaab2bf4737a00340efdc4
       url: "https://pub.dev"
     source: hosted
-    version: "3.0.7"
+    version: "3.0.8"
   device_info_plus:
     dependency: transitive
     description:
@@ -188,10 +188,10 @@ packages:
     dependency: transitive
     description:
       name: jni
-      sha256: "6b9ca0602fef0230e83149afbe3f9f8227e94f2bbe84a1da4f14d699742f402d"
+      sha256: d8df6dab6847855512fe44dd9032b0bbe34dda7bf7597e41d30750879779813f
       url: "https://pub.dev"
     source: hosted
-    version: "1.1.0"
+    version: "1.1.1"
   jni_flutter:
     dependency: transitive
     description:
@@ -421,6 +421,20 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.4.1"
+  tasktrooper_dio:
+    dependency: "direct main"
+    description:
+      path: "../tasktrooper_dio"
+      relative: true
+    source: path
+    version: "0.1.0"
+  tasktrooper_flutter:
+    dependency: "direct main"
+    description:
+      path: "../tasktrooper_flutter"
+      relative: true
+    source: path
+    version: "0.1.0"
   term_glyph:
     dependency: transitive
     description:
@@ -437,20 +451,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.7.10"
-  trooper_dio:
-    dependency: "direct main"
-    description:
-      path: "../trooper_dio"
-      relative: true
-    source: path
-    version: "0.1.0"
-  trooper_flutter:
-    dependency: "direct main"
-    description:
-      path: "../trooper_flutter"
-      relative: true
-    source: path
-    version: "0.1.0"
   typed_data:
     dependency: transitive
     description:

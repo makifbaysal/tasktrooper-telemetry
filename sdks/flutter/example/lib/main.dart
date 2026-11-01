@@ -1,8 +1,8 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:trooper_dio/trooper_dio.dart';
-import 'package:trooper_flutter/trooper_flutter.dart';
+import 'package:tasktrooper_dio/tasktrooper_dio.dart';
+import 'package:tasktrooper_flutter/tasktrooper_flutter.dart';
 
 // Local stack: `docker compose -f deploy/docker-compose.yml up -d` + ingest-gw.
 // Android emulator reaches the host as 10.0.2.2. --dart-define=TROOPER_DSN=http://<ingest-key>@localhost:4318/<project-id> (empty = SDK off).

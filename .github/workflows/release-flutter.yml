@@ -1,0 +1,73 @@
+name: Release Flutter SDK
+
+# Publishes sdks/flutter/<package> to pub.dev via automated publishing (GitHub OIDC, no stored secret).
+# Tag format: <package>-v<version>, e.g. tasktrooper_flutter-v0.1.0 / tasktrooper_dio-v0.1.0. The version must
+# match the package's pubspec.yaml. Release tasktrooper_flutter before a tasktrooper_dio version that needs it.
+# One-time setup per package (sdks/flutter/README.md § Releasing): first version published manually, then
+# pub.dev → package → Admin → Automated publishing: repo makifbaysal/tasktrooper-telemetry,
+# tag pattern `<package>-v{{version}}`, environment `pub.dev`.
+
+on:
+  push:
+    tags:
+      - "tasktrooper_flutter-v[0-9]+.[0-9]+.[0-9]+*"
+      - "tasktrooper_dio-v[0-9]+.[0-9]+.[0-9]+*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pub.dev
+    permissions:
+      contents: read
+      id-token: write # pub.dev automated publishing (OIDC)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Resolve package from tag
+        id: pkg
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          package="${TAG%-v*}"
+          version="${TAG##*-v}"
+          case "$package" in
+            tasktrooper_flutter|tasktrooper_dio) ;;
+            *) echo "::error::unknown package in tag $TAG"; exit 1 ;;
+          esac
+          dir="sdks/flutter/$package"
+          declared=$(sed -n 's/^version:[[:space:]]*//p' "$dir/pubspec.yaml" | tr -d '"'"'"'[:space:]')
+          if [ "$declared" != "$version" ]; then
+            echo "::error::tag version $version != $dir/pubspec.yaml version $declared"
+            exit 1
+          fi
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # Validate against what users will resolve: dependencies from pub.dev, not the local path override.
+      - name: Drop local path overrides
+        run: rm -f pubspec_overrides.yaml
+        working-directory: ${{ steps.pkg.outputs.dir }}
+
+      - run: flutter pub get
+        working-directory: ${{ steps.pkg.outputs.dir }}
+
+      - run: flutter analyze
+        working-directory: ${{ steps.pkg.outputs.dir }}
+
+      - run: flutter test
+        working-directory: ${{ steps.pkg.outputs.dir }}
+
+      - name: Publish to pub.dev
+        run: dart pub publish --force
+        working-directory: ${{ steps.pkg.outputs.dir }}
