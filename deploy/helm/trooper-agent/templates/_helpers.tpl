@@ -45,7 +45,7 @@ app.kubernetes.io/component: {{ .component }}
 {{- $u := urlParse .Values.dsn -}}
 {{- printf "%s://%s" $u.scheme $u.host -}}
 {{- else -}}
-{{- fail "ebpf.enabled with existingSecret needs ebpf.endpoint (e.g. https://ingest.tasktrooper.io)" -}}
+{{- fail "ebpf.enabled with existingSecret needs ebpf.endpoint (e.g. https://ingest.telemetry.tasktrooper.ai)" -}}
 {{- end -}}
 {{- end -}}
 

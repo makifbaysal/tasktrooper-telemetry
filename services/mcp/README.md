@@ -50,7 +50,7 @@ tool params, no write tools):
 
 | Env | Default |
 |---|---|
-| `TT_API_KEY` | **required** — a project api key (`POST /api/v1/api-keys`, dashboard Team → API keys) |
+| `TT_API_KEY` | **required** — a project api key (`POST /api/v1/api-keys`, dashboard Settings → API keys) |
 | `TT_API_URL` | `http://localhost:8080` |
 | `TT_ORG_ID` / `TT_PROJECT_ID` | unset (optional cross-checks) |
 | `TT_LOG_LEVEL` | `info` (stderr JSON) |

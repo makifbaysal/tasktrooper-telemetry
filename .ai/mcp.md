@@ -19,7 +19,7 @@ sunucusu. `services/api`'yi (`openapi.yaml`) sarar; ClickHouse/Postgres'e **doku
 | Env | Zorunlu | Anlam |
 |---|---|---|
 | `TT_API_URL` | ✓ | API base (default `http://localhost:8080`) — collector ile aynı ad |
-| `TT_API_KEY` | ✓ | Proje kapsamli api key (seed key yok, ADR-028: dashboard Team → API keys veya `POST /api/v1/api-keys`) |
+| `TT_API_KEY` | ✓ | Proje kapsamli api key (seed key yok, ADR-028: dashboard Settings → API keys veya `POST /api/v1/api-keys`) |
 | `TT_ORG_ID`, `TT_PROJECT_ID` | | Startup'ta `GET /me` ile doğrulanır; eşleşmezse sunucu **başlamaz** (yanlış anahtarla yanlış projeye okuma). API key auth'ta tenant anahtardan gelir, istek başlığından değil |
 | `TT_LOG_LEVEL` | | `logx` (JSON slog) |
 
@@ -135,7 +135,7 @@ verisi (`/inventory`, `/suggestions` — bkz. aşağıdaki örtüşme notu).
 Binary: `cd services/mcp && go install ./cmd/tt-mcp` (`$(go env GOPATH)/bin` PATH'te olmalı; değilse aşağıdaki
 `command`'a mutlak yol yazılır). API ayakta olmalı (compose `--profile app` veya servisleri lokal çalıştır) ve bir proje + api key bulunmalı: onboarding
 (UI'da "org + proje oluştur", contracts §11) veya `api bootstrap --org <ad> --project <ad> --owner <email>`, ardından
-dashboard Team → API keys. Platformun kendi verisi için `make self` (ADR-027/028). `tt-mcp`
+dashboard Settings → API keys. Platformun kendi verisi için `make self` (ADR-027/028). `tt-mcp`
 startup'ta `GET /me` çağırır, API yoksa başlamaz.
 
 **OpenCode** (`~/.config/opencode/opencode.json` veya proje `opencode.json`):

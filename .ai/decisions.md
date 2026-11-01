@@ -457,3 +457,23 @@ yöneticisinden sürümlü paket çekemiyordu. Paket isimleri yayınlanabilir de
   yayınlanıp bağımlılık yükseltilince girer. SDK örnekleri local path ile kalır.
 **Sonuç:** "Paket yayınlama" roadmap maddesi kapanır. Paket isimleri artık public sözleşmedir; yeniden adlandırma breaking change'dir.
 Detay: sdk.md § Dağıtım.
+
+## ADR-030 — Production host'ları: `telemetry.tasktrooper.ai` altında alt alan adları
+**Bağlam:** SaaS'ın public adresi belirlenmemişti; dokümanlarda `ingest.tasktrooper.io`, `ingest.tasktrooper.dev` ve `<api-host>` gibi
+birbirini tutmayan örnekler vardı. Landing, docs ve dashboard aynı web uygulamasında (`apps/web`) yayınlanıyor.
+**Karar:** Tek kök `telemetry.tasktrooper.ai`, dışarı açılan her servis kendi alt alan adında, hepsi 443 + TLS:
+
+| Host | Servis | İç port |
+|---|---|---|
+| `telemetry.tasktrooper.ai` | `apps/web` (landing `/`, `/docs`, `/login`, dashboard; SPA, bilinmeyen path → `index.html`) | statik |
+| `api.telemetry.tasktrooper.ai` | `services/api` (`/api/v1/...`, OIDC callback, Slack/GitHub callback'leri) | 8080 |
+| `ingest.telemetry.tasktrooper.ai` | `ingest-gw` (OTLP/HTTP, `/v1/rum`, `/v1/replay`, `/v1/profiles`; OTLP gRPC h2 ile aynı host:443) | 4318, 4317 |
+| `hooks.telemetry.tasktrooper.ai` | `codeintel` webhook'ları (`/v1/webhooks/<github\|gitlab\|bitbucket>`) | 8096 |
+| `symbols.telemetry.tasktrooper.ai` | `symbolicator` (`trooper-cli` sourcemap/dSYM/mapping upload) | 8095 |
+
+- Diğer servisler (ingest-writer, alerting, collector'ın iç uçları, loadtest-ctl, integrations, ClickHouse, Postgres, Redpanda, Redis)
+  dışarı açılmaz.
+- Web ve api aynı site (`tasktrooper.ai` eTLD+1) → `tt_session` cookie'si (host-only, api host'unda, `SameSite=Lax`, `Secure`)
+  `fetch(..., { credentials: 'include' })` ile gider; CORS yalnızca `https://telemetry.tasktrooper.ai`.
+- DSN biçimi: `https://<ingest-key>@ingest.telemetry.tasktrooper.ai/<project-id>`.
+**Sonuç:** Env değerleri ve DNS kayıtları contracts.md §2a'da. Örnek ve dokümanlar bu host'ları kullanır; başka alan adı örneği yazılmaz.

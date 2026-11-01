@@ -34,7 +34,7 @@ type Config struct {
 type Options struct {
 	Base          string
 	IntegrationID int64
-	// PublicIngestURL is TT_PUBLIC_INGEST_URL (e.g. https://ingest.tasktrooper.dev); used only with createDrain.
+	// PublicIngestURL is TT_PUBLIC_INGEST_URL (e.g. https://ingest.telemetry.tasktrooper.ai); used only with createDrain.
 	PublicIngestURL string
 	IngestKey       string
 	DrainSecret     string

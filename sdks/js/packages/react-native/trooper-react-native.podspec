@@ -7,7 +7,7 @@ Pod::Spec.new do |s|
   s.module_name  = "TrooperReactNative"
   s.version      = package["version"]
   s.summary      = package["description"]
-  s.homepage     = "https://tasktrooper.ai"
+  s.homepage     = "https://telemetry.tasktrooper.ai"
   s.license      = package["license"]
   s.authors      = "Mehmet Akif Baysal"
   s.platforms    = { :ios => "13.4", :tvos => "13.4" }

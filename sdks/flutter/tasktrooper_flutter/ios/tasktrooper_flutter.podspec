@@ -16,7 +16,7 @@ Pod::Spec.new do |s|
   s.description      = <<-DESC
 Bridges the Flutter RUM SDK to the native TaskTrooper iOS SDK (shared session) and reports process start time.
                        DESC
-  s.homepage         = 'https://tasktrooper.ai'
+  s.homepage         = 'https://telemetry.tasktrooper.ai'
   s.license          = { :type => 'Apache-2.0', :file => '../LICENSE' }
   s.author           = 'Mehmet Akif Baysal'
   s.source           = { :path => '.' }

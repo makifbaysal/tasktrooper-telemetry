@@ -205,7 +205,7 @@ docker run -d --name trooper-agent --restart unless-stopped \
   -v /proc:/host/proc:ro -v /sys:/host/sys:ro -v /:/host/root:ro,rslave \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
   -e TT_AGENT_MODES=host \
-  -e TT_DSN=https://<ingest key>@ingest.tasktrooper.io/<project> \
+  -e TT_DSN=https://<ingest key>@ingest.telemetry.tasktrooper.ai/<project> \
   ghcr.io/tasktrooper/trooper-agent:0.3.0
 ```
 
@@ -234,7 +234,7 @@ The single chart for every mode (the old DB-only chart under `services/collector
 ```bash
 helm upgrade --install trooper-agent deploy/helm/trooper-agent -n tasktrooper --create-namespace \
   --set clusterName=prod-eks \
-  --set dsn=https://<ingest key>@ingest.tasktrooper.io/<project> \
+  --set dsn=https://<ingest key>@ingest.telemetry.tasktrooper.ai/<project> \
   --set ebpf.enabled=true --set windows.enabled=true   # optional: OBI DaemonSet, Windows HostProcess DaemonSet
 ```
 
@@ -263,7 +263,7 @@ override detection.
 ```bash
 helm upgrade --install trooper-agent deploy/helm/trooper-agent \
   --set host.enabled=false --set cluster.enabled=false --set db.enabled=true \
-  --set dsn=https://<ingest key>@ingest.tasktrooper.io/<project> \
+  --set dsn=https://<ingest key>@ingest.telemetry.tasktrooper.ai/<project> \
   --set db.integrations.postgres.enabled=true \
   --set db.integrations.postgres.address=orders-db:5432 \
   --set db.integrations.postgres.user=trooper_monitor \

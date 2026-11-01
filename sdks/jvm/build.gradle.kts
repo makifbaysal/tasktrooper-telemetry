@@ -33,7 +33,7 @@ subprojects {
         pom {
             name.set(project.name)
             description.set(provider { project.description ?: "TaskTrooper Telemetry JVM SDK: ${project.name}" })
-            url.set("https://tasktrooper.ai")
+            url.set("https://telemetry.tasktrooper.ai")
             inceptionYear.set("2026")
             licenses {
                 license {

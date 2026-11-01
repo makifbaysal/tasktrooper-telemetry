@@ -3,7 +3,7 @@ Pod::Spec.new do |s|
   s.version          = '0.1.0'
   s.summary          = 'TaskTrooper Telemetry RUM SDK for iOS and tvOS.'
   s.description      = 'Sessions, views, app start, network (traceparent), crashes, hangs and frame vitals sent to TaskTrooper Telemetry.'
-  s.homepage         = 'https://tasktrooper.ai'
+  s.homepage         = 'https://telemetry.tasktrooper.ai'
   s.license          = { :type => 'Apache-2.0', :file => 'sdks/LICENSE' }
   s.author           = 'Mehmet Akif Baysal'
   s.source           = { :git => 'https://github.com/makifbaysal/tasktrooper-telemetry.git', :tag => "ios-v#{s.version}" }
