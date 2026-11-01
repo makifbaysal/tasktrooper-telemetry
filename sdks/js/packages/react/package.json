@@ -14,7 +14,7 @@
   ],
   "license": "Apache-2.0",
   "author": "Mehmet Akif Baysal",
-  "homepage": "https://tasktrooper.ai",
+  "homepage": "https://telemetry.tasktrooper.ai",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/makifbaysal/tasktrooper-telemetry.git",

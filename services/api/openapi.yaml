@@ -104,6 +104,21 @@ paths:
         '400': { $ref: '#/components/responses/E400' }
         '401': { $ref: '#/components/responses/E401' }
         '500': { $ref: '#/components/responses/E500' }
+  /api/v1/service-map:
+    get:
+      tags: [APM]
+      operationId: getServiceMap
+      summary: 'Whole-system graph: client apps, services and dependencies with traffic, health and open incidents'
+      parameters:
+        - $ref: '#/components/parameters/range'
+        - $ref: '#/components/parameters/env'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/ServiceMap' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
   /api/v1/services:
     get:
       tags: [APM]
@@ -3312,6 +3327,46 @@ components:
         p95: { type: number }
         errorRate: { type: number }
         callsPerMin: { type: number }
+    ServiceMap:
+      type: object
+      required: [nodes, edges]
+      properties:
+        nodes: { type: array, items: { $ref: '#/components/schemas/MapNode' } }
+        edges: { type: array, items: { $ref: '#/components/schemas/MapEdge' } }
+    MapNode:
+      type: object
+      required: [id, name, tier, kind, status, rpm, errorRate, p95]
+      properties:
+        id: { type: string, description: 'Service name, caller name, or "dep:<system> · <name>" for dependencies' }
+        name: { type: string }
+        tier: { type: string, enum: [client, service, data, external] }
+        kind: { type: string, description: 'http | worker | consumer | web | mobile | db | cache | queue | http | ai | partner | webhook | probe | service' }
+        system: { type: string, description: 'Dependency system (postgres, redis, kafka, …)' }
+        status: { type: string, enum: [ok, warning, critical] }
+        rpm: { type: number }
+        errorRate: { type: number }
+        p95: { type: number }
+        incident: { $ref: '#/components/schemas/MapIncident' }
+    MapIncident:
+      type: object
+      required: [id, title, severity, state, open]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        severity: { type: string }
+        state: { type: string }
+        open: { type: integer, description: 'Open incidents of the service' }
+    MapEdge:
+      type: object
+      required: [id, from, to, callsPerMin, errorRate, p95, status]
+      properties:
+        id: { type: string }
+        from: { type: string }
+        to: { type: string }
+        callsPerMin: { type: number }
+        errorRate: { type: number }
+        p95: { type: number }
+        status: { type: string, enum: [ok, warning, critical], description: 'From the edge error rate (≥1% warning, ≥5% critical)' }
     EndpointCall:
       type: object
       required: [dep, callsPerReq, msPerReq]

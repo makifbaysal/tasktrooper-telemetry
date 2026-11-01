@@ -19,7 +19,7 @@
     <Product>TaskTrooper Telemetry</Product>
     <Copyright>Copyright (c) Mehmet Akif Baysal</Copyright>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-    <PackageProjectUrl>https://tasktrooper.ai</PackageProjectUrl>
+    <PackageProjectUrl>https://telemetry.tasktrooper.ai</PackageProjectUrl>
     <RepositoryUrl>https://github.com/makifbaysal/tasktrooper-telemetry</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>

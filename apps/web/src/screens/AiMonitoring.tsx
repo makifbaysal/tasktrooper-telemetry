@@ -7,11 +7,11 @@
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { BellPlus, BotMessageSquare, Coins, ExternalLink, Loader2, MessageSquareText, Pencil, Plus, RotateCcw, ShieldAlert, Wrench } from 'lucide-react';
+import { BellPlus, BotMessageSquare, Coins, ExternalLink, MessageSquareText, Pencil, Plus, RotateCcw, ShieldAlert, Wrench } from 'lucide-react';
 import { Columns, TimeSeries } from '@/components/charts';
 import {
   Badge, Button, Callout, Card, CopyCode, Drawer, DrawerSection, EmptyState, Field, Input, KeyValues, MetricCard, PageHeader, Section,
-  Segmented, Select, StatusBadge, Table, Toggle, type Column,
+  Segmented, Select, SkeletonPage, SkeletonText, StatusBadge, Table, Toggle, type Column,
 } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
 import { can, denied } from '@/data/auth';
@@ -111,7 +111,7 @@ export function AiMonitoringBody({ service }: { service?: string }) {
   );
 
   if (loading) {
-    return <Card><EmptyState icon={<Loader2 className="spin" />} title="Loading LLM calls…" /></Card>;
+    return <SkeletonPage label="Loading LLM calls" />;
   }
   if (data.totals.calls === 0) {
     return (
@@ -366,7 +366,7 @@ export function AiCallDrawer({ target, onClose, onSetPrice }: {
       </span>}
       actions={target && <Button size="sm" icon={<ExternalLink size={14} />} onClick={() => nav(`/traces/${encodeURIComponent(target.traceId)}?span=${encodeURIComponent(target.spanId)}`)}>Open trace</Button>}>
       {!d && (st?.loading
-        ? <EmptyState icon={<Loader2 className="spin" />} title="Loading call…" />
+        ? <SkeletonText lines={6} label="Loading call" />
         : <EmptyState icon={<BotMessageSquare />} title="Call not found">{st?.error ?? 'It may be older than the retention window.'}</EmptyState>)}
       {d && c && (
         <>

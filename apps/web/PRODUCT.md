@@ -35,7 +35,7 @@ budgets), and root-cause analysis walks the call tree to answer "your code or a 
 
 ## Operating Context
 
-- Delivered as SaaS at tasktrooper.ai; customers only add an SDK and a DSN. (The repo also runs fully locally for
+- Delivered as SaaS at telemetry.tasktrooper.ai (landing, docs and the dashboard on one host); customers only add an SDK and a DSN. (The repo also runs fully locally for
   development: docker compose infra + Go services + Vite dashboard.)
 - Part of the TaskTrooper product family; the dashboard follows the TaskTrooper app theme (`.ai/design-system.md` § Tema kaynağı).
 - SDKs are published for Go, JVM, Android, .NET, Python, JS (browser, React, Vue, Angular, React Native, Node), Flutter

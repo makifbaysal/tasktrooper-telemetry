@@ -36,6 +36,7 @@ type Store interface {
 	Callers(ctx context.Context, q store.Q, service string, ref *store.EndpointRef) ([]model.CallerTraffic, error)
 	CallerSeries(ctx context.Context, q store.Q, service string, ref *store.EndpointRef) (model.SeriesSet, error)
 	Dependencies(ctx context.Context, q store.Q, service string) ([]model.Dependency, error)
+	ServiceMap(ctx context.Context, q store.Q) (*model.ServiceMap, error)
 	DependencySeries(ctx context.Context, q store.Q, service, dep string) (model.SeriesSet, error)
 	EndpointCalls(ctx context.Context, q store.Q, service string, ref store.EndpointRef) ([]model.EndpointCall, error)
 	Breakdown(ctx context.Context, q store.Q, service string, ref *store.EndpointRef) (model.TimeBreakdown, error)

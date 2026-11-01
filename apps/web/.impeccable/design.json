@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-01T14:30:00Z",
+  "generatedAt": "2026-11-01T18:00:00Z",
   "title": "Design System: TaskTrooper Telemetry",
   "extensions": {
     "colorMeta": {
@@ -54,117 +54,67 @@
           "oklch(0.99 0.003 265)"
         ]
       },
-      "status-good": {
-        "role": "status",
-        "displayName": "Status Good"
+      "field-navy": {
+        "role": "neutral",
+        "displayName": "Field Navy",
+        "canonical": "oklch(0.22 0.07 268)",
+        "tonalRamp": [
+          "oklch(0.22 0.07 268)",
+          "oklch(0.265 0.075 268)",
+          "oklch(0.36 0.06 268)",
+          "oklch(0.47 0.06 268)",
+          "oklch(0.74 0.03 265)",
+          "oklch(0.85 0.025 265)",
+          "oklch(0.97 0.006 265)"
+        ]
       },
-      "status-warning": {
-        "role": "status",
-        "displayName": "Status Warning"
+      "field-signal-ink": {
+        "role": "secondary",
+        "displayName": "Field Signal Ink",
+        "canonical": "oklch(0.89 0.075 75)"
       },
-      "status-serious": {
-        "role": "status",
-        "displayName": "Status Serious"
-      },
-      "status-critical": {
-        "role": "status",
-        "displayName": "Status Critical"
-      }
+      "status-good": { "role": "status", "displayName": "Status Good" },
+      "status-warning": { "role": "status", "displayName": "Status Warning" },
+      "status-serious": { "role": "status", "displayName": "Status Serious" },
+      "status-critical": { "role": "status", "displayName": "Status Critical" }
     },
     "typographyMeta": {
-      "display": {
-        "displayName": "Display",
-        "purpose": "Stat and metric values; one 44px hero number per page at most."
-      },
-      "headline": {
-        "displayName": "Headline",
-        "purpose": "Page title (h1)."
-      },
-      "title": {
-        "displayName": "Title",
-        "purpose": "Section and card titles."
-      },
-      "body": {
-        "displayName": "Body",
-        "purpose": "Default text, table cells, metric labels."
-      },
-      "caption": {
-        "displayName": "Caption",
-        "purpose": "Secondary text and meta."
-      },
-      "label": {
-        "displayName": "Label",
-        "purpose": "Uppercase table headers, section labels, badges, chart ticks."
-      },
-      "mono": {
-        "displayName": "Mono",
-        "purpose": "Routes, logs, code, trace ids, path chips."
-      }
+      "public-display": { "displayName": "Public Display", "purpose": "Landing hero h1 only (fluid 40→68px)." },
+      "public-headline": { "displayName": "Public Headline", "purpose": "Public section headings, docs h1, sign-in statement." },
+      "public-lede": { "displayName": "Public Lede", "purpose": "Hero and docs intro paragraphs." },
+      "display": { "displayName": "Display", "purpose": "Page title (PageHeader h1) and stat / metric values; one 44px hero number per page at most." },
+      "headline": { "displayName": "Headline", "purpose": "Default h1 outside the PageHeader; public surface column headings." },
+      "title": { "displayName": "Title", "purpose": "Section, card, drawer and KPI-card titles." },
+      "body": { "displayName": "Body", "purpose": "Default text, table cells, metric labels." },
+      "caption": { "displayName": "Caption", "purpose": "Secondary text, meta, sentence-case table headers and small labels." },
+      "label": { "displayName": "Label", "purpose": "Badges, key/value terms, chart ticks; uppercase only for sidebar group names." },
+      "mono": { "displayName": "Mono", "purpose": "Routes, logs, code, trace ids, path chips." }
     },
     "shadows": [
-      {
-        "name": "shadow-sm",
-        "value": "0 1px 2px 0 rgb(0 0 0 / 0.06), 0 1px 3px 0 rgb(0 0 0 / 0.08)",
-        "purpose": "Raised: cards at rest, selected segmented item."
-      },
-      {
-        "name": "shadow-md",
-        "value": "0 4px 16px -4px rgb(0 0 0 / 0.12), 0 1px 3px 0 rgb(0 0 0 / 0.06)",
-        "purpose": "Floating: tooltips, hovered interactive cards."
-      },
-      {
-        "name": "shadow-lg",
-        "value": "0 8px 24px -4px rgb(0 0 0 / 0.18), 0 2px 8px -2px rgb(0 0 0 / 0.12)",
-        "purpose": "Overlay: menus, popovers, drawers."
-      },
-      {
-        "name": "focus-ring",
-        "value": "0 0 0 2px var(--bg-page), 0 0 0 4px oklch(0.455 0.118 265 / 0.55)",
-        "purpose": "Keyboard focus on any interactive element."
-      }
+      { "name": "shadow-sm", "value": "0 1px 2px 0 rgb(0 0 0 / 0.06), 0 1px 3px 0 rgb(0 0 0 / 0.08)", "purpose": "Raised: selected segmented item, toggle knob. Not on cards." },
+      { "name": "shadow-md", "value": "0 4px 16px -4px rgb(0 0 0 / 0.12), 0 1px 3px 0 rgb(0 0 0 / 0.06)", "purpose": "Floating: tooltips; peak of the motion layer's ambient card pulse." },
+      { "name": "shadow-lg", "value": "0 8px 24px -4px rgb(0 0 0 / 0.18), 0 2px 8px -2px rgb(0 0 0 / 0.12)", "purpose": "Overlay: menus, popovers, quick-jump list, drawers." },
+      { "name": "alarm-line", "value": "inset 0 2px 0 var(--status-critical)", "purpose": "Top line of an alarm card / root-cause card (warning variant uses --status-warning), with the border tinted 45% toward the status colour." },
+      { "name": "focus-ring", "value": "0 0 0 2px var(--bg-page), 0 0 0 4px oklch(0.455 0.118 265 / 0.55)", "purpose": "Keyboard focus on any interactive element." },
+      { "name": "field-focus-ring", "value": "0 0 0 2px var(--field-bg), 0 0 0 4px var(--field-signal)", "purpose": "Keyboard focus on the Field (hero, code band, sign-in panel)." }
     ],
     "motion": [
-      {
-        "name": "ease",
-        "value": "cubic-bezier(0.2, 0, 0, 1)",
-        "purpose": "All state transitions."
-      },
-      {
-        "name": "dur-fast",
-        "value": "120ms",
-        "purpose": "Hover, press, colour changes."
-      },
-      {
-        "name": "dur-med",
-        "value": "200ms",
-        "purpose": "Open/close of menus and drawers."
-      },
-      {
-        "name": "dur-slow",
-        "value": "320ms",
-        "purpose": "Sidebar collapse, cursor morph."
-      },
-      {
-        "name": "dur-reveal",
-        "value": "520ms",
-        "purpose": "Card entrance as it scrolls into view."
-      },
-      {
-        "name": "dur-ambient",
-        "value": "6.5s",
-        "purpose": "One cycle of the idle card pulse."
-      },
-      {
-        "name": "reveal-shift",
-        "value": "18px",
-        "purpose": "Card entrance travel."
-      }
+      { "name": "ease", "value": "cubic-bezier(0.2, 0, 0, 1)", "purpose": "All state transitions." },
+      { "name": "ease-out-expo", "value": "cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "Public hero scene: edge draw, node pop, lit path, finding settle." },
+      { "name": "dur-fast", "value": "120ms", "purpose": "Hover, press, colour changes." },
+      { "name": "dur-med", "value": "200ms", "purpose": "Open/close of menus and drawers." },
+      { "name": "dur-slow", "value": "320ms", "purpose": "Sidebar collapse, cursor morph, service-map state changes." },
+      { "name": "dur-reveal", "value": "520ms", "purpose": "Card entrance as it scrolls into view." },
+      { "name": "dur-ambient", "value": "6.5s", "purpose": "One cycle of the idle card pulse." },
+      { "name": "reveal-shift", "value": "18px", "purpose": "Card entrance travel." },
+      { "name": "skel-shimmer", "value": "1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite", "purpose": "Skeleton shimmer; off under reduced motion." }
     ],
     "breakpoints": [
-      {
-        "name": "nav-drawer",
-        "value": "900px"
-      }
+      { "name": "topbar-wrap", "value": "640px" },
+      { "name": "single-column", "value": "720px" },
+      { "name": "nav-drawer", "value": "900px" },
+      { "name": "public-stack", "value": "1080px" },
+      { "name": "grid-two-up", "value": "1100px" }
     ]
   },
   "components": [
@@ -180,25 +130,17 @@
       "name": "Secondary Button",
       "kind": "button",
       "refersTo": "button-secondary",
-      "description": "Default button: neutral fill with a hairline border.",
+      "description": "Default button: page-coloured fill with a hairline border.",
       "html": "<button class=\"ds-btn2\">Export</button>",
       "css": ".ds-btn2 { display: inline-flex; align-items: center; height: var(--control-h-md); padding: 0 var(--space-4); border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--bg-page); color: var(--text-primary); font: var(--weight-medium) var(--text-md)/var(--lh-md) var(--font-sans); cursor: pointer; transition: background var(--dur-fast) var(--ease); } .ds-btn2:hover { background: var(--bg-active); } .ds-btn2:active { transform: scale(0.98); } .ds-btn2:focus-visible { outline: none; box-shadow: var(--focus-ring); }"
-    },
-    {
-      "name": "Ghost Button",
-      "kind": "button",
-      "refersTo": "button-ghost",
-      "description": "Low-emphasis action inside cards and toolbars.",
-      "html": "<button class=\"ds-btn-ghost\">View all</button>",
-      "css": ".ds-btn-ghost { height: var(--control-h-md); padding: 0 var(--space-4); border-radius: var(--radius-md); border: 1px solid transparent; background: transparent; color: var(--text-secondary); font: var(--weight-medium) var(--text-md)/var(--lh-md) var(--font-sans); cursor: pointer; transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease); } .ds-btn-ghost:hover { color: var(--text-primary); background: var(--bg-hover); } .ds-btn-ghost:focus-visible { outline: none; box-shadow: var(--focus-ring); }"
     },
     {
       "name": "Text Input",
       "kind": "input",
       "refersTo": "input",
-      "description": "Raised field with navy focus halo.",
+      "description": "Page-coloured field with a navy focus halo.",
       "html": "<input class=\"ds-input\" placeholder=\"Search services\" />",
-      "css": ".ds-input { height: var(--control-h-md); padding: 0 var(--space-3); border-radius: var(--radius-md); border: 1px solid var(--border-strong); background: var(--bg-raised); color: var(--text-primary); font: var(--text-md)/var(--lh-md) var(--font-sans); transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease); } .ds-input::placeholder { color: var(--text-muted); } .ds-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }"
+      "css": ".ds-input { height: var(--control-h-md); padding: 0 var(--space-3); border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--bg-page); color: var(--text-primary); font: var(--text-md)/var(--lh-md) var(--font-sans); } .ds-input::placeholder { color: var(--text-muted); } .ds-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }"
     },
     {
       "name": "Status Badge",
@@ -212,9 +154,25 @@
       "name": "Card",
       "kind": "card",
       "refersTo": "card",
-      "description": "Surface for a section; flush variant for tables.",
+      "description": "Flat section surface: divider hairline, 8px radius, no shadow; border-only hover when interactive.",
       "html": "<div class=\"ds-card\"><div class=\"ds-card-head\"><strong>Throughput</strong><span>requests / min</span></div><div class=\"ds-card-body\">1,284 rpm</div></div>",
-      "css": ".ds-card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); font: var(--text-md)/var(--lh-md) var(--font-sans); color: var(--text-primary); max-width: 320px; } .ds-card-head { display: flex; gap: var(--space-2); align-items: baseline; padding: var(--space-4) var(--space-4) var(--space-3); } .ds-card-head span { color: var(--text-muted); font-size: var(--text-sm); } .ds-card-body { padding: 0 var(--space-4) var(--space-4); font-size: var(--text-2xl); line-height: var(--lh-2xl); font-weight: var(--weight-semibold); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }"
+      "css": ".ds-card { background: var(--bg-surface); border: 1px solid var(--divider); border-radius: var(--radius-md); font: var(--text-md)/var(--lh-md) var(--font-sans); color: var(--text-primary); max-width: 320px; cursor: pointer; transition: border-color var(--dur-fast) var(--ease); } .ds-card:hover { border-color: var(--border-strong); } .ds-card-head { display: flex; gap: var(--space-2); align-items: baseline; padding: var(--space-4) var(--space-4) var(--space-3); } .ds-card-head span { color: var(--text-muted); font-size: var(--text-sm); } .ds-card-body { padding: 0 var(--space-4) var(--space-4); font-size: var(--text-2xl); line-height: var(--lh-2xl); font-weight: var(--weight-semibold); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }"
+    },
+    {
+      "name": "Alarm Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Alarm state: status-tinted border plus a 2px inset top line; no fill, no side stripe.",
+      "html": "<div class=\"ds-alarm\"><strong>Checkout p95 regressed</strong><span>Your code · orders-api → reco-db</span></div>",
+      "css": ".ds-alarm { display: flex; flex-direction: column; gap: var(--space-1); max-width: 360px; padding: var(--space-4); background: var(--bg-surface); border: 1px solid color-mix(in oklch, var(--status-critical) 45%, var(--divider)); border-radius: var(--radius-md); box-shadow: inset 0 2px 0 var(--status-critical); font: var(--text-md)/var(--lh-md) var(--font-sans); color: var(--text-primary); } .ds-alarm span { color: var(--text-secondary); font-size: var(--text-sm); }"
+    },
+    {
+      "name": "Skeleton",
+      "kind": "custom",
+      "refersTo": "skeleton",
+      "description": "Loading placeholder in the shape of the content, with a soft shimmer.",
+      "html": "<div class=\"ds-skel-group\"><span class=\"ds-skel\" style=\"width:40%\"></span><span class=\"ds-skel\" style=\"width:90%\"></span><span class=\"ds-skel\" style=\"width:70%\"></span></div>",
+      "css": ".ds-skel-group { display: flex; flex-direction: column; gap: var(--space-2); width: 280px; } .ds-skel { display: block; height: var(--space-3); border-radius: var(--radius-xs); background: linear-gradient(100deg, var(--bg-sunken) 30%, color-mix(in oklch, var(--bg-sunken) 55%, var(--text-muted) 12%) 50%, var(--bg-sunken) 70%); background-size: 300% 100%; animation: ds-skel 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite; } @keyframes ds-skel { from { background-position: 100% 0; } to { background-position: 0 0; } } @media (prefers-reduced-motion: reduce) { .ds-skel { animation: none; } }"
     },
     {
       "name": "Segmented Control",
@@ -230,69 +188,68 @@
       "refersTo": "nav-item-active",
       "description": "Icon + label row; current page fills with the active tone.",
       "html": "<nav class=\"ds-nav\"><a href=\"#\">Overview</a><a href=\"#\" aria-current=\"page\">Services</a><a href=\"#\">Incidents</a></nav>",
-      "css": ".ds-nav { display: flex; flex-direction: column; gap: 2px; width: 220px; padding: var(--space-2); background: var(--bg-sidebar); } .ds-nav a { display: flex; align-items: center; height: 32px; padding: 0 var(--space-3); border-radius: var(--radius-md); color: var(--text-secondary); font: var(--weight-medium) var(--text-md)/var(--lh-md) var(--font-sans); text-decoration: none; transition: background var(--dur-fast) var(--ease); } .ds-nav a:hover { background: var(--bg-hover); color: var(--text-primary); } .ds-nav a[aria-current='page'] { background: var(--bg-active); color: var(--text-primary); } .ds-nav a:focus-visible { outline: none; box-shadow: var(--focus-ring); }"
+      "css": ".ds-nav { display: flex; flex-direction: column; gap: 2px; width: 220px; padding: var(--space-2); background: var(--bg-sidebar); } .ds-nav a { display: flex; align-items: center; height: var(--control-h-md); padding: 0 var(--space-3); border-radius: var(--radius-md); color: var(--text-secondary); font: var(--weight-medium) var(--text-md)/var(--lh-md) var(--font-sans); text-decoration: none; transition: background var(--dur-fast) var(--ease); } .ds-nav a:hover { background: var(--bg-hover); color: var(--text-primary); } .ds-nav a[aria-current='page'] { background: var(--bg-active); color: var(--text-primary); } .ds-nav a:focus-visible { outline: none; box-shadow: var(--focus-ring); }"
+    },
+    {
+      "name": "Field Buttons",
+      "kind": "button",
+      "refersTo": "public-button-light",
+      "description": "Public hero actions on the navy Field: light (primary) and outline.",
+      "html": "<div class=\"ds-field\"><a class=\"ds-pbtn ds-pbtn-light\" href=\"#\">Sign in</a><a class=\"ds-pbtn ds-pbtn-outline\" href=\"#\">Read the docs</a></div>",
+      "css": ".ds-field { display: flex; gap: var(--space-3); padding: var(--space-6); background: var(--field-bg); border-radius: var(--radius-lg); } .ds-pbtn { display: inline-flex; align-items: center; height: calc(var(--control-h-md) + var(--space-2)); padding: 0 var(--space-5); border: 1px solid transparent; border-radius: var(--radius-md); font: var(--weight-medium) var(--text-md)/var(--lh-md) var(--font-sans); text-decoration: none; transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease); } .ds-pbtn:active { transform: scale(0.98); } .ds-pbtn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--field-bg), 0 0 0 4px var(--field-signal); } .ds-pbtn-light { background: var(--field-ink); color: var(--field-bg); } .ds-pbtn-light:hover { background: color-mix(in oklch, var(--field-ink) 86%, var(--field-signal)); } .ds-pbtn-outline { border-color: var(--field-line-strong); color: var(--field-ink); } .ds-pbtn-outline:hover { background: var(--field-raised); }"
+    },
+    {
+      "name": "Field Code Block",
+      "kind": "custom",
+      "refersTo": "public-code-block",
+      "description": "Public code blocks always sit on the Field with a label bar and copy action.",
+      "html": "<figure class=\"ds-pcode\"><div class=\"ds-pcode-bar\"><span>Terminal</span><button>Copy</button></div><pre>npm install @tasktrooper/browser</pre></figure>",
+      "css": ".ds-pcode { margin: 0; max-width: 420px; background: var(--field-bg); border: 1px solid var(--field-line); border-radius: var(--radius-lg); overflow: hidden; } .ds-pcode-bar { display: flex; align-items: center; justify-content: space-between; padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4); border-bottom: 1px solid var(--field-line); font: var(--text-sm)/var(--lh-sm) var(--font-sans); color: var(--field-ink-muted); } .ds-pcode-bar button { padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-sm); background: none; color: var(--field-ink-muted); font: inherit; cursor: pointer; } .ds-pcode-bar button:hover { color: var(--field-ink); background: var(--field-raised); } .ds-pcode-bar button:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--field-signal); } .ds-pcode pre { margin: 0; padding: var(--space-4); font: var(--text-sm)/1.7 var(--font-mono); color: var(--field-ink-secondary); font-variant-ligatures: none; overflow-x: auto; }"
     }
   ],
   "narrative": {
     "northStar": "The Incident Console",
-    "overview": "The dashboard is the desk a backend developer sits down at when something is wrong. The chrome — sidebar, topbar, cards, controls — is a quiet frame of cold slate neutrals and one navy voice; everything loud on screen is either data (charts in a fixed categorical order) or status (always an icon with a label). Nothing decorates. If a pixel is coloured, it is measuring something or saying something is broken.\n\nDensity is high but legible: 14px body on a 4px grid, tight tables, 16px between cards. Hierarchy comes from weight and size steps, not from colour or ornament. The system follows the TaskTrooper app theme so the product family reads as one; light and dark are equal citizens, with dark built from its own chosen steps rather than an inversion.\n\nMotion is a quiet layer on top of state: cards settle in as they scroll into view and breathe faintly while on screen, a liquid cursor follows the pointer and morphs onto controls, and every interaction answers in 120–320ms. All of it is decorative, so all of it switches off with the OS reduce-motion setting or the account menu's Reduce motion.",
+    "overview": "The dashboard is the desk a backend developer sits down at when something is wrong. The chrome — sidebar, topbar, cards, controls — is a quiet frame of cold slate neutrals and one navy voice; everything loud on screen is either data (charts in a fixed categorical order) or status (always an icon with a label). Nothing decorates. If a pixel is coloured, it is measuring something or saying something is broken.\n\nDensity is high but legible: 14px body on a 4px grid, flat hairline cards, sentence-case labels, 32px between page regions. Hierarchy comes from weight and size steps, not from colour, shadow or ornament. The system follows the TaskTrooper app theme so the product family reads as one; light and dark are equal citizens, with dark built from its own chosen steps rather than an inversion.\n\nSigned out, the same console is introduced on the Field: a deep navy ground (--field-*, identical in both themes) with a faint dot measurement grid, on which a layered service map draws itself, turns hot along one path and settles on a root cause. The Field is the brand ground of the public pages only — hero, code band, code blocks, sign-in panel; everything else on those pages sits on the app's own page colour and follows the theme. Inside the app shell the Field never appears.\n\nMotion is a quiet layer on top of state. All decorative motion switches off with the OS \"reduce motion\" setting or the account menu's Reduce motion; the public hero then shows its final frame.",
     "keyCharacteristics": [
-      "Cold slate neutrals (hue 265), one navy primary, warm amber only for selection and highlight.",
+      "Cold slate neutrals (hue 265), one navy primary, warm amber only for selection, highlight and the Field's signal.",
       "Colour is reserved for data and status; status is never colour alone.",
       "Inter for interface, JetBrains Mono for routes, logs, trace ids and code.",
       "Tabular numbers everywhere a value is compared.",
-      "Flat-by-default surfaces with a single light card shadow; depth grows only for popovers and drawers."
+      "Flat surfaces: cards are a 1px divider hairline on the surface tone, no resting shadow; shadows only for popovers, menus and drawers.",
+      "Loading is the shape of the content (shimmer skeletons), never a centred spinner or \"Loading…\"."
     ],
     "rules": [
-      {
-        "name": "The Measuring-or-Broken Rule",
-        "body": "Colour appears only when it encodes data or status. Chrome stays slate and navy.",
-        "section": "colors"
-      },
-      {
-        "name": "The Icon-Plus-Label Rule",
-        "body": "A status colour never stands alone: every status renders through StatusBadge (icon + word).",
-        "section": "colors"
-      },
-      {
-        "name": "The Fixed Order Rule",
-        "body": "Categorical series are assigned series-1..8 in order; status colours are never reused as series or as diff colours.",
-        "section": "colors"
-      },
-      {
-        "name": "The Tabular Rule",
-        "body": "Every number that sits next to another number uses tabular-nums; large values tighten to -0.02em.",
-        "section": "typography"
-      },
-      {
-        "name": "The Mono-Means-Machine Rule",
-        "body": "Monospace is only for text the user would copy or match against code.",
-        "section": "typography"
-      },
-      {
-        "name": "The Opt-Out Motion Rule",
-        "body": "Decorative motion lives only in styles/motion.css + components/layout/motion.ts and runs from data-* attributes set when motion is allowed: card reveal, ambient card pulse, liquid cursor, sidebar collapse. prefers-reduced-motion or :root[data-motion='reduced'] turns all of it off; state transitions stay within 120–200ms on --ease.",
-        "section": "elevation"
-      },
-      {
-        "name": "The Alarm Rail Rule",
-        "body": "A card in an alarm state gets a 4px left status rail (critical or warning) instead of a coloured fill.",
-        "section": "elevation"
-      }
+      { "name": "The Measuring-or-Broken Rule", "body": "Colour appears only when it encodes data or status. Chrome stays slate and navy.", "section": "colors" },
+      { "name": "The Icon-Plus-Label Rule", "body": "A status colour never stands alone: every status renders through StatusBadge (icon + word).", "section": "colors" },
+      { "name": "The Fixed Order Rule", "body": "Categorical series are assigned series-1..8 in order; status colours are never reused as series or as diff colours.", "section": "colors" },
+      { "name": "The Field Stays Outside Rule", "body": "--field-* and the fluid public type steps belong to the public pages and the signed-out boot screen; the app shell never uses them.", "section": "colors" },
+      { "name": "The Tabular Rule", "body": "Every number that sits next to another number uses tabular-nums; large values tighten to -0.02em.", "section": "typography" },
+      { "name": "The Mono-Means-Machine Rule", "body": "Monospace is only for text the user would copy or match against code.", "section": "typography" },
+      { "name": "The Sentence-Case Rule", "body": "Labels — metric labels, table headers, the eyebrow small label — are sentence case with no tracking. Uppercase with 0.06em tracking is kept only for sidebar group names. A small label names a field or a block of content; it never sits as a kicker above a heading.", "section": "typography" },
+      { "name": "The Flat Card Rule", "body": "Cards rest flat: 1px divider, radius-md, no shadow. Hover on an interactive card changes only the border (to border-strong).", "section": "elevation" },
+      { "name": "The Opt-Out Motion Rule", "body": "Decorative app motion lives in one place (styles/motion.css + components/layout/motion.ts) and is driven by data-* attributes that are only set when motion is allowed: card reveal, ambient card pulse, liquid cursor and sidebar collapse. The public service map runs on its own scene clock with --ease-out-expo and renders its final frame ([data-static]) when motion is reduced. prefers-reduced-motion or :root[data-motion='reduced'] turns all of it off, skeleton shimmer included; state transitions (hover, focus, press) stay within 120–200ms on --ease.", "section": "elevation" },
+      { "name": "The Alarm Line Rule", "body": "A card in an alarm state (card--rail-*, the root-cause card) keeps its hairline frame, tints the border toward the status colour (45%) and draws a 2px inset line along its top edge. No coloured fill and no thick side stripe.", "section": "elevation" }
     ],
     "dos": [
       "Do reference tokens from src/styles/tokens.css for every colour, size, space and radius.",
-      "Do render status through StatusBadge (icon + label) and alarm cards through the 4px status rail.",
+      "Do render status through StatusBadge (icon + label) and alarm cards through the tinted border + 2px top line.",
+      "Do keep cards flat: 1px divider, 8px radius, border-only hover; flatten cards nested in cards.",
+      "Do write labels in sentence case; keep uppercase for sidebar group names only.",
+      "Do show loading as skeletons in the shape of the content; keep spinners inside busy buttons and replay buffering.",
       "Do assign chart series series-1..8 in order and keep one y-axis per chart.",
       "Do use JetBrains Mono for routes, logs, trace ids and code; tabular numbers for compared values.",
       "Do keep exactly one primary (navy) button per page.",
-      "Do build dark theme from its own token steps; check both themes."
+      "Do build dark theme from its own token steps; check both themes.",
+      "Do keep the Field (--field-*, --text-display/headline/lede, --space-16+) on the public pages, aligned to the shared --inline edge."
     ],
     "donts": [
       "Don't write raw hex, raw px font sizes or ad-hoc spacing in components.",
       "Don't use status colours for decoration, series or diffs, or colour as the only status signal.",
       "Don't use dual y-axes.",
-      "Don't add decorative motion outside motion.css / motion.ts, or any motion that ignores the reduce-motion switches.",
+      "Don't give cards a resting shadow, a thick coloured side stripe or a coloured fill for alarm state.",
+      "Don't put a kicker or eyebrow label above a heading.",
+      "Don't show a centred spinner or \"Loading…\" text for page or panel loading.",
+      "Don't add decorative motion outside motion.css / motion.ts (app) or the service map's scene clock (public), or any motion that ignores the reduce-motion switches.",
       "Don't introduce a second accent hue for chrome (violet primary, green \"signal\" nav): the chrome voice is Trooper Navy.",
       "Don't use provider brand colours or logos for third-party identity; use the neutral ProviderMark."
     ]

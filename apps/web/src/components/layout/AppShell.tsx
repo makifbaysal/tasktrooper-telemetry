@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import {
-  AlertOctagon, BotMessageSquare, Boxes, Wind, Server, Building2, ChevronsUpDown, Code2, Database, Gauge, KeyRound, LayoutDashboard, LogOut, Moon, Waypoints,
+  AlertOctagon, BotMessageSquare, Boxes, Wind, Server, Building2, ChevronsUpDown, Code2, Database, Gauge, KeyRound, LayoutDashboard, LogOut, Moon, Network, Waypoints,
   Layers, PanelLeftClose, PanelLeftOpen, Plug, Settings, Sparkles, SquareFunction, Sun, SunMoon, Target, UserRound, Users, type LucideIcon,
 } from 'lucide-react';
 import { Avatar, Badge, Menu, MenuDivider, MenuItem, MenuLabel, Segmented, Select } from '@/components/ui';
@@ -22,6 +22,7 @@ const NAV: { section: string | null; items: NavItem[] }[] = [
   { section: null, items: [
     { to: '/', label: 'Overview', icon: LayoutDashboard, end: true },
     { to: '/incidents', label: 'Incidents', icon: AlertOctagon, liveCount: 'firing' },
+    { to: '/service-map', label: 'Service map', icon: Network },
   ] },
   { section: 'Infrastructure', items: [
     { to: '/infrastructure/databases', label: 'Databases', icon: Database,
@@ -56,7 +57,7 @@ const RANGES: { id: TimeRange; label: string }[] = [
  * ignored by lists without series (hosts) and by non-telemetry pages (incidents, settings, load tests, code…).
  */
 function scopeFor(path: string): { env: boolean; range: boolean } {
-  const telemetry = path === '/' || path === '/ai' || /^\/(services|traces|infrastructure)(\/|$)/.test(path) || /^\/kpis\/(?!new$)[^/]+$/.test(path);
+  const telemetry = path === '/' || path === '/ai' || /^\/(services|service-map|traces|infrastructure)(\/|$)/.test(path) || /^\/kpis\/(?!new$)[^/]+$/.test(path);
   return { env: telemetry, range: telemetry && path !== '/infrastructure/hosts' };
 }
 

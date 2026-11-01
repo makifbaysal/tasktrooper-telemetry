@@ -19,8 +19,13 @@
   --text-lg: 16px;   --lh-lg: 24px;   /* "heading" */
   --text-xl: 20px;   --lh-xl: 28px;   /* "title" */
   --text-2xl: 28px;  --lh-2xl: 36px;  /* "display" */
-  --text-hero: 34px; --lh-hero: 40px; /* hero metric value only */
-  --text-hero: 44px; --lh-hero: 48px;
+  --text-hero: 44px; --lh-hero: 48px; /* hero metric value only */
+
+  /* public pages (landing, docs, login): fluid display steps, never inside the app shell */
+  --text-display: clamp(40px, 3.2vw + 20px, 68px);  --lh-display: 1.04;
+  --text-headline: clamp(28px, 1.6vw + 18px, 40px); --lh-headline: 1.12;
+  --text-lede: clamp(16px, 0.3vw + 15px, 19px);     --lh-lede: 1.55;
+  --measure: 68ch;
 
   --weight-regular: 400;
   --weight-medium: 500;
@@ -37,6 +42,9 @@
   --space-8: 32px;
   --space-10: 40px;
   --space-12: 48px;
+  --space-16: 64px;
+  --space-24: 96px;
+  --space-32: 128px;
 
   /* ---------- Radius (TaskTrooper --radius: 10px) ---------- */
   --radius-xs: 4px;
@@ -49,6 +57,8 @@
   --sidebar-w: 240px;
   --topbar-h: 56px;
   --content-max: 1440px;
+  --public-max: 1200px;    /* landing / docs column */
+  --public-nav-h: 72px;
   --control-h-sm: 30px;
   --control-h-md: 36px;
 
@@ -60,11 +70,23 @@
   --dur-reveal: 520ms;     /* card entrance */
   --dur-ambient: 6.5s;     /* idle card pulse, one cycle */
   --reveal-shift: 18px;    /* card entrance travel */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1); /* public hero scene: lit path, cause settle */
 
   /* ---------- Brand ---------- */
   --brand-mark: #15214b;               /* app icon navy — same in both themes */
   --accent-warm: oklch(0.818 0.112 72.9);
   --accent-warm-soft: oklch(0.818 0.112 72.9 / 0.16);
+
+  /* ---------- Brand field: the deep navy ground of the public pages (landing hero, login panel). Same in both themes. */
+  --field-bg: oklch(0.22 0.07 268);
+  --field-raised: oklch(0.265 0.075 268);
+  --field-line: oklch(0.36 0.06 268);
+  --field-line-strong: oklch(0.47 0.06 268);
+  --field-ink: oklch(0.97 0.006 265);
+  --field-ink-secondary: oklch(0.85 0.025 265);
+  --field-ink-muted: oklch(0.74 0.03 265);
+  --field-signal: var(--accent-warm);
+  --field-signal-ink: oklch(0.89 0.075 75);
 
   /* ---------- Surfaces & ink (light) ---------- */
   --bg-page: oklch(0.962 0.007 265);

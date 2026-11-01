@@ -20,8 +20,8 @@ func TestParseIngestDSN(t *testing.T) {
 	}{
 		{"local dev", "http://tt_dev_ingest_key@localhost:4318/1",
 			IngestDSN{MetricsURL: "http://localhost:4318/v1/metrics", LogsURL: "http://localhost:4318/v1/logs", Key: "tt_dev_ingest_key", ProjectID: "1", Insecure: true}, ""},
-		{"https no port", "https://abc@ingest.tasktrooper.io/42",
-			IngestDSN{MetricsURL: "https://ingest.tasktrooper.io/v1/metrics", LogsURL: "https://ingest.tasktrooper.io/v1/logs", Key: "abc", ProjectID: "42"}, ""},
+		{"https no port", "https://abc@ingest.telemetry.tasktrooper.ai/42",
+			IngestDSN{MetricsURL: "https://ingest.telemetry.tasktrooper.ai/v1/metrics", LogsURL: "https://ingest.telemetry.tasktrooper.ai/v1/logs", Key: "abc", ProjectID: "42"}, ""},
 		{"no project", "https://abc@ingest.example.com",
 			IngestDSN{MetricsURL: "https://ingest.example.com/v1/metrics", LogsURL: "https://ingest.example.com/v1/logs", Key: "abc"}, ""},
 		{"missing key", "http://localhost:4318/1", IngestDSN{}, "ingest key is missing"},

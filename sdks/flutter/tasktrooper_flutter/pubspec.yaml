@@ -1,7 +1,7 @@
 name: tasktrooper_flutter
 description: TaskTrooper Telemetry RUM SDK for Flutter. Tracks views, errors, network calls, frame vitals, app start, sessions and session replay.
 version: 0.1.0
-homepage: https://tasktrooper.ai
+homepage: https://telemetry.tasktrooper.ai
 repository: https://github.com/makifbaysal/tasktrooper-telemetry/tree/main/sdks/flutter/tasktrooper_flutter
 issue_tracker: https://github.com/makifbaysal/tasktrooper-telemetry/issues
 topics:

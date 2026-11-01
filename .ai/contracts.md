@@ -57,14 +57,47 @@ gerekirse küçük tutulur (tek harici bağımlılık `google.golang.org/protobu
 | ingest-gw metrics | 4318 (veya `TT_INGEST_METRICS_ADDR`) | Prometheus `GET /metrics` |
 | ingest-writer metrics | 9464 (`TT_INGEST_WRITER_METRICS_ADDR`) | Prometheus `GET /metrics` |
 
+### 2a. Production host'ları ve DNS (ADR-030)
+
+| Host | Hedef | DNS kaydı |
+|---|---|---|
+| `telemetry.tasktrooper.ai` | `apps/web` statik build (SPA fallback: bilinmeyen path → `index.html`) | CNAME (veya apex değilse ALIAS) → web host'u / CDN |
+| `api.telemetry.tasktrooper.ai` | api :8080 | CNAME → load balancer |
+| `ingest.telemetry.tasktrooper.ai` | ingest-gw :4318 (HTTP) + :4317 (gRPC, h2) | CNAME → load balancer (gRPC için HTTP/2 destekli) |
+| `hooks.telemetry.tasktrooper.ai` | codeintel :8096 | CNAME → load balancer |
+| `symbols.telemetry.tasktrooper.ai` | symbolicator :8095 | CNAME → load balancer |
+
+Hepsi 443'te TLS (tek `*.telemetry.tasktrooper.ai` + `telemetry.tasktrooper.ai` sertifikası yeter). Opsiyonel: `CAA` kaydı sertifika
+sağlayıcısına kısıtlı.
+
+**Env değerleri (production):**
+
+| Servis | Env | Değer |
+|---|---|---|
+| web build | `VITE_API_URL` | `https://api.telemetry.tasktrooper.ai` |
+| api | `TT_WEB_URL` | `https://telemetry.tasktrooper.ai` |
+| api | `TT_API_CORS_ORIGINS` | `https://telemetry.tasktrooper.ai` |
+| api | `TT_PUBLIC_API_URL` | `https://api.telemetry.tasktrooper.ai` |
+| api | `TT_PUBLIC_INGEST_URL` | `https://ingest.telemetry.tasktrooper.ai` |
+| api | `TT_PUBLIC_WEBHOOK_URL` | `https://hooks.telemetry.tasktrooper.ai` |
+| api | `TT_OIDC_REDIRECT_URL` | `https://api.telemetry.tasktrooper.ai/api/v1/auth/callback` (IdP'ye kayıtlı olmalı) |
+| api | `TT_COOKIE_SECURE` | `true` |
+| integrations | `TT_PUBLIC_INGEST_URL` | `https://ingest.telemetry.tasktrooper.ai` (Vercel drain) |
+| trooper-cli | `TROOPER_API_URL` | `https://symbols.telemetry.tasktrooper.ai` |
+| mcp (`tt-mcp`) | `TT_API_URL` | `https://api.telemetry.tasktrooper.ai` |
+
+Üçüncü taraf kayıtları: Slack App redirect URL `https://api.telemetry.tasktrooper.ai/api/v1/integrations/slack/callback`, GitHub App
+callback `https://api.telemetry.tasktrooper.ai/api/v1/integrations/github/callback` ve webhook URL
+`https://hooks.telemetry.tasktrooper.ai/v1/webhooks/github`.
+
 **Internal credential:** servis içi gönderenler (trooper-cloud, loadtest-runner) `x-trooper-internal: <TT_INTERNAL_TOKEN>` +
 `x-trooper-project: <id>` gönderir (OTLP HTTP/gRPC metadata, `/v1/rum`); sabit zamanlı karşılaştırma, `Origin` varsa 403, token
 ayarlı değilse 401. Org Postgres'ten (60 sn cache).
 **Ingest auth:** `x-trooper-key: <ingest key>` header'ı, ya da `Authorization: Bearer <key>`. Browser `sendBeacon` header
 koyamadığı için `?key=` query parametresi de kabul edilir (sadece `/v1/rum` ve `/v1/replay`). Key Postgres `api_keys` tablosunda sha256 hash'i ile
 durur; ingest-gw 60 sn TTL'li in-memory cache tutar. Key → `(org_id, project_id)`. Browser key'lerinde `allowed_origins` kontrolü.
-**DSN:** `https://<key>@<host>[:port]/<project_id>` — SDK'lar DSN'den endpoint ve key çıkarır. Lokal: `http://tt_dev_ingest_key@localhost:4318/1`.
-**Dev seed:** org 1, project 1, ingest key `tt_dev_ingest_key`, api key `tt_dev_api_key` (postgres/002_seed.sql).
+**DSN:** `https://<key>@<host>[:port]/<project_id>` — SDK'lar DSN'den endpoint ve key çıkarır. Lokal: `http://<ingest-key>@localhost:4318/<project-id>`.
+**Seed yok (ADR-028):** org/proje/key onboarding'de ya da `api bootstrap` ile açılır; ingest ve api key'leri dashboard Settings → API keys'ten (`tt_ingest_…` / `tt_api_…`).
 
 **`/v1/rum` content type'ları:** `application/json`, `application/x-protobuf` ve `text/plain;charset=UTF-8` (gövde JSON —
 `sendBeacon` preflight'sız sadece bunu gönderebilir). **CORS:** `OPTIONS` preflight `content-type`, `x-trooper-key`,
@@ -221,6 +254,8 @@ api key ile), DB'ye doğrudan bağlanmaz.
 `?range=1h|6h|24h|7d` (UI'daki `TimeRange`) ve `?env=`. Seriler `{ timestamps: number[], series: [{ id, label, data: number[] }] }`.
 Cevap şekilleri `apps/web/src/data/types.ts` (+ `infra.ts`) ile birebir; UI'da api eşlemesi sadece `src/data/*`
 fonksiyonlarındadır. Auth: `Authorization: Bearer <api key>` (dev) — OIDC session sonra.
+
+`GET /service-map?range=&env=` tüm sistem grafiğini döner: `nodes` (`tier` client|service|data|external, `kind`, `system`, `status`, rpm/errorRate/p95, en ağır açık `incident`) + `edges` (from→to, callsPerMin, errorRate, p95, `status` hata oranından: ≥%1 warning, ≥%5 critical). Gelen kenarlar `callers_1m`'den (callee görüşü), bağımlılıklar `edges_1m`'den; `child_service`'i telemetri gönderen bir servise çözülen http çağrısı servis→servis kenarıdır, çözülmeyen `peer.service` dış (`external`) node olur. Dependency node id'si `dep:<system> · <name>`.
 
 ## 9. RUM
 

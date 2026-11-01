@@ -3,11 +3,11 @@
 # Kubernetes infrastructure (host + cluster):
 #   helm upgrade --install trooper-agent deploy/helm/trooper-agent -n tasktrooper --create-namespace \
 #     --set clusterName=prod-eks \
-#     --set dsn=https://<ingest key>@ingest.tasktrooper.io/<project>
+#     --set dsn=https://<ingest key>@ingest.telemetry.tasktrooper.ai/<project>
 #
 # Databases / brokers only (no host / cluster monitoring):
 #   helm upgrade --install trooper-agent deploy/helm/trooper-agent -n tasktrooper --create-namespace \
-#     --set dsn=https://<ingest key>@ingest.tasktrooper.io/<project> \
+#     --set dsn=https://<ingest key>@ingest.telemetry.tasktrooper.ai/<project> \
 #     --set host.enabled=false --set cluster.enabled=false --set db.enabled=true \
 #     --set db.integrations.postgres.enabled=true \
 #     --set db.integrations.postgres.address=orders-db:5432 \

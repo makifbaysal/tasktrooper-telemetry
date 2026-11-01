@@ -35,7 +35,7 @@ dependencies {
 }
 
 gradlePlugin {
-    website.set("https://tasktrooper.ai")
+    website.set("https://telemetry.tasktrooper.ai")
     vcsUrl.set("https://github.com/makifbaysal/tasktrooper-telemetry")
     plugins {
         create("mappingUpload") {
@@ -60,7 +60,7 @@ extensions.configure<MavenPublishBaseExtension> {
     pom {
         name.set(project.name)
         description.set(project.description)
-        url.set("https://tasktrooper.ai")
+        url.set("https://telemetry.tasktrooper.ai")
         inceptionYear.set("2026")
         licenses {
             license {

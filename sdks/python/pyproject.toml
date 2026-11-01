@@ -85,7 +85,7 @@ dev = [
 tasktrooper-run = "tasktrooper._run:main"
 
 [project.urls]
-Homepage = "https://tasktrooper.ai"
+Homepage = "https://telemetry.tasktrooper.ai"
 Source = "https://github.com/makifbaysal/tasktrooper-telemetry/tree/main/sdks/python"
 Issues = "https://github.com/makifbaysal/tasktrooper-telemetry/issues"
 Changelog = "https://github.com/makifbaysal/tasktrooper-telemetry/blob/main/sdks/python/CHANGELOG.md"

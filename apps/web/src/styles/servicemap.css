@@ -1,0 +1,115 @@
+/* Service map screen (screens/ServiceMapScreen.tsx). Builds on the landing graph's `smap` classes (public.css) and the
+ * field tokens, which are the same in both themes; status colours mark problems, always with an icon and a label. */
+
+.svcmap { position: relative; }
+
+.svcmap__canvas {
+  position: relative; overflow: hidden; height: max(34rem, calc(100vh - 19rem));
+  border-radius: var(--radius-md); border: 1px solid var(--field-line);
+  background:
+    radial-gradient(color-mix(in oklch, var(--field-line) 60%, transparent) 1px, transparent 1px) 0 0 / var(--space-6) var(--space-6),
+    var(--field-bg);
+}
+.svcmap__svg { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; user-select: none; }
+.svcmap__svg:active { cursor: grabbing; }
+
+/* zoom controls, bottom right of the canvas */
+.svcmap__zoom {
+  position: absolute; right: var(--space-3); bottom: var(--space-3); z-index: 2;
+  display: flex; flex-direction: column; gap: var(--space-1);
+}
+
+/* edges by status; the invisible hit path widens the hover target */
+.svcmap__edge.is-warning { stroke: color-mix(in oklch, var(--status-warning) 75%, var(--field-line)); }
+.svcmap__edge.is-critical { stroke: color-mix(in oklch, var(--status-critical) 80%, var(--field-line)); }
+.svcmap__edge.is-focus { stroke: var(--field-ink); }
+.svcmap__hit { fill: none; stroke: transparent; stroke-width: 12; cursor: help; }
+.svcmap__dot { fill: var(--field-ink-muted); transition: opacity var(--dur-med) var(--ease); }
+.svcmap__dot.is-warning { fill: var(--status-warning); }
+.svcmap__dot.is-critical { fill: var(--status-critical); filter: drop-shadow(0 0 4px var(--status-critical)); }
+.svcmap__dot.is-dim { opacity: 0.15; }
+
+/* nodes */
+.svcmap__node { cursor: pointer; outline: none; }
+.svcmap__node:hover .smap__box, .svcmap__node:focus-visible .smap__box { stroke: var(--field-ink-secondary); }
+.svcmap__node.is-selected .smap__box { stroke: var(--field-ink); stroke-width: 2; }
+.svcmap__node.is-warning .smap__box { stroke: var(--status-warning); fill: color-mix(in oklch, var(--status-warning) 9%, var(--field-raised)); }
+.svcmap__node.is-critical .smap__box { stroke: var(--status-critical); fill: color-mix(in oklch, var(--status-critical) 12%, var(--field-raised)); }
+.svcmap__node.is-warning .svcmap__status { color: var(--status-warning); }
+.svcmap__node.is-critical .svcmap__status { color: var(--status-critical); }
+.svcmap__ripple { stroke: var(--status-critical); }
+.svcmap__tag.is-critical rect { fill: var(--status-critical); }
+.svcmap__tag.is-critical text { fill: var(--field-ink); }
+.svcmap__tag.is-warning rect { fill: var(--status-warning); }
+.svcmap__tag.is-warning text { fill: var(--field-bg); }
+
+/* hover tooltip, anchored under the node */
+.svcmap__tip {
+  position: absolute; z-index: 2; transform: translate(-50%, var(--space-2)); pointer-events: none;
+  display: grid; gap: var(--space-1); min-width: 13rem; max-width: 20rem;
+  padding: var(--space-3); border-radius: var(--radius-md); border: 1px solid var(--field-line-strong);
+  background: var(--field-raised); color: var(--field-ink); font-size: var(--text-sm); line-height: var(--lh-sm);
+  box-shadow: 0 var(--space-2) var(--space-6) color-mix(in oklch, black 40%, transparent);
+}
+.svcmap__tip strong { font-size: var(--text-md); }
+.svcmap__tip-kind, .svcmap__tip-hint { color: var(--field-ink-muted); }
+.svcmap__tip-inc { color: var(--field-ink); font-weight: var(--weight-medium); }
+
+/* problems: a horizontally scrolling row of cards; click opens the node's details and centres the map on it */
+.svcmap__problems { margin-bottom: var(--space-6); }
+.svcmap__problems-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-3); }
+.svcmap__problems-head h2 { font-size: var(--text-lg); line-height: var(--lh-lg); font-weight: var(--weight-semibold); }
+.svcmap__cards {
+  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(16rem, 18rem); gap: var(--space-4);
+  overflow-x: auto; scroll-snap-type: x mandatory; scroll-padding: 0; padding-bottom: var(--space-2); scrollbar-width: thin;
+}
+.svcmap__card {
+  scroll-snap-align: start; display: flex; flex-direction: column; gap: var(--space-2); min-width: 0;
+  padding: var(--space-4); border: 1px solid var(--divider); border-radius: var(--radius-md);
+  background: var(--bg-surface); color: var(--text-primary); font: inherit; text-align: left; cursor: pointer;
+  box-shadow: inset 0 2px 0 var(--status-warning);
+  transition: border-color var(--dur-fast) var(--ease);
+}
+.svcmap__card.is-critical { box-shadow: inset 0 2px 0 var(--status-critical); }
+.svcmap__card:hover, .svcmap__card[aria-pressed='true'] { border-color: var(--border-strong); }
+.svcmap__card-top { display: flex; align-items: center; gap: var(--space-2); min-width: 0; color: var(--text-secondary); }
+.svcmap__card-name { flex: 1; min-width: 0; font-family: var(--font-mono); font-weight: var(--weight-medium); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.svcmap__card-why {
+  font-size: var(--text-md); line-height: var(--lh-md); color: var(--text-primary);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: calc(var(--lh-md) * 2);
+}
+.svcmap__card-num { font-size: var(--text-sm); color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+
+/* details panel: slides in from the left over the map, the map keeps its size */
+.svcmap__panel {
+  position: absolute; z-index: 3; left: var(--space-3); top: var(--space-3); bottom: var(--space-3); width: min(22rem, calc(100% - var(--space-6)));
+  display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-4); overflow: auto;
+  border: 1px solid var(--divider); border-radius: var(--radius-md); background: var(--bg-surface);
+  box-shadow: 0 var(--space-4) var(--space-10) color-mix(in oklch, black 40%, transparent);
+  animation: svcmap-panel-in var(--dur-med) var(--ease-out-expo) both;
+}
+@keyframes svcmap-panel-in { from { opacity: 0; transform: translateX(calc(-100% - var(--space-3))); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .svcmap__panel { animation: none; } }
+.svcmap__panel-head { display: flex; justify-content: space-between; align-items: start; gap: var(--space-2); }
+.svcmap__panel-head h2 { font-family: var(--font-mono); font-size: var(--text-lg); font-weight: var(--weight-semibold); word-break: break-all; }
+.svcmap__panel-head p { color: var(--text-secondary); font-size: var(--text-sm); }
+.svcmap__panel h3 { font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--text-secondary); }
+.svcmap__panel-inc {
+  display: grid; gap: var(--space-1); justify-items: start; padding: var(--space-3);
+  border: 1px solid var(--status-critical-soft); border-radius: var(--radius-md); background: var(--status-critical-soft);
+  color: var(--text-primary); text-decoration: none; font-size: var(--text-md);
+}
+.svcmap__panel-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); }
+.svcmap__panel-stats dt { font-size: var(--text-sm); color: var(--text-secondary); }
+.svcmap__panel-stats dd { margin: 0; font-size: var(--text-lg); font-variant-numeric: tabular-nums; }
+.svcmap__panel-list { list-style: none; margin: calc(var(--space-2) * -1) 0 0; padding: 0; display: grid; gap: var(--space-2); }
+.svcmap__panel-list li { display: grid; gap: 0; font-size: var(--text-sm); padding-bottom: var(--space-2); border-bottom: 1px solid var(--divider); }
+.svcmap__panel-peer { display: flex; align-items: center; gap: var(--space-2); font-family: var(--font-mono); word-break: break-all; }
+.svcmap__panel-num { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.svcmap__panel-open { align-self: start; text-decoration: none; }
+
+
+
+/* embedded in the service detail (Map tab) */
+.svcmap__bar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-4); }
+.svcmap--embedded .svcmap__canvas { height: max(30rem, calc(100vh - 24rem)); }

@@ -1,7 +1,7 @@
 name: tasktrooper_dio
 description: Dio interceptor for the TaskTrooper Flutter RUM SDK. Records network calls as RESOURCE events and propagates W3C traceparent.
 version: 0.1.0
-homepage: https://tasktrooper.ai
+homepage: https://telemetry.tasktrooper.ai
 repository: https://github.com/makifbaysal/tasktrooper-telemetry/tree/main/sdks/flutter/tasktrooper_dio
 issue_tracker: https://github.com/makifbaysal/tasktrooper-telemetry/issues
 topics:

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Check, ChevronDown, ChevronRight, FolderGit2, Lock, Plus, Webhook } from 'lucide-react';
-import { Badge, Button, Callout, CopyCode, Drawer, DrawerSection, EmptyState, Field, Input, SearchInput, Segmented, StatusBadge } from '@/components/ui';
+import { Badge, Button, Callout, CopyCode, Drawer, DrawerSection, EmptyState, Field, Input, SearchInput, Segmented, SkeletonRows, SkeletonText, StatusBadge } from '@/components/ui';
 import {
   baseUrlError, connectRepo, fullNameError, githubInstallUrl, githubInstallations, githubRepos,
   type GithubInstallation, type GithubRepoOption, type RepoProvider, type RepoWebhook,
@@ -141,7 +141,7 @@ export function ConnectRepoDrawer({ open, onClose, integrationId }: { open: bool
       {!hook && (<>
       <DrawerSection title="GitHub"aside={installation && <span className="row muted" style={{ gap: 4 }}><FolderGit2 size={12} aria-hidden />{installation.account}</span>}>
         {installs === null ? (
-          <span className="muted">Loading installations…</span>
+          <SkeletonText lines={2} label="Loading installations" />
         ) : !installation ? (
           <div className="stack" style={{ gap: 'var(--space-3)' }}>
             <p className="secondary" style={{ margin: 0 }}>
@@ -162,7 +162,7 @@ export function ConnectRepoDrawer({ open, onClose, integrationId }: { open: bool
               <Button size="sm" variant="ghost" icon={<FolderGit2 size={14} />} onClick={install}>Add account</Button>
             </div>
             {listError && <div className="row" style={{ gap: 'var(--space-2)' }}><StatusBadge status="critical" label="Error" /><span className="secondary">{listError}</span></div>}
-            {options === null ? <span className="muted">Loading repositories…</span>
+            {options === null ? <SkeletonRows rows={4} label="Loading repositories" />
               : options.length === 0 && !listError ? <EmptyState icon={<FolderGit2 size={20} />} title={q ? 'No repository matches' : 'The installation has no repositories'}>Change the repository access of the GitHub App on GitHub.</EmptyState>
               : (
                 <div className="list" role="group" aria-label="Repositories">

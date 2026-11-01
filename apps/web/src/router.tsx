@@ -1,5 +1,7 @@
 import { Navigate, createBrowserRouter, useSearchParams } from 'react-router';
+import { ServiceMapScreen } from '@/screens/ServiceMapScreen';
 import { AppShell } from './components/layout/AppShell';
+import { safeNext } from './publicRouter';
 import { Overview } from './screens/Overview';
 import { Services } from './screens/Services';
 import { ServiceDetail } from './screens/ServiceDetail';
@@ -29,13 +31,18 @@ import { DesignSystem } from './screens/DesignSystem';
 import { TraceDetail } from './screens/TraceDetail';
 import { ReplayDetailScreen } from './screens/ReplayDetail';
 import { AiMonitoring } from './screens/AiMonitoring';
+import { Docs } from './screens/Docs';
 
 export const router = createBrowserRouter([
+  // public docs stay reachable when signed in (no app shell); the sign-in page has nothing to do here
+  { path: '/docs', element: <Docs /> },
+  { path: '/login', element: <LoginDone /> },
   {
     element: <AppShell />,
     children: [
       { path: '/', element: <Overview /> },
       { path: '/services', element: <Services /> },
+      { path: '/service-map', element: <ServiceMapScreen /> },
       { path: '/services/:serviceId', element: <ServiceDetail /> },
       { path: '/services/:serviceId/endpoints/:endpointId', element: <EndpointDetail /> },
       { path: '/traces/:traceId', element: <TraceDetail /> },
@@ -75,6 +82,12 @@ export const router = createBrowserRouter([
     ],
   },
 ]);
+
+/** Already signed in: honour `?next=` (same-origin paths only), else the overview. */
+function LoginDone() {
+  const [params] = useSearchParams();
+  return <Navigate to={safeNext(params.get('next'))} replace />;
+}
 
 /** Logs live on each service page now; old /logs?service=x links land there. */
 function LogsRedirect() {

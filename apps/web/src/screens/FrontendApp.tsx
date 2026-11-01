@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router';
 import { AlertTriangle, ArrowRight, MonitorSmartphone, PlayCircle, Target, UserRound } from 'lucide-react';
 import { TimeSeries } from '@/components/charts';
 import {
-  Badge, Button, Card, CodeBlock, ConnectSdk, Drawer, DrawerSection, EmptyState, KeyValues, MetricCard, Section, StatusBadge, Table, Tabs, useDrawer,
+  Badge, Button, Card, CodeBlock, ConnectSdk, Drawer, DrawerSection, EmptyState, KeyValues, MetricCard, Section, SkeletonText, StatusBadge, Table, Tabs, useDrawer,
 } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
 import {
@@ -359,7 +359,7 @@ function ErrorDrawer({ appId, error, onClose, onReplay }: {
         ...(error.page ? [['Seen on', <span key="p" className="mono">{error.page}</span>] as [string, ReactNode]] : []),
       ]} />
       <DrawerSection title="Stack trace" aside={detail ? (detail.symbolicated ? 'symbolicated' : 'not symbolicated') : undefined}>
-        {detail?.stack ? <CodeBlock>{detail.stack}</CodeBlock> : <p className="muted">{detail ? 'No stack recorded for this error.' : 'Loading…'}</p>}
+        {detail?.stack ? <CodeBlock>{detail.stack}</CodeBlock> : detail ? <p className="muted">No stack recorded for this error.</p> : <SkeletonText lines={5} label="Loading stack trace" />}
       </DrawerSection>
     </Drawer>
   );
