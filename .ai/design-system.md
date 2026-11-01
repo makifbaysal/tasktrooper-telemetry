@@ -60,7 +60,7 @@ Font: `--font-sans` (Inter), `--font-mono` (JetBrains Mono — route, log, kod, 
 - Spacing: `--space-1..12` (4px grid).
 - Radius: `--radius-xs 4` (bar ucu) · `sm 6` (chip, segmented item) · `md 8` (buton, input, nav item) · `lg 14` (kart, rounded-xl) · `full` (badge).
 - Kontrol yükseklikleri: `--control-h-sm 30`, `--control-h-md 36`.
-- Layout: sidebar 240px (topbar'daki butonla daraltılır, localStorage `trooper-sidebar`), topbar 56px (yarı saydam + blur), içerik max 1440px. 900px altı sidebar üstte yatay. Topbar'daki env seçici ve zaman aralığı sadece onları okuyan ekranlarda görünür (`scopeFor`, `AppShell.tsx`): Overview, servis/endpoint/trace, altyapı, KPI detay, AI monitoring; Incidents, Settings, Load tests, Code insights'ta gizli. Ekran düzeni (Overview, Incidents, Services) `styles/screens.css`'te, sadece yapı.
+- Layout: sidebar 240px (topbar'daki butonla daraltılır, localStorage `trooper-sidebar`), topbar 56px (yarı saydam + blur), içerik max 1440px. 900px altı sidebar `--scrim` üstünde overlay drawer (aynı buton açar; navigasyon, Escape veya scrim'e dokunma kapatır); 640px altı topbar iki satıra sarılır, zaman aralığı kendi satırında. Topbar'da hızlı geçiş (`GlobalSearch`: servis + sayfa, `/` veya ⌘K). Topbar'daki env seçici ve zaman aralığı sadece onları okuyan ekranlarda görünür (`scopeFor`, `AppShell.tsx`): Overview, servis/endpoint/trace, altyapı, KPI detay, AI monitoring; Incidents, Settings, Load tests, Code insights'ta gizli. Ekran düzeni (Overview, Incidents, Services) `styles/screens.css`'te, sadece yapı.
 - Kartlar: `--shadow-sm` (TaskTrooper shadow-raised). Alarm durumundaki kart: sol 4px status rail (`.card--rail-critical` / `.card--rail-warning`).
 
 ## Komponentler (`components/ui`)
@@ -72,8 +72,8 @@ Font: `--font-sans` (Inter), `--font-mono` (JetBrains Mono — route, log, kod, 
 | `StatusBadge` | Durum için tek doğru yol — ikon + etiket |
 | `Card` | `title`, `subtitle`, `actions`, `flush` (tablo/list için padding'siz) |
 | `StatTile` | label · value(+unit) · delta (yön × `upIsGood`) · opsiyonel sparkline |
-| `Table` | Kolon tanımlı, `numeric` sağa hizalı tabular, `sortValue` ile sıralanabilir, `onRowClick`; `childRows` ile iç içe satırlar (ebeveynin hemen altında girintili, aynı sıralama — ör. Azure Function App'in fonksiyonları) |
-| `Tabs` / `Segmented` | Tabs = sayfa içi bölüm; Segmented = filtre/zaman aralığı |
+| `Table` | Kolon tanımlı, `numeric` sağa hizalı tabular, `sortValue` ile sıralanabilir, `onRowClick`; `childRows` ile iç içe satırlar (ebeveynin hemen altında girintili, aynı sıralama — ör. Azure Function App'in fonksiyonları). Karttan genişse içinde kayar, kırpılan kenarda gölge; `empty` string ise dolgulu `.table__empty` |
+| `Tabs` / `Segmented` | Tabs = sayfa içi bölüm (ok tuşları / Home / End ile gezinme, taşınca kırpılan kenar solar — `data-fade`); Segmented = filtre/zaman aralığı |
 | `Field`, `Input`, `Textarea`, `SearchInput`, `Select`, `Toggle` | Form elemanları (`Textarea mono` JSON/header şablonları için) |
 | `PageHeader` | breadcrumb + başlık + alt başlık + aksiyonlar |
 | `EmptyState`, `Meter`, `CodeBlock`, `Callout` | Yardımcılar |

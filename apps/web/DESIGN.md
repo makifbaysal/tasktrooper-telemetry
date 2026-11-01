@@ -236,7 +236,7 @@ or as diff colours.
 copy — a route, a trace id, a log line — so it reads as machine text at a glance.
 
 ### Hierarchy
-- **Display** (600, 28/36px, -0.02em, tabular): stat and metric values. One `hero` number (44/48px) per page at most.
+- **Display** (600, 28/36px, -0.02em, tabular): stat and metric values. One `hero` number (`--text-hero`, 34/40px) per page at most.
 - **Headline** (600, 20/28px): page title (h1).
 - **Title** (600, 16/24px): section and card titles.
 - **Body** (400, 14/20px): default for everything, including table cells and metric labels on Overview.
@@ -251,8 +251,10 @@ copy — a route, a trace id, a log line — so it reads as machine text at a gl
 
 ## Layout
 
-App shell: a 240px sticky sidebar, a 56px topbar and content capped at 1440px. Below 900px the sidebar collapses
-into a wrapping row of nav items above the content (sections, footer and project switcher hide). Spacing follows a 4px grid
+App shell: a 240px sticky sidebar, a 56px topbar and content capped at 1440px. On wide screens the topbar toggle
+collapses the sidebar (remembered). Below 900px the sidebar is an overlay drawer over a `--scrim`, opened by the same
+toggle and closed by navigation, Escape or a tap on the scrim; below 640px the topbar wraps so the time range takes its
+own full-width row and the page never scrolls sideways. Spacing follows a 4px grid
 (`--space-1..12`); cards sit 16px apart, card bodies pad 16px. Controls are 36px (`md`) or 30px (`sm`) tall.
 
 Pages read top to bottom: `PageHeader` (breadcrumb, title, subtitle, actions on the right), then sections of cards.
@@ -316,18 +318,19 @@ Precise and quiet: one filled navy button per page, everything else neutral.
 - **Family:** `Field`, `Input`, `Textarea` (mono variant for JSON/headers), `SearchInput` (leading icon), `Select`, `Toggle`.
 
 ### Tabs & Segmented
-- **Tabs:** page sections. Muted label, 2px underline; selected tab turns navy text with a navy underline.
+- **Tabs:** page sections. Muted label, 2px underline; selected tab turns navy text with a navy underline. Arrow keys, Home and End move between tabs; when the row overflows, the clipped edge fades so hidden tabs are discoverable.
 - **Segmented:** filters and time ranges. Sunken 3px track, 6px items; the selected item lifts onto the page colour with the Raised shadow.
 - **ChoiceChips:** the segmented look with multiple `aria-pressed` items, wrapping on narrow screens.
 
 ### Tables
 Dense and scannable. Headers in the uppercase label style on a lightly sunken band, sticky; cells pad 10px × 12px with
-divider rules; numeric columns right-aligned and tabular; rows highlight on hover and may open detail on click; child rows indent under their parent.
+divider rules; numeric columns right-aligned and tabular; rows highlight on hover and may open detail on click; child rows indent under their parent. A table wider than its card scrolls inside it, with edge shadows marking the clipped side.
 
 ### Navigation
 Sidebar items are 8px-rounded rows with an icon and label; hover uses the hover tone, the current page fills with
 `cold-slate-active` and primary ink. Section labels use the uppercase label style. The topbar holds the sidebar toggle,
-project/org menus and the theme switch (`system | light | dark`).
+the quick jump (services and pages; `/` or ⌘K focuses it, arrows + Enter open a result), the env and time-range scope
+(only on screens that read them) and the theme switch (`system | light | dark`). The account menu sits at the bottom of the sidebar.
 
 ### Root Cause Card (signature)
 Sits above the golden signals on service and endpoint pages, only when there is a clear regression. An origin label

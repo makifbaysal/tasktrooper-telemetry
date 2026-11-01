@@ -30,7 +30,7 @@ export function EmptyState({ icon, title, children, action }: { icon: ReactNode;
   return (
     <div className="empty">
       <div className="empty__icon">{icon}</div>
-      <h3 style={{ color: 'var(--text-primary)' }}>{title}</h3>
+      <h3>{title}</h3>
       {children && <p>{children}</p>}
       {action}
     </div>

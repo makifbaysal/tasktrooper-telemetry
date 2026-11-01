@@ -162,7 +162,7 @@
     ],
     "breakpoints": [
       {
-        "name": "nav-row",
+        "name": "nav-drawer",
         "value": "900px"
       }
     ]

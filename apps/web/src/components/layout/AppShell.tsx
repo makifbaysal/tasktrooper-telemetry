@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import {
   AlertOctagon, BotMessageSquare, Boxes, Wind, Server, Building2, ChevronsUpDown, Code2, Database, Gauge, KeyRound, LayoutDashboard, LogOut, Moon, Waypoints,
-  Layers, PanelLeftClose, PanelLeftOpen, Plug, Search, Settings, Sparkles, SquareFunction, Sun, SunMoon, Target, UserRound, Users, Zap, type LucideIcon,
+  Layers, PanelLeftClose, PanelLeftOpen, Plug, Settings, Sparkles, SquareFunction, Sun, SunMoon, Target, UserRound, Users, type LucideIcon,
 } from 'lucide-react';
 import { Avatar, Badge, Menu, MenuDivider, MenuItem, MenuLabel, Segmented, Select } from '@/components/ui';
 import { logout, switchProject, useAuth } from '@/data/auth';
@@ -14,6 +14,7 @@ import { useApp } from './context';
 import { Logo } from './Logo';
 import { LiquidCursor } from './LiquidCursor';
 import { useCardReveal, useMotionAllowed } from './motion';
+import { GlobalSearch, type SearchPage } from './GlobalSearch';
 
 /** `badge` is evaluated on every render so counts follow data changes (api hydrate, mutations). */
 interface NavItem { to: string; label: string; icon: LucideIcon; end?: boolean; badge?: () => { count: number; tone?: Health }; liveCount?: 'firing' }
@@ -59,6 +60,21 @@ function scopeFor(path: string): { env: boolean; range: boolean } {
   return { env: telemetry, range: telemetry && path !== '/infrastructure/hosts' };
 }
 
+const SEARCH_PAGES: SearchPage[] = [
+  ...NAV.flatMap((g) => g.items.map(({ to, label, icon }) => ({ to, label, icon }))),
+  { to: '/services', label: 'All services', icon: Layers },
+  { to: '/settings', label: 'Settings & SDK', icon: Settings },
+  { to: '/settings/integrations', label: 'Integrations', icon: Plug },
+  { to: '/settings/usage', label: 'AI usage', icon: Sparkles },
+];
+
+const NARROW = '(max-width: 900px)';
+const subscribeNarrow = (cb: () => void) => { const m = window.matchMedia(NARROW); m.addEventListener('change', cb); return () => m.removeEventListener('change', cb); };
+/** Below 900px the sidebar is an overlay drawer instead of a column. */
+function useNarrow() {
+  return useSyncExternalStore(subscribeNarrow, () => window.matchMedia(NARROW).matches, () => false);
+}
+
 function readSidebar(): boolean {
   try { return localStorage.getItem('trooper-sidebar') !== 'collapsed'; } catch { return true; }
 }
@@ -77,13 +93,26 @@ export function AppShell() {
     try { localStorage.setItem('trooper-sidebar', open ? 'collapsed' : 'open'); } catch { /* storage unavailable */ }
     return !open;
   });
+  // narrow screens: the same toggle opens an overlay drawer that closes on navigation, Escape or scrim
+  const narrow = useNarrow();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  useEffect(() => { setDrawerOpen(false); }, [pathname, narrow]);
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setDrawerOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [drawerOpen]);
+  const navShown = narrow ? drawerOpen : sidebarOpen;
+  const onToggle = narrow ? () => setDrawerOpen((o) => !o) : toggleSidebar;
   const envOptions = [{ value: '', label: 'All environments' },
     ...[...new Set([...environments, ...(env ? [env] : [])])].map((e) => ({ value: e, label: e }))];
 
   return (
-    <div className={`shell${sidebarOpen ? '' : ' shell--sidebar-collapsed'}`}>
+    <div className={`shell${sidebarOpen ? '' : ' shell--sidebar-collapsed'}${drawerOpen ? ' shell--drawer-open' : ''}`}>
       {motionOn && <LiquidCursor />}
-      <aside className="sidebar" id="app-sidebar" aria-label="Main navigation">
+      {narrow && drawerOpen && <div className="sidebar-scrim" aria-hidden onClick={() => setDrawerOpen(false)} />}
+      <aside className="sidebar" id="app-sidebar" aria-label="Main navigation" inert={narrow && !drawerOpen ? true : undefined}>
         <div className="sidebar__brand">
           <span className="sidebar__logo"><Logo /></span>
           <span className="sidebar__name"><strong>TaskTrooper</strong><span>Telemetry</span></span>
@@ -101,21 +130,17 @@ export function AppShell() {
 
       <div className="main">
         <header className="topbar">
-          <button className="btn btn--ghost btn--icon sidebar-toggle" type="button" title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
-            aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'} aria-expanded={sidebarOpen} aria-controls="app-sidebar" onClick={toggleSidebar}>
-            {sidebarOpen ? <PanelLeftClose size={16} aria-hidden /> : <PanelLeftOpen size={16} aria-hidden />}
+          <button className="btn btn--ghost btn--icon sidebar-toggle" type="button" title={navShown ? 'Hide navigation' : 'Show navigation'}
+            aria-label={navShown ? 'Hide navigation' : 'Show navigation'} aria-expanded={navShown} aria-controls="app-sidebar" onClick={onToggle}>
+            {navShown ? <PanelLeftClose size={16} aria-hidden /> : <PanelLeftOpen size={16} aria-hidden />}
           </button>
-          <div className="input-group" style={{ width: 280, maxWidth: '40vw' }}>
-            <Search size={14} aria-hidden />
-            <input className="input" placeholder="Search services, endpoints, pages…" style={{ width: '100%' }} />
-          </div>
+          <GlobalSearch pages={SEARCH_PAGES} />
           <span className="spacer" />
           {scope.env && <Select aria-label="Environment" value={env} onChange={(e) => setEnv(e.target.value)} options={envOptions} />}
           {scope.range && <Segmented label="Time range" options={RANGES} value={range} onChange={setRange} />}
           <button className="btn btn--ghost btn--icon" title={`Theme: ${theme}`} aria-label={`Theme: ${theme}. Switch to ${nextTheme}`} onClick={() => setTheme(nextTheme)}>
             <ThemeIcon size={16} />
           </button>
-          <button className="btn btn--ghost btn--icon" aria-label="What's new"><Zap size={16} /></button>
         </header>
         <main className="content">
           <AiQuotaBanner />

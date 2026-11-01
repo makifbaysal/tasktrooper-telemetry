@@ -19,6 +19,7 @@
   --text-lg: 16px;   --lh-lg: 24px;   /* "heading" */
   --text-xl: 20px;   --lh-xl: 28px;   /* "title" */
   --text-2xl: 28px;  --lh-2xl: 36px;  /* "display" */
+  --text-hero: 34px; --lh-hero: 40px; /* hero metric value only */
   --text-hero: 44px; --lh-hero: 48px;
 
   --weight-regular: 400;
@@ -136,6 +137,7 @@
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.06), 0 1px 3px 0 rgb(0 0 0 / 0.08);
   --shadow-md: 0 4px 16px -4px rgb(0 0 0 / 0.12), 0 1px 3px 0 rgb(0 0 0 / 0.06);
   --shadow-lg: 0 8px 24px -4px rgb(0 0 0 / 0.18), 0 2px 8px -2px rgb(0 0 0 / 0.12);
+  --scrim: rgb(0 0 0 / 0.4);           /* behind drawers and the mobile nav */
 }
 
 /* ---------- Dark theme: TaskTrooper .dark steps, not an inversion ---------- */
@@ -185,6 +187,7 @@
     --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
     --shadow-md: 0 4px 16px -4px rgb(0 0 0 / 0.45);
     --shadow-lg: 0 8px 24px -4px rgb(0 0 0 / 0.55);
+    --scrim: rgb(0 0 0 / 0.6);
   }
 }
 
@@ -233,4 +236,5 @@
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
   --shadow-md: 0 4px 16px -4px rgb(0 0 0 / 0.45);
   --shadow-lg: 0 8px 24px -4px rgb(0 0 0 / 0.55);
+  --scrim: rgb(0 0 0 / 0.6);
 }

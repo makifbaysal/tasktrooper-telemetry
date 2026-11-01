@@ -25,7 +25,7 @@
 
 .legend { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); font-size: var(--text-sm); color: var(--text-secondary); margin-bottom: var(--space-2); }
 .legend__item { display: inline-flex; align-items: center; gap: var(--space-1); }
-.legend__key { width: 12px; height: 2px; border-radius: 1px; }
+.legend__key { width: 12px; height: 2px; border-radius: var(--radius-full); }
 .legend__swatch { width: 8px; height: 8px; border-radius: 2px; }
 
 /* Bar list (horizontal ranked bars) */
