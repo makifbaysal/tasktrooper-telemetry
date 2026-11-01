@@ -26,6 +26,9 @@ import (
 // Timeout bounds every test.
 var Timeout = 5 * time.Second
 
+// HTTPClient sends management-API checks (main swaps in a traced client, ADR-027).
+var HTTPClient = http.DefaultClient
+
 // Run executes the test described by in. It never returns an error: failures are reported in the result.
 func Run(ctx context.Context, in model.ConnTestInput) model.ConnTestResult {
 	ctx, cancel := context.WithTimeout(ctx, Timeout)
@@ -236,7 +239,7 @@ func rabbit(ctx context.Context, in model.ConnTestInput) (model.ConnTestResult, 
 	if in.User != "" {
 		req.SetBasicAuth(in.User, in.Password)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := HTTPClient.Do(req)
 	if err != nil {
 		return model.ConnTestResult{}, fmt.Errorf("management API unreachable: %w", err)
 	}

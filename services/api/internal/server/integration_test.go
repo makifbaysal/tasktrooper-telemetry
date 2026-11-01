@@ -429,10 +429,11 @@ func TestIntegration(t *testing.T) {
 	})
 
 	t.Run("tenant isolation", func(t *testing.T) {
-		other := itClient{t: t, base: ts.URL, key: "tt_dev_api_key"}
+		fx := newFixture(t, pool, "9101-other")
+		other := itClient{t: t, base: ts.URL, key: fx.APIKey}
 		code, b := other.do("GET", "/services?range=1h", nil)
-		if code == 200 && strings.Contains(string(b), "it-api") {
-			t.Errorf("project 1 sees project 9101 data")
+		if code != 200 || strings.Contains(string(b), "it-api") {
+			t.Errorf("project %d sees project 9101 data: %d %s", fx.ProjectID, code, b)
 		}
 	})
 
@@ -978,13 +979,14 @@ func TestIntegration(t *testing.T) {
 		var me model.Me
 		code, b := sess("GET", "/me", nil, "X-Trooper-Project", "9101")
 		_ = json.Unmarshal(b, &me)
-		if code != 200 || me.User == nil || me.User.Email != "it-9101-ada@example.com" || me.Role != "member" || me.CurrentProjectID != "9101" || me.Auth != "session" {
+		if code != 200 || me.User == nil || me.User.Email != "it-9101-ada@example.com" || me.Role != "member" || me.CurrentProjectID == nil || *me.CurrentProjectID != "9101" || me.Auth != "session" {
 			t.Fatalf("me: %d %s", code, b)
 		}
 		if code, _ := sess("GET", "/services?range=15m", nil, "X-Trooper-Project", "9101"); code != 200 {
 			t.Errorf("session read: %d", code)
 		}
-		if code, _ := sess("GET", "/services", nil, "X-Trooper-Project", "1"); code != 403 {
+		foreign := newFixture(t, pool, "9101-foreign")
+		if code, _ := sess("GET", "/services", nil, "X-Trooper-Project", foreign.Project()); code != 403 {
 			t.Errorf("foreign project: %d", code)
 		}
 		if code, _ := sess("GET", "/api-keys", nil, "X-Trooper-Project", "9101"); code != 403 {

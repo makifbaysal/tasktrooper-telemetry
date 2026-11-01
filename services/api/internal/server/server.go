@@ -19,6 +19,7 @@ import (
 	"github.com/tasktrooper/telemetry/services/api/internal/blob"
 	"github.com/tasktrooper/telemetry/services/api/internal/model"
 	"github.com/tasktrooper/telemetry/services/api/internal/rules"
+	"github.com/tasktrooper/telemetry/services/api/internal/selftel"
 	"github.com/tasktrooper/telemetry/services/api/internal/store"
 	"github.com/tasktrooper/telemetry/services/api/internal/symbolicate"
 	"github.com/tasktrooper/telemetry/services/api/internal/timerange"
@@ -201,6 +202,10 @@ type Server struct {
 	PublicWebhookURL string
 	// StateKey signs install states (derived from TT_SECRETS_KEY).
 	StateKey []byte
+	// MaxOrgsPerUser caps the orgs one user may own via POST /orgs (TT_MAX_ORGS_PER_USER; 0 = store default 20).
+	MaxOrgsPerUser int
+	// PublicIngestURL is the ingest gateway as reachable by SDKs; DSNs returned by POST /orgs (TT_PUBLIC_INGEST_URL).
+	PublicIngestURL string
 
 	channels channelCache
 }
@@ -211,13 +216,14 @@ func (s *Server) Handler() http.Handler {
 		s.Now = time.Now
 	}
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID, s.recoverer, s.requestLog, s.cors, middleware.Compress(5, "application/json"))
+	// selftel.Middleware sits inside the recoverer so panics are recorded on the span before the 500 (ADR-027).
+	r.Use(middleware.RequestID, s.recoverer, selftel.Middleware(), s.requestLog, s.cors, middleware.Compress(5, "application/json"))
 	r.Get("/healthz", s.healthz)
 	r.Route("/api/v1", func(r chi.Router) {
 		s.authRoutes(r)          // anonymous
 		s.chatOpsPublicRoutes(r) // signed state / Slack signature
 		r.Group(func(r chi.Router) {
-			r.Use(s.authenticate, s.guard)
+			r.Use(s.authenticate, selftel.TagTenant, s.guard)
 			s.identityRoutes(r)
 			s.chatOpsRoutes(r)
 			s.routes(r)
@@ -277,7 +283,8 @@ func (s *Server) cors(next http.Handler) http.Handler {
 			h.Add("Vary", "Origin")
 			h.Set("Access-Control-Allow-Credentials", "true") // tt_session cookie; the origin is echoed exactly, never "*"
 			h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, "+projectHeader)
+			// traceparent / tracestate / baggage: the dashboard RUM SDK propagates traces into the api (contracts §27).
+			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, "+projectHeader+", traceparent, tracestate, baggage")
 			h.Set("Access-Control-Max-Age", "600")
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)

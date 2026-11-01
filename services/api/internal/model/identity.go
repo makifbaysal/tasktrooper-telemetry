@@ -25,9 +25,10 @@ type MeOrg struct {
 
 // Me is GET /me. User is null for api key callers (Auth = "apiKey").
 type Me struct {
-	User             *User   `json:"user"`
-	Orgs             []MeOrg `json:"orgs"`
-	CurrentProjectID string  `json:"currentProjectId"`
+	User *User   `json:"user"`
+	Orgs []MeOrg `json:"orgs"`
+	// CurrentProjectID is null for a signed-in user without any project (onboarding, ADR-028).
+	CurrentProjectID *string `json:"currentProjectId"`
 	// Role in the current project's org.
 	Role string `json:"role"`
 	Auth string `json:"auth"` // session | apiKey
@@ -142,4 +143,41 @@ type GitHubRepo struct {
 	Private       bool   `json:"private"`
 	Language      string `json:"language"`
 	Added         bool   `json:"added"`
+}
+
+// OrgInput is POST /orgs (onboarding, contracts §11): a new org with its first project.
+type OrgInput struct {
+	Name    string          `json:"name"`
+	Project OrgProjectInput `json:"project"`
+}
+
+type OrgProjectInput struct {
+	Name string `json:"name"`
+	Slug string `json:"slug,omitempty"` // default: derived from name
+}
+
+// OrgCreated is the POST /orgs response; IngestKey.Key and DSN are only returned here.
+type OrgCreated struct {
+	Org       CreatedOrg     `json:"org"`
+	Project   CreatedProject `json:"project"`
+	IngestKey CreatedKey     `json:"ingestKey"`
+	DSN       string         `json:"dsn"`
+}
+
+type CreatedOrg struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Role string `json:"role"`
+}
+
+type CreatedProject struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+}
+
+type CreatedKey struct {
+	ID     string `json:"id"`
+	Prefix string `json:"prefix"`
+	Key    string `json:"key"`
 }
