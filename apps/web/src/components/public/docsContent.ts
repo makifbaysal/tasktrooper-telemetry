@@ -58,16 +58,24 @@ java -javaagent:trooper-javaagent.jar -jar app.jar` },
     install: { lang: 'bash', code: `dotnet add package TaskTrooper.Telemetry
 dotnet add package TaskTrooper.Telemetry.AspNetCore` },
     init: { lang: 'csharp', code: `builder.Services
-    .AddTaskTrooper(o => { o.Dsn = "${DSN_PLACEHOLDER}"; o.ServiceName = "orders-api"; })
+    .AddTaskTrooper(o =>
+    {
+        o.Dsn = Environment.GetEnvironmentVariable("TROOPER_DSN");
+        o.ServiceName = "orders-api";
+    })
     .AddAspNetCore();` },
   },
   {
     id: 'python', label: 'Python', group: 'Backend', readme: 'sdks/python',
     summary: 'FastAPI, Flask and Django; initialise before the app is created.',
     install: { lang: 'bash', code: 'pip install tasktrooper' },
-    init: { lang: 'python', code: `import tasktrooper
+    init: { lang: 'python', code: `import os
+import tasktrooper
 
-tasktrooper.init(dsn="${DSN_PLACEHOLDER}", service="orders-api")
+tasktrooper.init(
+    dsn=os.environ["TROOPER_DSN"],
+    service="orders-api",
+)
 # … then create your FastAPI / Flask / Django app` },
   },
   {
@@ -228,7 +236,7 @@ export const MCP_WRITE_TOOLS: DocTool[] = [
 /** One command: finds the coding tools on the machine, asks which ones and global vs. project, installs tt-mcp + skills. */
 export const INSTALL_CMD = `curl -fsSL ${SITE}/install-agent.sh | bash`;
 
-export const INSTALL_TOOLS = ['Claude Code', 'Cursor', 'Antigravity', 'Codex CLI', 'OpenCode', 'Gemini CLI', 'Muse Code'];
+export const INSTALL_TOOLS = ['Claude Code', 'Muse Code', 'Cursor', 'Antigravity', 'Codex CLI', 'OpenCode', 'Gemini CLI'];
 
 export const INSTALL_STEPS: string[] = [
   'Finds the coding tools installed on this machine and asks which ones to set up.',

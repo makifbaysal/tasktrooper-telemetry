@@ -80,12 +80,20 @@ const PROPOSED = [
   { route: 'payments.settled', rule: 'Consumer lag under 1,000 messages', why: 'Queue consumer' },
 ];
 
-const TIMELINE = [
+const TIMELINE_TODAY = [
   { t: '14:02', title: 'Deploy', body: 'reco-db migration 0042 ships with recommendation-api 2.14.' },
-  { t: '14:06', title: 'Latency rises', body: 'Homepage p95 climbs from 380 ms to 4.1 s for real users.' },
-  { t: '14:09', title: 'Alert', body: 'The Homepage latency KPI burns its error budget 14× too fast. Slack gets the alert.' },
-  { t: '14:09', title: 'Cause', body: 'Root-cause analysis walks the call tree: reco-db queries are 63× slower since the migration.' },
-  { t: '14:31', title: 'Resolved', body: 'Migration rolled back, p95 back to 380 ms, the incident closes itself.' },
+  { t: '14:41', title: 'Customers notice', body: 'Support tickets say the homepage hangs. No alert fired: CPU and error rate look normal.' },
+  { t: '15:20', title: 'War room', body: 'On-call is paged. Five people join a call, each in a different dashboard.' },
+  { t: '16:55', title: 'Guessing', body: 'Logs are grepped service by service. recommendation-api is restarted twice; nothing changes.' },
+  { t: '17:45', title: 'Found', body: 'Someone spots the migration and rolls it back, almost four hours after the deploy.' },
+];
+
+const TIMELINE_TROOPER = [
+  { t: '14:02', title: 'Deploy', body: 'The same migration ships with recommendation-api 2.14.' },
+  { t: '14:04', title: 'Latency rises', body: 'Homepage p95 climbs from 380 ms to 4.1 s for real users.' },
+  { t: '14:05', title: 'Alert with the cause', body: 'Slack gets the KPI alert, and it names reco-db: queries 63× slower since migration 0042.' },
+  { t: '14:07', title: 'Rollback', body: 'On-call opens the incident from Slack and rolls the migration back. No war room.' },
+  { t: '14:09', title: 'Resolved', body: 'p95 is back to 380 ms and the incident closes itself.' },
 ];
 
 const TAB_SDKS = ['go', 'jvm', 'dotnet', 'python', 'node', 'browser'];
@@ -117,6 +125,41 @@ export function Landing() {
       </section>
 
       <main>
+        <section className="psec" aria-labelledby="cause-title">
+          <div className="psec__head">
+            <h2 id="cause-title">Today it takes hours and a war room. Here it takes minutes.</h2>
+            <p>Without the dependency and the deploy next to the alert, teams hear it from customers and search by hand.
+              TaskTrooper alerts on what users feel, and the incident arrives with the dependency, the deploy and the
+              evidence that point to the cause, or it says “unknown” when the evidence is thin.</p>
+          </div>
+          <div className="race">
+            <div className="race__row race__row--slow">
+              <p className="race__label">Today <span>3 h 43 min</span></p>
+              <ol className="timeline">
+                {TIMELINE_TODAY.map((s) => (
+                  <li key={s.title}>
+                    <time>{s.t}</time>
+                    <strong>{s.title}</strong>
+                    <p>{s.body}</p>
+                  </li>
+                ))}
+              </ol>
+            </div>
+            <div className="race__row">
+              <p className="race__label">With TaskTrooper <span>7 min</span></p>
+              <ol className="timeline">
+                {TIMELINE_TROOPER.map((s) => (
+                  <li key={s.title}>
+                    <time>{s.t}</time>
+                    <strong>{s.title}</strong>
+                    <p>{s.body}</p>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          </div>
+        </section>
+
         <section id="product" className="psec" aria-labelledby="product-title">
           <div className="psec__head">
             <h2 id="product-title">Backend, web and mobile, read as one system.</h2>
@@ -157,7 +200,7 @@ export function Landing() {
         <section className="band" aria-labelledby="code-title">
           <div className="band__inner">
             <div className="psec__head psec__head--field">
-              <h2 id="code-title">Connect a repo. Get the alerts you would have written after the outage.</h2>
+              <h2 id="code-title">Connect a project. Get the alerts you would have written after the outage.</h2>
               <p>TaskTrooper reads your routes, consumers and jobs, matches them with production traffic, and proposes a KPI and
                 its monitors for each critical path. You accept, edit or dismiss.</p>
             </div>
@@ -189,22 +232,6 @@ export function Landing() {
           </div>
         </section>
 
-        <section className="psec" aria-labelledby="cause-title">
-          <div className="psec__head">
-            <h2 id="cause-title">From symptom to cause in minutes, not a war room.</h2>
-            <p>Alerts fire on what users feel. The incident arrives with the dependency, the deploy and the evidence that
-              point to the cause, or it says “unknown” when the evidence is thin.</p>
-          </div>
-          <ol className="timeline">
-            {TIMELINE.map((s) => (
-              <li key={s.title}>
-                <time>{s.t}</time>
-                <strong>{s.title}</strong>
-                <p>{s.body}</p>
-              </li>
-            ))}
-          </ol>
-        </section>
 
         <section id="sdks" className="psec" aria-labelledby="sdks-title">
           <div className="psec__head">

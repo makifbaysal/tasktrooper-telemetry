@@ -105,7 +105,7 @@ export function Docs() {
 
           <section id="mcp" className="docs__sec">
             <h2>MCP server</h2>
-            <p><code>tt-mcp</code> is a Model Context Protocol server for coding agents such as Claude Code, Cursor,
+            <p><code>tt-mcp</code> is a Model Context Protocol server for coding agents such as Claude Code, Muse Code, Cursor,
               Antigravity and OpenCode. It runs locally over stdio, wraps the TaskTrooper API and is scoped to one project
               by its API key. It only reads unless you turn writes on.</p>
             {MCP_SETUP.map((c) => <CodeBlock key={c.label} caption={c.label} code={c.code} />)}
