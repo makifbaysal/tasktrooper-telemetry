@@ -18,28 +18,28 @@ attribute'ları). Client SDK'ları kendi hafif RUM katmanıdır ve `POST /v1/rum
 
 | Paket | Klasör | Hedef | Kapsam |
 |---|---|---|---|
-| `github.com/tasktrooper/telemetry-go` (+ `integrations/*` ayrı modüller) | `sdks/go` | Go | net/http (ServeMux pattern), gin, fiber, echo, chi, grpc, franz-go, sarama, amqp091, database/sql, pgx, go-redis, slog/zap |
+| `github.com/makifbaysal/tasktrooper-telemetry/sdks/go` (+ `integrations/*` ayrı modüller) | `sdks/go` | Go | net/http (ServeMux pattern), gin, fiber, echo, chi, grpc, franz-go, sarama, amqp091, database/sql, pgx, go-redis, slog/zap |
 | `trooper-javaagent` (OTel agent + extension) | `sdks/jvm` | JVM (kod değişikliği yok) | OTel Java agent'ın tüm auto-instrumentation'ı + trooper preset'leri |
 | `trooper-spring-boot-starter` | `sdks/jvm` | Spring Boot 3 | MVC/WebFlux route template, `@KafkaListener`/`@RabbitListener` process adı |
 | `trooper-quarkus` | `sdks/jvm` | Quarkus 3 | quarkus-opentelemetry config'i, JAX-RS route template, reactive messaging (SmallRye Kafka/RabbitMQ consumer'larında `trooper.consumer.attempt` otomatik: `trooper` propagator'ı extract sırasında `tt-attempt` → `kafka_deliveryAttempt` → `x-delivery-count`+1 → `x-death`+1 → `delayed-retry-count`+1 okur) |
 | `trooper-llm` | `sdks/jvm` | JVM | GenAI span API'si (`TrooperLlm`), Anthropic SDK sarmalayıcısı, LangChain4j listener — ADR-023 |
 | `trooper-ktor` + `trooper-kotlin` | `sdks/jvm` | Kotlin / Ktor 3 | server + client plugin, coroutine context |
 | `TaskTrooper.Telemetry` (+ `.AspNetCore`, `.Kafka`, `.RabbitMQ`, `.MassTransit`, `.EntityFrameworkCore`, `.Redis`) | `sdks/dotnet` | .NET 8+ | ASP.NET Core, HttpClient, SqlClient/EF Core, Npgsql, Redis, gRPC, Confluent.Kafka, RabbitMQ, MassTransit |
-| `@trooper/node` | `sdks/js/packages/node` | Node.js ≥ 22.15 | `@opentelemetry/sdk-node` + OTLP/HTTP protobuf (traces/metrics/logs); http, undici, express, koa, NestJS, kafkajs, amqplib, pg, mysql2, mongodb, ioredis/redis, pino/winston log bridge; route template helper'ları (express, fastify, koa, Hono, NestJS interceptor), BullMQ processor wrapper'ı, `tt-attempt` okuma/yazma |
-| `@trooper/core` + `@trooper/browser` | `sdks/js/packages` | Web | page view, SPA route, Web Vitals, fetch/XHR + traceparent, JS error, click (rage/dead), sendBeacon, offline kuyruk |
-| `@trooper/replay` | `sdks/js/packages` | Web | session replay (rrweb kayıt, maskeleme, örnekleme) — ADR-021 |
-| `@trooper/react`, `@trooper/vue`, `@trooper/angular` | `sdks/js/packages` | Web framework'leri | ErrorBoundary/errorHandler, router entegrasyonu (react-router, Next.js, TanStack Router, vue-router, Angular Router) → route template view adı |
-| `@trooper/react-native` | `sdks/js/packages` | React Native | react-navigation ekranları, app start, JS hataları, network, AppState flush |
+| `@tasktrooper/node` | `sdks/js/packages/node` | Node.js ≥ 22.15 | `@opentelemetry/sdk-node` + OTLP/HTTP protobuf (traces/metrics/logs); http, undici, express, koa, NestJS, kafkajs, amqplib, pg, mysql2, mongodb, ioredis/redis, pino/winston log bridge; route template helper'ları (express, fastify, koa, Hono, NestJS interceptor), BullMQ processor wrapper'ı, `tt-attempt` okuma/yazma |
+| `@tasktrooper/core` + `@tasktrooper/browser` | `sdks/js/packages` | Web | page view, SPA route, Web Vitals, fetch/XHR + traceparent, JS error, click (rage/dead), sendBeacon, offline kuyruk |
+| `@tasktrooper/replay` | `sdks/js/packages` | Web | session replay (rrweb kayıt, maskeleme, örnekleme) — ADR-021 |
+| `@tasktrooper/react`, `@tasktrooper/vue`, `@tasktrooper/angular` | `sdks/js/packages` | Web framework'leri | ErrorBoundary/errorHandler, router entegrasyonu (react-router, Next.js, TanStack Router, vue-router, Angular Router) → route template view adı |
+| `@tasktrooper/react-native` | `sdks/js/packages` | React Native | react-navigation ekranları, app start, JS hataları, network, AppState flush |
 | `trooper-android` (+ `-okhttp`, `-compose`) | `sdks/android` | Android | Activity/Fragment/Compose ekranları, app start, crash, ANR, frozen frame, OkHttp |
 | `TaskTrooper` (SPM + CocoaPods) | `sdks/ios` | iOS | UIKit/SwiftUI ekranları, app start, crash (signal + NSException), hang, URLSession |
-| `trooper_flutter` (+ `trooper_dio`) | `sdks/flutter` | Flutter | Navigator/go_router, Flutter/Dart hataları, http/dio, frame timing, app start |
+| `tasktrooper_flutter` (+ `tasktrooper_dio`) | `sdks/flutter` | Flutter | Navigator/go_router, Flutter/Dart hataları, http/dio, frame timing, app start |
 | `tasktrooper` (PyPI, ADR-024) | `sdks/python` | Python ≥ 3.9 | OTel dağıtımı (django, fastapi, flask, celery, sqlalchemy, requests, httpx — OTel contrib extras), route template, profiling, `instrument_openai` / `instrument_anthropic` |
 
 Kütüphane başına özel kod sadece OTel'in vermediği bilgi için yazılır: route template (`trooper.route`), consumer process adı,
 çağıran servis (`tt.svc` baggage). Geri kalan her şey OTel instrumentation'ından gelir.
 
 **Dogfooding (ADR-027, contracts §27).** Platformun kendisi bu SDK'ların ilk kullanıcısıdır: Go servisleri
-`telemetry-go` ile (`TROOPER_DSN`), dashboard `apps/web` `@trooper/browser` + `@trooper/react` + `@trooper/replay` ile
+`telemetry-go` ile (`TROOPER_DSN`), dashboard `apps/web` `@tasktrooper/browser` + `@tasktrooper/react` + `@tasktrooper/replay` ile
 (`tt-web`, `VITE_TROOPER_DSN`; yoksa SDK chunk'ı hiç yüklenmez — dynamic import), altyapı `trooper-agent` ile
 (`deploy/self/agent.yaml`, `make self`) ayrı "TaskTrooper" projesine raporlar. `apps/web` paketleri root pnpm
 workspace'inden `workspace:*` ile bağlar (build edilmiş `dist`; `pnpm sdk:build` / `make check` önce SDK'ları build eder).
@@ -49,8 +49,8 @@ workspace'inden `workspace:*` ile bağlar (build edilmiş `dist`; `pnpm sdk:buil
 ### Node
 
 ```ts
-// ESM: node --import @trooper/node/register app.mjs   (CJS: --require; env'den init eder)
-import { init } from '@trooper/node';
+// ESM: node --import @tasktrooper/node/register app.mjs   (CJS: --require; env'den init eder)
+import { init } from '@tasktrooper/node';
 
 init({
   dsn: process.env.TROOPER_DSN,           // https://<ingest-key>@ingest.trooper.dev/<project>
@@ -73,7 +73,7 @@ Route template helper'ları: `app.use(trooperExpress())`, `app.register(trooperF
 Worker/consumer için ek API:
 
 ```ts
-import { processMessage, instrumentBullmqProcessor, withTraceContext, injectHeaders, nextAttempt, setAttemptHeader, markDlq } from '@trooper/node';
+import { processMessage, instrumentBullmqProcessor, withTraceContext, injectHeaders, nextAttempt, setAttemptHeader, markDlq } from '@tasktrooper/node';
 
 // kafkajs / amqplib: upstream OTel instrumentation + hook → trooper.consumer.attempt (tt-attempt, x-delivery-count, x-death)
 new Worker('emails', instrumentBullmqProcessor(async (job) => send(job.data)));     // attempt = attemptsStarted
@@ -112,7 +112,7 @@ metrik aralığında. Resource'ta process başına rastgele `service.instance.id
 ### Browser
 
 ```ts
-import { init, identify, track } from '@trooper/browser';
+import { init, identify, track } from '@tasktrooper/browser';
 
 init({ dsn, service: 'shop-web', environment: 'production', version, tracePropagationTargets: [/api\.shop\.com/] });
 identify({ id: user.id, email: user.email, plan: 'pro' });   // opt-in
@@ -129,18 +129,18 @@ CORS `Access-Control-Allow-Headers`'a `traceparent` ile birlikte `baggage`'ı da
 ### Session replay (ADR-021, contracts §23)
 
 ```ts
-import { init } from '@trooper/browser';
-import { replayIntegration } from '@trooper/replay';
+import { init } from '@tasktrooper/browser';
+import { replayIntegration } from '@tasktrooper/replay';
 
 init({ dsn, service: 'shop-web', integrations: [
   replayIntegration({ sampleRate: 0.1, onErrorSampleRate: 1.0, maskAllText: true, maskAllInputs: true }),
 ] });
 ```
 
-`@trooper/replay` `@rrweb/record`'u sarar (ayrı paket; `@trooper/browser` boyutu değişmez). CDN: `trooper-replay.iife.js`
-`window.TrooperReplay`. Oturum ve hata bilgisini `@trooper/browser`'ın integration kancalarından alır.
+`@tasktrooper/replay` `@rrweb/record`'u sarar (ayrı paket; `@tasktrooper/browser` boyutu değişmez). CDN: `trooper-replay.iife.js`
+`window.TrooperReplay`. Oturum ve hata bilgisini `@tasktrooper/browser`'ın integration kancalarından alır.
 
-React Native: `import { startReplay } from '@trooper/react-native'; startReplay({ sampleRate: 0.1 })` (native SDK gerekir).
+React Native: `import { startReplay } from '@tasktrooper/react-native'; startReplay({ sampleRate: 0.1 })` (native SDK gerekir).
 Flutter: `TaskTrooper.init(config, appRunner: …, replay: const TrooperReplayOptions(sampleRate: 0.1))` — Dart tarafı wireframe; unmask `TrooperUnmask(child: …)`.
 
 Mobil (wireframe, ekran görüntüsü yok):
@@ -168,7 +168,7 @@ Varsayılan kapalı; `TROOPER_PROFILING=true` veya kodda:
 LLM çağrıları OTel GenAI span'ı olarak gider; içerik (`captureContent`) varsayılan kapalı.
 - Node: `instrumentOpenAI(new OpenAI())`, `instrumentAnthropic(new Anthropic())` (stream dahil token + TTFT); Vercel AI SDK
   `experimental_telemetry: { isEnabled: true }` span'ları olduğu gibi gelir. `init({ llm: { captureContent: true } })`.
-- Go (`github.com/tasktrooper/telemetry-go/llm`): `client := openai.NewClient(option.WithHTTPClient(llm.HTTPClient(nil)))` / Anthropic aynı (`llm.HTTPClient` bilinen
+- Go (`github.com/makifbaysal/tasktrooper-telemetry/sdks/go/llm`): `client := openai.NewClient(option.WithHTTPClient(llm.HTTPClient(nil)))` / Anthropic aynı (`llm.HTTPClient` bilinen
   provider host'larını tanır, request/response JSON'undan model + token okur, SSE stream'i bozmadan sayar); elle:
   `ctx, call := llm.Start(ctx, llm.Request{Provider: "anthropic", Model: m, Operation: "chat"}); defer call.End(llm.Usage{…})`.
 - JVM (`trooper-llm` modülü — sadece `opentelemetry-api`, agent'ın yanında uygulama kodundan görünür; Spring starter içerir):
@@ -192,10 +192,10 @@ eşlemesi için `OTEL_SERVICE_NAME` (veya App Insights'ta cloud role name) ile a
 okuyup `service`'i ezer; yetki yoksa sessizce atlanır, başka hiçbir ayar saklanmaz. Detay: contracts §22,
 `services/integrations/README.md` § Azure.
 
-**Node.js Lambda — `@trooper/node`:**
+**Node.js Lambda — `@tasktrooper/node`:**
 
 ```ts
-import { init, wrapLambda } from '@trooper/node';
+import { init, wrapLambda } from '@tasktrooper/node';
 init({ service: 'orders-api' });                       // modül seviyesinde; DSN env'den (TROOPER_DSN)
 export const handler = wrapLambda(async (event, context) => ({ statusCode: 200, body: 'ok' }));
 ```
@@ -261,3 +261,23 @@ OTel semantic conventions esas. `trooper.*` attribute'larının tam listesi ve w
 ## Versiyonlama
 
 Semver. Wire protokolünde kırıcı değişiklik → yeni endpoint versiyonu (`/v2/rum`), eski versiyon en az 12 ay desteklenir.
+
+## Dağıtım
+
+SDK'lar public registry'lerde yayınlanır (ADR-029, lisans Apache-2.0). Her ekosistem bağımsız sürümlenir; release, ekosisteme
+özel tag ile (`js-vX.Y.Z`, `jvm-vX.Y.Z`, `android-vX.Y.Z`, `dotnet-vX.Y.Z`, `python-vX.Y.Z`, `ios-vX.Y.Z`,
+`tasktrooper_flutter-vX.Y.Z`, `tasktrooper_dio-vX.Y.Z`, `sdks/go/vX.Y.Z`) `.github/workflows/release-*.yml` üzerinden yapılır.
+Workflow tag sürümü ile paket sürümünü karşılaştırır, testleri koşar, sonra yayınlar. Kimlik doğrulama mümkün olan her yerde OIDC
+trusted publishing'dir (npm, PyPI, NuGet, pub.dev); Maven Central ve CocoaPods repo secret'ı kullanır.
+
+| Ekosistem | Kurulum |
+|---|---|
+| Go | `go get github.com/makifbaysal/tasktrooper-telemetry/sdks/go@latest` |
+| JS | `npm i @tasktrooper/browser` (vb.) |
+| JVM / Android | `implementation("ai.tasktrooper:<artifact>:<v>")` + `mavenCentral()` |
+| .NET | `dotnet add package TaskTrooper.Telemetry` |
+| Python | `pip install tasktrooper` |
+| Flutter | `tasktrooper_flutter: ^<v>` |
+| iOS | SwiftPM `https://github.com/makifbaysal/tasktrooper-telemetry` veya `pod 'TaskTrooper'` |
+
+Repo içi kullanım (services, `apps/web`, örnekler) local path / pnpm workspace ile kalır; dış uygulamalar registry paketini kullanır.

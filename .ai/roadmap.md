@@ -23,17 +23,17 @@ Durum: servisler (`ingest`, `api`, `alerting`, `collector`, `integrations` = `tr
 - [x] Cloud entegrasyonları (ADR-012): AWS (RDS, ElastiCache, MSK, SQS), GCP (Cloud SQL, Memorystore, Pub/Sub), Neon, Vercel
   (deploy + drain) + Integrations ekranı
 - [x] Symbolication: sourcemap, R8/ProGuard, dSYM, NDK, Dart + `trooper-cli`
-- [ ] Paket yayınlama (Maven Central, NuGet, npm, pub.dev, CocoaPods) — hesap gerektirir
-- [x] Quarkus `tt-attempt` otomatik okuma; `@trooper/node`
+- [x] Paket yayınlama (npm, PyPI, Maven Central, NuGet, pub.dev, CocoaPods/SwiftPM, Go proxy) — ADR-029
+- [x] Quarkus `tt-attempt` otomatik okuma; `@tasktrooper/node`
 - [x] ingest-gw internal servis credential'ı (`TT_INTERNAL_TOKEN`, contracts §2)
 - [ ] Gerçek AWS/GCP/Neon/Vercel hesaplarıyla doğrulama (şu an fake sunucularla test edildi)
 - [x] Auth (OIDC + dev login, ADR-016), org/proje/üye/API key yönetimi + audit log
 - [x] api: 1 saatten kısa range'ler (`15m`, `30m`)
 
 ## Faz 2 — RUM + Logs ✅
-- [x] `@trooper/browser`, `/v1/rum`, `rum_events` + MV'ler, frontend ekranları gerçek veriye
+- [x] `@tasktrooper/browser`, `/v1/rum`, `rum_events` + MV'ler, frontend ekranları gerçek veriye
 - [x] Log ingestion + pattern + Logs ekranı
-- [x] `@trooper/react-native`
+- [x] `@tasktrooper/react-native`
 - [x] Vercel log kaynağı (`vercel.source`) Logs ekranında filtre
 
 ## Faz 3 — Alerting ✅
@@ -66,7 +66,7 @@ Durum: servisler (`ingest`, `api`, `alerting`, `collector`, `integrations` = `tr
 - [x] Helm chart (DaemonSet + Deployment + RBAC) + opsiyonel eBPF (OBI)
 - [x] Monitor kind `infra`, RCA'da pod/host sinyalleri
 - [x] AWS Lambda keşif + CloudWatch metrikleri, Azure Functions sağlayıcısı, `faas` monitor'ları, maliyet tahmini (ADR-020)
-- [x] `@trooper/node` `wrapLambda`
+- [x] `@tasktrooper/node` `wrapLambda`
 - [x] UI: Hosts, Kubernetes, Serverless ekranları; servis detayında altyapı sekmesi
 - [x] K8s cluster modunda list yerine watch (binlerce pod üstü için)
 - [x] containerd/Podman host'ları, GPU ve Windows node metrikleri
@@ -81,7 +81,7 @@ Durum: servisler (`ingest`, `api`, `alerting`, `collector`, `integrations` = `tr
 - [x] ingest: `/v1/replay` → `tt.replay` → S3 + `replay_segments`; `/v1/profiles` → `tt.profiles` → `profile_stacks`/`profiles`;
   GenAI span'ları → `dep_kind=ai`, `llm_1m`, `llm_content` (OpenLLMetry ve Vercel AI SDK adları dahil)
 - [x] api: `/replays*`, `/profiles/*`, `/ai/*` + fiyat tablosu; sessions `hasReplay`, error `replay`, trace span `llm`
-- [x] SDK: `@trooper/replay` (rrweb), Android/iOS wireframe replay; Go/JVM (JFR)/Node profiling; Node/Go/JVM/.NET LLM span'ları
+- [x] SDK: `@tasktrooper/replay` (rrweb), Android/iOS wireframe replay; Go/JVM (JFR)/Node profiling; Node/Go/JVM/.NET LLM span'ları
 - [x] UI: Replays sekmesi + oynatıcı, Profiling sekmesi + flame graph/diff, AI monitoring ekranı + servis AI sekmesi
 - [x] Demo: replay (web rrweb + mobil wireframe), profil (iki versiyon, diff hikâyeleri), LLM trafiği (Anthropic/OpenAI/Gemini)
 - [ ] Gerçek cihazda mobil replay doğrulaması (main thread maliyeti, Compose/SwiftUI çıktısı)
@@ -111,7 +111,7 @@ Durum: servisler (`ingest`, `api`, `alerting`, `collector`, `integrations` = `tr
 - [x] Geri besleme döngüsü koruması: ingest-gw / ingest-writer `TT_SELF_PROJECT_ID` trafiği için span/log üretmez
 - [x] api CORS: `traceparent`, `tracestate`, `baggage` (RUM → api trace'i uçtan uca)
 - [x] Docker build context repo kökü (Dockerfile'lar `sdks/go`'yu kopyalar)
-- [x] Dashboard RUM `tt-web` (`@trooper/browser` + `@trooper/react` + `@trooper/replay`, `VITE_TROOPER_DSN` yoksa SDK chunk'ı
+- [x] Dashboard RUM `tt-web` (`@tasktrooper/browser` + `@tasktrooper/react` + `@tasktrooper/replay`, `VITE_TROOPER_DSN` yoksa SDK chunk'ı
   yüklenmez): route template view adları, React root error handler'ları, Web Vitals, api'ye `traceparent`, kullanıcı yalnız
   internal id ile `identify`, replay default kapalı + tüm metin maskeli
 - [x] Altyapı: `deploy/self/agent.yaml` (Postgres, Redis, Redpanda `tt.*` topic / `tt-*` group + host + Docker container'ları),
