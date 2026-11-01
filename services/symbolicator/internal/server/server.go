@@ -17,6 +17,7 @@ import (
 	"github.com/tasktrooper/telemetry/services/symbolicator/internal/jsmap"
 	"github.com/tasktrooper/telemetry/services/symbolicator/internal/native"
 	"github.com/tasktrooper/telemetry/services/symbolicator/internal/retrace"
+	"github.com/tasktrooper/telemetry/services/symbolicator/internal/selftel"
 	"github.com/tasktrooper/telemetry/services/symbolicator/internal/store"
 )
 
@@ -87,7 +88,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/artifacts", s.authed(s.list))
 	mux.Handle("DELETE /v1/artifacts", s.authed(s.deleteRelease))
 	mux.Handle("POST /v1/symbolicate", s.authed(s.symbolicate))
-	return s.recoverer(mux)
+	// server spans sit inside the recoverer so a panic is recorded before the 500 (ADR-027)
+	return s.recoverer(selftel.Handler(mux))
 }
 
 type ctxKey struct{}
@@ -106,6 +108,7 @@ func (s *Server) authed(h func(http.ResponseWriter, *http.Request)) http.Handler
 			writeErr(w, http.StatusServiceUnavailable, "auth backend unavailable")
 			return
 		}
+		selftel.TagProject(r.Context(), project)
 		h(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, project)))
 	})
 }

@@ -14,7 +14,7 @@ Turns minified / obfuscated / unsymbolicated stacks from RUM and APM errors back
 ## API
 
 All `/v1` routes need `Authorization: Bearer <api key>` (Postgres `api_keys`, `kind='api'`, sha256 lookup,
-60 s cache incl. negative answers; DB down → 503). Dev key: `tt_dev_api_key` (project 1).
+60 s cache incl. negative answers; DB down → 503). No seeded key (ADR-028): create one with `POST /api/v1/api-keys` (dashboard Team → API keys).
 
 - `POST /v1/artifacts` — `multipart/form-data`: fields `kind` (`sourcemap|dsym|r8|proguard|dart|ndk`), `app`, `release`
   (= RUM `resource.version` / `service.version`), one or more file parts (any part name; the SDK uploaders use `file`). The **raw** `filename` is kept as the relative
@@ -89,6 +89,22 @@ downloaded to `TT_SYMBOLICATOR_CACHE_DIR`.
 | `TT_SYMBOLICATOR_CACHE_DIR` | `$TMPDIR/tt-symbolicator` |
 | `TT_SWIFT_DEMANGLE` | auto (`off` disables) |
 
+## Self telemetry (ADR-027)
+
+`internal/selftel` (contracts §27), service `tt-symbolicator`:
+
+| Env | Default | |
+|---|---|---|
+| `TROOPER_DSN` | unset | self project ingest DSN (dev: the DSN `make self` prints, `http://<ingest-key>@localhost:4318/<self-project-id>`); unset = nothing is started, behaviour unchanged |
+| `TROOPER_SERVICE` | `tt-symbolicator` | service name override |
+| `TROOPER_ENV` | `TT_ENV`, else `development` | |
+| `TROOPER_VERSION` | `-X main.version` build value | deploy marker |
+| `TROOPER_SAMPLE_RATE`, `TROOPER_PROFILING`, `TROOPER_DEBUG` | SDK defaults | see `sdks/go/README.md` |
+
+Traced: incoming HTTP (route templates from the mux patterns, `tt.project_id` on authenticated requests; `/healthz`
+untraced), pgx (api key lookup), go-redis (result cache, no arguments), S3 calls (client spans, `peer.service=s3`), slog →
+OTel logs.
+
 ## CLI
 
 `tools/trooper-cli` (own module, stdlib only): `upload-sourcemaps <dir>`, `upload-dsym <path>…` (zips `.dSYM`
@@ -102,7 +118,7 @@ dirs), `upload-mapping <mapping.txt> [--kind proguard]`, `upload-flutter-symbols
 ```bash
 GOWORK=off go test ./...                          # unit + handler tests (in-memory store)
 TT_E2E=1 GOWORK=off go test ./e2e/ -v             # live: SeaweedFS + Postgres + Redis, drives the CLI binary
-docker build -f symbolicator/Dockerfile -t tasktrooper/symbolicator services/
+docker build -f services/symbolicator/Dockerfile -t tasktrooper/symbolicator .   # repo root
 ```
 
 Fixtures in `testdata/` are real build outputs: `js/` (esbuild 0.25 `--bundle --minify --sourcemap` of `js/src`),

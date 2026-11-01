@@ -20,10 +20,40 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )
 
-const apiKey = "tt_dev_api_key" // deploy/postgres/002_seed.sql (project 1)
+// fixture creates its own org + project + api key (sha256, as the api stores it) — nothing depends on seeded
+// rows (ADR-028) — and deletes them afterwards (the org delete cascades project and key).
+func fixture(t *testing.T) (key string, project int64) {
+	t.Helper()
+	ctx := context.Background()
+	pgURL := os.Getenv("TT_POSTGRES_URL")
+	if pgURL == "" {
+		pgURL = "postgres://trooper:trooper@localhost:5432/trooper?sslmode=disable"
+	}
+	pg, err := pgxpool.New(ctx, pgURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pg.Close)
+	name := fmt.Sprintf("symbolicator-e2e-%d", time.Now().UnixNano())
+	key = "tt_api_" + name
+	var org int64
+	if err := pg.QueryRow(ctx, `INSERT INTO orgs (name) VALUES ($1) RETURNING id`, name).Scan(&org); err != nil {
+		t.Fatalf("postgres fixture (make infra && make migrate): %v", err)
+	}
+	t.Cleanup(func() { _, _ = pg.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, org) })
+	if err := pg.QueryRow(ctx, `INSERT INTO projects (org_id, name, slug) VALUES ($1, $2, $2) RETURNING id`, org, name).Scan(&project); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pg.Exec(ctx, `INSERT INTO api_keys (project_id, name, kind, hash, prefix) VALUES ($1, 'e2e', 'api', digest($2::text, 'sha256'), left($2, 8))`,
+		project, key); err != nil {
+		t.Fatal(err)
+	}
+	return key, project
+}
 
 func build(t *testing.T, dir, out string) string {
 	t.Helper()
@@ -46,13 +76,13 @@ func freePort(t *testing.T) string {
 }
 
 type cli struct {
-	bin, url string
+	bin, url, key string
 }
 
 func (c cli) run(t *testing.T, stdin string, args ...string) (int, string, string) {
 	t.Helper()
 	cmd := exec.Command(c.bin, args...)
-	cmd.Env = append(os.Environ(), "TROOPER_API_URL="+c.url, "TROOPER_API_KEY="+apiKey)
+	cmd.Env = append(os.Environ(), "TROOPER_API_URL="+c.url, "TROOPER_API_KEY="+c.key)
 	cmd.Stdin = strings.NewReader(stdin)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
@@ -91,9 +121,10 @@ func TestLiveStack(t *testing.T) {
 	if os.Getenv("TT_E2E") != "1" {
 		t.Skip("set TT_E2E=1 (needs docker compose infra: S3 :9002, Postgres :5432, Redis :6379)")
 	}
+	key, project := fixture(t) // its t.Cleanup runs after the deferred artifact cleanup below
 	tmp := t.TempDir()
 	svc := build(t, "../cmd/symbolicator", filepath.Join(tmp, "symbolicator"))
-	c := cli{bin: build(t, "../../../tools/trooper-cli", filepath.Join(tmp, "trooper-cli"))}
+	c := cli{bin: build(t, "../../../tools/trooper-cli", filepath.Join(tmp, "trooper-cli")), key: key}
 
 	addr := freePort(t)
 	c.url = "http://" + addr
@@ -130,7 +161,7 @@ func TestLiveStack(t *testing.T) {
 		c.run(t, "", append([]string{"delete"}, ar...)...)
 		opt, _ := redis.ParseURL("redis://localhost:6379/0")
 		rc := redis.NewClient(opt)
-		rc.Del(context.Background(), "ttsym:gen:1:"+app+":"+rel)
+		rc.Del(context.Background(), fmt.Sprintf("ttsym:gen:%d:%s:%s", project, app, rel))
 		rc.Close()
 	}
 	defer cleanup()
@@ -208,7 +239,7 @@ func TestLiveStack(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"app": app, "release": rel, "platform": "android", "stack": "java.lang.Error\n\tat a.a.a(SourceFile:1)"})
 	for i, want := range []string{"miss", "hit"} {
 		req, _ := http.NewRequest("POST", c.url+"/v1/symbolicate", bytes.NewReader(body))
-		req.Header.Set("Authorization", "Bearer "+apiKey)
+		req.Header.Set("Authorization", "Bearer "+c.key)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -228,5 +259,5 @@ func TestLiveStack(t *testing.T) {
 }
 
 func (c cli) runWithKey(t *testing.T, key string, args ...string) (int, string, string) {
-	return cli{bin: c.bin, url: c.url}.run(t, "", append(args, "--key", key)...)
+	return cli{bin: c.bin, url: c.url, key: c.key}.run(t, "", append(args, "--key", key)...)
 }
