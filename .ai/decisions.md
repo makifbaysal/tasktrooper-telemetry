@@ -500,5 +500,8 @@ yok. Elde bir Mac mini (Apple Silicon, 16 GB) ve Docker Desktop var. Ev ağında
   `DEMO_TROOPER_DSN`; özel bootstrap yok. Go servisleri ve dashboard RUM'u public ingest host'una, `trooper-agent`
   container'ı (`deploy/demo/agent.yaml`, modlar `db,host`) Postgres/Redis/Redpanda ve container metriklerini gönderir.
   `TT_SELF_PROJECT_ID` (döngü koruması) DSN'in proje id'sinden türetilir.
+- Self-telemetry gönderen container'lar `dns: [1.1.1.1, 8.8.8.8]` kullanır (ev router'ının eski DNS önbelleği public ingest
+  host'unu başka yere çözmesin); `TROOPER_VERSION` = git kısa sha (deploy marker). Dashboard: `/assets/*` uzun önbellek,
+  diğer her path `no-cache`; build `rsync --delete-after` ile kopyalanır (deploy sırasında 404 yok).
 **Sonuç:** Kurulum ve adımlar `deploy/demo/README.md`. Makine kapanınca demo da kapanır (uptime garantisi yok); yedek ve
 kısa retention ayrı iş. Production'a geçişte ADR-030 host'ları ve ayrı altyapı geçerli olur.
