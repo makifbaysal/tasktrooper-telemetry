@@ -3,6 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+description = "TaskTrooper OkHttp interceptor: RESOURCE events + W3C traceparent injection"
+
 android {
     namespace = "com.tasktrooper.android.okhttp"
     compileSdk = 36

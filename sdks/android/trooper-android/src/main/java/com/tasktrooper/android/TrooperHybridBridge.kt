@@ -7,7 +7,7 @@ import com.tasktrooper.android.internal.Internal
 /**
  * Shared context for hybrid apps (Flutter / React Native on top of this SDK), contracts.md §9.
  * Callers forward their calls here, so native crashes and JS/Dart events share one session:
- * - Flutter: the `trooper_flutter` plugin's MethodChannel [CHANNEL] (`dev.tasktrooper.telemetry/rum`);
+ * - Flutter: the `tasktrooper_flutter` plugin's MethodChannel [CHANNEL] (`dev.tasktrooper.telemetry/rum`);
  * - React Native: the native module named [RN_MODULE] (`TrooperRum`; the JS side falls back to a module
  *   named [CHANNEL]).
  * Map keys: session_id, anonymous_id, view_id, view_name, user_id, sampled (bool: that layer's RUM sampling

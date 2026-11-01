@@ -3,6 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+description = "TaskTrooper Android RUM SDK: sessions, views, app start, crashes, ANR, frames, offline batching"
+
 android {
     namespace = "com.tasktrooper.android"
     compileSdk = 36

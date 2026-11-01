@@ -4,6 +4,8 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+description = "TaskTrooper Jetpack Compose integration: Navigation Compose screen tracking, actions, replay masking"
+
 android {
     namespace = "com.tasktrooper.android.compose"
     compileSdk = 36

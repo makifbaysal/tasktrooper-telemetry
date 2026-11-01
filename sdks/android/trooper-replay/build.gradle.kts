@@ -3,6 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+description = "TaskTrooper wireframe session replay for Android (no screenshots)"
+
 android {
     namespace = "com.tasktrooper.android.replay"
     compileSdk = 36

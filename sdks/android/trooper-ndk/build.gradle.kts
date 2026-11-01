@@ -5,6 +5,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+description = "TaskTrooper Android native (NDK) crash handler; depends on trooper-android"
+
 android {
     namespace = "com.tasktrooper.android.ndk"
     compileSdk = 36
