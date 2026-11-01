@@ -17,6 +17,7 @@ import {
 } from '@/data/api/ops';
 import { findRootCause } from '@/lib/rca';
 import { can, denied } from '@/data/auth';
+import { LocalAICost } from '@/components/ui/LocalAICost';
 import { targetLabel } from '@/data/slack';
 import { WhyBlock, badLabel, badSeries, kpiRca, objectivePct } from './Kpis';
 import { ago, clock, compact, dateTime, duration, ms, pct } from '@/lib/format';
@@ -611,6 +612,7 @@ export function IncidentDrawer({ incident: i, state, onClose, onAck, onResolve, 
       subtitle={<span className="row" style={{ gap: 'var(--space-2)' }}><StatusBadge status={incidentStatus(state)} /><Badge tone={sevTone(i.severity)}>{i.severity}</Badge><span className="muted">started {dateTime(i.startedAt)}</span></span>}
       actions={<>
         <Button size="sm" icon={<Sparkles size={12} />} disabled={explaining} onClick={() => void explain()}>{explaining ? 'Explaining…' : 'Explain'}</Button>
+        <LocalAICost />
         {i.kpiId && <Button size="sm" icon={<Target size={12} />} onClick={() => nav(`/kpis/${i.kpiId}`)}>Open KPI</Button>}
         {sid && <Button size="sm" icon={<ExternalLink size={12} />} onClick={() => onOpenService(sid)}>Open {i.service}</Button>}
         {state === 'firing' && can('write') && <Button size="sm" variant="primary" icon={<Check size={12} />} onClick={onAck}>Acknowledge</Button>}
@@ -625,9 +627,11 @@ export function IncidentDrawer({ incident: i, state, onClose, onAck, onResolve, 
           <Button size="sm" icon={<Sparkles size={12} />} disabled={suggesting} onClick={() => void suggestNextSteps()}>
             {suggesting ? 'Drafting…' : 'Suggest next steps'}
           </Button>
+          <LocalAICost />
           <Button size="sm" icon={<FileCode2 size={12} />} disabled={reporting} onClick={() => void draftReport()}>
             {reporting ? 'Drafting…' : 'Draft incident report'}
           </Button>
+          <LocalAICost />
         </div>
         {nextSteps.length > 0 && <ol className="stack" style={{ gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}>
           {nextSteps.map((step) => <li key={step}>{step}</li>)}
@@ -707,6 +711,7 @@ export function IncidentDrawer({ incident: i, state, onClose, onAck, onResolve, 
           <Button size="sm" icon={<Sparkles size={12} />} disabled={triaging || related.length === 0} onClick={() => void triageLogs()}>
             {triaging ? 'Triage in progress…' : 'Triage logs'}
           </Button>
+          <LocalAICost />
         </div>
         {triage && <div className="stack" style={{ gap: 'var(--space-1)', marginBottom: 'var(--space-3)' }}>
           {triage.groups.map((group) => <div key={group.label}>{group.label}: {group.count}</div>)}

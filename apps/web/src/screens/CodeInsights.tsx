@@ -16,6 +16,7 @@ import {
   rotateWebhookSecret, suggestionRows, type InventoryRow, type RepoInfo, type RepoWebhook, type SuggestionRow,
 } from '@/data/codeintel';
 import { ago, compact } from '@/lib/format';
+import { LocalAICost } from '@/components/ui/LocalAICost';
 import { CriticalityBadge } from './shared';
 import { ConnectRepoDrawer, WebhookSetup } from './ConnectRepo';
 
@@ -296,6 +297,7 @@ export function CodeInsights() {
         subtitle={item && <>{KIND_LABEL[item.kind]} · {item.service}</>}
         actions={item && <>
           <Button size="sm" icon={<Sparkles size={14} />} disabled={aiBusy} onClick={() => void runLocalAI('inventory-enrichment')}>Enrich inventory</Button>
+          <LocalAICost />
           {item.kind === 'endpoint' && !item.shadow && <Button size="sm" icon={<Gauge size={14} />} onClick={() => nav('/load-tests')}>Load test this</Button>}
         </>}>
         {item && (
@@ -307,7 +309,9 @@ export function CodeInsights() {
             <DrawerSection title="Local AI drafts" aside="Offline mock · 0 tokens">
               <div className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}>
                 <Button size="sm" icon={<Bell size={12} />} disabled={aiBusy} onClick={() => void runLocalAI('monitor-suggestions')}>Suggest monitors</Button>
+                <LocalAICost />
                 {item.kind === 'endpoint' && <Button size="sm" icon={<Gauge size={12} />} disabled={aiBusy} onClick={() => void runLocalAI('loadtest-draft')}>Draft load test</Button>}
+                {item.kind === 'endpoint' && <LocalAICost />}
               </div>
               {aiItemId === item.id && enrichment && <div className="stack" style={{ marginTop: 'var(--space-3)' }}><p>{enrichment.summary}</p><ul>{enrichment.failureModes.map((mode) => <li key={mode}>{mode}</li>)}</ul></div>}
               {aiItemId === item.id && monitorDraft && <div className="stack" style={{ marginTop: 'var(--space-3)' }}>{monitorDraft.suggestions.map((suggestion) => <div key={suggestion.name}><strong>{suggestion.name}</strong><div className="mono secondary">{suggestion.kind} · {suggestion.condition}</div><div className="muted">{suggestion.rationale}</div></div>)}<span className="muted">Drafts only; no monitor was created.</span></div>}
