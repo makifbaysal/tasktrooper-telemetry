@@ -15,7 +15,7 @@ set -euo pipefail
 REPO="makifbaysal/tasktrooper-telemetry"
 DEFAULT_API_URL="https://telemetry-api.tasktrooper.ai" # docsContent.ts API_HOST
 SKILLS="trooper-diagnose trooper-query trooper-alerts"
-ALL_TOOLS="claude cursor antigravity codex opencode gemini muse"
+ALL_TOOLS="claude muse cursor antigravity codex opencode gemini"
 SERVER="tasktrooper"
 
 TOOLS="" SCOPE="" PROJECT_DIR="" API_URL="" WRITE="" YES=0 BIN_DIR="${TT_INSTALL_DIR:-$HOME/.local/bin}" SOURCE=""

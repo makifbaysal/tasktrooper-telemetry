@@ -231,6 +231,19 @@
   border: 1px solid var(--border); background: var(--bg-page); color: var(--text-primary);
   font: inherit; min-width: 0;
 }
+.select {
+  appearance: none; padding-right: var(--space-8); cursor: pointer;
+  /* chevron drawn with tokens: two half-squares form a small down triangle, inset from the edge */
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+    linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+  background-position:
+    right calc(var(--space-3) + var(--space-1)) center,
+    right var(--space-3) center;
+  background-size: var(--space-1) var(--space-1);
+  background-repeat: no-repeat;
+}
+.select:hover { border-color: var(--border-strong); }
 .input:focus, .select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .input::placeholder { color: var(--text-muted); }
 .input-group { position: relative; display: flex; align-items: center; }
