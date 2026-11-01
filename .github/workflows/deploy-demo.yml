@@ -35,8 +35,8 @@ jobs:
 
       - name: Deploy
         env:
-          # owner (Google sign-in email) of the self project; empty = self-observability off (ADR-027)
-          TT_SELF_OWNER: ${{ vars.DEMO_SELF_OWNER }}
+          # DSN of the TaskTrooper project created in the dashboard; empty = self-observability off (ADR-027)
+          TROOPER_DSN: ${{ secrets.DEMO_TROOPER_DSN }}
         run: deploy/demo/deploy.sh
 
       - name: Remove deploy/.env

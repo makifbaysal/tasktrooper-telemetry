@@ -50,28 +50,19 @@ make migrate
 profiles=(--profile app)
 agent=()
 web_dsn=""
-if [ -n "${TT_SELF_OWNER:-}" ]; then
-  # Self-observability (ADR-027): idempotent `api bootstrap` of TaskTrooper / tasktrooper owned by TT_SELF_OWNER. The
-  # ingest key stays in $self_dir on this machine (reused on every deploy) and is never printed.
-  step "self project"
-  self_dir="$HOME/trooper-demo/self"
-  mkdir -p "$self_dir" && chmod 700 "$self_dir"
-  "${dc[@]}" --profile app build api
-  out="$("${dc[@]}" --profile app run --rm --no-deps -T -u 0 -v "$self_dir:/out" api \
-    bootstrap --org TaskTrooper --project tasktrooper --owner "$TT_SELF_OWNER" --ingest-key-out /out/ingest-key --json)"
-  dsn="$(sed -nE 's/.*"dsn":"([^"]*)".*/\1/p' <<<"$out")"
-  project="$(sed -nE 's/.*"projectId":([0-9]+).*/\1/p' <<<"$out")"
-  key="$(sed -nE 's#^[a-z]+://([^@]+)@.*#\1#p' <<<"$dsn")"
-  if [ -z "$key" ] || [ -z "$project" ]; then echo "api bootstrap returned no dsn" >&2; exit 1; fi
-  [ "${GITHUB_ACTIONS:-}" = true ] && echo "::add-mask::$key"
-  # containers reach ingest-gw directly; the browser uses the public ingest host
-  export TROOPER_SELF_DSN="http://$key@ingest-gw:4318/$project" TT_SELF_PROJECT_ID="$project"
-  web_dsn="$dsn"
+if [ -n "${TROOPER_DSN:-}" ]; then
+  # Self-observability (ADR-027) like any customer: the DSN of a project created in the dashboard (DEMO_TROOPER_DSN
+  # secret), sent through the public ingest host. The project id only feeds ingest-gw/writer's loop guard.
+  step "self-observability"
+  project="${TROOPER_DSN##*/}"
+  [[ "$TROOPER_DSN" =~ ^https?://[^@/]+@[^/]+/[0-9]+$ ]] || { echo "TROOPER_DSN is not <scheme>://<key>@<host>/<project id>" >&2; exit 1; }
+  export TROOPER_SELF_DSN="$TROOPER_DSN" TT_SELF_PROJECT_ID="$project"
+  web_dsn="$TROOPER_DSN"
   profiles+=(--profile self)
   agent=(trooper-agent)
-  echo "self project $project (owner $TT_SELF_OWNER)"
+  echo "on: project $project"
 else
-  echo "TT_SELF_OWNER unset: self-observability off"
+  echo "TROOPER_DSN unset: self-observability off"
 fi
 
 step "dashboard"

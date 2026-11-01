@@ -71,16 +71,17 @@ on api, ingest-gw and web. Data volumes (compose project `tasktrooper`) survive 
 By hand on the machine (from a checkout with `deploy/.env`): `deploy/demo/deploy.sh`.
 
 ## Self-observability (ADR-027)
-Set the environment variable **`DEMO_SELF_OWNER`** (Settings → Environments → demo → Variables) to the Google email you
-sign in with. Each deploy then runs `api bootstrap` for **TaskTrooper / tasktrooper** owned by that user (idempotent; the
-ingest key stays in `~/trooper-demo/self/ingest-key` on the machine and is masked in the log) and:
+Same as any customer: sign in, create a project (e.g. org **TaskTrooper**, project **tasktrooper**) in the dashboard and
+copy its DSN (`https://<ingest-key>@telemetry-ingest.tasktrooper.ai/<project-id>`). Store it as the `demo` environment
+secret **`DEMO_TROOPER_DSN`** and run deploy-demo. Then:
 - the Go services export traces, logs and metrics as `tt-ingest-gw`, `tt-ingest-writer`, `tt-api`, `tt-alert-engine`,
-  `tt-notifier` (env `demo`; ingest-gw/writer skip the self project's own traffic),
+  `tt-notifier` (env `demo`) through the public ingest host; ingest-gw/writer skip that project's own requests (loop guard,
+  `TT_SELF_PROJECT_ID` = the DSN's project id),
 - the dashboard sends RUM as `tt-web`,
 - `trooper-agent` (profile `self`, `deploy/demo/agent.yaml`) reports Postgres, Redis, Redpanda, the Docker VM and every
   container.
 
-Empty variable = all of this is off.
+No secret = all of this is off.
 
 ## First sign-in
 Open `https://telemetry.tasktrooper.ai`, sign in with Google, onboarding creates the org, project and ingest key (DSN).

@@ -3,8 +3,8 @@
 #   docker compose -f deploy/docker-compose.yml -f deploy/demo/docker-compose.demo.yml --profile app up -d --build \
 #     ingest-gw ingest-writer api alert-engine notifier web trooper-agent
 # Values come from deploy/.env (the deploy-demo workflow writes it from the DEMO_ENV secret). Relative paths resolve against deploy/.
-# Self-observability (ADR-027): deploy.sh bootstraps the self project and exports TROOPER_SELF_DSN / TT_SELF_PROJECT_ID;
-# empty = the services export nothing and trooper-agent is not started.
+# Self-observability (ADR-027): deploy.sh exports TROOPER_SELF_DSN / TT_SELF_PROJECT_ID from the DEMO_TROOPER_DSN secret (a
+# project created in the dashboard, public ingest host); empty = the services export nothing and trooper-agent is not started.
 x-restart: &restart { restart: unless-stopped }
 x-self-env: &self_env { TROOPER_ENV: demo }
 
