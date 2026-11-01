@@ -3,6 +3,7 @@
 package secrets
 
 import (
+	"bytes"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
@@ -14,15 +15,24 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/tasktrooper/telemetry/services/pkg/config"
 )
 
 // devKey is used when TT_SECRETS_KEY is unset. Never use it outside local development.
 var devKey = []byte("tasktrooper-dev-secrets-key-32b!")
 
+// ErrDevKeyInProduction is returned by Key when TT_ENV=production and TT_SECRETS_KEY is unset or the dev key.
+var ErrDevKeyInProduction = errors.New("secrets: TT_ENV=production requires TT_SECRETS_KEY set to a non-development key (base64, 32 bytes)")
+
 // Key returns the 32-byte key from TT_SECRETS_KEY (base64), or the dev key with a warning.
+// With TT_ENV=production it fails closed (ErrDevKeyInProduction) instead of falling back.
 func Key() ([]byte, error) {
 	v := os.Getenv("TT_SECRETS_KEY")
 	if v == "" {
+		if config.Production() {
+			return nil, ErrDevKeyInProduction
+		}
 		slog.Warn("TT_SECRETS_KEY not set; using the development key")
 		return devKey, nil
 	}
@@ -32,6 +42,9 @@ func Key() ([]byte, error) {
 	}
 	if len(k) != 32 {
 		return nil, fmt.Errorf("secrets: TT_SECRETS_KEY must be 32 bytes, got %d", len(k))
+	}
+	if config.Production() && bytes.Equal(k, devKey) {
+		return nil, ErrDevKeyInProduction
 	}
 	return k, nil
 }

@@ -28,6 +28,12 @@ func Load() Common {
 	}
 }
 
+// Production reports whether TT_ENV is "production" (case-insensitive). Unset means development; production-only
+// guards (e.g. secrets.Key refusing the dev key) key off this.
+func Production() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("TT_ENV")), "production")
+}
+
 // String returns env key or def.
 func String(key, def string) string {
 	if v, ok := os.LookupEnv(key); ok && v != "" {
