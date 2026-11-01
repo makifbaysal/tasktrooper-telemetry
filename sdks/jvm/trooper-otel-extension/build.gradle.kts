@@ -5,8 +5,10 @@ plugins {
 description = "TaskTrooper OpenTelemetry javaagent extension (use with -Dotel.javaagent.extensions or via trooper-javaagent.jar)"
 
 dependencies {
-    // Bundled into the extension jar; the OTel API/SDK classes are provided by the agent at runtime.
-    implementation(project(":trooper-otel-core"))
+    // Bundled into the extension jar (see tasks.jar), so it is compileOnly and not a dependency in the published POM;
+    // the OTel API/SDK classes are provided by the agent at runtime.
+    compileOnly(project(":trooper-otel-core"))
+    testImplementation(project(":trooper-otel-core"))
     compileOnly(libs.otel.autoconfigure.spi)
     compileOnly(libs.otel.autoconfigure)
     compileOnly(libs.otel.javaagent.extension.api)

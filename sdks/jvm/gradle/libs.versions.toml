@@ -12,6 +12,7 @@ junit = "5.14.4"
 assertj = "3.27.7"
 anthropic = "2.71.0"
 langchain4j = "1.21.0"
+mavenPublish = "0.37.0"
 
 [libraries]
 otel-bom = { module = "io.opentelemetry:opentelemetry-bom", version.ref = "otel" }
@@ -41,3 +42,4 @@ langchain4j-core = { module = "dev.langchain4j:langchain4j-core", version.ref = 
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+maven-publish = { id = "com.vanniktech.maven.publish", version.ref = "mavenPublish" }
