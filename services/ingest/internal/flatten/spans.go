@@ -227,6 +227,10 @@ func spanRow(t tenant.Tenant, res *resourceInfo, sp *tracepb.Span, batch []*trac
 	if isConsumer || k == tracepb.Span_SPAN_KIND_PRODUCER || a.get("messaging.system") != nil {
 		r.Topic = a.first("messaging.destination.name", "trooper.consumer.topic")
 		r.MessagingSystem = MessagingSystem(a.str("messaging.system"))
+		// background job entry (contracts §4): consumer kind, no messaging.system, trooper.entry.method = JOB
+		if r.MessagingSystem == "" && isConsumer && strings.EqualFold(a.str("trooper.entry.method"), jobMethod) {
+			r.MessagingSystem = JobSystem
+		}
 		r.ConsumerGroup = a.first("messaging.consumer.group.name", "messaging.kafka.consumer.group", "trooper.consumer.group")
 		if n, ok := a.int("trooper.consumer.attempt"); ok && n > 0 {
 			r.Attempt = uint16(min(n, 65535))
@@ -479,6 +483,12 @@ func hostOf(u string) string {
 	}
 	return h
 }
+
+// JobSystem is the messaging_system of background job entries (spans, consumer_1m; contracts §4): consumer spans
+// without messaging.system whose trooper.entry.method is JOB. The api never shows them as queues / topics / groups.
+const JobSystem = "job"
+
+const jobMethod = "JOB"
 
 // MessagingSystem normalizes messaging.system to the values the UI and rollups use (contracts §5):
 // kafka | rabbitmq | aws_sqs | gcp_pubsub | aws_sns | servicebus | eventhubs | nats | …

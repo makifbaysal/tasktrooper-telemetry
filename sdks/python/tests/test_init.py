@@ -173,3 +173,47 @@ def test_build_env_flags():
     assert cmd == ["uvicorn", "app:app", "--port", "1"]
     assert env["TROOPER_PROFILING"] == "true" and env["TROOPER_LLM_CAPTURE_CONTENT"] == "true" and env["TROOPER_ENABLED"] == "false"
     assert env["PYTHONPATH"].endswith(os.pathsep + "/x")
+
+
+def _heartbeats(requests):
+    """(service.name, gauge value) of every ``trooper.sdk.heartbeat`` point in the captured /v1/metrics requests."""
+    out = []
+    for q in requests:
+        if q["path"] != "/v1/metrics":
+            continue
+        mt = ExportMetricsServiceRequest()
+        mt.ParseFromString(q["body"])
+        for rm in mt.resource_metrics:
+            svc = _attrs(rm.resource.attributes).get("service.name")
+            for sm in rm.scope_metrics:
+                for m in sm.metrics:
+                    if m.name == "trooper.sdk.heartbeat":
+                        assert sm.scope.name == "TaskTrooper.Telemetry"
+                        for p in m.gauge.data_points:
+                            assert not p.attributes
+                            out.append((svc, p.as_int or p.as_double))
+    return out
+
+
+HEARTBEAT_APP = r"""
+import os, time, tasktrooper
+import tasktrooper._init as ti
+ti._EARLY_EXPORT_S = 0.5
+h = tasktrooper.init(service="py-heartbeat", instrument=False, logs=False, traces=False, metrics=METRICS)
+time.sleep(3)
+os._exit(0)  # no shutdown flush: only the early export may have sent metrics
+"""
+
+
+def test_heartbeat_early_export_without_traffic(httpserver):
+    env = {"TROOPER_DSN": httpserver.url.replace("http://", "http://tt_key@") + "/1"}
+    r = run_py(HEARTBEAT_APP.replace("METRICS", "True"), env)
+    assert r.returncode == 0, r.stderr
+    assert ("py-heartbeat", 1) in _heartbeats(httpserver.requests), [q["path"] for q in httpserver.requests]
+
+
+def test_heartbeat_off_when_metrics_disabled(httpserver):
+    env = {"TROOPER_DSN": httpserver.url.replace("http://", "http://tt_key@") + "/1"}
+    r = run_py(HEARTBEAT_APP.replace("METRICS", "False"), env)
+    assert r.returncode == 0, r.stderr
+    assert not [q for q in httpserver.requests if q["path"] == "/v1/metrics"]

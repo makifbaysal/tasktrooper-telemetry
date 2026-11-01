@@ -143,6 +143,7 @@ func Start(ctx context.Context, cfg Config, opts ...Option) (shutdown ShutdownFu
 		otel.SetMeterProvider(mp)
 		shutdowns = append(shutdowns, mp.Shutdown)
 		self.register(mp.Meter(MeterName))
+		shutdowns = append(shutdowns, startHeartbeat(mp, cfg.MetricInterval, cfg.ExportTimeout))
 		if !cfg.DisableRuntimeMetrics {
 			_ = runtime.Start(runtime.WithMeterProvider(mp))
 		}
@@ -249,6 +250,8 @@ func buildResource(ctx context.Context, cfg Config) (*resource.Resource, error) 
 		attrs = append(attrs, attribute.String(k, v))
 	}
 	res, err := resource.New(ctx,
+		// One id per process start (OTel semconv); OTEL_RESOURCE_ATTRIBUTES or ResourceAttributes override it.
+		resource.WithAttributes(attribute.String("service.instance.id", instanceID())),
 		resource.WithFromEnv(),
 		resource.WithTelemetrySDK(),
 		resource.WithHost(),

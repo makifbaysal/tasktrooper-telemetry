@@ -188,8 +188,8 @@ func (r *Runner) analyze(ctx context.Context, repo model.Repo) {
 		return
 	}
 	log := r.Log.With("repo", repo.FullName, "repo_id", repo.ID)
-	// one root span per analysis run (ADR-027): clone, extract, LLM (GenAI spans), Postgres and ClickHouse are children
-	ctx, span := selftel.StartRoot(ctx, "codeintel.analyze", append(selftel.Tenant(repo.OrgID, repo.ProjectID),
+	// one codeintel.analyze job entry per analysis run (ADR-027, contracts §4): clone, extract, LLM (GenAI spans), Postgres and ClickHouse are children
+	ctx, span := selftel.StartJob(ctx, "codeintel.analyze", append(selftel.Tenant(repo.OrgID, repo.ProjectID),
 		attribute.Int64("tt.repo.id", repo.ID), attribute.String("tt.repo.provider", repo.Provider),
 		attribute.Bool("tt.analysis.full", !analyze.Incremental(repo, pending)))...)
 	var serr error

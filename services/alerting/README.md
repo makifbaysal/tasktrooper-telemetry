@@ -342,13 +342,14 @@ Both binaries report to the platform's own project with the Go SDK (`internal/se
 
 What is traced:
 
-- **alert-engine:** root span `alert.cycle` per evaluation tick (`tt.alert.shards_held`, `tt.alert.monitors`, `tt.alert.kpis`;
-  standbys produce a short cycle span too); children `alert.evaluate` per monitor (`tt.monitor.kind`, `tt.monitor.id`,
+- **alert-engine:** job entry `alert.cycle` (consumer kind, `trooper.entry.method=JOB`, contracts §4) per evaluation tick
+  that holds shards (`tt.alert.shards_held`, `tt.alert.monitors`, `tt.alert.kpis`; a failed leader election is an error
+  cycle; standby replicas produce no span); children `alert.evaluate` per monitor (`tt.monitor.kind`, `tt.monitor.id`,
   `tt.org_id`, `tt.project_id`, `tt.alert.breached`, `tt.alert.no_data`, `tt.alert.stream`), `alert.kpis`, and every
   Postgres (pgx, sanitized SQL) and ClickHouse query (`db.system=clickhouse`, `db.namespace`, `SanitizeSQL`'d
   `db.query.text`) under them. Stream-triggered evaluations are root `alert.evaluate` spans; stream records themselves are
-  not traced (they are the customers' ingest traffic). `alert.ai_quota_check` per quota check.
-- **notifier:** root span `notify.deliver` per delivery attempt (`tt.project_id`, `tt.notification.kind`,
+  not traced (they are the customers' ingest traffic). Job entry `alert.ai_quota_check` per quota check (every replica runs it).
+- **notifier:** job entry `notify.deliver` per delivery attempt (`tt.project_id`, `tt.notification.kind`,
   `tt.notification.attempt`, `tt.channel.type`) with Postgres and outgoing HTTP client spans. The HTTP client spans come from
   `selftel.RedactedTransport`, not otelhttp: they record only scheme + host (`url.full`, `server.address`), method and status,
   never the path or query — Slack/Teams/webhook URLs carry secrets there. Empty outbox polls produce no spans (DB spans are

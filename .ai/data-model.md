@@ -33,6 +33,10 @@ TTL toDateTime(ts) + INTERVAL 15 DAY;
 ### `consumer_1m`
 `service, topic, group, minute, processed, failed, retried, dlq, duration_hist, max_lag`
 - UI'daki birim `(service, process=group)`; `topic` ayrı boyut. Bir topic → N process (her biri ayrı group, ayrı lag).
+- Background job entry'leri (contracts §4) de buraya düşer: `messaging_system = 'job'`, `topic`/`group` boş, process = job adı.
+  api bunları kuyruk/topic/group olarak göstermez (process kaynağı `cron`, method `JOB`).
+- Servis listesi trafiği olmayan servisleri `spans` + `metrics`'ten (`GROUP BY service`, pencerenin en fazla son 24 saati,
+  rollup'ta zaten görünen servisler `NOT IN` ile primary key'den elenir; `trooper.*` metrikleri hariç, heartbeat dahil) bulur.
 
 ### `logs`
 `ts, org_id, project_id, service, env, severity, body, trace_id, span_id, attrs Map, pattern_id UInt64`

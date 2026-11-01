@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/tasktrooper/telemetry-go/troopertest"
 
@@ -45,8 +46,8 @@ func TestOnceScrapeSpan(t *testing.T) {
 			if s == nil {
 				t.Fatalf("no agent.scrape span; got %d spans", len(h.Spans()))
 			}
-			if s.Parent().IsValid() {
-				t.Error("scrape span must be a root span")
+			if s.Parent().IsValid() || s.SpanKind() != trace.SpanKindConsumer || troopertest.AttrString(s, "trooper.entry.method") != "JOB" {
+				t.Error("scrape span must be a job entry (root, consumer kind, JOB)")
 			}
 			if v := troopertest.AttrString(s, "tt.collector.kind"); v != "postgres" {
 				t.Errorf("kind = %q", v)

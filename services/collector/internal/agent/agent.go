@@ -195,8 +195,8 @@ type Runner struct {
 // It never panics and never returns an error: failures become trooper.collector.up = 0.
 func (r *Runner) Once(ctx context.Context) (ok bool) {
 	up := emit.UpAttrs(r.T.Key, r.T.Kind)
-	// self telemetry (ADR-027): one root span per scrape; the scrapers' own clients are not traced
-	ctx, span := selftel.StartRoot(ctx, "agent.scrape",
+	// self telemetry (ADR-027): one agent.scrape job entry (contracts §4) per scrape; the scrapers' own clients are not traced
+	ctx, span := selftel.StartJob(ctx, "agent.scrape",
 		attribute.String("tt.collector.kind", r.T.Kind), attribute.String("tt.collector.target", r.T.ID))
 	var serr error
 	samples := 0

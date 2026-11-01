@@ -374,7 +374,7 @@ cloud metrics go): self telemetry is enabled only by `TROOPER_DSN`.
 | `TROOPER_VERSION` | `-X main.version` build value | deploy marker |
 | `TROOPER_SAMPLE_RATE`, `TROOPER_PROFILING`, `TROOPER_DEBUG` | SDK defaults | see `sdks/go/README.md` |
 
-Traced: one root span per step (`discover <provider>`, `collect <provider>`, attributes `tt.project_id`,
+Traced: one job entry (contracts §4) per step (`discover <provider>`, `collect <provider>`, attributes `tt.project_id`,
 `tt.integration.id`, `cloud.provider`) with the provider API calls (AWS SDK, Azure, GCP, Neon, Vercel via `httpx`) and
 pgx statements as children; slog → OTel logs. The OTLP metrics sent to ingest-gw (`internal/otlp`) are **not** traced
 (feedback loop).

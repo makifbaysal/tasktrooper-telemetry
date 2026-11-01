@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -26,8 +25,6 @@ import (
 
 // Service is the fixed service name of this binary (ADR-027); TROOPER_SERVICE overrides it.
 const Service = "tt-trooper-cloud"
-
-const scope = "github.com/tasktrooper/telemetry/services/integrations"
 
 // Enabled reports whether self telemetry has somewhere to go.
 func Enabled() bool {
@@ -100,10 +97,11 @@ func Client(timeout time.Duration) *http.Client {
 // PGTracer is the pgx tracer (sanitized SQL, no parameters).
 func PGTracer() *trooperpgx.Tracer { return trooperpgx.NewTracer() }
 
-// StartRoot starts an internal root span for one unit of periodic work (discovery, a metrics step). name must be
-// low cardinality; the integration / project go in attributes (tt.project_id is a span attribute, never a label).
-func StartRoot(ctx context.Context, name string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
-	return otel.Tracer(scope).Start(ctx, name, trace.WithNewRoot(), trace.WithSpanKind(trace.SpanKindInternal), trace.WithAttributes(attrs...))
+// StartJob starts the job entry span (contracts §4: kind consumer, trooper.process = name, trooper.entry.method = JOB)
+// of one run of periodic work that did something; idle polls start none. name must be low cardinality; tenant ids
+// go in attributes only (Tenant). A local parent in ctx is not used (new root + link).
+func StartJob(ctx context.Context, name string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
+	return trooper.StartJob(ctx, name, trace.WithAttributes(attrs...))
 }
 
 // End records err (if any) and ends span.

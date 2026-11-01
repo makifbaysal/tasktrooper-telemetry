@@ -79,10 +79,16 @@ func PGTracer() *trooperpgx.Tracer { return trooperpgx.NewTracer(otelpgx.WithDis
 
 func tracer() trace.Tracer { return otel.Tracer(scope) }
 
-// StartRoot starts an internal root span for one unit of periodic work (an evaluation tick, a delivery batch).
-// Names must be low cardinality; tenant ids go in attributes only (Tenant).
-func StartRoot(ctx context.Context, name string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
-	return tracer().Start(ctx, name, trace.WithNewRoot(), trace.WithSpanKind(trace.SpanKindInternal), trace.WithAttributes(attrs...))
+// StartJob starts the job entry span (contracts §4: kind consumer, trooper.process = name, trooper.entry.method = JOB)
+// of one run of periodic work that did something; idle polls start none. name must be low cardinality; tenant ids
+// go in attributes only (Tenant). A local parent in ctx is not used (new root + link).
+func StartJob(ctx context.Context, name string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
+	return trooper.StartJob(ctx, name, trace.WithAttributes(attrs...))
+}
+
+// StartJobAt is StartJob with an explicit start time (work measured before it was known to be a run).
+func StartJobAt(ctx context.Context, name string, at time.Time, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
+	return trooper.StartJob(ctx, name, trace.WithTimestamp(at), trace.WithAttributes(attrs...))
 }
 
 // StartSpan starts an internal child span.

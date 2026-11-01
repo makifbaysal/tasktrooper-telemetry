@@ -128,10 +128,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	defer t.Stop()
 	defer e.elector.Release()
 	for {
-		// one root span per evaluation cycle (ADR-027); evaluations, Postgres and ClickHouse are children
-		tctx, span := selftel.StartRoot(ctx, "alert.cycle")
-		err := e.Tick(tctx)
-		selftel.End(span, err)
+		err := e.Tick(ctx) // alert.cycle job entry when this replica holds shards
 		if err != nil && ctx.Err() == nil {
 			e.log.Error("cycle failed", "err", err)
 		}
@@ -143,17 +140,26 @@ func (e *Engine) Run(ctx context.Context) error {
 	}
 }
 
-// Tick runs one cycle: elect, refresh cache, evaluate monitors and KPIs.
-func (e *Engine) Tick(ctx context.Context) error {
+// Tick runs one cycle: elect, refresh cache, evaluate monitors and KPIs. A cycle that holds shards (or fails
+// the election) is one alert.cycle job entry (ADR-027, contracts §4) with evaluations, Postgres and ClickHouse as
+// children; a standby replica's cycle produces no span.
+func (e *Engine) Tick(ctx context.Context) (err error) {
 	start := time.Now()
 	held, err := e.elector.Tick(ctx)
 	if err != nil {
 		e.reg.Set("tt_alert_leader", 0)
-		return fmt.Errorf("leader election: %w", err)
+		err = fmt.Errorf("leader election: %w", err)
+		_, span := selftel.StartJobAt(ctx, "alert.cycle", start)
+		selftel.End(span, err)
+		return err
 	}
 	e.reg.Set("tt_alert_shards_held", float64(len(held)))
+	if len(held) > 0 {
+		var span trace.Span
+		ctx, span = selftel.StartJobAt(ctx, "alert.cycle", start, attribute.Int("tt.alert.shards_held", len(held)))
+		defer func() { selftel.End(span, err) }()
+	}
 	span := trace.SpanFromContext(ctx)
-	span.SetAttributes(attribute.Int("tt.alert.shards_held", len(held)))
 	if len(held) == 0 {
 		e.reg.Set("tt_alert_leader", 0)
 		if len(e.held) > 0 {

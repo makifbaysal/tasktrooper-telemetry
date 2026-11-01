@@ -226,6 +226,9 @@ SDK's own `recordInputs` / `recordOutputs` settings, not `captureContent`.
   their own errors; errors thrown by *your* handlers are recorded on the span and re-thrown unchanged. Swallowed errors
   are counted in `trooper.sdk.errors{component}` (meter `TaskTrooper.Telemetry`) and `internalErrorCount()`; failed
   export batches count as `component=exporter.traces|metrics|logs`.
+- **Heartbeat**: gauge `trooper.sdk.heartbeat` = 1 (meter `TaskTrooper.Telemetry`, no attributes) from `init()` on, even
+  without traffic, so the service appears in the Services list; first export ~5 s after `init()` (unref'd timer), then
+  every `metricIntervalMs`. Not sent with `metrics: false` or without a DSN.
 - **Async, batched, bounded**: batch span/log processors (bounded queue, drops instead of blocking), periodic metric
   reader, upstream OTLP retry (429/502/503/504 with backoff).
 - **No PII by default**: no headers, bodies or query values.

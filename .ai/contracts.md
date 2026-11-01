@@ -119,6 +119,18 @@ batch'teki en yakın entry-span atasından doldurur. Webhook çağıranlar `call
 Exception type/message `attrs` içine kopyalanır (`errors_1h` okur).
 
 Entry span = `kind ∈ {server, consumer}` ve parent'ı başka servisten (veya yok). RED/consumer rollup'ları sadece entry span'lardan.
+
+**Background job entry:** zamanlayıcı tick'i, iş bulan bir poll, batch gibi broker'dan gelmeyen periyodik iş de entry'dir:
+span kind `consumer`, aynı servisten parent'ı yok (yerel parent varsa yeni root + link; remote parent — ör. başka servisin
+verdiği `TRACEPARENT` — korunur), `trooper.process` = job adı (düşük kardinalite: `alert.cycle`, `billing.sync`; tenant/id
+attribute'ta), `trooper.entry.route` = job adı, `trooper.entry.method` = `JOB`; `messaging.system`, `messaging.destination.name`,
+`messaging.consumer.group.name` **yazılmaz** (mesajlaşma değil). Writer bu span'ın `messaging_system` kolonunu `job` doldurur
+(yalnız `kind=consumer`, `messaging.system` yok ve `trooper.entry.method=JOB` iken) → `consumer_1m`'e `process` = job adı,
+`topic`/`consumer_group` boş, `messaging_system = 'job'` olarak düşer (throughput, hata, süre, `job_missed` monitor'ü).
+api `messaging_system = 'job'` satırlarını kuyruk/topic/consumer group olarak göstermez (process listesinde `JOB` method'u,
+kaynak/topic yok; lag yok); yalnız job entry'si olan servisin tipi `worker`. Job entry'si yalnız iş yapılan run'da açılır —
+boş poll span üretmez, yoksa throughput poll hızına eşit olur. Go: `trooper.StartJob` / `trooper.RunJob` (sdk.md).
+
 **Sampling:** RED metrikleri sampling'den önce sayılmalı → SDK'lar sampling yapsa bile entry span'ları `trooper.sample_rate` (float)
 ile işaretler, writer sayımları `1/sample_rate` ile çarpar. Parent-based sampling'de gerçekte geçerli olan oran upstream'in
 oranıdır: kök span'ı başlatan SDK oranı W3C `tracestate`'e `tt=r:<rate>` olarak yazar; remote parent'lı entry span'lar
@@ -130,6 +142,14 @@ Spring Kafka'da `kafka_deliveryAttempt`).
 
 **SDK iç metriği:** her backend SDK'sı yuttuğu hataları `trooper.sdk.errors` counter'ında (meter `TaskTrooper.Telemetry`,
 attr `component`) sayar. Profiling/LLM bileşenleri: `profiler`, `profiler.cpu`, `exporter.profiles`, `llm`.
+
+**SDK heartbeat (varlık sinyali):** her backend SDK'sı (Go, JVM, .NET, Python, Node) başlatıldığı andan itibaren trafik olmasa da
+`trooper.sdk.heartbeat` gauge'unu (değer 1, meter `TaskTrooper.Telemetry`, attribute yok — bilgi resource'ta: `service.name`,
+`service.version`, `deployment.environment.name`, `service.instance.id`, `telemetry.sdk.*`) metrik export aralığında (default 30–60 sn)
+gönderir; ilk export başlangıçtan ≤ 10 sn sonra. Metrikler kapalıysa (`DisableMetrics` vb.) heartbeat de gönderilmez.
+api servis listesi trafiği olmayan ama heartbeat (veya herhangi bir span/metric) gönderen servisi `worker`/bilinen tip, 0 rpm olarak
+listeler; servis detayında "SDK bağlı, henüz trafik yok" + son görülme zamanı (`lastSeen`) gösterilir. Frontend/mobil SDK'lar
+oturum başlangıcında zaten RUM event'i gönderdiği için heartbeat göndermez.
 
 ## 5. Collector metrikleri (trooper-agent → OTLP metrics → writer)
 
@@ -1053,6 +1073,23 @@ Enstrümantasyon: gelen HTTP (route template'li), pgx, go-redis, franz-go (produ
 seviyesi aynen), codeintel LLM çağrıları (§25, içerik kapalı). Health/metrics uçları (`/healthz`, `/readyz`, `/metrics`) span
 üretmez. Metrik etiketlerinde tenant id yok (kardinalite); tenant bilgisi gerekiyorsa span attribute'u `tt.org_id` /
 `tt.project_id` olarak sadece span'da.
+
+**Periyodik iş = job entry (§4, `trooper.StartJob`; her modülün `internal/selftel.StartJob`'u):** Services ekranında
+arka plan servisleri de throughput / hata / süre ile görünsün diye kök span'lar `consumer` kind job entry'dir:
+
+| Servis | Job (`trooper.process`) | Ne zaman |
+|---|---|---|
+| `tt-alert-engine` | `alert.cycle` | shard tutan her tick (standby replika span üretmez; leader election hatası hatalı cycle); `alert.evaluate` / `alert.kpis` child |
+| `tt-alert-engine` | `alert.ai_quota_check` | her kontrol (5 dk; her replika çalıştırır, `ai_quota_alerts` dedupe eder) |
+| `tt-notifier` | `notify.deliver` | teslim denemesi başına (boş outbox poll'u span üretmez) |
+| `tt-trooper-agent` | `agent.scrape` | hedef scrape'i başına |
+| `tt-codeintel` | `codeintel.analyze` | analiz run'ı başına |
+| `tt-loadtest-ctl` | `loadtest.claim`, `loadtest.verify_domains` | yalnız run claim edildiğinde / bekleyen doğrulama varken; `loadtest.finish` / `.abort` claim'in child'ı |
+| `tt-loadtest-runner` | `loadtest.run` | shard başına (remote parent = claim span, `TRACEPARENT`) |
+| `tt-trooper-cloud` | `discover <provider>`, `collect <provider>` | adım başına |
+
+ingest-writer'ın `process flush`'ı gerçek Kafka consumer'ıdır (`messaging.system=kafka`, group) — job değil. Trafiği olmayan
+servisler (boşta ingest-gw, self kayıtları dışında flush'ı olmayan writer) heartbeat / runtime metrikleriyle listelenir (§4).
 
 **ingest-gw / ingest-writer (döngü koruması, `services/ingest/internal/selfobs`):**
 - gw'de proje ancak key auth'tan sonra bilinir: server span auth'tan **sonra** açılır (başlangıç zamanı = isteğin geliş anı,

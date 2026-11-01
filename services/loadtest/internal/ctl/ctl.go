@@ -181,7 +181,7 @@ func (c *Controller) ClaimOnce(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	ctx, span := selftel.StartIn(ctx, trace.SpanContext{}, "loadtest.claim", trace.WithTimestamp(t0), trace.WithAttributes(
+	ctx, span := selftel.StartJob(ctx, "loadtest.claim", trace.WithTimestamp(t0), trace.WithAttributes(
 		attribute.Int64("tt.project_id", run.ProjectID), attribute.Int64("tt.loadtest.run_id", run.ID),
 		attribute.String("tt.loadtest.executor", c.cfg.Executor)))
 	defer span.End()
@@ -417,7 +417,7 @@ func (c *Controller) VerifyDomains(ctx context.Context) {
 	if len(list) == 0 {
 		return // no span for idle ticks
 	}
-	ctx, span := selftel.StartIn(ctx, trace.SpanContext{}, "loadtest.verify_domains", trace.WithTimestamp(t0),
+	ctx, span := selftel.StartJob(ctx, "loadtest.verify_domains", trace.WithTimestamp(t0),
 		trace.WithAttributes(attribute.Int("tt.loadtest.domains", len(list))))
 	defer span.End()
 	for _, d := range list {

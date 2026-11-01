@@ -21,6 +21,8 @@ export interface Service {
   lag?: number;
   /** 'ebpf' = seen through eBPF (OBI) spans, no SDK (ADR-019, contracts §20) */
   source?: 'sdk' | 'ebpf';
+  /** Unix ms of the latest telemetry in the range (traffic, any span or SDK heartbeat / metric; contracts §4) */
+  lastSeen?: number;
 }
 
 export interface Endpoint {

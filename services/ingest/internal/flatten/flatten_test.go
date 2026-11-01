@@ -247,6 +247,42 @@ func TestMessagingFields(t *testing.T) {
 	}
 }
 
+func TestJobEntries(t *testing.T) {
+	job := attrs("trooper.process", "alert.cycle", "trooper.entry.route", "alert.cycle", "trooper.entry.method", "JOB")
+	tests := []struct {
+		name                   string
+		spans                  []*tracepb.Span
+		row                    int
+		wantSystem, wantRoute  string
+		wantEntry              uint8
+		wantEntryRoute, method string
+	}{
+		{name: "job entry", spans: []*tracepb.Span{span(1, 0, consumer, job)},
+			wantSystem: JobSystem, wantRoute: "alert.cycle", wantEntry: 1, wantEntryRoute: "alert.cycle", method: "JOB"},
+		{name: "child of a job", spans: []*tracepb.Span{span(1, 0, consumer, job), span(2, 1, client, attrs("db.system", "postgresql",
+			"trooper.entry.route", "alert.cycle", "trooper.entry.method", "JOB"))}, row: 1,
+			wantRoute: "alert.cycle", wantEntryRoute: "alert.cycle", method: "JOB"},
+		{name: "lower-case method", spans: []*tracepb.Span{span(1, 0, consumer, attrs("trooper.process", "sync", "trooper.entry.method", "job"))},
+			wantSystem: JobSystem, wantRoute: "sync", wantEntry: 1, wantEntryRoute: "sync", method: "JOB"},
+		{name: "messaging.system wins", spans: []*tracepb.Span{span(1, 0, consumer, attrs("messaging.system", "rabbitmq",
+			"trooper.process", "mailer", "trooper.entry.method", "JOB"))},
+			wantSystem: "rabbitmq", wantRoute: "mailer", wantEntry: 1, wantEntryRoute: "mailer", method: "JOB"},
+		{name: "consumer without method is not a job", spans: []*tracepb.Span{span(1, 0, consumer, attrs("trooper.process", "legacy"))},
+			wantRoute: "legacy", wantEntry: 1, wantEntryRoute: "legacy"},
+		{name: "internal span with JOB is not a job", spans: []*tracepb.Span{span(1, 0, internal, attrs("trooper.entry.method", "JOB"))}, method: "JOB"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := Spans(tn, traces("tt-alert-engine", tt.spans...), nil)[tt.row]
+			if r.MessagingSystem != tt.wantSystem || r.Route != tt.wantRoute || r.IsEntry != tt.wantEntry ||
+				r.EntryRoute != tt.wantEntryRoute || r.EntryMethod != tt.method || r.Topic != "" || r.ConsumerGroup != "" {
+				t.Errorf("system=%q route=%q entry=%d entryRoute=%q method=%q topic=%q group=%q", r.MessagingSystem, r.Route, r.IsEntry,
+					r.EntryRoute, r.EntryMethod, r.Topic, r.ConsumerGroup)
+			}
+		})
+	}
+}
+
 func TestAttrCaps(t *testing.T) {
 	var a []*commonpb.KeyValue
 	big := make([]byte, 5000)
@@ -512,6 +548,30 @@ func BenchmarkFlattenSpans(b *testing.B) {
 	}
 	req := traces("orders-api", spans...)
 	rows := make([]SpanRow, 0, 100)
+	b.ReportAllocs()
+	for b.Loop() {
+		rows = Spans(tn, req, rows[:0])
+	}
+	b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*len(spans)), "ns/span")
+}
+
+// BenchmarkFlattenConsumerSpans: Kafka consumer entries and background job entries (contracts §4) with children.
+func BenchmarkFlattenConsumerSpans(b *testing.B) {
+	var spans []*tracepb.Span
+	for i := range 20 {
+		base := byte(i*4 + 1)
+		spans = append(spans,
+			span(base, 0, consumer, attrs("messaging.system", "kafka", "messaging.destination.name", "orders", "messaging.consumer.group.name", "billing",
+				"trooper.process", "billing", "trooper.consumer.attempt", 1, "trooper.sample_rate", 1.0)),
+			span(base+1, base, client, attrs("db.system", "postgresql", "db.namespace", "orders", "db.query.text", "UPDATE orders SET paid = true WHERE id = 1")),
+			span(base+2, 0, consumer, attrs("trooper.process", "alert.cycle", "trooper.entry.route", "alert.cycle", "trooper.entry.method", "JOB",
+				"trooper.sample_rate", 1.0)),
+			span(base+3, base+2, client, attrs("db.system", "clickhouse", "db.namespace", "telemetry", "db.query.text", "SELECT count() FROM red_1m",
+				"trooper.entry.route", "alert.cycle", "trooper.entry.method", "JOB")),
+		)
+	}
+	req := traces("worker", spans...)
+	rows := make([]SpanRow, 0, 80)
 	b.ReportAllocs()
 	for b.Loop() {
 		rows = Spans(tn, req, rows[:0])

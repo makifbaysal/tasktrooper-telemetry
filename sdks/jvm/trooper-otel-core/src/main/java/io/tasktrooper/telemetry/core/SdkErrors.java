@@ -18,7 +18,8 @@ import java.util.logging.Logger;
  *
  * <p>Errors are counted in memory from the start; the counter is registered once an {@link OpenTelemetry} is known
  * ({@link #bind}: javaagent listener, {@link TrooperSdk}, Spring/Quarkus/Ktor integrations), or lazily from
- * {@link GlobalOpenTelemetry} once that has been set. Never throws.
+ * {@link GlobalOpenTelemetry} once that has been set. Binding also registers the presence gauge ({@link SdkHeartbeat}).
+ * Never throws.
  */
 public final class SdkErrors {
     public static final String METER = "TaskTrooper.Telemetry";
@@ -73,6 +74,7 @@ public final class SdkErrors {
         } catch (Throwable t) {
             LOG.log(Level.FINE, "TaskTrooper: cannot register " + METRIC, t);
         }
+        SdkHeartbeat.bind(openTelemetry);
     }
 
     /** Current count for a component (tests / diagnostics). */
@@ -91,5 +93,6 @@ public final class SdkErrors {
             registration = null;
             boundTo = null;
         }
+        SdkHeartbeat.resetForTest();
     }
 }

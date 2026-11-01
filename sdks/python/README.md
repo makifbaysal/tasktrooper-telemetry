@@ -64,6 +64,7 @@ flush and never raises. Without a DSN nothing is exported but propagation and th
 | URLs | query **values** stripped (`?token=…` → `?token`) |
 | Logs | stdlib `logging` → OTLP logs with trace/span ids (via `opentelemetry-instrumentation-logging` when installed) |
 | Self-metric | `trooper.sdk.errors{component}` (meter `TaskTrooper.Telemetry`) counts every swallowed error |
+| Heartbeat | gauge `trooper.sdk.heartbeat` = 1 (meter `TaskTrooper.Telemetry`, no attributes) from `init()` on, even without traffic, so the service appears in the Services list; first export ~5 s after `init()`, then every `metric_interval_s`. Not sent with `metrics=False` or without a DSN |
 
 ### Route templates
 

@@ -2,7 +2,7 @@ import { ServiceLoadTests } from './ServiceLoadTests';
 import { ServiceLag } from './ConsumerLag';
 import { useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
-import { Bell, Play } from 'lucide-react';
+import { Bell, Play, PlugZap } from 'lucide-react';
 import { BreakdownBar, Columns, Flow, Legend, Sparkline, TimeSeries, seriesColor } from '@/components/charts';
 import {
   Badge, Button, Card, Drawer, DrawerSection, EmptyState, KeyValues, MetricCard, PageHeader, Section, Segmented, StatusBadge, Table, Tabs, useDrawer,
@@ -70,7 +70,7 @@ export function ServiceDetail() {
     <>
       <PageHeader title={svc.name}
         crumbs={[{ label: categoryOf(svc.type).label, to: `/services?type=${categoryOf(svc.type).id}` }, { label: svc.name }]}
-        subtitle={<span className="row" style={{ gap: 12 }}><StatusBadge status={svc.status} /><ServiceType type={svc.type} /><span className="muted">{svc.language} · {svc.version} · {svc.instances} instances</span>{svc.source === 'ebpf' && <EbpfBadge />}</span>}
+        subtitle={<span className="row" style={{ gap: 12 }}><StatusBadge status={svc.status} /><ServiceType type={svc.type} /><span className="muted">{[svc.language, svc.version, svc.instances > 0 ? `${svc.instances} instance${svc.instances === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')}</span>{svc.source === 'ebpf' && <EbpfBadge />}</span>}
         actions={<>
           <Button icon={<Play size={14} />} onClick={() => nav('/load-tests')}>Load test</Button>
         </>} />
@@ -79,7 +79,9 @@ export function ServiceDetail() {
       {diagnose(svc.id).map((d) => <RootCauseCard key={d.metric} d={d} scope={svc.name} />)}
       <KpisAtRisk serviceId={svc.id} />
 
-      <HealthSection svc={svc} ts={ts} unit={unit} isConsumer={isConsumer} critical={critical} />
+      {svc.rpm > 0
+        ? <HealthSection svc={svc} ts={ts} unit={unit} isConsumer={isConsumer} critical={critical} />
+        : <NoTraffic svc={svc} onLogs={() => setTab('logs')} />}
 
       <Section>
         <Tabs value={tab} onChange={setTab} tabs={[
@@ -110,6 +112,27 @@ export function ServiceDetail() {
         {tab === 'ai' && <div className="stack"><AiMonitoringBody key={svc.id} service={svc.id} /></div>}
       </Section>
     </>
+  );
+}
+
+/**
+ * The service is known (SDK heartbeat, runtime metrics, spans or a Postgres registration) but had no entry traffic in the
+ * range: say so instead of empty charts (contracts §4).
+ */
+function NoTraffic({ svc, onLogs }: { svc: Service; onLogs: () => void }) {
+  const what = svc.type === 'http' ? 'requests' : svc.type === 'worker' ? 'messages or job runs' : 'messages';
+  return (
+    <Card>
+      <EmptyState icon={<PlugZap />} title={svc.lastSeen ? 'SDK connected — no traffic yet' : 'No telemetry in this range'}
+        action={<Button size="sm" onClick={onLogs}>View logs</Button>}>
+        {svc.lastSeen
+          ? <>Last telemetry {ago(svc.lastSeen)} ({dateTime(svc.lastSeen)}), but no {what} in the selected range. </>
+          : <>{svc.name} is registered but sent nothing in the selected range. </>}
+        {svc.type === 'http'
+          ? 'Send a request to the service, or check that the HTTP server / router integration is installed so routes are recorded.'
+          : 'Process a message, or wrap background work in a job entry (trooper.StartJob / RunJob) so its runs are counted.'}
+      </EmptyState>
+    </Card>
   );
 }
 
@@ -180,8 +203,11 @@ function EndpointsTab({ eps, unit, isConsumer, onOpen }: { eps: Endpoint[]; unit
  * and the topic/queue/schedule it reads is a separate column — several processes
  * can read the same topic.
  */
+/** Topic / queue of a process; background jobs (source cron, contracts §4) read nothing — their own schedule starts them. */
+const readsFrom = (e: Endpoint) => e.sub?.topic || (e.sub?.source === 'cron' ? 'Schedule' : e.route);
+
 function ProcessesTab({ eps, unit, onOpen }: { eps: Endpoint[]; unit: string; onOpen: (e: Endpoint) => void }) {
-  const readers = (e: Endpoint) => eps.filter((x) => x.sub && e.sub && x.sub.topic === e.sub.topic).length;
+  const readers = (e: Endpoint) => (e.sub?.topic ? eps.filter((x) => x.sub?.topic === e.sub?.topic).length : 1);
   return (
     <Card flush>
       <Table rows={eps} rowKey={(e) => e.id} defaultSort={{ key: 'rpm', dir: 'desc' }} onRowClick={onOpen} columns={[
@@ -190,9 +216,9 @@ function ProcessesTab({ eps, unit, onOpen }: { eps: Endpoint[]; unit: string; on
             <div className="row" style={{ gap: 6, fontWeight: 500 }}>{epLabel(e)}{e.criticality === 'critical' && <CriticalityBadge c={e.criticality} />}{e.monitored && <span title="Monitor active" style={{ display: 'inline-flex', color: 'var(--status-good)' }}><Bell size={12} aria-label="Monitor active" /></span>}</div>
             <div className="muted mono" style={{ fontSize: 'var(--text-xs)' }}>{e.sub?.schedule ? `schedule ${e.sub.schedule}` : e.sub?.group ? `group ${e.sub.group}` : ''}</div>
           </div>) },
-        { key: 'topic', header: 'Reads from', sortValue: (e) => e.sub?.topic ?? e.route, render: (e) => (
+        { key: 'topic', header: 'Reads from', sortValue: (e) => readsFrom(e), render: (e) => (
           <div style={{ whiteSpace: 'nowrap' }}>
-            <div className="mono">{e.sub?.topic ?? e.route}</div>
+            <div className={e.sub?.topic || !e.sub ? 'mono' : 'muted'}>{readsFrom(e)}</div>
             <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>{sourceLabel(e)}{readers(e) > 1 && <> · +{readers(e) - 1} more reader{readers(e) > 2 ? 's' : ''}</>}</div>
           </div>) },
         { key: 'rpm', header: unit, numeric: true, sortValue: (e) => e.rpm, render: (e) => compact(e.rpm) },
@@ -221,7 +247,7 @@ function TrafficTab({ svc, eps, ts, unit, isConsumer }: { svc: Service; eps: End
   return (
     <>
       <Card title={isConsumer ? 'What it reads, what it calls' : 'Who calls it, what it calls'}
-        subtitle={`${compact(svc.rpm)} ${unit} in · ${compact(outPerMin)} calls/min out · ${(outPerMin / svc.rpm).toFixed(1)} calls per ${isConsumer ? 'message' : 'request'} · ${pct(outErr)} of outgoing calls fail`}>
+        subtitle={`${compact(svc.rpm)} ${unit} in · ${compact(outPerMin)} calls/min out · ${svc.rpm > 0 ? (outPerMin / svc.rpm).toFixed(1) : '0'} calls per ${isConsumer ? 'message' : 'request'} · ${pct(outErr)} of outgoing calls fail`}>
         <Flow leftTitle={isConsumer ? 'Reads from' : undefined}
           center={{ label: svc.name, sub: `${compact(svc.rpm)} ${unit}` }}
           left={callers.map((c) => ({ id: `in-${c.caller.id}`, label: c.caller.name, sub: CALLER_KIND_LABEL[c.caller.kind], value: c.rpm, display: compact(c.rpm), color: callerColor(c.caller.id) }))}
@@ -283,7 +309,7 @@ function TimeTab({ svc, eps, ts, critical, onOpen }: { svc: Service; eps: Endpoi
   const totalWork = rows.reduce((a, r) => a + r.e.rpm * r.b.avgMs, 0);
   const segments = (b: ReturnType<typeof endpointBreakdown>) =>
     TIME_CATEGORIES.map((c) => ({ id: c.id, label: c.label, value: b.parts[c.id], color: seriesColor(c.slot) }));
-  const depMs = (d: Dependency) => (d.callsPerMin * d.avgMs) / svc.rpm;
+  const depMs = (d: Dependency) => (svc.rpm > 0 ? (d.callsPerMin * d.avgMs) / svc.rpm : 0);
   const isConsumer = svc.type === 'consumer' || svc.type === 'worker';
 
   return (
@@ -303,7 +329,7 @@ function TimeTab({ svc, eps, ts, critical, onOpen }: { svc: Service; eps: Endpoi
                     <span className="legend__swatch" style={{ background: seriesColor(c.slot) }} />
                     <span className="list__title" style={{ flex: 1 }}>{c.label}</span>
                     <span className="num">{ms(total.parts[c.id])}</span>
-                    <span className="num muted" style={{ width: 36, textAlign: 'right' }}>{Math.round((total.parts[c.id] / total.avgMs) * 100)}%</span>
+                    <span className="num muted" style={{ width: 36, textAlign: 'right' }}>{total.avgMs > 0 ? Math.round((total.parts[c.id] / total.avgMs) * 100) : 0}%</span>
                   </div>
                   {inCat.map((d) => (
                     <div key={d.id} className="row list__row--clickable" onClick={() => depDrawer.open(d)}
@@ -324,11 +350,11 @@ function TimeTab({ svc, eps, ts, critical, onOpen }: { svc: Service; eps: Endpoi
         actions={<Legend kind="swatch" items={TIME_CATEGORIES.map((c) => ({ label: c.label, color: seriesColor(c.slot) }))} />}>
         <Table rows={rows} rowKey={(r) => r.e.id} defaultSort={{ key: 'share', dir: 'desc' }} onRowClick={(r) => onOpen(r.e)} columns={[
           { key: 'ep', header: isConsumer ? 'Process' : 'Endpoint', sortValue: (r) => epLabel(r.e), render: (r) => r.e.sub
-            ? <span className="truncate" style={{ display: 'block', maxWidth: 240 }}>{r.e.sub.process} <span className="mono muted">· {r.e.sub.topic}</span></span>
+            ? <span className="truncate" style={{ display: 'block', maxWidth: 240 }}>{r.e.sub.process}{r.e.sub.topic && <span className="mono muted"> · {r.e.sub.topic}</span>}</span>
             : <span className="truncate" style={{ display: 'block', maxWidth: 240 }}><span className="mono muted">{r.e.method}</span> {r.e.route}</span> },
           { key: 'avg', header: 'Avg', numeric: true, sortValue: (r) => r.b.avgMs, render: (r) => ms(r.b.avgMs) },
           { key: 'bar', header: 'Breakdown', width: '40%', render: (r) => <BreakdownBar segments={segments(r.b)} max={maxAvg} format={ms} /> },
-          { key: 'share', header: 'Share of service time', numeric: true, sortValue: (r) => r.e.rpm * r.b.avgMs, render: (r) => pct((r.e.rpm * r.b.avgMs) / totalWork, 1) },
+          { key: 'share', header: 'Share of service time', numeric: true, sortValue: (r) => r.e.rpm * r.b.avgMs, render: (r) => pct(totalWork > 0 ? (r.e.rpm * r.b.avgMs) / totalWork : 0, 1) },
         ]} />
       </Card>
 

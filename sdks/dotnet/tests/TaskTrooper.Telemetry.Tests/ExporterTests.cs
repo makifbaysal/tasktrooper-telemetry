@@ -64,6 +64,50 @@ public class ExporterTests
     }
 
     [Fact]
+    public async Task Heartbeat_is_exported_early_without_traffic()
+    {
+        var delay = TrooperHeartbeat.EarlyExportDelay;
+        TrooperHeartbeat.EarlyExportDelay = TimeSpan.FromMilliseconds(200);
+        try
+        {
+            using var server = new CaptureServer();
+            await using var sp = Build($"http://k@127.0.0.1:{server.Port}/1");
+
+            // no ForceFlush: the one-off early collect must send it (the periodic interval is 30 s)
+            var metrics = await server.WaitForAsync("/v1/metrics", timeoutMs: 5_000);
+            Assert.True(metrics.BodyContains(TrooperHeartbeat.Name));
+            Assert.True(metrics.BodyContains(TrooperSelfDiagnostics.MeterName));
+            Assert.True(metrics.BodyContains("orders-api"));
+        }
+        finally
+        {
+            TrooperHeartbeat.EarlyExportDelay = delay;
+        }
+    }
+
+    [Fact]
+    public async Task Heartbeat_is_not_sent_when_metrics_are_disabled()
+    {
+        var delay = TrooperHeartbeat.EarlyExportDelay;
+        TrooperHeartbeat.EarlyExportDelay = TimeSpan.FromMilliseconds(100);
+        try
+        {
+            using var server = new CaptureServer();
+            await using (var sp = Build($"http://k@127.0.0.1:{server.Port}/1", o => o.EnableMetrics = false))
+            {
+                await Task.Delay(500);
+                sp.GetRequiredService<MeterProvider>().ForceFlush();
+            }
+
+            Assert.Empty(server.ForPath("/v1/metrics"));
+        }
+        finally
+        {
+            TrooperHeartbeat.EarlyExportDelay = delay;
+        }
+    }
+
+    [Fact]
     public async Task Retries_on_503_and_drops_on_400()
     {
         var calls = 0;

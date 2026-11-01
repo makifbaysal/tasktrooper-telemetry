@@ -434,6 +434,19 @@ func (d *DB) services(ctx context.Context, q Q, only string) ([]model.Service, e
 	if err != nil {
 		return nil, err
 	}
+	pres, err := d.rollupPresence(ctx, q, where, args)
+	if err != nil {
+		return nil, err
+	}
+	known := make([]string, 0, len(pres))
+	for name := range pres {
+		known = append(known, name)
+	}
+	// services that sent spans / SDK metrics (heartbeat, runtime) but no entry traffic: idle APIs, workers (contracts §4)
+	seen, err := d.telemetryPresence(ctx, q, where, args, known)
+	if err != nil {
+		return nil, err
+	}
 
 	mins := q.W.Minutes()
 	stepMin := q.W.StepMinutes()
@@ -468,13 +481,18 @@ func (d *DB) services(ctx context.Context, q Q, only string) ([]model.Service, e
 			s.Type, s.Rpm, s.ErrorRate, s.P95 = "consumer", r.processed/mins, div(r.failed, r.processed), qt(r.q, 1)
 		}
 	}
+	for name, p := range pres {
+		if s, ok := by[name]; ok && p.jobsOnly && s.Type == "consumer" {
+			s.Type = "worker" // only background job entries (contracts §4), no messages
+		}
+	}
 	for _, r := range cold {
-		if s, ok := by[r.key[0]]; ok && s.Type == "consumer" {
+		if s, ok := by[r.key[0]]; ok && (s.Type == "consumer" || s.Type == "worker") {
 			s.PrevRpm, s.PrevErrorRate, s.PrevP95 = r.processed/mins, div(r.failed, r.processed), qt(r.q, 1)
 		}
 	}
 	for _, r := range cspark {
-		if s, ok := by[r.key[0]]; ok && s.Type == "consumer" && r.bucket >= 0 && r.bucket < q.W.Points {
+		if s, ok := by[r.key[0]]; ok && (s.Type == "consumer" || s.Type == "worker") && r.bucket >= 0 && r.bucket < q.W.Points {
 			s.Spark[r.bucket] = r.processed / stepMin
 		}
 	}
@@ -499,6 +517,9 @@ func (d *DB) services(ctx context.Context, q Q, only string) ([]model.Service, e
 			s.Spark[r.bucket] = r.views / stepMin
 		}
 	}
+	for name := range seen {
+		get(name) // type from Postgres below, else worker
+	}
 	for name, p := range pgs {
 		if only != "" && name != only {
 			continue
@@ -515,16 +536,23 @@ func (d *DB) services(ctx context.Context, q Q, only string) ([]model.Service, e
 	}
 	out := make([]model.Service, 0, len(by))
 	for name, s := range by {
+		if _, ok := seen[name]; ok && s.Type == "" {
+			s.Type = "worker" // telemetry but no entry traffic and no registered type
+		}
 		if s.Type == "" {
 			s.Type = "http"
 		}
+		if p := pres[name]; p != nil {
+			s.LastSeen = p.lastSeen
+		}
+		s.LastSeen = max(s.LastSeen, seen[name])
 		s.Version = versions[name]
 		s.Instances = inst[name]
 		s.Source = "sdk"
 		if ebpf[name] {
 			s.Source = "ebpf"
 		}
-		if s.Type == "consumer" || s.Type == "worker" {
+		if s.Type == "consumer" || (s.Type == "worker" && len(groups[name]) > 0) { // job-only workers have no lag
 			total := 0.0
 			for _, g := range groups[name] {
 				total += lags[g]
@@ -816,6 +844,9 @@ func (d *DB) processes(ctx context.Context, q Q, service string, monitored map[s
 			source = "kafka"
 		}
 		method := strings.ToUpper(source)
+		if system == JobSystem { // background job entry (contracts §4): no broker, topic, group or lag
+			source, method = "cron", "JOB"
+		}
 		idx[proc] = len(out)
 		out = append(out, model.Endpoint{
 			ID: proc, ServiceID: service, Method: method, Route: topic,
@@ -1069,6 +1100,13 @@ func (d *DB) sourceCallers(ctx context.Context, q Q, service, process string) ([
 	out := []model.CallerTraffic{}
 	for _, r := range rows {
 		topic, group := r.key[0], r.key[1]
+		if r.key[2] == JobSystem { // background jobs are started by the service's own schedule, not by a topic / queue
+			out = append(out, model.CallerTraffic{
+				Caller: model.Caller{ID: "schedule", Name: "Schedule", Kind: "schedule", Via: "background job (no message source)"},
+				Rpm:    r.processed / mins, Share: div(r.processed, total), ErrorRate: div(r.failed, r.processed), P95: qt(r.q, 1),
+			})
+			continue
+		}
 		kind := BrokerKind(r.key[2])
 		if kind == "" {
 			kind = info[group].kind

@@ -8,7 +8,7 @@ internal static class TrooperSelfDiagnostics
 {
     public const string MeterName = "TaskTrooper.Telemetry";
 
-    private static readonly Meter Meter = new(MeterName, typeof(TrooperSelfDiagnostics).Assembly.GetName().Version?.ToString());
+    internal static readonly Meter Meter = new(MeterName, typeof(TrooperSelfDiagnostics).Assembly.GetName().Version?.ToString());
     private static readonly Counter<long> Errors = Meter.CreateCounter<long>("trooper.sdk.errors", description: "Errors swallowed by the TaskTrooper SDK");
     private static readonly Counter<long> Retries = Meter.CreateCounter<long>("trooper.sdk.export.retries", description: "OTLP export retries");
 

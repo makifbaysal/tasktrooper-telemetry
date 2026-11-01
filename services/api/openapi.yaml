@@ -3242,12 +3242,20 @@ components:
         lag: { type: number, description: "Consumer services only (summed group lag); omitted otherwise" }
         source: { type: string, enum: [sdk, ebpf], description: "ebpf = every entry span comes from eBPF instrumentation (OBI / Beyla)" }
         spark: { type: array, items: { type: number } }
+        lastSeen:
+          type: integer
+          format: int64
+          description: >-
+            Unix ms of the latest telemetry of the service in the window: entry traffic (rollups, minute precision), or any
+            span / SDK metric incl. the trooper.sdk.heartbeat presence gauge (raw tables, at most the last 24 h of the window).
+            A service with telemetry but no entry traffic is listed with type worker (or its registered type), rpm 0.
+            Omitted for services only registered in Postgres.
     Subscription:
       type: object
       required: [process, source, topic, lag, retriesPerMin, dlqPerMin]
       properties:
         process: { type: string }
-        source: { type: string }
+        source: { type: string, description: "kafka | rabbitmq | sqs | pubsub | cron (cron = background job entry, contracts §4: no topic, group or lag)" }
         topic: { type: string }
         group: { type: string }
         partitions: { type: integer }

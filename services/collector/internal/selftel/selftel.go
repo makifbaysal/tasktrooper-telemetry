@@ -1,5 +1,5 @@
 // Package selftel wires trooper-agent's own telemetry (ADR-027, contracts §27): trooper.Start with the fixed service
-// name tt-trooper-agent, slog → OTel logs, Go runtime metrics, a root span per scrape and client spans for the
+// name tt-trooper-agent, slog → OTel logs, Go runtime metrics, an agent.scrape job entry per scrape and client spans for the
 // remote config poll. It is separate from the emitters (TT_DSN, own non-global providers) that ship the scraped
 // data. Without TROOPER_DSN (and OTEL_EXPORTER_OTLP_ENDPOINT) nothing is started and behaviour is unchanged.
 package selftel
@@ -82,10 +82,11 @@ func Transport(base http.RoundTripper) http.RoundTripper {
 
 func tracer() trace.Tracer { return otel.Tracer(scope) }
 
-// StartRoot starts an internal root span for one unit of periodic work (an evaluation tick, a delivery batch).
-// Names must be low cardinality; tenant ids go in attributes only (Tenant).
-func StartRoot(ctx context.Context, name string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
-	return tracer().Start(ctx, name, trace.WithNewRoot(), trace.WithSpanKind(trace.SpanKindInternal), trace.WithAttributes(attrs...))
+// StartJob starts the job entry span (contracts §4: kind consumer, trooper.process = name, trooper.entry.method = JOB)
+// of one run of periodic work that did something; idle polls start none. name must be low cardinality; tenant ids
+// go in attributes only (Tenant). A local parent in ctx is not used (new root + link).
+func StartJob(ctx context.Context, name string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
+	return trooper.StartJob(ctx, name, trace.WithAttributes(attrs...))
 }
 
 // StartSpan starts an internal child span.

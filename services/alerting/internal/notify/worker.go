@@ -150,8 +150,8 @@ func (w *Worker) Once(ctx context.Context) (int, error) {
 }
 
 func (w *Worker) handle(ctx context.Context, r Row) {
-	// one root span per delivery attempt (ADR-027); the empty outbox polls produce no spans
-	ctx, span := selftel.StartRoot(ctx, "notify.deliver", attribute.Int64("tt.project_id", r.ProjectID),
+	// one notify.deliver job entry per delivery attempt (ADR-027, contracts §4); the empty outbox polls produce no spans
+	ctx, span := selftel.StartJob(ctx, "notify.deliver", attribute.Int64("tt.project_id", r.ProjectID),
 		attribute.String("tt.notification.kind", r.Kind), attribute.Int("tt.notification.attempt", r.Attempts+1))
 	var serr error
 	defer func() { selftel.End(span, serr) }()

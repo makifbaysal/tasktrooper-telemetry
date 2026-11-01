@@ -39,15 +39,15 @@ type Config struct {
 }
 
 // Run executes the shard until done, aborted or ctx (SIGTERM) ends. Self telemetry (ADR-027): one
-// loadtest.run span (child of the ctl claim span when ctx carries TRACEPARENT) plus loadtest.stage spans; never a
+// loadtest.run job entry (child of the ctl claim span when ctx carries TRACEPARENT) plus loadtest.stage spans; never a
 // span per generated request, and the target requests are not instrumented (they carry their own traceparent).
 func Run(ctx context.Context, st *store.Store, cfg Config, log *slog.Logger) (err error) {
 	if cfg.Region == "" {
 		cfg.Region = "local"
 	}
-	ctx, span := selftel.StartSpan(ctx, "loadtest.run", attribute.Int64("tt.loadtest.run_id", cfg.RunID),
+	ctx, span := selftel.StartJob(ctx, "loadtest.run", trace.WithAttributes(attribute.Int64("tt.loadtest.run_id", cfg.RunID),
 		attribute.String("tt.loadtest.region", cfg.Region), attribute.Float64("tt.loadtest.share", cfg.Share),
-		attribute.Int("tt.loadtest.vu_cap", cfg.VUCap))
+		attribute.Int("tt.loadtest.vu_cap", cfg.VUCap)))
 	defer func() { selftel.End(span, err) }()
 	if cfg.Poll <= 0 {
 		cfg.Poll = time.Second

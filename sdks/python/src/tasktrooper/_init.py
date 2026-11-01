@@ -19,6 +19,10 @@ from .propagation import create_propagator
 _lock = threading.RLock()
 _current: Optional["TrooperHandle"] = None
 
+#: Delay of the one-off early metric export that brings the first ``trooper.sdk.heartbeat`` in within 10 s of init
+#: (the periodic reader's first export would otherwise wait a full interval, 30 s by default).
+_EARLY_EXPORT_S = 5.0
+
 
 class TrooperHandle:
     """Returned by :func:`init`. ``force_flush`` / ``shutdown`` never raise."""
@@ -41,6 +45,7 @@ class TrooperHandle:
         self.instrumentations = list(instrumentations or [])
         self._log_handler = log_handler
         self._stopped = False
+        self._early_export: Optional[threading.Timer] = None
 
     @property
     def exporting(self) -> bool:
@@ -69,6 +74,11 @@ class TrooperHandle:
             if self._stopped:
                 return
             self._stopped = True
+        try:
+            if self._early_export is not None:
+                self._early_export.cancel()
+        except Exception as err:  # noqa: BLE001
+            record_error("shutdown", err)
         try:
             if self.profiler is not None:
                 self.profiler.stop(min(timeout_s, 5.0))
@@ -116,6 +126,48 @@ def _counting(base: type, signal: str) -> type:
 
     Counting.__name__ = "Trooper" + base.__name__
     return Counting
+
+
+def _bind_heartbeat(meter: Any) -> None:
+    """``trooper.sdk.heartbeat`` (gauge, 1, no attributes): presence signal so a service without traffic still shows
+    up in the Services list (.ai/contracts.md §4). Identity comes from the resource."""
+    try:
+        from opentelemetry.metrics import CallbackOptions, Observation
+
+        def observe(_options: CallbackOptions) -> Any:
+            return [Observation(1)]
+
+        meter.create_observable_gauge(
+            "trooper.sdk.heartbeat",
+            callbacks=[observe],
+            unit="1",
+            description="Presence signal of a running trooper SDK",
+        )
+    except Exception as err:  # noqa: BLE001
+        record_error("heartbeat", err)
+
+
+def _schedule_early_export(handle: "TrooperHandle", interval_s: float) -> None:
+    """One daemon timer that force-flushes the metrics once ~5 s after init, so the first heartbeat lands within 10 s
+    even when the export interval is longer. Never blocks init; skipped when the interval is already short."""
+    if handle.meter_provider is None or interval_s <= 10:
+        return
+
+    def run() -> None:
+        try:
+            if not handle._stopped:
+                handle.meter_provider.force_flush(timeout_millis=10_000)
+        except Exception as err:  # noqa: BLE001
+            record_error("heartbeat", err)
+
+    try:
+        t = threading.Timer(_EARLY_EXPORT_S, run)
+        t.daemon = True
+        t.name = "trooper-early-export"
+        t.start()
+        handle._early_export = t
+    except Exception as err:  # noqa: BLE001
+        record_error("heartbeat", err)
 
 
 def _resource(cfg: Config) -> Any:
@@ -332,7 +384,10 @@ def _start(cfg: Config) -> TrooperHandle:
         )
     mp = MeterProvider(resource=resource, metric_readers=readers)
     otel_metrics.set_meter_provider(mp)
-    bind_self_metrics(mp.get_meter(SELF_METER, VERSION))
+    self_meter = mp.get_meter(SELF_METER, VERSION)
+    bind_self_metrics(self_meter)
+    if readers:
+        _bind_heartbeat(self_meter)
 
     propagate.set_global_textmap(create_propagator(cfg.service))
 
@@ -370,6 +425,8 @@ def _start(cfg: Config) -> TrooperHandle:
             profiler = None
 
     handle = TrooperHandle(cfg, tp, mp, lp, profiler, enabled, handler)
+    if readers:
+        _schedule_early_export(handle, cfg.metric_interval_s)
     atexit.register(handle.shutdown)
     return handle
 

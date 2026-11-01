@@ -66,7 +66,7 @@ What is traced:
 
 - **HTTP server:** webhook routes (`POST /v1/webhooks/github|gitlab|bitbucket`) with route templates; `/healthz` and
   `/metrics` produce no spans.
-- **Analysis runs:** one root span `codeintel.analyze` per run with `tt.org_id`, `tt.project_id`, `tt.repo.id`,
+- **Analysis runs:** one job entry `codeintel.analyze` (contracts §4) per run with `tt.org_id`, `tt.project_id`, `tt.repo.id`,
   `tt.repo.provider`, `tt.analysis.full`, `tt.analysis.result`, item / observed / suggestion / scenario / LLM item counts and
   `tt.analysis.llm_status`. Postgres (pgx, sanitized SQL), ClickHouse (`db.system=clickhouse` client spans, sanitized SQL)
   and LLM calls are children; queries outside a span (scheduler polls) are not traced.
