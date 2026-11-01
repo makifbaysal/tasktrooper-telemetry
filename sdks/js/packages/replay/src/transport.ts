@@ -1,4 +1,4 @@
-import type { IntegrationClient } from '@trooper/browser';
+import type { IntegrationClient } from '@tasktrooper/browser';
 
 /** Browsers cap the total in-flight body of keepalive requests at 64 KiB. */
 export const KEEPALIVE_LIMIT = 60000;

@@ -3,7 +3,7 @@ export const VERSION = '0.1.0';
 /** Reported as telemetry.distro.name (.ai/contracts.md §2). */
 export const DISTRO_NAME = 'trooper-node';
 /** Instrumentation scope of spans created by this package. */
-export const SCOPE_NAME = '@trooper/node';
+export const SCOPE_NAME = '@tasktrooper/node';
 /** Meter of the SDK's own metrics (trooper.sdk.errors). */
 export const SELF_METER = 'TaskTrooper.Telemetry';
 

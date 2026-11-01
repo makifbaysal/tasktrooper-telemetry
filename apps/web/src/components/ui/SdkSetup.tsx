@@ -17,8 +17,8 @@ interface Sdk { label: string; frontend?: boolean; install: string; code: (dsn: 
 export const SDKS: Record<SdkId, Sdk> = {
   go: {
     label: 'Go',
-    install: 'go get github.com/tasktrooper/telemetry-go',
-    code: (dsn) => `import trooper "github.com/tasktrooper/telemetry-go"
+    install: 'go get github.com/makifbaysal/tasktrooper-telemetry/sdks/go',
+    code: (dsn) => `import trooper "github.com/makifbaysal/tasktrooper-telemetry/sdks/go"
 
 shutdown, err := trooper.Start(ctx, trooper.Config{
     DSN:     "${dsn}", // or os.Getenv("TROOPER_DSN")
@@ -31,17 +31,17 @@ defer shutdown(context.Background())`,
   },
   node: {
     label: 'Node.js',
-    install: 'npm install @trooper/node',
-    code: (dsn) => `import { init } from '@trooper/node';
+    install: 'npm install @tasktrooper/node',
+    code: (dsn) => `import { init } from '@tasktrooper/node';
 
 init({ dsn: '${dsn}', service: 'orders-api' });
-// or without code: TROOPER_DSN=… node --import @trooper/node/register app.mjs`,
+// or without code: TROOPER_DSN=… node --import @tasktrooper/node/register app.mjs`,
   },
   browser: {
     label: 'Browser',
     frontend: true,
-    install: 'npm install @trooper/browser',
-    code: (dsn) => `import { init } from '@trooper/browser';
+    install: 'npm install @tasktrooper/browser',
+    code: (dsn) => `import { init } from '@tasktrooper/browser';
 
 init({
   dsn: '${dsn}',
@@ -60,7 +60,7 @@ tasktrooper.init(dsn="${dsn}", service="orders-api")
   },
   java: {
     label: 'Java',
-    install: '# download trooper-javaagent.jar (sdks/jvm)',
+    install: 'curl -fsSLo trooper-javaagent.jar https://repo1.maven.org/maven2/ai/tasktrooper/trooper-javaagent/0.1.0/trooper-javaagent-0.1.0.jar',
     code: (dsn) => `export TROOPER_DSN=${dsn}
 export TROOPER_SERVICE=orders-api
 java -javaagent:trooper-javaagent.jar -jar app.jar`,

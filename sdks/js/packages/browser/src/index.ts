@@ -11,7 +11,7 @@ import {
   type CoreOptions,
   type ErrorPayload,
   type PropagationTarget,
-} from '@trooper/core';
+} from '@tasktrooper/core';
 import { onCLS, onFCP, onINP, onLCP, onTTFB, type Metric } from 'web-vitals';
 import { Actions } from './actions';
 import { Activity } from './activity';
@@ -22,7 +22,7 @@ import { Hub, integrationClient, type FetchLike, type Integration } from './inte
 import { BrowserTransport } from './transport';
 import { currentPath, Views } from './views';
 
-export const SDK_NAME = '@trooper/browser';
+export const SDK_NAME = '@tasktrooper/browser';
 export const SDK_VERSION = '0.1.0';
 
 export interface BrowserOptions extends CoreOptions {
@@ -46,7 +46,7 @@ export interface BrowserOptions extends CoreOptions {
   trackVitals?: boolean;
   /** Persist session/anonymous id in localStorage and the offline queue in IndexedDB. Default true. */
   persist?: boolean;
-  /** Add-ons such as `replayIntegration()` from `@trooper/replay`. Set up when the SDK starts. */
+  /** Add-ons such as `replayIntegration()` from `@tasktrooper/replay`. Set up when the SDK starts. */
   integrations?: Integration[];
 }
 
@@ -348,5 +348,5 @@ export async function close(): Promise<void> {
 }
 
 export type { FetchLike, Integration, IntegrationClient } from './integrations';
-export type { BeforeSend, CoreOptions, PropagationTarget, RumBatch, RumEvent } from '@trooper/core';
-export { normalizePath, stripQueryValues } from '@trooper/core';
+export type { BeforeSend, CoreOptions, PropagationTarget, RumBatch, RumEvent } from '@tasktrooper/core';
+export { normalizePath, stripQueryValues } from '@tasktrooper/core';

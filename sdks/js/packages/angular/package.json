@@ -1,8 +1,25 @@
 {
-  "name": "@trooper/angular",
+  "name": "@tasktrooper/angular",
   "version": "0.1.0",
-  "description": "Angular (17+) providers for @trooper/browser.",
+  "description": "Angular (17+) providers for @tasktrooper/browser.",
+  "keywords": [
+    "tasktrooper",
+    "observability",
+    "monitoring",
+    "angular",
+    "rum"
+  ],
   "license": "Apache-2.0",
+  "author": "Mehmet Akif Baysal",
+  "homepage": "https://tasktrooper.ai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/makifbaysal/tasktrooper-telemetry.git",
+    "directory": "sdks/js/packages/angular"
+  },
+  "bugs": {
+    "url": "https://github.com/makifbaysal/tasktrooper-telemetry/issues"
+  },
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.cjs",
@@ -23,7 +40,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsup",
@@ -31,8 +49,8 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@trooper/browser": "workspace:*",
-    "@trooper/core": "workspace:*"
+    "@tasktrooper/browser": "workspace:*",
+    "@tasktrooper/core": "workspace:*"
   },
   "peerDependencies": {
     "@angular/core": ">=17",
@@ -51,5 +69,9 @@
     "rxjs": "^7.8.0",
     "happy-dom": "^21.0.0",
     "@types/node": "^26.6.5"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

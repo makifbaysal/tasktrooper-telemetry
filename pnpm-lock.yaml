@@ -13,13 +13,13 @@ importers:
       '@rrweb/replay':
         specifier: 2.2.0
         version: 2.2.0
-      '@trooper/browser':
+      '@tasktrooper/browser':
         specifier: workspace:*
         version: link:../../sdks/js/packages/browser
-      '@trooper/react':
+      '@tasktrooper/react':
         specifier: workspace:*
         version: link:../../sdks/js/packages/react
-      '@trooper/replay':
+      '@tasktrooper/replay':
         specifier: workspace:*
         version: link:../../sdks/js/packages/replay
       lucide-react:
@@ -56,10 +56,10 @@ importers:
 
   sdks/js/packages/angular:
     dependencies:
-      '@trooper/browser':
+      '@tasktrooper/browser':
         specifier: workspace:*
         version: link:../browser
-      '@trooper/core':
+      '@tasktrooper/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -99,7 +99,7 @@ importers:
 
   sdks/js/packages/browser:
     dependencies:
-      '@trooper/core':
+      '@tasktrooper/core':
         specifier: workspace:*
         version: link:../core
       web-vitals:
@@ -257,10 +257,10 @@ importers:
       '@tanstack/react-router':
         specifier: '>=1'
         version: 1.170.46(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@trooper/browser':
+      '@tasktrooper/browser':
         specifier: workspace:*
         version: link:../browser
-      '@trooper/core':
+      '@tasktrooper/core':
         specifier: workspace:*
         version: link:../core
       next:
@@ -309,7 +309,7 @@ importers:
       '@react-native-async-storage/async-storage':
         specifier: '>=1.17'
         version: 3.1.1(react-native@0.88.0(@babel/core@7.29.7)(@types/react@19.3.0)(react@19.3.1))(react@19.3.1)
-      '@trooper/core':
+      '@tasktrooper/core':
         specifier: workspace:*
         version: link:../core
       react-native:
@@ -338,10 +338,10 @@ importers:
         specifier: 2.2.0
         version: 2.2.0
     devDependencies:
-      '@trooper/browser':
+      '@tasktrooper/browser':
         specifier: workspace:*
         version: link:../browser
-      '@trooper/core':
+      '@tasktrooper/core':
         specifier: workspace:*
         version: link:../core
       '@types/node':
@@ -365,10 +365,10 @@ importers:
 
   sdks/js/packages/vue:
     dependencies:
-      '@trooper/browser':
+      '@tasktrooper/browser':
         specifier: workspace:*
         version: link:../browser
-      '@trooper/core':
+      '@tasktrooper/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:

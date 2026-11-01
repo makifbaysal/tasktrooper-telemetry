@@ -7,11 +7,11 @@ Pod::Spec.new do |s|
   s.module_name  = "TrooperReactNative"
   s.version      = package["version"]
   s.summary      = package["description"]
-  s.homepage     = "https://github.com/tasktrooper/telemetry"
+  s.homepage     = "https://tasktrooper.ai"
   s.license      = package["license"]
-  s.authors      = { "TaskTrooper" => "sdk@tasktrooper.dev" }
+  s.authors      = "Mehmet Akif Baysal"
   s.platforms    = { :ios => "13.4", :tvos => "13.4" }
-  s.source       = { :git => "https://github.com/tasktrooper/telemetry.git", :tag => "react-native-v#{s.version}" }
+  s.source       = { :git => "https://github.com/makifbaysal/tasktrooper-telemetry.git", :tag => "js-v#{s.version}" }
   s.source_files = "ios/**/*.{h,m,mm,swift}"
   s.private_header_files = "ios/**/*.h"
   s.swift_version = "5.9"

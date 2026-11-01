@@ -1,10 +1,10 @@
 import { record } from '@rrweb/record';
-import type { IntegrationClient, RumEvent } from '@trooper/browser';
+import type { IntegrationClient, RumEvent } from '@tasktrooper/browser';
 import { rrwebPrivacyOptions, type PrivacyOptions } from './privacy';
 import { KEY_PREFIX, ReplayStore } from './store';
 import { KEEPALIVE_LIMIT, ReplayTransport } from './transport';
 
-export const SDK_NAME = '@trooper/replay';
+export const SDK_NAME = '@tasktrooper/replay';
 export const SDK_VERSION = '0.1.0';
 
 /** A segment is sent after 5 s or once ~256 KB of (uncompressed) events are collected — contracts.md §23. */

@@ -38,7 +38,7 @@ describe('page hide', () => {
     track('x');
     await events();
     expect(batches[0]!.resource).toMatchObject({
-      app: 'shop-web', version: '1.0.0', environment: 'test', platform: 'PLATFORM_WEB', sdk: { name: '@trooper/browser' },
+      app: 'shop-web', version: '1.0.0', environment: 'test', platform: 'PLATFORM_WEB', sdk: { name: '@tasktrooper/browser' },
     });
     expect(DSN).toContain('localhost');
   });

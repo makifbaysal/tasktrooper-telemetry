@@ -1,20 +1,20 @@
-# @trooper/replay
+# @tasktrooper/replay
 
-Session replay for the web — an integration for [`@trooper/browser`](../browser) that records the DOM with
+Session replay for the web — an integration for [`@tasktrooper/browser`](../browser) that records the DOM with
 [`@rrweb/record`](https://github.com/rrweb-io/rrweb) 2.2.0 and sends segments to `POST /v1/replay` (ADR-021, contracts §23).
 Replays share the RUM `session_id`, so the player's timeline (views, actions, errors, requests → traces) comes from RUM.
 
-Separate package so `@trooper/browser` stays small: ~3.5 KB gzip of our code + ~22.5 KB for rrweb (~26 KB total, `pnpm size`).
+Separate package so `@tasktrooper/browser` stays small: ~3.5 KB gzip of our code + ~22.5 KB for rrweb (~26 KB total, `pnpm size`).
 
 ## Install
 
 ```bash
-pnpm add @trooper/browser @trooper/replay
+pnpm add @tasktrooper/browser @tasktrooper/replay
 ```
 
 ```ts
-import { init } from '@trooper/browser';
-import { replayIntegration } from '@trooper/replay';
+import { init } from '@tasktrooper/browser';
+import { replayIntegration } from '@tasktrooper/replay';
 
 init({
   dsn: 'https://<ingest-key>@ingest.example.com/<project>',
@@ -28,8 +28,8 @@ init({
 Script tag — load after the browser IIFE; `window.TrooperReplay` exposes the same exports:
 
 ```html
-<script src="https://unpkg.com/@trooper/browser/dist/trooper.iife.js"></script>
-<script src="https://unpkg.com/@trooper/replay/dist/trooper-replay.iife.js"></script>
+<script src="https://unpkg.com/@tasktrooper/browser/dist/trooper.iife.js"></script>
+<script src="https://unpkg.com/@tasktrooper/replay/dist/trooper-replay.iife.js"></script>
 <script>
   Trooper.init({ dsn: '…', app: 'shop-web', integrations: [TrooperReplay.replayIntegration()] });
 </script>
@@ -82,7 +82,7 @@ Default is "show the layout, hide the content":
 - **Session rotation** (30 min idle / 4 h / `clearUser()`) — the open segment is sent under the old id, a new decision is made
   and recording restarts with a FullSnapshot at segment 0.
 - **Stats** per segment: `clicks` (rrweb mouse clicks), `inputs` (input interactions, consecutive events on one field count
-  once), `errors` and `rage_clicks` (from `@trooper/browser` ERROR / rage ACTION events).
+  once), `errors` and `rage_clicks` (from `@tasktrooper/browser` ERROR / rage ACTION events).
 - **Delivery** — `POST <origin>/v1/replay?key=<key>` with `credentials: 'omit'`. Gzip via `CompressionStream` when available
   (`Content-Type: application/json`, `Content-Encoding: gzip` — needs the CORS preflight), else plain JSON as
   `text/plain;charset=UTF-8` (no preflight). 429 / 5xx / network errors → backoff 1 s → 60 s with jitter (honours
@@ -95,8 +95,8 @@ Default is "show the layout, hide the content":
 ## Development
 
 ```bash
-pnpm --filter @trooper/replay build       # ESM + CJS + .d.ts + dist/trooper-replay.iife.js
-pnpm --filter @trooper/replay test        # vitest + happy-dom (rrweb mocked; one smoke test with the real recorder)
-pnpm --filter @trooper/replay typecheck   # needs @trooper/browser built
-pnpm --filter @trooper/replay size
+pnpm --filter @tasktrooper/replay build       # ESM + CJS + .d.ts + dist/trooper-replay.iife.js
+pnpm --filter @tasktrooper/replay test        # vitest + happy-dom (rrweb mocked; one smoke test with the real recorder)
+pnpm --filter @tasktrooper/replay typecheck   # needs @tasktrooper/browser built
+pnpm --filter @tasktrooper/replay size
 ```

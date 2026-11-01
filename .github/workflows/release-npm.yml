@@ -1,0 +1,67 @@
+name: Release npm
+
+# Publishes every JS SDK (sdks/js/packages/*) to npm under @tasktrooper/*.
+# Trigger: push a tag js-vX.Y.Z whose version equals every package.json version
+# (bump them all with sdks/js/scripts/version.sh). See sdks/js/README.md § Releasing.
+
+on:
+  push:
+    tags: ["js-v*"]
+
+permissions:
+  contents: read
+  id-token: write # npm trusted publishing (OIDC) + provenance
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "24" # LTS, >= 22 required for trusted publishing
+  PNPM_VERSION: "12" # same as ci.yml
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+      - name: upgrade npm (trusted publishing needs >= 11.5.1)
+        run: |
+          npm install -g npm@latest
+          npm --version
+      - name: tag version matches every package
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          want="${TAG#js-v}"
+          fail=0
+          for pkg in sdks/js/packages/*/package.json; do
+            got=$(node -p "require('./$pkg').version")
+            name=$(node -p "require('./$pkg').name")
+            if [ "$got" != "$want" ]; then
+              echo "::error file=$pkg::$name is $got, tag says $want"
+              fail=1
+            fi
+          done
+          exit "$fail"
+      - run: pnpm install --frozen-lockfile
+      - name: build
+        run: pnpm -r --filter "./sdks/js/packages/*" build
+      - name: test
+        run: pnpm -r --filter "./sdks/js/packages/*" test
+      - name: publish
+        # Trusted publishing (OIDC) is used once a trusted publisher is configured per package on npmjs.com.
+        # NPM_TOKEN is only needed for the very first publish (a package must exist before a trusted
+        # publisher can be added); remove the secret afterwards.
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: "true"
+        run: pnpm -r --filter "./sdks/js/packages/*" publish --access public --no-git-checks

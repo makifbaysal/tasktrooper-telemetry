@@ -1,8 +1,28 @@
 {
-  "name": "@trooper/node",
+  "name": "@tasktrooper/node",
   "version": "0.1.0",
   "description": "TaskTrooper Telemetry distribution of OpenTelemetry for Node.js: OTLP export, trooper.* conventions, framework and queue helpers.",
+  "keywords": [
+    "tasktrooper",
+    "observability",
+    "monitoring",
+    "opentelemetry",
+    "apm",
+    "tracing",
+    "otlp",
+    "nodejs"
+  ],
   "license": "Apache-2.0",
+  "author": "Mehmet Akif Baysal",
+  "homepage": "https://tasktrooper.ai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/makifbaysal/tasktrooper-telemetry.git",
+    "directory": "sdks/js/packages/node"
+  },
+  "bugs": {
+    "url": "https://github.com/makifbaysal/tasktrooper-telemetry/issues"
+  },
   "type": "module",
   "sideEffects": [
     "./dist/register.js",
@@ -36,7 +56,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=22.15.0"
@@ -84,5 +105,9 @@
     "tsup": "^9.0.0",
     "typescript": "5.9.3",
     "vitest": "^5.0.5"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

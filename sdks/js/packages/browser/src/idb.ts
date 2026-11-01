@@ -1,4 +1,4 @@
-import { byteLength, MemoryOfflineStore, OFFLINE_MAX_BYTES, reportInternal, type OfflineStore } from '@trooper/core';
+import { byteLength, MemoryOfflineStore, OFFLINE_MAX_BYTES, reportInternal, type OfflineStore } from '@tasktrooper/core';
 
 const req = <T>(r: IDBRequest<T>): Promise<T> =>
   new Promise((res, rej) => {

@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import { close, init, type BrowserOptions } from '@trooper/browser';
+import { close, init, type BrowserOptions } from '@tasktrooper/browser';
 import { replayIntegration, type ReplayOptions, type ReplaySegmentPayload } from '../src/index';
 
 import { rr } from './rrweb-mock';
@@ -14,7 +14,7 @@ export interface Sent {
   payload: ReplaySegmentPayload;
 }
 
-/** Init `@trooper/browser` + replay with a fetch stub; replay requests are decoded into `sent`. */
+/** Init `@tasktrooper/browser` + replay with a fetch stub; replay requests are decoded into `sent`. */
 export function setup(replay: ReplayOptions = {}, opts: Partial<BrowserOptions> = {}, respond: () => Response | Promise<Response> = ok) {
   const sent: Sent[] = [];
   const rum: unknown[] = [];

@@ -1,8 +1,8 @@
 import { createApp, defineComponent, h, nextTick } from 'vue';
 import { createMemoryHistory, createRouter, RouterView } from 'vue-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { close, flush } from '@trooper/browser';
-import type { RumBatch, RumEvent } from '@trooper/core';
+import { close, flush } from '@tasktrooper/browser';
+import type { RumBatch, RumEvent } from '@tasktrooper/core';
 import { Trooper, useTrooper, vueRouteTemplate } from '../src/index';
 
 const OPTIONS = { dsn: 'http://tt_dev_ingest_key@localhost:4318/1', app: 'vue-app', persist: false, trackVitals: false, trackActions: false };

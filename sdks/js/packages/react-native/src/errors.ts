@@ -1,4 +1,4 @@
-import { truncate, type ErrorPayload } from '@trooper/core';
+import { truncate, type ErrorPayload } from '@tasktrooper/core';
 
 export function toErrorPayload(err: unknown): ErrorPayload {
   if (err && typeof err === 'object' && ('message' in err || 'stack' in err)) {

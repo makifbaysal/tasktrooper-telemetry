@@ -1,10 +1,10 @@
-# @trooper/browser
+# @tasktrooper/browser
 
-RUM for the web. Framework-agnostic; see `@trooper/react`, `@trooper/vue`, `@trooper/angular` for route templates and
+RUM for the web. Framework-agnostic; see `@tasktrooper/react`, `@tasktrooper/vue`, `@tasktrooper/angular` for route templates and
 framework error hooks.
 
 ```ts
-import { init, identify, clearUser, track, captureError, setView } from '@trooper/browser';
+import { init, identify, clearUser, track, captureError, setView } from '@tasktrooper/browser';
 
 init({
   dsn: 'https://<ingest-key>@ingest.example.com/<project>',
@@ -19,7 +19,7 @@ captureError(err, { attributes: { step: 'payment' } });
 setView('/products/:id');                          // name the current view (route template)
 ```
 
-Script tag: `<script src="https://unpkg.com/@trooper/browser/dist/trooper.iife.js"></script>` → `window.Trooper.init(...)`.
+Script tag: `<script src="https://unpkg.com/@tasktrooper/browser/dist/trooper.iife.js"></script>` → `window.Trooper.init(...)`.
 
 | Option | Default | |
 |---|---|---|
@@ -31,7 +31,7 @@ Script tag: `<script src="https://unpkg.com/@trooper/browser/dist/trooper.iife.j
 | `trackActions` | true | clicks → ACTION; name = `data-trooper-name` / `aria-label` / text (50 chars); rage (≥3 in 1 s), dead (no DOM mutation / navigation / request in 1 s; inputs excluded) |
 | `persist` | true | anonymous id + session in localStorage, offline queue in IndexedDB (memory fallback) |
 | `maxBatchSize` / `flushIntervalMs` | 100 / 5000 | |
-| `integrations` | `[]` | add-ons set up on start, e.g. `replayIntegration()` from [`@trooper/replay`](../replay) |
+| `integrations` | `[]` | add-ons set up on start, e.g. `replayIntegration()` from [`@tasktrooper/replay`](../replay) |
 
 **Views.** `VIEW_START` is emitted when the loading time is known — initial page: navigation timing `loadEventEnd`; SPA route:
 time until the DOM is quiet for 100 ms with no request in flight (max 10 s) — or earlier if the view ends / the page is hidden.
@@ -48,8 +48,8 @@ return a teardown called by `close()`. The `IntegrationClient` gives `config` (`
 `fetch`, `backoffDelay`, `classifyStatus` and `reportInternal`. Throwing integrations and listeners are swallowed.
 
 ```ts
-import { init } from '@trooper/browser';
-import { replayIntegration } from '@trooper/replay';
+import { init } from '@tasktrooper/browser';
+import { replayIntegration } from '@tasktrooper/replay';
 init({ dsn, app: 'shop-web', integrations: [replayIntegration({ sampleRate: 0.1 })] });
 ```
 

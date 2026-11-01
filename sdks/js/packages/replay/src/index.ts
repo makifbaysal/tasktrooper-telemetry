@@ -1,4 +1,4 @@
-import type { Integration, IntegrationClient } from '@trooper/browser';
+import type { Integration, IntegrationClient } from '@tasktrooper/browser';
 import { Replay, type ReplayMode, type ReplayOptions } from './replay';
 
 export interface ReplayIntegration extends Integration {
@@ -6,12 +6,12 @@ export interface ReplayIntegration extends Integration {
   getMode(): ReplayMode;
   /** Send the open segment now. */
   flush(): Promise<void>;
-  /** Stop recording for the rest of this page (also done by `close()` of `@trooper/browser`). */
+  /** Stop recording for the rest of this page (also done by `close()` of `@tasktrooper/browser`). */
   stop(): Promise<void>;
 }
 
 /**
- * Session replay for `@trooper/browser` (ADR-021, contracts.md §23):
+ * Session replay for `@tasktrooper/browser` (ADR-021, contracts.md §23):
  *
  * ```ts
  * init({ dsn, app: 'shop-web', integrations: [replayIntegration({ sampleRate: 0.1, onErrorSampleRate: 1.0 })] });

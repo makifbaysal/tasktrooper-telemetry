@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useParams, usePathname } from 'next/navigation';
 import { useRouter } from 'next/router';
-import { setView } from '@trooper/browser';
+import { setView } from '@tasktrooper/browser';
 
 type Params = Record<string, string | string[] | undefined>;
 

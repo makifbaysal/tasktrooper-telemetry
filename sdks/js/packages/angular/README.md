@@ -1,4 +1,4 @@
-# @trooper/angular
+# @tasktrooper/angular
 
 Angular 17+ (standalone).
 

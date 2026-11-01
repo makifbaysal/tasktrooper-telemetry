@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { matchRoutes, useLocation, type RouteObject } from 'react-router';
-import { setView } from '@trooper/browser';
+import { setView } from '@tasktrooper/browser';
 
 interface MatchLike {
   route: { path?: string };

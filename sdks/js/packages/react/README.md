@@ -1,7 +1,7 @@
-# @trooper/react
+# @tasktrooper/react
 
 ```tsx
-import { TrooperProvider, ErrorBoundary, useTrooper } from '@trooper/react';
+import { TrooperProvider, ErrorBoundary, useTrooper } from '@tasktrooper/react';
 
 <TrooperProvider options={{ dsn, app: 'shop-web', version }}>
   <ErrorBoundary name="root" fallback={({ error, resetError }) => <Crash onRetry={resetError} />}>
@@ -22,24 +22,24 @@ Subpath exports; the router packages are optional peer dependencies.
 
 ```ts
 // react-router v6.4+/v7 data routers
-import { trackReactRouter } from '@trooper/react/react-router';
+import { trackReactRouter } from '@tasktrooper/react/react-router';
 const router = createBrowserRouter(routes);
 trackReactRouter(router);                       // "/users/:userId/orders/:orderId"
 
 // declarative <BrowserRouter><Routes> — pass the route config (createRoutesFromElements for JSX)
-import { TrooperRoutes } from '@trooper/react/react-router';
+import { TrooperRoutes } from '@tasktrooper/react/react-router';
 <TrooperRoutes routes={routes} />
 
 // TanStack Router
-import { trackTanStackRouter } from '@trooper/react/tanstack-router';
+import { trackTanStackRouter } from '@tasktrooper/react/tanstack-router';
 trackTanStackRouter(router);                    // "/posts/$postId" → "/posts/:postId"
 
 // Next.js App Router (client component in the root layout)
-import { TrooperNextAppRouter } from '@trooper/react/nextjs';
+import { TrooperNextAppRouter } from '@tasktrooper/react/nextjs';
 <TrooperNextAppRouter />                         // usePathname + useParams → "/shop/:category/:id"
 
 // Next.js Pages Router (_app.tsx)
-import { useNextPagesRouterTracking } from '@trooper/react/nextjs';
+import { useNextPagesRouterTracking } from '@tasktrooper/react/nextjs';
 useNextPagesRouterTracking();                   // router.pathname "/products/[id]" → "/products/:id"
 ```
 

@@ -1,4 +1,4 @@
-import { safe, truncate, type Client, type ViewRef } from '@trooper/core';
+import { safe, truncate, type Client, type ViewRef } from '@tasktrooper/core';
 import type { Activity } from './activity';
 
 export const RAGE_CLICKS = 3;

@@ -1,9 +1,9 @@
-import { backoffDelay, classifyStatus, reportInternal, safe, type Client, type RumEvent, type SendResult, type ViewRef } from '@trooper/core';
+import { backoffDelay, classifyStatus, reportInternal, safe, type Client, type RumEvent, type SendResult, type ViewRef } from '@tasktrooper/core';
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 /**
- * What `@trooper/browser` hands to an integration (e.g. `@trooper/replay`). Every function is safe to call and never
+ * What `@tasktrooper/browser` hands to an integration (e.g. `@tasktrooper/replay`). Every function is safe to call and never
  * throws. Integrations must not crash the host either: wrap work in try/catch and use `reportInternal`.
  */
 export interface IntegrationClient {

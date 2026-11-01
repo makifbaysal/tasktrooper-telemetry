@@ -9,7 +9,7 @@ import {
   track,
   type BrowserOptions,
   type CaptureErrorOptions,
-} from '@trooper/browser';
+} from '@tasktrooper/browser';
 
 export interface TrooperApi {
   track: typeof track;
@@ -109,5 +109,5 @@ export function reactErrorHandler(
   };
 }
 
-export { captureError, clearUser, flush, identify, init, setView, track } from '@trooper/browser';
-export type { BrowserOptions, CaptureErrorOptions } from '@trooper/browser';
+export { captureError, clearUser, flush, identify, init, setView, track } from '@tasktrooper/browser';
+export type { BrowserOptions, CaptureErrorOptions } from '@tasktrooper/browser';

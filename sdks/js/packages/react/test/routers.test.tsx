@@ -1,7 +1,7 @@
 import { act, render } from '@testing-library/react';
 import { createMemoryRouter, MemoryRouter, Outlet, RouterProvider, useNavigate, type RouteObject } from 'react-router';
 import { afterEach, describe, expect, it } from 'vitest';
-import { init } from '@trooper/browser';
+import { init } from '@tasktrooper/browser';
 import { routeTemplate, TrooperRoutes, trackReactRouter } from '../src/react-router';
 import { tanstackTemplate, trackTanStackRouter } from '../src/tanstack-router';
 import { appRouterTemplate, pagesRouterTemplate, TrooperNextAppRouter, useNextPagesRouterTracking } from '../src/nextjs';

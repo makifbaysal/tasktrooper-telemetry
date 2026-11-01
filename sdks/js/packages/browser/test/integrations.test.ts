@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { RumEvent } from '@trooper/core';
+import type { RumEvent } from '@tasktrooper/core';
 import { captureError, clearUser, close, identify, track, type Integration, type IntegrationClient } from '../src/index';
 import { setup, teardown } from './helpers';
 

@@ -8,7 +8,7 @@ import {
   type EnvironmentProviders,
 } from '@angular/core';
 import { NavigationEnd, Router } from '@angular/router';
-import { captureError, init, setView, type BrowserOptions } from '@trooper/browser';
+import { captureError, init, setView, type BrowserOptions } from '@tasktrooper/browser';
 
 export interface TrooperAngularOptions extends BrowserOptions {
   /** Name views with the Angular route config path template. Default true. */
@@ -112,5 +112,5 @@ export function provideTrooper(options: TrooperAngularOptions): EnvironmentProvi
   ]);
 }
 
-export { captureError, clearUser, flush, identify, init, setView, track } from '@trooper/browser';
-export type { BrowserOptions } from '@trooper/browser';
+export { captureError, clearUser, flush, identify, init, setView, track } from '@tasktrooper/browser';
+export type { BrowserOptions } from '@tasktrooper/browser';

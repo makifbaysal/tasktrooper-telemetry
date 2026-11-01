@@ -1,8 +1,25 @@
 {
-  "name": "@trooper/core",
+  "name": "@tasktrooper/core",
   "version": "0.1.0",
   "description": "Platform-neutral core of the TaskTrooper RUM SDKs: event model, session, batching, transport, retry.",
+  "keywords": [
+    "tasktrooper",
+    "observability",
+    "monitoring",
+    "rum",
+    "telemetry"
+  ],
   "license": "Apache-2.0",
+  "author": "Mehmet Akif Baysal",
+  "homepage": "https://tasktrooper.ai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/makifbaysal/tasktrooper-telemetry.git",
+    "directory": "sdks/js/packages/core"
+  },
+  "bugs": {
+    "url": "https://github.com/makifbaysal/tasktrooper-telemetry/issues"
+  },
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.cjs",
@@ -23,7 +40,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsup",
@@ -35,5 +53,9 @@
     "tsup": "^9.0.0",
     "vitest": "^5.0.5",
     "@types/node": "^26.6.5"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

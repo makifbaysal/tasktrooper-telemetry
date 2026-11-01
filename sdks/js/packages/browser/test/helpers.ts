@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import type { RumBatch, RumEvent } from '@trooper/core';
+import type { RumBatch, RumEvent } from '@tasktrooper/core';
 import { close, flush, init, type BrowserOptions } from '../src/index';
 
 export const DSN = 'http://tt_dev_ingest_key@localhost:4318/1';

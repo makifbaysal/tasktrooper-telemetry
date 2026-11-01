@@ -517,7 +517,7 @@ function ContentSection({ content }: { content: { system?: string; input: string
 }
 
 const CAPTURE_SNIPPETS = {
-  node: `import { init } from '@trooper/node';\n\ninit({ service: 'support-bot', llm: { captureContent: true } });\n// or: TROOPER_LLM_CAPTURE_CONTENT=true`,
+  node: `import { init } from '@tasktrooper/node';\n\ninit({ service: 'support-bot', llm: { captureContent: true } });\n// or: TROOPER_LLM_CAPTURE_CONTENT=true`,
   go: `# environment of the service\nTROOPER_LLM_CAPTURE_CONTENT=true`,
 };
 /** Empty state for a call without prompt / completion. */
@@ -662,7 +662,7 @@ const SETUP: Record<SdkId, { label: string; note: ReactNode; code: string }> = {
     note: <>Wrap the client once; streaming responses are counted too (tokens + time to first token). Vercel AI SDK calls with <span className="mono">experimental_telemetry: {'{ isEnabled: true }'}</span> are picked up as they are.</>,
     code: `import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
-import { init, instrumentOpenAI, instrumentAnthropic } from '@trooper/node';
+import { init, instrumentOpenAI, instrumentAnthropic } from '@tasktrooper/node';
 
 init({ service: 'support-bot', llm: { captureContent: false } });
 
@@ -675,7 +675,7 @@ const anthropic = instrumentAnthropic(new Anthropic());`,
     code: `import (
     "github.com/openai/openai-go"
     "github.com/openai/openai-go/option"
-    "github.com/tasktrooper/telemetry-go/llm"
+    "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/llm"
 )
 
 client := openai.NewClient(option.WithHTTPClient(llm.HTTPClient(nil)))

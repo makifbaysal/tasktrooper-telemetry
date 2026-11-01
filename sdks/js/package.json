@@ -1,11 +1,11 @@
 {
-  "name": "@trooper/js-sdks",
+  "name": "@tasktrooper/js-sdks",
   "private": true,
-  "description": "TaskTrooper Telemetry JavaScript SDKs (RUM clients + @trooper/node). Workspace packages live in ./packages and are part of the root pnpm workspace.",
+  "description": "TaskTrooper Telemetry JavaScript SDKs (RUM clients + @tasktrooper/node). Workspace packages live in ./packages and are part of the root pnpm workspace.",
   "scripts": {
     "build": "pnpm -r --filter \"./packages/**\" build",
     "test": "pnpm -r --filter \"./packages/**\" test",
     "typecheck": "pnpm -r --filter \"./packages/**\" typecheck",
-    "size": "pnpm --filter @trooper/browser size"
+    "size": "pnpm --filter @tasktrooper/browser size"
   }
 }

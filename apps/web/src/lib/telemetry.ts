@@ -1,7 +1,7 @@
 /**
  * Self-observability of the dashboard (ADR-027, .ai/contracts.md §27): RUM app `tt-web` reporting to the platform's own
- * project. Off unless `VITE_TROOPER_DSN` is set — then the SDK chunks (`@trooper/browser`, `@trooper/react`, and
- * `@trooper/replay` when a replay rate is > 0) are loaded with a dynamic import, so a build without the DSN pays nothing
+ * project. Off unless `VITE_TROOPER_DSN` is set — then the SDK chunks (`@tasktrooper/browser`, `@tasktrooper/react`, and
+ * `@tasktrooper/replay` when a replay rate is > 0) are loaded with a dynamic import, so a build without the DSN pays nothing
  * beyond this file.
  */
 import { API_URL } from '@/data/remote';
@@ -54,10 +54,10 @@ export async function startTelemetry(router: Router): Promise<void> {
     const replayOnErrorSampleRate = rate(env.VITE_TROOPER_REPLAY_ON_ERROR_SAMPLE_RATE, 0);
     const withReplay = replaySampleRate > 0 || replayOnErrorSampleRate > 0;
     const [react, { trackReactRouter }, replay] = await Promise.all([
-      import('@trooper/react'),
-      import('@trooper/react/react-router'),
+      import('@tasktrooper/react'),
+      import('@tasktrooper/react/react-router'),
       (import.meta.env.VITE_TROOPER_REPLAY_SAMPLE_RATE || import.meta.env.VITE_TROOPER_REPLAY_ON_ERROR_SAMPLE_RATE) && withReplay
-        ? import('@trooper/replay')
+        ? import('@tasktrooper/replay')
         : Promise.resolve(undefined),
     ]);
     const origin = apiOrigin();

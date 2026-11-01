@@ -1,4 +1,4 @@
-# @trooper/node
+# @tasktrooper/node
 
 TaskTrooper Telemetry distribution of OpenTelemetry for Node.js (≥ 22.15). It configures `@opentelemetry/sdk-node` to
 export traces, metrics and logs as **OTLP/HTTP protobuf** to the TaskTrooper ingest gateway and adds the `trooper.*`
@@ -8,15 +8,15 @@ service, sample rate.
 ## Install & start
 
 ```bash
-pnpm add @trooper/node
+pnpm add @tasktrooper/node
 TROOPER_DSN=https://<ingest-key>@ingest.example.com/<project> TROOPER_SERVICE=orders-api \
-  node --import @trooper/node/register app.mjs     # ESM (CJS: node --require @trooper/node/register app.js)
+  node --import @tasktrooper/node/register app.mjs     # ESM (CJS: node --require @tasktrooper/node/register app.js)
 ```
 
 Or in code, **before** importing the frameworks it instruments:
 
 ```ts
-import { init } from '@trooper/node';
+import { init } from '@tasktrooper/node';
 
 const trooper = init({
   dsn: process.env.TROOPER_DSN,       // https://<ingest-key>@host[:port]/<project>
@@ -87,7 +87,7 @@ setRoute('/v1/orders/:id');                         // anything else
 
 ```ts
 import { instrumentBullmqProcessor, withTraceContext, processMessage, injectHeaders,
-         setAttemptHeader, nextAttempt, currentAttempt, setProcessName, markDlq } from '@trooper/node';
+         setAttemptHeader, nextAttempt, currentAttempt, setProcessName, markDlq } from '@tasktrooper/node';
 
 // kafkajs / amqplib consumers are traced by the upstream instrumentations; trooper hooks add the attempt:
 //   tt-attempt → kafka_deliveryAttempt → x-delivery-count + 1 → x-death counts + 1 (amqplib: redelivered → 2), else 1.
@@ -108,7 +108,7 @@ await processMessage({ system: 'sqs', destination: 'orders', headers: msg.attrib
 ### AWS Lambda
 
 ```ts
-import { init, wrapLambda } from '@trooper/node';
+import { init, wrapLambda } from '@tasktrooper/node';
 
 init({ service: 'orders' });   // module scope, once per execution environment (TT_DSN / OTLP env as usual)
 
@@ -146,7 +146,7 @@ the Lambda tag `tasktrooper.service`), so cold starts and errors line up with th
 ```ts
 init({ dsn, service: 'orders-api', profiling: true });
 // or: profiling: { types: ['cpu', 'wall', 'inuse_space'], periodS: 60, cpuDurationS: 10 }
-// or: TROOPER_PROFILING=true TROOPER_PROFILING_TYPES=cpu,inuse_space node --import @trooper/node/register app.mjs
+// or: TROOPER_PROFILING=true TROOPER_PROFILING_TYPES=cpu,inuse_space node --import @tasktrooper/node/register app.mjs
 ```
 
 Every `periodS` (default 60 s) the SDK takes a `cpuDurationS` (default 10 s, 10 ms sampling) CPU profile with
@@ -176,7 +176,7 @@ stacks yet.
 ```ts
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
-import { init, instrumentOpenAI, instrumentAnthropic } from '@trooper/node';
+import { init, instrumentOpenAI, instrumentAnthropic } from '@tasktrooper/node';
 
 init({ service: 'support-bot', llm: { captureContent: false } });
 const openai = instrumentOpenAI(new OpenAI());          // also AzureOpenAI / OpenAI-compatible base URLs
@@ -235,7 +235,7 @@ SDK's own `recordInputs` / `recordOutputs` settings, not `captureContent`.
 
 ## Limitations
 
-- ESM apps need the loader hook: use `--import @trooper/node/register` (synchronous `module.registerHooks()` loader of
+- ESM apps need the loader hook: use `--import @tasktrooper/node/register` (synchronous `module.registerHooks()` loader of
   import-in-the-middle where supported). The `--require` entry uses the asynchronous `module.register()` loader, which
   Node 26 reports as deprecated.
 - fastify / Hono / BullMQ have no upstream OTel instrumentation in the default set; HTTP spans come from the `http`
@@ -246,9 +246,9 @@ SDK's own `recordInputs` / `recordOutputs` settings, not `captureContent`.
 ## Development
 
 ```bash
-pnpm --filter @trooper/node test        # vitest: routes, config/DSN, sampler/tracestate, baggage, attempts,
+pnpm --filter @tasktrooper/node test        # vitest: routes, config/DSN, sampler/tracestate, baggage, attempts,
                                         # error swallowing, e2e (express + pino → fake OTLP server, protobuf decoded),
                                         # profiling (folded conversion, upload, real inspector), LLM wrappers (fakes)
-pnpm --filter @trooper/node build       # tsup: ESM + CJS + .d.ts (index, register)
-pnpm --filter @trooper/node typecheck
+pnpm --filter @tasktrooper/node build       # tsup: ESM + CJS + .d.ts (index, register)
+pnpm --filter @tasktrooper/node typecheck
 ```

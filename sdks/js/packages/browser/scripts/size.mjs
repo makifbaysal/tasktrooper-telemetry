@@ -1,4 +1,4 @@
-// Bundle-size report for @trooper/core + @trooper/browser (+ web-vitals), min + gzip. Budget: < 15 KB.
+// Bundle-size report for @tasktrooper/core + @tasktrooper/browser (+ web-vitals), min + gzip. Budget: < 15 KB.
 import { build } from 'esbuild';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -16,7 +16,7 @@ async function measure(name, contents) {
     format: 'esm',
     target: 'es2020',
     write: false,
-    alias: { '@trooper/core': core },
+    alias: { '@tasktrooper/core': core },
     treeShaking: true,
   });
   const code = r.outputFiles[0].contents;

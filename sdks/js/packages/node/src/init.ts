@@ -151,7 +151,7 @@ function noopHandle(config: ResolvedConfig): TrooperHandle {
 /**
  * Starts the TaskTrooper distribution of OpenTelemetry: OTLP/HTTP protobuf export of traces, metrics and logs to the
  * DSN's ingest gateway, trooper sampler / propagator / span processor and the default instrumentations.
- * Call it before importing the frameworks it instruments (or use `node --import @trooper/node/register`).
+ * Call it before importing the frameworks it instruments (or use `node --import @tasktrooper/node/register`).
  * Idempotent; never throws — on failure it returns a handle that does nothing.
  */
 export function init(options: TrooperOptions = {}): TrooperHandle {

@@ -1,10 +1,10 @@
-# @trooper/react-native
+# @tasktrooper/react-native
 
 ```ts
 // index.js — import first so app start (js_init) is measured from bundle start
 import AsyncStorage from '@react-native-async-storage/async-storage'; // optional
 import DeviceInfo from 'react-native-device-info';                   // optional
-import { init, trooperNavigation } from '@trooper/react-native';
+import { init, trooperNavigation } from '@tasktrooper/react-native';
 
 init({ dsn, app: 'courier-app', environment: 'production', storage: AsyncStorage, deviceInfo: DeviceInfo,
        tracePropagationTargets: ['https://api.example.com'] });
@@ -57,7 +57,7 @@ React Native draws native views, so the native SDKs' **wireframe** replay (ADR-0
 pixels) records RN screens as they are. It is started from JS through the `TrooperRum` native module and needs the native SDK:
 
 ```ts
-import { init, startReplay, stopReplay, isReplayRecording } from '@trooper/react-native';
+import { init, startReplay, stopReplay, isReplayRecording } from '@tasktrooper/react-native';
 
 init({ dsn, app: 'courier-app' });
 const started = await startReplay({ sampleRate: 0.1, onErrorSampleRate: 1.0, maskAllText: true }); // all optional

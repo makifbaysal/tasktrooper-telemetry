@@ -1,6 +1,6 @@
 import type { App, ComponentPublicInstance, InjectionKey, Plugin } from 'vue';
 import { inject } from 'vue';
-import { captureError, clearUser, flush, identify, init, setView, track, type BrowserOptions } from '@trooper/browser';
+import { captureError, clearUser, flush, identify, init, setView, track, type BrowserOptions } from '@tasktrooper/browser';
 
 interface RouteRecordLike {
   path: string;
@@ -94,5 +94,5 @@ export const Trooper: Plugin<[TrooperVueOptions?]> = {
 /** Composition API access to the SDK (works without the plugin too). */
 export const useTrooper = (): TrooperApi => inject(TrooperKey, api);
 
-export { captureError, clearUser, flush, identify, init, setView, track } from '@trooper/browser';
-export type { BrowserOptions } from '@trooper/browser';
+export { captureError, clearUser, flush, identify, init, setView, track } from '@tasktrooper/browser';
+export type { BrowserOptions } from '@tasktrooper/browser';

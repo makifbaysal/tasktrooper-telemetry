@@ -9,7 +9,7 @@ export default defineConfig([
     clean: true,
     treeshake: true,
     target: 'es2020',
-    external: ['@rrweb/record', '@trooper/browser'],
+    external: ['@rrweb/record', '@tasktrooper/browser'],
   },
   {
     // Script-tag build: rrweb bundled, exposed as `window.TrooperReplay`. Load after trooper.iife.js:
