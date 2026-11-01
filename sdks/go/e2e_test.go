@@ -16,11 +16,12 @@ import (
 )
 
 // TestE2EIngestGateway sends real telemetry to a locally running ingest-gw.
-// Run: go test -tags e2e -run E2E ./...   (TROOPER_E2E_DSN overrides the dev DSN)
+// Run: TROOPER_E2E_DSN=http://<ingest-key>@localhost:4318/<project-id> go test -tags e2e -run E2E ./...
+// (DSN from onboarding or `api bootstrap`; no seeded key exists, ADR-028).
 func TestE2EIngestGateway(t *testing.T) {
 	dsn := os.Getenv("TROOPER_E2E_DSN")
 	if dsn == "" {
-		dsn = "http://tt_dev_ingest_key@localhost:4318/1"
+		t.Skip("TROOPER_E2E_DSN not set")
 	}
 	d, err := trooper.ParseDSN(dsn)
 	if err != nil {

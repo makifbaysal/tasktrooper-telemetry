@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/baggage"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
@@ -342,5 +343,28 @@ func TestMarkDLQ(t *testing.T) {
 	s.End()
 	if got := troopertest.AttrString(h.SpanByKind(trace.SpanKindConsumer), trooper.AttrConsumerDLQ); got != "true" {
 		t.Errorf("dlq = %q", got)
+	}
+}
+
+func TestClientURLQueryStripped(t *testing.T) {
+	tests := []struct {
+		name, in, want string
+		kind           trace.SpanKind
+	}{
+		{"query", "https://api.example.com/v1/x?token=s3cret&range=1h", "https://api.example.com/v1/x", trace.SpanKindClient},
+		{"fragment", "https://api.example.com/p#frag", "https://api.example.com/p", trace.SpanKindClient},
+		{"clean", "https://api.example.com/v1/x", "https://api.example.com/v1/x", trace.SpanKindClient},
+		{"server kept", "https://host/x?a=1", "https://host/x?a=1", trace.SpanKindServer},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := troopertest.New(t, "svc")
+			_, s := otel.Tracer("test").Start(context.Background(), "s", trace.WithSpanKind(tt.kind),
+				trace.WithAttributes(attribute.String("url.full", tt.in)))
+			s.End()
+			if got := troopertest.AttrString(h.SpanByName("s"), "url.full"); got != tt.want {
+				t.Fatalf("url.full = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

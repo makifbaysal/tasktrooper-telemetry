@@ -166,3 +166,18 @@ func TestProfileLabels(t *testing.T) {
 		t.Error("labels not restored after the request")
 	}
 }
+
+// Routers like chi leave a partial pattern on the request; the resolved template must win for the span name.
+func TestSpanNameUsesResolvedRoute(t *testing.T) {
+	h := troopertest.New(t, "svc")
+	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Pattern = "GET /api/v1/services/{service}/*"
+		w.WriteHeader(http.StatusOK)
+	})
+	srv := Handler(router, WithRouteResolver(func(*http.Request) string { return "/api/v1/services/:service/endpoints" }))
+	srv.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/v1/services/a/endpoints", nil))
+	s := h.SpanByKind(trace.SpanKindServer)
+	if s == nil || s.Name() != "GET /api/v1/services/:service/endpoints" {
+		t.Fatalf("span name = %v", s.Name())
+	}
+}

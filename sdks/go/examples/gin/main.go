@@ -1,6 +1,6 @@
 // Command gin is an example gin service instrumented with trooper-go.
 //
-//	TROOPER_DSN=http://tt_dev_ingest_key@localhost:4318/1 go run ./gin
+//	TROOPER_DSN=http://<ingest-key>@localhost:4318/<project-id> go run ./gin
 package main
 
 import (

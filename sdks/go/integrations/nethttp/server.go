@@ -88,8 +88,12 @@ func Handler(next http.Handler, opts ...Option) http.Handler {
 				trooper.SetServerRoute(span, route)
 				span.SetName(r.Method + " " + route)
 			}
-			// Let otelhttp see the pattern (http.route on metrics).
-			if r.Pattern == "" {
+			// Let otelhttp see the pattern (http.route on metrics, span name after the handler). With a resolved
+			// route use it: routers like chi leave only a partial pattern ("/api/v1/services/{service}/*") on r2,
+			// which otelhttp would otherwise turn into the span name.
+			if route != "" {
+				r.Pattern = r.Method + " " + route
+			} else if r.Pattern == "" {
 				r.Pattern = r2.Pattern
 			}
 		}

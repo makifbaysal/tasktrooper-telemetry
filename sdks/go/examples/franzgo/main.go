@@ -1,6 +1,6 @@
 // Command franzgo is an example franz-go consumer instrumented with trooper-go.
 //
-//	TROOPER_DSN=http://tt_dev_ingest_key@localhost:4318/1 KAFKA_BROKERS=localhost:19092 go run ./franzgo
+//	TROOPER_DSN=http://<ingest-key>@localhost:4318/<project-id> KAFKA_BROKERS=localhost:19092 go run ./franzgo
 package main
 
 import (
