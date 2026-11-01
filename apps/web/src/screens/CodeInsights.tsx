@@ -15,6 +15,7 @@ import {
 } from '@/data/codeintel';
 import { ago } from '@/lib/format';
 import { LocalAICost } from '@/components/ui/LocalAICost';
+import { LocalAIState } from '@/components/ui/LocalAIState';
 import { CriticalityBadge } from './shared';
 import { ConnectRepoDrawer, WebhookSetup } from './ConnectRepo';
 
@@ -85,10 +86,12 @@ export function CodeInsights() {
   const [loadTestDraft, setLoadTestDraft] = useState<{ yaml: string; note: string } | null>(null);
   const [aiError, setAiError] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
+  const [lastAIAction, setLastAIAction] = useState<'inventory-enrichment' | 'monitor-suggestions' | 'loadtest-draft'>('inventory-enrichment');
   const [aiItemId, setAiItemId] = useState('');
   const runLocalAI = async (action: 'inventory-enrichment' | 'monitor-suggestions' | 'loadtest-draft') => {
     const selected = drawer.item;
     if (!selected) return;
+    setLastAIAction(action);
     if (aiItemId !== selected.id) { setEnrichment(null); setMonitorDraft(null); setLoadTestDraft(null); setAiItemId(selected.id); }
     setAiBusy(true); setAiError('');
     try {
@@ -292,7 +295,7 @@ export function CodeInsights() {
               {aiItemId === item.id && enrichment && <div className="stack" style={{ marginTop: 'var(--space-3)' }}><p>{enrichment.summary}</p><ul>{enrichment.failureModes.map((mode) => <li key={mode}>{mode}</li>)}</ul></div>}
               {aiItemId === item.id && monitorDraft && <div className="stack" style={{ marginTop: 'var(--space-3)' }}>{monitorDraft.suggestions.map((suggestion) => <div key={suggestion.name}><strong>{suggestion.name}</strong><div className="mono secondary">{suggestion.kind} · {suggestion.condition}</div><div className="muted">{suggestion.rationale}</div></div>)}<span className="muted">Drafts only; no monitor was created.</span></div>}
               {aiItemId === item.id && loadTestDraft && <div className="stack" style={{ marginTop: 'var(--space-3)' }}><CodeBlock>{loadTestDraft.yaml}</CodeBlock><span className="muted">{loadTestDraft.note}</span></div>}
-              {aiItemId === item.id && aiError && <p role="alert" className="secondary">{aiError}</p>}
+              {aiItemId === item.id && <LocalAIState busy={aiBusy} error={aiError} onRetry={() => void runLocalAI(lastAIAction)} />}
             </DrawerSection>
 
             {item.shadow ? (
