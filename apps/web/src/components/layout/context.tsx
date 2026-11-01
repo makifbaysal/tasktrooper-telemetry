@@ -1,12 +1,16 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { TimeRange } from '@/data';
-import { useData } from '@/data/remote';
+import { getEnvFilter, setEnvFilter, useData } from '@/data/remote';
 
 interface Ctx {
   range: TimeRange;
   setRange: (r: TimeRange) => void;
+  /** deployment environment filter; '' = all environments */
   env: string;
   setEnv: (e: string) => void;
+  /** user motion preference; the OS "reduce motion" setting always wins */
+  motion: 'full' | 'reduced';
+  setMotion: (m: 'full' | 'reduced') => void;
   theme: 'system' | 'light' | 'dark';
   setTheme: (t: 'system' | 'light' | 'dark') => void;
   /** bumps when api data arrives (ADR-013) — consumers re-render */
@@ -24,7 +28,9 @@ function write(key: string, v: string | null) {
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [range, setRange] = useState<TimeRange>('1h');
-  const [env, setEnv] = useState('production');
+  const [env, setEnvState] = useState(getEnvFilter);
+  const setEnv = (e: string) => { setEnvState(e); write('trooper-env', e || null); setEnvFilter(e); };
+  const [motion, setMotion] = useState<Ctx['motion']>(() => (read('trooper-motion') === 'reduced' ? 'reduced' : 'full'));
   const [theme, setTheme] = useState<Ctx['theme']>(() => (read('trooper-theme') as Ctx['theme']) ?? 'system');
   const dataVersion = useData();
 
@@ -34,7 +40,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     else { root.dataset.theme = theme; write('trooper-theme', theme); }
   }, [theme]);
 
-  return <AppCtx.Provider value={{ range, setRange, env, setEnv, theme, setTheme, dataVersion }}>{children}</AppCtx.Provider>;
+  useEffect(() => {
+    const root = document.documentElement;
+    if (motion === 'reduced') { root.dataset.motion = 'reduced'; write('trooper-motion', 'reduced'); }
+    else { delete root.dataset.motion; write('trooper-motion', null); }
+  }, [motion]);
+
+  return <AppCtx.Provider value={{ range, setRange, env, setEnv, motion, setMotion, theme, setTheme, dataVersion }}>{children}</AppCtx.Provider>;
 }
 
 export function useApp() {

@@ -185,6 +185,10 @@ func (s *Server) routes(r chi.Router) {
 		v, err := s.Store.ListDeploys(r.Context(), q, store.DeployFilter{Service: qs(r, "service"), Source: qs(r, "source")})
 		s.reply(w, r, v, err)
 	}))
+	r.Get("/environments", func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Store.ListEnvironments(r.Context())
+		s.reply(w, r, v, err)
+	})
 	r.Get("/traces", s.withQ(func(w http.ResponseWriter, r *http.Request, q store.Q) {
 		minMs, _ := strconv.ParseFloat(qs(r, "minMs"), 64)
 		v, err := s.Store.SearchTraces(r.Context(), q, store.TraceFilter{

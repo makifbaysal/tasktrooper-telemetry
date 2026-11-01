@@ -8,7 +8,7 @@
  */
 import { deploysFor, services } from './apm';
 import type { Cluster, Database } from './infra';
-import { api, hydrateList, mutate, registerHydrator, seg } from './remote';
+import { api, hydrateList, mutate, qs, registerHydrator, seg } from './remote';
 
 export type IntegrationProvider = 'aws' | 'gcp' | 'azure' | 'vercel' | 'neon';
 export type IntegrationStatus = 'pending' | 'ok' | 'error' | 'disabled';
@@ -166,7 +166,7 @@ const mapDeploy = (d: RawDeploy): DeployMarker => ({ ...d, ts: toMs(d.ts) ?? 0, 
 registerHydrator(async () => {
   await Promise.all([
     hydrateList(integrations, '/integrations', (raw: RawIntegration[] | { items: RawIntegration[] }) => (Array.isArray(raw) ? raw : raw.items ?? []).map(mapIntegration)),
-    hydrateList(deployMarkers, '/deploys?range=7d', (raw: RawDeploy[]) => (Array.isArray(raw) ? raw : []).map(mapDeploy)),
+    hydrateList(deployMarkers, `/deploys${qs({ range: '7d' })}`, (raw: RawDeploy[]) => (Array.isArray(raw) ? raw : []).map(mapDeploy)),
   ]);
 });
 

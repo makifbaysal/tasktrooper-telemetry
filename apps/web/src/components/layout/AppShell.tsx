@@ -1,17 +1,19 @@
 import { useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import {
-  AlertOctagon, BotMessageSquare, Boxes, Server, Building2, ChevronsUpDown, Code2, Database, Gauge, KeyRound, LayoutDashboard, LogOut, Moon, Waypoints,
-  Layers, Plug, Search, Settings, Sparkles, SquareFunction, Sun, SunMoon, Target, UserRound, Users, Zap, type LucideIcon,
+  AlertOctagon, BotMessageSquare, Boxes, Wind, Server, Building2, ChevronsUpDown, Code2, Database, Gauge, KeyRound, LayoutDashboard, LogOut, Moon, Waypoints,
+  Layers, PanelLeftClose, PanelLeftOpen, Plug, Search, Settings, Sparkles, SquareFunction, Sun, SunMoon, Target, UserRound, Users, Zap, type LucideIcon,
 } from 'lucide-react';
 import { Avatar, Badge, Menu, MenuDivider, MenuItem, MenuLabel, Segmented, Select } from '@/components/ui';
 import { logout, switchProject, useAuth } from '@/data/auth';
-import { PROVIDERS, clusterHealth, clusters, databases, hosts, incidents, integrations, k8sClusters, kpis, services, useData, worst, type Health, type TimeRange } from '@/data';
+import { PROVIDERS, clusterHealth, clusters, databases, environments, hosts, incidents, integrations, k8sClusters, kpis, services, useData, worst, type Health, type TimeRange } from '@/data';
 import { useAcks } from '@/screens/Alerts';
 import { SERVICE_CATEGORIES } from '@/screens/shared';
 import { AiQuotaBanner } from '@/screens/Usage';
 import { useApp } from './context';
 import { Logo } from './Logo';
+import { LiquidCursor } from './LiquidCursor';
+import { useCardReveal, useMotionAllowed } from './motion';
 
 /** `badge` is evaluated on every render so counts follow data changes (api hydrate, mutations). */
 interface NavItem { to: string; label: string; icon: LucideIcon; end?: boolean; badge?: () => { count: number; tone?: Health }; liveCount?: 'firing' }
@@ -48,14 +50,40 @@ const RANGES: { id: TimeRange; label: string }[] = [
   { id: '15m', label: '15m' }, { id: '30m', label: '30m' }, { id: '1h', label: '1h' }, { id: '6h', label: '6h' }, { id: '24h', label: '24h' }, { id: '7d', label: '7d' },
 ];
 
+/**
+ * Topbar scope controls only where the screen reads them: env filters every telemetry view, the time range is
+ * ignored by lists without series (hosts) and by non-telemetry pages (incidents, settings, load tests, code…).
+ */
+function scopeFor(path: string): { env: boolean; range: boolean } {
+  const telemetry = path === '/' || path === '/ai' || /^\/(services|traces|infrastructure)(\/|$)/.test(path) || /^\/kpis\/(?!new$)[^/]+$/.test(path);
+  return { env: telemetry, range: telemetry && path !== '/infrastructure/hosts' };
+}
+
+function readSidebar(): boolean {
+  try { return localStorage.getItem('trooper-sidebar') !== 'collapsed'; } catch { return true; }
+}
+
 export function AppShell() {
   const { range, setRange, env, setEnv, theme, setTheme } = useApp();
+  const { pathname } = useLocation();
+  useData();
+  const scope = scopeFor(pathname);
   const nextTheme = theme === 'system' ? 'light' : theme === 'light' ? 'dark' : 'system';
   const ThemeIcon = theme === 'system' ? SunMoon : theme === 'light' ? Sun : Moon;
+  const motionOn = useMotionAllowed();
+  useCardReveal(motionOn);
+  const [sidebarOpen, setSidebarOpen] = useState(readSidebar);
+  const toggleSidebar = () => setSidebarOpen((open) => {
+    try { localStorage.setItem('trooper-sidebar', open ? 'collapsed' : 'open'); } catch { /* storage unavailable */ }
+    return !open;
+  });
+  const envOptions = [{ value: '', label: 'All environments' },
+    ...[...new Set([...environments, ...(env ? [env] : [])])].map((e) => ({ value: e, label: e }))];
 
   return (
-    <div className="shell">
-      <aside className="sidebar">
+    <div className={`shell${sidebarOpen ? '' : ' shell--sidebar-collapsed'}`}>
+      {motionOn && <LiquidCursor />}
+      <aside className="sidebar" id="app-sidebar" aria-label="Main navigation">
         <div className="sidebar__brand">
           <span className="sidebar__logo"><Logo /></span>
           <span className="sidebar__name"><strong>TaskTrooper</strong><span>Telemetry</span></span>
@@ -73,14 +101,17 @@ export function AppShell() {
 
       <div className="main">
         <header className="topbar">
+          <button className="btn btn--ghost btn--icon sidebar-toggle" type="button" title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+            aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'} aria-expanded={sidebarOpen} aria-controls="app-sidebar" onClick={toggleSidebar}>
+            {sidebarOpen ? <PanelLeftClose size={16} aria-hidden /> : <PanelLeftOpen size={16} aria-hidden />}
+          </button>
           <div className="input-group" style={{ width: 280, maxWidth: '40vw' }}>
             <Search size={14} aria-hidden />
             <input className="input" placeholder="Search services, endpoints, pages…" style={{ width: '100%' }} />
           </div>
           <span className="spacer" />
-          <Select aria-label="Environment" value={env} onChange={(e) => setEnv(e.target.value)}
-            options={[{ value: 'production', label: 'production' }, { value: 'staging', label: 'staging' }]} />
-          <Segmented label="Time range" options={RANGES} value={range} onChange={setRange} />
+          {scope.env && <Select aria-label="Environment" value={env} onChange={(e) => setEnv(e.target.value)} options={envOptions} />}
+          {scope.range && <Segmented label="Time range" options={RANGES} value={range} onChange={setRange} />}
           <button className="btn btn--ghost btn--icon" title={`Theme: ${theme}`} aria-label={`Theme: ${theme}. Switch to ${nextTheme}`} onClick={() => setTheme(nextTheme)}>
             <ThemeIcon size={16} />
           </button>
@@ -207,6 +238,7 @@ function ProjectSwitcher() {
 /** Avatar → account, role, settings shortcuts, sign out. */
 function UserMenu() {
   const { me, org, role } = useAuth();
+  const { motion, setMotion } = useApp();
   const nav = useNavigate();
   const name = me ? me.user.name ?? me.user.email : 'API key';
   return (
@@ -235,6 +267,7 @@ function UserMenu() {
           <MenuItem icon={<Users size={14} />} onSelect={() => { close(); nav('/settings?tab=members'); }}>Members</MenuItem>
           <MenuItem icon={<KeyRound size={14} />} onSelect={() => { close(); nav('/settings?tab=keys'); }}>API keys</MenuItem>
           <MenuItem icon={<Sparkles size={14} />} onSelect={() => { close(); nav('/settings/usage'); }}>AI usage</MenuItem>
+          <MenuItem icon={<Wind size={14} />} selected={motion === 'reduced'} onSelect={() => setMotion(motion === 'reduced' ? 'full' : 'reduced')}>Reduce motion</MenuItem>
           <MenuDivider />
           <MenuItem icon={<LogOut size={14} />} onSelect={() => { close(); void logout(); }}>Sign out</MenuItem>
         </>

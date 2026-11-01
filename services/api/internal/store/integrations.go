@@ -598,6 +598,24 @@ type DeployFilter struct {
 	Source  string // spans | vercel | ci | manual | aws | gcp | "" (all)
 }
 
+// ListEnvironments returns the deployment environments the project has reported (from the deploys table), sorted.
+func (d *DB) ListEnvironments(ctx context.Context) ([]string, error) {
+	rows, err := d.ch.Query(ctx, `SELECT DISTINCT env FROM deploys WHERE {{tenant}} AND env != '' ORDER BY env LIMIT 100`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var e string
+		if err := rows.Scan(&e); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 var deploySources = map[string]bool{"spans": true, "vercel": true, "ci": true, "manual": true, "aws": true, "gcp": true}
 
 // ListDeploys merges versions first seen in spans (ClickHouse deploys, source "spans") with Postgres deploy_markers,

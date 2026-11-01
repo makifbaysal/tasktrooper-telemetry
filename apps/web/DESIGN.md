@@ -176,8 +176,9 @@ Density is high but legible: 14px body on a 4px grid, tight tables, 16px between
 size steps, not from colour or ornament. The system follows the TaskTrooper app theme so the product family reads as one;
 light and dark are equal citizens, with dark built from its own chosen steps rather than an inversion.
 
-Motion only answers the user: hover, focus, press, open and close, in 120–200ms. Surfaces do not breathe, drift or
-animate on their own, and there is no custom cursor.
+Motion is a quiet layer on top of state: cards settle in as they scroll into view and breathe faintly while on screen,
+a liquid cursor follows the pointer and morphs onto controls, and every interaction answers in 120–320ms. All of it is
+decorative, so all of it switches off with the OS "reduce motion" setting or the account menu's **Reduce motion**.
 
 **Key Characteristics:**
 - Cold slate neutrals (hue 265), one navy primary, warm amber only for selection and highlight.
@@ -270,9 +271,12 @@ deeper, softer shadows from its own steps.
 - **Overlay** (`--shadow-lg`: `0 8px 24px -4px rgb(0 0 0 / 0.18), 0 2px 8px -2px rgb(0 0 0 / 0.12)`): menus, popovers, drawers.
 
 ### Named Rules
-**The Still Surface Rule.** Surfaces never animate on their own. Shadows and borders change only in response to hover,
-focus, press or opening, within 120–200ms on `cubic-bezier(0.2, 0, 0, 1)`. No ambient pulsing, no scroll-reveal
-choreography, no custom cursor. `prefers-reduced-motion` removes even these.
+**The Opt-Out Motion Rule.** Decorative motion lives in one place (`styles/motion.css` + `components/layout/motion.ts`)
+and is driven by `data-*` attributes that are only set when motion is allowed: card reveal (`--dur-reveal`, travel
+`--reveal-shift`, staggered 75ms), ambient card pulse (`--dur-ambient`, `--shadow-sm` ↔ `--shadow-md`, border toward
+`--accent`), liquid cursor (accent tints, never hides the system cursor, off for touch and text inputs) and sidebar
+collapse (`--dur-slow`). `prefers-reduced-motion` or `:root[data-motion='reduced']` turns all of it off; state
+transitions (hover, focus, press) stay within 120–200ms on `--ease`. Never add motion outside this layer.
 
 **The Alarm Rail Rule.** A card in an alarm state gets a 4px left status rail (critical or warning) instead of a coloured fill.
 
@@ -345,6 +349,6 @@ multiplier, "explains %" bar, evidence at the root).
 - **Don't** write raw hex, raw px font sizes or ad-hoc spacing in components.
 - **Don't** use status colours for decoration, series or diffs, or colour as the only status signal.
 - **Don't** use dual y-axes.
-- **Don't** add ambient animation (breathing shadows, pulsing borders), scroll-reveal choreography or a custom cursor.
+- **Don't** add decorative motion outside `motion.css` / `motion.ts`, or any motion that ignores the reduce-motion switches.
 - **Don't** introduce a second accent hue for chrome (violet primary, green "signal" nav): the chrome voice is Trooper Navy.
 - **Don't** use provider brand colours or logos for third-party identity; use the neutral `ProviderMark`.

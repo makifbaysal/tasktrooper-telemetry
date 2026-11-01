@@ -15,7 +15,7 @@ değişirse bu dosya ve `tokens.css` aynı PR'da güncellenir.
 3. **Durum asla tek başına renk değildir.** Status her zaman ikon + etiket (`StatusBadge`).
 4. **Light ve dark eşit vatandaş.** Dark tema aynı rampalardan seçilmiş ayrı adımlar, otomatik ters çevirme değil. Tema: `system | light | dark` (topbar'dan), `data-theme` attribute'u ile.
 5. **Ham değer yasak.** Komponentlerde hex, px font size, rastgele spacing yazılmaz; token kullanılır.
-6. **Hareket sadece duruma tepki verir.** Ambient animasyon, scroll-reveal, özel cursor yok; ekran başlıklarının üstünde eyebrow/kicker yok. İkinci bir accent rengi (mor primary, yeşil sinyal) eklenmez.
+6. **Hareket tek katmanda ve kapatılabilir.** Dekoratif hareket (kart reveal + ambient nefes, liquid cursor, sidebar daraltma) sadece `styles/motion.css` + `components/layout/motion.ts`'te; token'lar `--dur-slow/--dur-reveal/--dur-ambient/--reveal-shift`. OS `prefers-reduced-motion` veya hesap menüsündeki **Reduce motion** (`data-motion="reduced"`, localStorage `trooper-motion`) hepsini kapatır. Ekran başlıklarının üstünde eyebrow/kicker yok; ikinci bir accent rengi (mor primary, yeşil sinyal) eklenmez.
 
 ## Token'lar
 
@@ -60,7 +60,7 @@ Font: `--font-sans` (Inter), `--font-mono` (JetBrains Mono — route, log, kod, 
 - Spacing: `--space-1..12` (4px grid).
 - Radius: `--radius-xs 4` (bar ucu) · `sm 6` (chip, segmented item) · `md 8` (buton, input, nav item) · `lg 14` (kart, rounded-xl) · `full` (badge).
 - Kontrol yükseklikleri: `--control-h-sm 30`, `--control-h-md 36`.
-- Layout: sidebar 240px, topbar 56px (yarı saydam + blur), içerik max 1440px. 900px altı sidebar üstte yatay. Ekran düzeni (Overview, Incidents, Services) `styles/screens.css`'te, sadece yapı.
+- Layout: sidebar 240px (topbar'daki butonla daraltılır, localStorage `trooper-sidebar`), topbar 56px (yarı saydam + blur), içerik max 1440px. 900px altı sidebar üstte yatay. Topbar'daki env seçici ve zaman aralığı sadece onları okuyan ekranlarda görünür (`scopeFor`, `AppShell.tsx`): Overview, servis/endpoint/trace, altyapı, KPI detay, AI monitoring; Incidents, Settings, Load tests, Code insights'ta gizli. Ekran düzeni (Overview, Incidents, Services) `styles/screens.css`'te, sadece yapı.
 - Kartlar: `--shadow-sm` (TaskTrooper shadow-raised). Alarm durumundaki kart: sol 4px status rail (`.card--rail-critical` / `.card--rail-warning`).
 
 ## Komponentler (`components/ui`)
