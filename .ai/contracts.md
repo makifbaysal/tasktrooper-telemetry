@@ -84,7 +84,7 @@ sağlayıcısına kısıtlı.
 | api | `TT_COOKIE_SECURE` | `true` |
 | integrations | `TT_PUBLIC_INGEST_URL` | `https://ingest.telemetry.tasktrooper.ai` (Vercel drain) |
 | trooper-cli | `TROOPER_API_URL` | `https://symbols.telemetry.tasktrooper.ai` |
-| mcp (`tt-mcp`) | `TT_API_URL` | `https://api.telemetry.tasktrooper.ai` |
+| mcp (`tt-mcp`) | `TT_API_URL` | `https://api.telemetry.tasktrooper.ai` (demo: `https://telemetry-api.tasktrooper.ai`, ADR-031) |
 
 Üçüncü taraf kayıtları: Slack App redirect URL `https://api.telemetry.tasktrooper.ai/api/v1/integrations/slack/callback`, GitHub App
 callback `https://api.telemetry.tasktrooper.ai/api/v1/integrations/github/callback` ve webhook URL
@@ -1063,6 +1063,9 @@ Yerel kodlama agent'ları için MCP sunucusu; varsayılan salt okunur, write opt
   `TT_PROJECT_ID` startup'ta `GET /me` ile eşleştirilmezse sunucu başlamaz.
 - **Env:** `TT_API_URL`, `TT_API_KEY`, `TT_ORG_ID`, `TT_PROJECT_ID`, `TT_LOG_LEVEL`, `TT_MCP_ALLOW_WRITE` (default `false`). `TT_API_KEY` tool
   tanımına, tool çıktısına, hata mesajına ve log'a girmez.
+- **Env dosyası:** `tt-mcp` startup'ta `$TT_MCP_ENV_FILE` → `.tasktrooper/mcp.env` (cwd → git kökü) →
+  `~/.config/tasktrooper/mcp.env` sırasıyla ilk bulduğu dosyadan yukarıdaki değişkenleri okur; ortam kazanır, mod 600 beklenir.
+  Installer (`/install-agent.sh`) bu dosyayı yazar; binary'ler `mcp/vX.Y.Z` tag'inde GitHub Release'e çıkar (`.ai/mcp.md` § Kurulum).
 - **v1 tool yüzeyi** (12, hepsi GET). `range` enum `15m|30m|1h|6h|24h|7d` (default `1h`):
 
   | Tool | Sarılan uç (operationId) |

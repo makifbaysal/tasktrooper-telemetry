@@ -75,8 +75,18 @@ saves nothing).
 | `TT_ORG_ID` / `TT_PROJECT_ID` | unset (optional cross-checks) |
 | `TT_LOG_LEVEL` | `info` (stderr JSON) |
 | `TT_MCP_ALLOW_WRITE` | `false` — `true` registers the 11 write tools (ADR-032) |
+| `TT_MCP_ENV_FILE` | unset — env file to read; otherwise `.tasktrooper/mcp.env` (cwd up to the git root), then `~/.config/tasktrooper/mcp.env` |
 
-Connection recipes (OpenCode, Claude Code, `.mcp.json`): `.ai/mcp.md` § Bağlanma.
+Variables already in the environment win over the env file; only the `TT_*` keys above are read, and a file readable by group/others logs a `chmod 600` warning.
+
+## Install
+
+`curl -fsSL https://telemetry.tasktrooper.ai/install-agent.sh | bash` detects the installed coding tools (Claude Code, Cursor,
+Antigravity, Codex, OpenCode, Gemini CLI, Muse Code), asks which ones and global vs project scope, verifies the key, writes the
+env file and registers the server + skills. Binaries come from GitHub Releases tagged `mcp/vX.Y.Z`
+(`.github/workflows/release-mcp.yml`). Details: `.ai/mcp.md` § Kurulum.
+
+Connection recipes (OpenCode, Claude Code, `.mcp.json`): `.ai/mcp.md` § Bağlanma (elle).
 
 ## Self telemetry (ADR-027)
 

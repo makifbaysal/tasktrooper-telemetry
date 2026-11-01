@@ -23,6 +23,7 @@ Yerel kodlama agent'ları (OpenCode, Claude Code, Cursor …) için Model Contex
 | `TT_ORG_ID`, `TT_PROJECT_ID` | | Startup'ta `GET /me` ile doğrulanır; eşleşmezse sunucu **başlamaz** (yanlış anahtarla yanlış projeye okuma). API key auth'ta tenant anahtardan gelir, istek başlığından değil |
 | `TT_MCP_ALLOW_WRITE` | | `true` → 11 write tool kaydedilir (default `false`, ADR-032). API key zaten `admin` rolünde: bu bayrak agent'ın yazabilmesinin tek kapısıdır |
 | `TT_LOG_LEVEL` | | `logx` (JSON slog) |
+| `TT_MCP_ENV_FILE` | | Okunacak env dosyası (yoksa default arama sırası, bkz. Kurulum § Env dosyası) |
 
 **Anahtar gizliliği:** `TT_API_KEY` sadece outbound `Authorization` header'ına yazılır. Tool tanımına,
 tool çıktısına, hata mesajına ve log'a **asla** girmez; logx middleware'i `Authorization` header'ını loglamaz.
@@ -174,13 +175,62 @@ Write hataları: 400/409 → API'nin `error` mesajı (≤ 300 karakter) geçer (
    kullanılamıyor. Başlangıçtaki `/me` kontrolü (config) en fazla 512 karakter gövde gösterebilir — bu
    stderr'e yazılır, tool çıktısı değildir.
 
-## Bağlanma
+## Kurulum (tek komut)
 
-Binary: `cd services/mcp && go install ./cmd/tt-mcp` (`$(go env GOPATH)/bin` PATH'te olmalı; değilse aşağıdaki
-`command`'a mutlak yol yazılır). API ayakta olmalı (compose `--profile app` veya servisleri lokal çalıştır) ve bir proje + api key bulunmalı: onboarding
+```bash
+curl -fsSL https://telemetry.tasktrooper.ai/install-agent.sh | bash
+```
+
+Script `apps/web/public/install-agent.sh` (web build ile `/install-agent.sh` olarak servis edilir; bash 3.2 uyumlu):
+
+1. Makinede kurulu kodlama tool'larını bulur (komut, home dizini, `/Applications/*.app`) ve hangilerine kurulacağını sorar.
+2. Kapsamı sorar: **global** (kullanıcı config'leri) veya **proje** (git kökü).
+3. API URL (default `https://telemetry-api.tasktrooper.ai`) ve api key'i alır; key gizli prompt'la (veya `TT_API_KEY` env'den)
+   okunur, `curl -H @-` ile `GET /api/v1/me`'de doğrulanır (argv'ye girmez). Sonra write tool'ları açılsın mı (y/N) sorar.
+4. `tt-mcp` binary'sini son `mcp/v*` GitHub Release'inden indirir, `checksums.txt` ile doğrular, `~/.local/bin`'e koyar.
+   Release yoksa Go ile kaynaktan derler (`git clone` + `go build`); `--source DIR` yerel checkout'tan derler.
+5. Env dosyasını yazar (umask 077, mod 600): global `~/.config/tasktrooper/mcp.env`, proje `<kök>/.tasktrooper/mcp.env`
+   (`.tasktrooper/` `.gitignore`'a eklenir). Key tool config'lerine **yazılmaz**, sadece bu dosyada durur.
+6. Skill'leri (`trooper-diagnose`, `trooper-query`, `trooper-alerts`) kopyalar, MCP sunucusunu her tool'un config'ine
+   `tasktrooper` adıyla ekler. JSON merge python3 / node ile yapılır, ilk değişiklikte `.tasktrooper.bak` yedeği alınır;
+   JSONC gibi parse edilemeyen dosyada script dosyaya dokunmaz, elle eklenecek snippet'i basar.
+
+Bayraklar: `--tools claude,cursor|all`, `--scope global|project`, `--project-dir`, `--api-url`, `--write|--read-only`,
+`--bin-dir`, `--source`, `-y` (sorusuz). Desteklenen tool'lar ve yazılan yerler:
+
+| Tool | MCP (global / proje) | Skill'ler (global / proje) |
+|---|---|---|
+| Claude Code | `claude mcp add --scope user` / `.mcp.json` | `~/.claude/skills` (symlink) / `.claude/skills` (symlink) |
+| Cursor | `~/.cursor/mcp.json` / `.cursor/mcp.json` | `~/.agents/skills` / `.agents/skills` |
+| Antigravity | `~/.gemini/config/mcp_config.json` (+ legacy `~/.gemini/antigravity/`) / `.agents/mcp_config.json` | `~/.gemini/config/skills` (symlink) / `.agents/skills` |
+| Codex | `codex mcp add` veya `~/.codex/config.toml` / `.codex/config.toml` | `~/.agents/skills` / `.agents/skills` |
+| OpenCode | `~/.config/opencode/opencode.json(c)` / `opencode.json` | `~/.agents/skills` / `.agents/skills` |
+| Gemini CLI | `gemini mcp add -s user` veya `~/.gemini/settings.json` / `.gemini/settings.json` | `~/.agents/skills` / `.agents/skills` |
+| Muse Code (Meta) | `~/.config/muse/settings.json` (`schema_version: 1`, `mcp_servers`) — proje config'i yok, hep global | `~/.agents/skills` |
+
+Global config'ler binary'nin mutlak yolunu kullanır; proje config'leri `tt-mcp` PATH'teyse adıyla yazar (repo'ya taşınabilir).
+**Bilinen boşluk:** Muse Code'un MCP anahtarı (`mcp_servers` vs `mcpServers`) kaynaklarda çelişkili, doğrulanmadı.
+
+**Env dosyası** (`internal/config/envfile.go`): `tt-mcp` startup'ta ilk bulduğu dosyayı okur; sıra
+`$TT_MCP_ENV_FILE` → cwd'den git köküne kadar `.tasktrooper/mcp.env` → `$XDG_CONFIG_HOME/tasktrooper/mcp.env`
+(default `~/.config/tasktrooper/mcp.env`). Sadece `TT_API_URL`, `TT_API_KEY`, `TT_MCP_ALLOW_WRITE`, `TT_ORG_ID`,
+`TT_PROJECT_ID`, `TT_LOG_LEVEL` okunur; ortamda zaten set olan değişken kazanır. Mod `077` bitlerinden biri açıksa
+uyarı log'lanır (`chmod 600`). `TT_MCP_ENV_FILE` verilip dosya yoksa sunucu başlamaz; default dosyaların yokluğu sorun değil.
+Proje kapsamı, tool'un MCP sunucusunu proje klasöründe başlatmasına dayanır.
+
+**Release:** `.github/workflows/release-mcp.yml`, `mcp/vX.Y.Z` tag'inde darwin/linux (arm64, amd64) + windows/amd64
+binary'lerini `tt-mcp_<os>_<arch>.tar.gz` ve `checksums.txt` ile GitHub Release'e koyar
+(`git tag mcp/v0.1.0 && git push origin mcp/v0.1.0`). Go module path'i repo ile eşleşmediği ve `replace` olduğu için
+`go install github.com/...` çalışmaz; dağıtım binary'dir.
+
+## Bağlanma (elle)
+
+Binary: release'ten indir veya `cd services/mcp && go build -o ~/.local/bin/tt-mcp ./cmd/tt-mcp` (`~/.local/bin` PATH'te
+olmalı; değilse aşağıdaki `command`'a mutlak yol yazılır). API ayakta olmalı (compose `--profile app` veya servisleri lokal çalıştır) ve bir proje + api key bulunmalı: onboarding
 (UI'da "org + proje oluştur", contracts §11) veya `api bootstrap --org <ad> --project <ad> --owner <email>`, ardından
 dashboard Settings → API keys. Platformun kendi verisi için `make self` (ADR-027/028). `tt-mcp`
-startup'ta `GET /me` çağırır, API yoksa başlamaz.
+startup'ta `GET /me` çağırır, API yoksa başlamaz. Env değişkenleri config'e yazılmak yerine env dosyasına da konabilir
+(bkz. Kurulum § Env dosyası); config'te sadece `command` kalır.
 
 **OpenCode** (`~/.config/opencode/opencode.json` veya proje `opencode.json`):
 
@@ -252,7 +302,7 @@ Tool'ları **hangi sırayla** kullanacağını anlatan Agent Skills (`skills/<na
 | [`trooper-alerts`](../skills/trooper-alerts/SKILL.md) | "Bu proje için alert / KPI kur" — envanter + mevcut monitor/KPI/öneri → veriden eşik → `tt_preview_monitor` → liste halinde onay → `confirm: true`; veri yetersizse load test önerir (onayla senaryo + run) |
 | [`trooper-contribute`](../skills/trooper-contribute/SKILL.md) | Bu repoda kod değişikliği; AGENTS.md + `.ai/` kurallarına işaret eden kontrol listesi |
 
-`trooper-diagnose`, `trooper-query` ve `trooper-alerts` yukarıdaki § Bağlanma ile kayıtlı `tasktrooper` MCP sunucusunu gerektirir. `trooper-alerts`
+`trooper-diagnose`, `trooper-query` ve `trooper-alerts` yukarıdaki § Kurulum (veya § Bağlanma) ile kayıtlı `tasktrooper` MCP sunucusunu gerektirir. `trooper-alerts`
 write adımları için `TT_MCP_ALLOW_WRITE=true` ister; kapalıysa önerileri liste olarak verir, kullanıcı UI'dan oluşturur.
 
 **Keşif:** tek bağlantı commit'li `.claude/skills -> ../skills` symlink'i, kopya yok.

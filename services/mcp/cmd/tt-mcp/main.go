@@ -47,6 +47,9 @@ func run() error {
 	log := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 		Level: cfg.LogLevel,
 	})).With("service", "mcp")
+	if cfg.EnvWarning != "" {
+		log.Warn(cfg.EnvWarning)
+	}
 	// Self telemetry (ADR-027): a no-op unless TROOPER_DSN is set. The SDK only ever writes to stderr.
 	flush := selftel.Start(context.Background(), version, log)
 	defer flush()
@@ -63,7 +66,7 @@ func run() error {
 	srv := server.New(client, log, server.Options{AllowWrite: cfg.AllowWrite})
 	// Run connects the stdio transport and serves until ctx is cancelled. It
 	// owns the only writer on os.Stdout.
-	log.Info("tt-mcp listening on stdio", "tools", server.ToolCount(cfg.AllowWrite), "write", cfg.AllowWrite, "api", cfg.APIURL)
+	log.Info("tt-mcp listening on stdio", "tools", server.ToolCount(cfg.AllowWrite), "write", cfg.AllowWrite, "api", cfg.APIURL, "envFile", cfg.EnvFile)
 	if err := srv.Run(ctx, &mcp.StdioTransport{}); err != nil && !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("stdio transport: %w", err)
 	}

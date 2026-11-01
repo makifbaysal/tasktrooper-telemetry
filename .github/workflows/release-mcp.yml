@@ -1,0 +1,75 @@
+name: Release MCP
+
+# Builds the tt-mcp binary (services/mcp) for macOS, Linux and Windows and attaches it to a GitHub Release, where
+# apps/web/public/install-agent.sh downloads it. The Go module path is not go-installable (replace directive), so binaries are
+# the distribution. Tag: mcp/vX.Y.Z (git tag mcp/v0.1.0 && git push origin mcp/v0.1.0). See .ai/mcp.md § Kurulum.
+
+on:
+  push:
+    tags:
+      - "mcp/v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [darwin/arm64, darwin/amd64, linux/amd64, linux/arm64, windows/amd64]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: services/mcp/go.mod
+          cache-dependency-path: services/mcp/go.sum
+      - name: build
+        working-directory: services/mcp
+        env:
+          TAG: ${{ github.ref_name }}
+          TARGET: ${{ matrix.target }}
+          GOWORK: "off"
+          CGO_ENABLED: "0"
+        run: |
+          version="${TAG#mcp/}"
+          if ! [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::tag $TAG does not end in a semver version"; exit 1
+          fi
+          export GOOS="${TARGET%/*}" GOARCH="${TARGET#*/}"
+          name="tt-mcp_${GOOS}_${GOARCH}"
+          bin="tt-mcp"; [ "$GOOS" = windows ] && bin="tt-mcp.exe"
+          mkdir -p "dist/$name"
+          go build -trimpath -ldflags="-s -w -X main.version=${version}" -o "dist/$name/$bin" ./cmd/tt-mcp
+          cp README.md "dist/$name/"
+          (cd dist && tar -czf "$name.tar.gz" "$name")
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ strategy.job-index }}
+          path: services/mcp/dist/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          cd dist
+          sha256sum ./*.tar.gz > checksums.txt
+          gh release create "$TAG" ./*.tar.gz checksums.txt --repo "$REPO" --title "tt-mcp ${TAG#mcp/}" \
+            --notes "MCP server for coding agents. Install: curl -fsSL https://telemetry.tasktrooper.ai/install-agent.sh | bash (.ai/mcp.md)."

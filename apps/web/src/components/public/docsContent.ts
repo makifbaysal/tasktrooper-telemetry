@@ -6,9 +6,10 @@ export const REPO = 'https://github.com/makifbaysal/tasktrooper-telemetry';
 /** Public site + dashboard (landing, /docs, /login and the app share this host). */
 export const SITE = 'https://telemetry.tasktrooper.ai';
 export const SITE_HOST = 'telemetry.tasktrooper.ai';
-/** Production hosts (ADR-030, contracts §2a). */
-export const API_HOST = 'https://api.telemetry.tasktrooper.ai';
-export const INGEST_HOST = 'ingest.telemetry.tasktrooper.ai';
+/** Live hosts, one level under the zone (ADR-031: the free certificate does not cover api.telemetry.…; ADR-030's hosts are
+ *  not served yet). */
+export const API_HOST = 'https://telemetry-api.tasktrooper.ai';
+export const INGEST_HOST = 'telemetry-ingest.tasktrooper.ai';
 export const DSN_PLACEHOLDER = `https://<ingest-key>@${INGEST_HOST}/<project-id>`;
 
 export type DocSdkGroup = 'Backend' | 'Web' | 'Mobile';
@@ -202,43 +203,78 @@ export const MCP_TOOLS: DocTool[] = [
   { name: 'tt_search_traces', what: 'Recent traces by service, endpoint, duration or error.' },
   { name: 'tt_get_trace', what: 'Full span tree of one trace.' },
   { name: 'tt_search_logs', what: 'Log lines by text, level, service, route or trace id, paginated.' },
-  { name: 'tt_list_monitors', what: 'Alert rules with kind, query and state.' },
-  { name: 'tt_list_incidents', what: 'Open and recent incidents with severity and state.' },
-  { name: 'tt_get_incident', what: 'One incident: alert detail, root cause and timeline.' },
-  { name: 'tt_list_loadtest_runs', what: 'Load test runs with thresholds and summary.' },
+  { name: 'tt_list_errors · tt_get_error', what: 'Error groups by fingerprint, and one with its latest stack.' },
+  { name: 'tt_list_incidents · tt_get_incident', what: 'Open and recent incidents; one with root cause and timeline.' },
+  { name: 'tt_list_monitors · tt_list_kpis', what: 'Alert rules and SLOs with their state, burn rate and budget.' },
+  { name: 'tt_preview_monitor', what: 'Replays an unsaved alert rule over past data: how often would it have fired? Saves nothing.' },
+  { name: 'tt_list_alert_suggestions · tt_list_inventory', what: 'Alerts suggested from code analysis, and the routes, crons and consumers found in the repository.' },
+  { name: 'tt_list_monitor_templates', what: 'Ready-made infrastructure, serverless and LLM alert rules.' },
+  { name: 'tt_list_notify_channels', what: 'Where alerts can go: Slack channels the bot sees and configured channels, each with its exact target string.' },
+  { name: 'tt_get_app_summary · tt_get_ai_overview', what: 'Web / mobile app health, and LLM calls, tokens and cost.' },
+  { name: 'tt_list_hosts · tt_list_databases · tt_list_consumer_groups', what: 'Hosts, databases and queue consumer groups with their health.' },
   { name: 'tt_list_deploys', what: 'Deploy markers, to line an incident up with a release.' },
+  { name: 'tt_list_loadtest_scenarios · tt_list_loadtest_runs · tt_get_loadtest_run', what: 'Load test scenarios, verified target domains and run results.' },
 ];
 
+/** Registered only with TT_MCP_ALLOW_WRITE=true; each one returns a dry run until called with confirm: true. */
+export const MCP_WRITE_TOOLS: DocTool[] = [
+  { name: 'tt_create_monitor · tt_update_monitor · tt_delete_monitor', what: 'Alert rules. Deletes only rules an agent created.' },
+  { name: 'tt_accept_suggestion', what: 'Turns a code-analysis suggestion into an alert rule.' },
+  { name: 'tt_create_kpi · tt_update_kpi · tt_delete_kpi', what: 'SLOs with fast and slow burn-rate alerts.' },
+  { name: 'tt_send_slack_test', what: 'Posts a test message to check the bot can reach a channel.' },
+  { name: 'tt_create_loadtest_scenario · tt_run_loadtest · tt_stop_loadtest', what: 'A baseline load test against a verified domain when there is too little traffic to set thresholds. Stopping needs no confirmation.' },
+];
+
+/** One command: finds the coding tools on the machine, asks which ones and global vs. project, installs tt-mcp + skills. */
+export const INSTALL_CMD = `curl -fsSL ${SITE}/install-agent.sh | bash`;
+
+export const INSTALL_TOOLS = ['Claude Code', 'Cursor', 'Antigravity', 'Codex CLI', 'OpenCode', 'Gemini CLI', 'Muse Code'];
+
+export const INSTALL_STEPS: string[] = [
+  'Finds the coding tools installed on this machine and asks which ones to set up.',
+  'Asks whether to install globally (every project) or only for the current project.',
+  'Asks for an API key (Settings → API keys), checks it against the API and saves it in a file only you can read: ~/.config/tasktrooper/mcp.env, or .tasktrooper/mcp.env in the project (added to .gitignore). Tool configs never contain the key.',
+  'Asks whether agents may create alert rules, SLOs and load tests after your approval (off by default).',
+  'Downloads tt-mcp for your OS and checks its checksum, copies the trooper-* skills, and registers the server in each tool.',
+];
+
+export const INSTALL_FLAGS: DocCode = { label: 'Without questions (CI, dotfiles)', lang: 'bash', code: `TT_API_KEY=<api-key> bash -c "$(curl -fsSL ${SITE}/install-agent.sh)" -- \\
+  --yes --tools claude,cursor --scope global --read-only` };
+
 export const MCP_SETUP: DocCode[] = [
-  { label: 'Build', lang: 'bash', code: `git clone ${REPO}
-cd tasktrooper-telemetry/services/mcp
-go install ./cmd/tt-mcp        # $(go env GOPATH)/bin must be on PATH` },
-  { label: 'Claude Code', lang: 'bash', code: `claude mcp add tasktrooper \\
-  -e TT_API_URL=${API_HOST} -e TT_API_KEY=<api-key> \\
-  -- tt-mcp` },
-  { label: '.mcp.json', lang: 'json', code: `{
+  { label: 'Manual: binary and key file', lang: 'bash', code: `# tt-mcp_<os>_<arch>.tar.gz from ${REPO}/releases (tags mcp/v*), or build:
+git clone ${REPO} && cd tasktrooper-telemetry/services/mcp
+GOWORK=off go build -o ~/.local/bin/tt-mcp ./cmd/tt-mcp
+
+# settings: environment variables, or this file (mode 600)
+mkdir -p ~/.config/tasktrooper && umask 077 && cat > ~/.config/tasktrooper/mcp.env <<'EOF'
+TT_API_URL=${API_HOST}
+TT_API_KEY=<api-key>
+TT_MCP_ALLOW_WRITE=false
+EOF` },
+  { label: 'Claude Code', lang: 'bash', code: `claude mcp add --scope user tasktrooper -- ~/.local/bin/tt-mcp` },
+  { label: 'Cursor (~/.cursor/mcp.json) · Antigravity (~/.gemini/config/mcp_config.json)', lang: 'json', code: `{
   "mcpServers": {
-    "tasktrooper": {
-      "command": "tt-mcp",
-      "env": { "TT_API_URL": "${API_HOST}", "TT_API_KEY": "<api-key>" }
-    }
+    "tasktrooper": { "type": "stdio", "command": "/Users/<you>/.local/bin/tt-mcp", "args": [] }
   }
 }` },
-  { label: 'OpenCode', lang: 'json', code: `{
+  { label: 'OpenCode (~/.config/opencode/opencode.json)', lang: 'json', code: `{
   "mcp": {
-    "tasktrooper": {
-      "type": "local",
-      "command": ["tt-mcp"],
-      "environment": { "TT_API_URL": "${API_HOST}", "TT_API_KEY": "<api-key>" },
-      "enabled": true
-    }
+    "tasktrooper": { "type": "local", "command": ["/Users/<you>/.local/bin/tt-mcp"], "enabled": true }
+  }
+}` },
+  { label: 'Codex CLI', lang: 'bash', code: `codex mcp add tasktrooper -- ~/.local/bin/tt-mcp` },
+  { label: 'Muse Code (~/.config/muse/settings.json)', lang: 'json', code: `{
+  "schema_version": 1,
+  "mcp_servers": {
+    "tasktrooper": { "transport": "stdio", "command": "/Users/<you>/.local/bin/tt-mcp", "args": [], "mode": "optional", "enabled": true }
   }
 }` },
 ];
 
 export const MCP_NOTES: string[] = [
-  'Read-only: agents can look, never change monitors, incidents or load tests.',
-  'The API key decides the organisation and project. Create one under Settings → API keys. Optional TT_ORG_ID and TT_PROJECT_ID are checked at startup, and the server refuses to start on a mismatch.',
+  'Read-only by default. With TT_MCP_ALLOW_WRITE=true an agent can also create alert rules, SLOs and load tests, but every change is shown as a dry run first and is only written after you approve it. Everything it creates is labelled “Agent” in the dashboard.',
+  'The API key decides the organisation and project. Create one under Settings → API keys. tt-mcp reads it from the environment or from the first env file it finds: $TT_MCP_ENV_FILE, .tasktrooper/mcp.env in the project, then ~/.config/tasktrooper/mcp.env. Optional TT_ORG_ID and TT_PROJECT_ID are checked at startup.',
   'The key only travels in the Authorization header. It never appears in tool output, errors or logs.',
   'Log messages and span attributes are masked before they reach the agent: e-mail addresses, IPs, bearer tokens, TaskTrooper keys and card-like numbers.',
   'Results are capped at 64 KB. A trimmed result says so and suggests how to narrow the query.',
@@ -248,17 +284,16 @@ export interface DocSkill { name: string; when: string; needsMcp: boolean }
 
 export const SKILLS: DocSkill[] = [
   { name: 'trooper-diagnose', needsMcp: true, when: 'Something is slow, failing or alerting. Walks incidents → KPIs → endpoint root cause → traces → logs → deploys, cites every claim and says “unknown” when the evidence is thin.' },
+  { name: 'trooper-alerts', needsMcp: true, when: 'Set up alerting for a project: reads services, traffic, existing rules and channels, derives every threshold from your data (“p95 over the last 5 minutes > 800 ms”), previews how often each would have fired, and creates the approved list. Suggests a short load test when there is too little traffic.' },
   { name: 'trooper-query', needsMcp: true, when: 'A question about production data: slowest endpoints, error logs for a trace, what deployed today. Teaches scoping, pagination and how to read truncated results.' },
   { name: 'trooper-contribute', needsMcp: false, when: 'For contributors to the TaskTrooper repository itself, not for using the product. A checklist pointing at AGENTS.md and the design docs: tenancy, cardinality, PII, tokens, make check.' },
 ];
 
 export const SKILLS_SETUP: DocCode[] = [
-  { label: 'Claude Code', lang: 'bash', code: `# inside a clone of the repo the skills are already wired up:
-#   .claude/skills -> ../skills
-claude -p "list skills starting with trooper-"
+  { label: 'Manual', lang: 'bash', code: `# global: Cursor, Codex, OpenCode, Gemini CLI and Muse Code read ~/.agents/skills
+cp -r tasktrooper-telemetry/skills/trooper-{diagnose,query,alerts} ~/.agents/skills/
+ln -s ~/.agents/skills/trooper-* ~/.claude/skills/          # Claude Code
+ln -s ~/.agents/skills/trooper-* ~/.gemini/config/skills/   # Antigravity
 
-# elsewhere: copy them into your project
-cp -r tasktrooper-telemetry/skills/trooper-* <your-project>/.claude/skills/` },
-  { label: 'OpenCode', lang: 'json', code: `// opencode.json
-{ "skills": ["./skills"] }` },
-];
+# one project: .agents/skills (and .claude/skills for Claude Code)` },
+]

@@ -81,7 +81,7 @@ func stdioSession(t *testing.T, bin string, selfTel bool) {
 	defer collector.Close()
 
 	cmd := exec.Command(bin)
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(os.Environ(), noEnvFile(t),
 		"TT_API_URL="+api.URL,
 		"TT_API_KEY=tt_api_test_key",
 		"TT_LOG_LEVEL=debug", // debug logging on: it must still not touch stdout
@@ -221,7 +221,7 @@ func writeLine(t *testing.T, w io.Writer, line string) {
 func TestMissingKeyFailsFast(t *testing.T) {
 	bin := buildBinary(t)
 	cmd := exec.Command(bin)
-	cmd.Env = append(os.Environ(), "TT_API_URL=http://127.0.0.1:1", "TT_API_KEY=")
+	cmd.Env = append(os.Environ(), noEnvFile(t), "TT_API_URL=http://127.0.0.1:1", "TT_API_KEY=")
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	err := cmd.Run()
@@ -234,4 +234,15 @@ func TestMissingKeyFailsFast(t *testing.T) {
 	if !strings.Contains(errb.String(), "TT_API_KEY") {
 		t.Errorf("stderr does not name the missing variable: %q", errb.String())
 	}
+}
+
+// noEnvFile points tt-mcp at an empty env file, so a developer's ~/.config/tasktrooper/mcp.env (written by the
+// installer) cannot change what the test sees.
+func noEnvFile(t *testing.T) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "mcp.env")
+	if err := os.WriteFile(p, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return "TT_MCP_ENV_FILE=" + p
 }
