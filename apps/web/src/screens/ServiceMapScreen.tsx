@@ -38,7 +38,16 @@ const iconOf = (n: MapNode): Icon => (n.tier === 'external' ? Cloud : n.tier ===
   : ICONS[n.kind] ?? Server);
 
 /** Generic callers detected from user agents read better as groups. */
-const CALLER_NAMES: Record<string, string> = { web: 'Browsers', mobile: 'Mobile apps', probe: 'Probes' };
+const CALLER_NAMES: Record<string, string> = { web: 'Browsers (direct)', mobile: 'Mobile apps (direct)', probe: 'Probes' };
+/** Why a synthetic caller exists: traffic whose sender has no SDK trace context, classified by user-agent. */
+const CALLER_HINTS: Record<string, string> = {
+  web: 'Browser requests without a TaskTrooper trace header: page navigations straight to the api (sign-in, OAuth returns such as Slack or GitHub), CORS preflights, or a web app without the browser SDK.',
+  mobile: 'Mobile requests without a TaskTrooper trace header: an app without the mobile SDK, or calls made outside it.',
+  probe: 'Health checks from load balancers and Kubernetes (kube-probe, ELB).',
+};
+/** Fixed colour slot per tier (Clients 1, Services 2, Data 3, External 4) so a tier keeps its colour when others are empty. */
+const laneSlot = (label: string) => Math.max(0, LANES.findIndex((l) => l.label === label)) + 1;
+const callerHint = (n: MapNode) => (n.tier === 'client' && !isService(n) ? CALLER_HINTS[n.id] : undefined);
 const KIND_LABEL: Record<string, string> = {
   http: 'HTTP service', worker: 'Worker', consumer: 'Consumer', web: 'Web app', mobile: 'Mobile app', service: 'Service',
   db: 'Database', cache: 'Cache', queue: 'Queue', ai: 'AI model', partner: 'Partner', webhook: 'Webhook', probe: 'Probe',
@@ -190,7 +199,9 @@ function useViewport(view: Layout | null) {
   const curRef = useRef(cur);
   curRef.current = cur;
   const drag = useRef<{ px: number; py: number; box: Box; k: number; moved: boolean } | null>(null);
-  useEffect(() => { setVb(null); }, [view]);
+  // refit only when the layout itself changes (nodes or size), not on every 60 s data refresh: keeps the user's zoom/pan
+  const shape = view ? `${Math.round(view.width)}x${Math.round(view.height)}:${view.nodes.map((p) => p.n.id).join(',')}` : '';
+  useEffect(() => { setVb(null); }, [shape]);
 
   const toSvg = (cx: number, cy: number) => {
     const ctm = svgRef.current?.getScreenCTM();
@@ -374,10 +385,16 @@ export function ServiceMapScreen({ serviceId }: { serviceId?: string } = {}) {
             onClick={() => { if (!vp.dragged()) setSelected(undefined); }}>
             <defs>{view.edges.map((e) => <path key={e.id} id={`svcmap-${e.id}`} d={edgePath(byId.get(e.from)!, byId.get(e.to)!)} />)}</defs>
             <g aria-hidden>
+              {view.lanes.map((l, i) => {
+                // tier band: from this lane's separator to the next one; the first and last bands run off the canvas
+                const top = i === 0 ? -view.height * 3 : l.sep;
+                const bottom = i === view.lanes.length - 1 ? view.height * 4 : view.lanes[i + 1].sep;
+                return <rect key={`band-${l.label}`} x={-view.width * 3} width={view.width * 7} y={top} height={bottom - top} className={`svcmap__band svcmap__band--${laneSlot(l.label)}`} />;
+              })}
               {view.lanes.map((l, i) => (
                 <g key={l.label}>
-                  {i > 0 && <line x1={-view.width} x2={view.width * 2} y1={l.sep} y2={l.sep} className="smap__sep" />}
-                  <text x={16} y={l.y + H / 2 + 14} className="smap__lane">{l.label}</text>
+                  {i > 0 && <line x1={-view.width * 3} x2={view.width * 4} y1={l.sep} y2={l.sep} className="smap__sep" />}
+                  <text x={16} y={l.y + H / 2 + 14} className={`smap__lane svcmap__lane--${laneSlot(l.label)}`}>{l.label}</text>
                 </g>
               ))}
             </g>
@@ -450,6 +467,7 @@ export function ServiceMapScreen({ serviceId }: { serviceId?: string } = {}) {
             <div className="svcmap__tip" role="status" style={tipAt(hovered.x, hovered.y + H / 2)}>
               <strong>{hovered.label}</strong>
               <span className="svcmap__tip-kind">{kindLabel(hovered.n)}</span>
+              {callerHint(hovered.n) && <span className="svcmap__tip-why">{callerHint(hovered.n)}</span>}
               <span>{compact(hovered.rpm)}/min · {pct(hovered.n.errorRate)} errors{hovered.n.p95 > 0 ? ` · p95 ${ms(hovered.n.p95)}` : ''}</span>
               {hovered.n.incident && <span className="svcmap__tip-inc">{hovered.n.incident.title}</span>}
               <span className="svcmap__tip-hint">Click for details</span>
@@ -491,6 +509,7 @@ function NodePanel({ n, map, current, onClose }: { n: MapNode; map: { nodes: Map
         <div>
           <h2>{displayName(n)}</h2>
           <p>{kindLabel(n)}</p>
+          {callerHint(n) && <p>{callerHint(n)}</p>}
         </div>
         <Button size="sm" variant="ghost" iconOnly icon={<X size={14} />} onClick={onClose} aria-label="Close details" />
       </header>
