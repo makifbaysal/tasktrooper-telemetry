@@ -477,3 +477,24 @@ birbirini tutmayan örnekler vardı. Landing, docs ve dashboard aynı web uygula
   `fetch(..., { credentials: 'include' })` ile gider; CORS yalnızca `https://telemetry.tasktrooper.ai`.
 - DSN biçimi: `https://<ingest-key>@ingest.telemetry.tasktrooper.ai/<project-id>`.
 **Sonuç:** Env değerleri ve DNS kayıtları contracts.md §2a'da. Örnek ve dokümanlar bu host'ları kullanır; başka alan adı örneği yazılmaz.
+
+## ADR-031 — Demo dağıtımı: tek Mac, self-hosted GitHub Actions runner, Cloudflare Tunnel
+**Bağlam:** Ürünün herkese açık bir demosu gerekiyor; production altyapısı (ADR-030 host'ları, çok node'lu kurulum) henüz
+yok. Elde bir Mac mini (Apple Silicon, 16 GB) ve Docker Desktop var. Ev ağında port açmak ve statik IP istenmiyor.
+**Karar:**
+- Tüm platform tek makinede, mevcut `deploy/docker-compose.yml` + `deploy/demo/docker-compose.demo.yml` (restart
+  politikası, public URL'ler, `TT_AUTH_DEV=false`, `TT_COOKIE_SECURE=true`, dashboard için Caddy `web` servisi). Demoda
+  çalışanlar: ClickHouse, Postgres, Redpanda, Redis, s3, ingest-gw, ingest-writer, api, alert-engine, notifier, web.
+  codeintel, loadtest, trooper-cloud yok. Image'lar makinede kaynaktan build edilir (arm64; ghcr image'ları amd64).
+- Yayın: Cloudflare Tunnel (giden bağlantı, port yok). Host'lar zone'un bir seviye altında: `telemetry.`,
+  `telemetry-api.`, `telemetry-ingest.tasktrooper.ai` — Cloudflare'in ücretsiz sertifikası iki seviyeyi
+  (`api.telemetry.…`) kapsamıyor. Tunnel'dan yalnız OTLP/HTTP (4318) geçer, gRPC (4317) yok.
+- Giriş: Google OIDC (`TT_OIDC_ISSUER=https://accounts.google.com`); dev login kapalı.
+- Deploy: `deploy-demo` workflow'u, yalnız manuel (`workflow_dispatch`) ve yalnız `main`, `demo` environment'ı,
+  makinedeki self-hosted runner'da (label `trooper-demo`) koşar. Secret'lar GitHub'da: `DEMO_ENV` = `deploy/.env`'in
+  tamamı; workflow dosyayı yazar, `deploy/demo/deploy.sh`'ı çalıştırır, sonunda siler. `deploy.sh`: infra → `make migrate`
+  → dashboard build (checkout dışına, `~/trooper-demo/web`) → servisler `up -d --build` → health check.
+- Repo public: self-hosted runner'a fork PR'ı ulaşmasın diye "Require approval for all external contributors" zorunlu;
+  başka hiçbir workflow `trooper-demo` label'ını kullanmaz.
+**Sonuç:** Kurulum ve adımlar `deploy/demo/README.md`. Makine kapanınca demo da kapanır (uptime garantisi yok); yedek ve
+kısa retention ayrı iş. Production'a geçişte ADR-030 host'ları ve ayrı altyapı geçerli olur.

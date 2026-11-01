@@ -1,0 +1,4 @@
+# actionlint config (make check / CI). Custom label of the demo machine's self-hosted runner (ADR-031).
+self-hosted-runner:
+  labels:
+    - trooper-demo

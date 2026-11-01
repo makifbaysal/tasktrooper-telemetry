@@ -1,0 +1,36 @@
+# Demo deployment on a single machine behind Cloudflare Tunnel (ADR-031, deploy/demo/README.md).
+# Layered on the local stack:
+#   docker compose -f deploy/docker-compose.yml -f deploy/demo/docker-compose.demo.yml --profile app up -d --build \
+#     ingest-gw ingest-writer api alert-engine notifier web
+# Values come from deploy/.env (the deploy-demo workflow writes it from the DEMO_ENV secret). Relative paths resolve against deploy/.
+x-restart: &restart { restart: unless-stopped }
+
+services:
+  clickhouse: *restart
+  postgres: *restart
+  redpanda: *restart
+  redis: *restart
+  s3: *restart
+  ingest-gw: *restart
+  ingest-writer: *restart
+  alert-engine: *restart
+  notifier: *restart
+
+  api:
+    restart: unless-stopped
+    environment:
+      # public site: never the dev login
+      TT_AUTH_DEV: "false"
+      TT_COOKIE_SECURE: "true"
+      TT_API_CORS_ORIGINS: ${TT_WEB_URL:?set TT_WEB_URL in deploy/.env}
+      TT_PUBLIC_INGEST_URL: ${TT_PUBLIC_INGEST_URL:?set TT_PUBLIC_INGEST_URL in deploy/.env}
+      TT_OIDC_REDIRECT_URL: ${TT_PUBLIC_API_URL:?set TT_PUBLIC_API_URL in deploy/.env}/api/v1/auth/callback
+
+  # dashboard: static build of apps/web, copied by deploy.sh to TT_DEMO_WEB_DIR (outside the checkout); SPA fallback
+  web:
+    image: caddy:2.10.0
+    restart: unless-stopped
+    ports: ["127.0.0.1:8081:80"]
+    volumes:
+      - ${TT_DEMO_WEB_DIR:-../apps/web/dist}:/srv:ro
+      - ./demo/Caddyfile:/etc/caddy/Caddyfile:ro

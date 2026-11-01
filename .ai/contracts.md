@@ -113,6 +113,8 @@ backend SDK'ları upstream retry politikasıyla yetinebilir (429/502/503/504, en
 (property dosyalarında `trooper.dsn`, `trooper.sample-rate`, `trooper.enabled` …). Resource'ta `telemetry.distro.name`
 (`trooper-go`, `tasktrooper-javaagent`, `trooper-dotnet` …).
 
+**Demo (ADR-031):** tek makine + Cloudflare Tunnel; host'lar zone'un bir seviye altında (ücretsiz sertifika iki seviyeyi kapsamaz): `telemetry.tasktrooper.ai` → web (`127.0.0.1:8081`), `telemetry-api.tasktrooper.ai` → api (8080), `telemetry-ingest.tasktrooper.ai` → ingest-gw OTLP/HTTP (4318; gRPC yok). DSN: `https://<ingest-key>-ingest.tasktrooper.ai/<project-id>`. Env: `deploy/demo/.env.example`.
+
 ## 3. Kafka (Redpanda) topic'leri — ingest-gw → ingest-writer
 
 | Topic | Değer | Key |
