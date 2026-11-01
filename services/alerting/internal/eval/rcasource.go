@@ -7,7 +7,7 @@ import (
 	"github.com/tasktrooper/telemetry/services/alerting/internal/rca"
 )
 
-// RCA windows: "now" is the last 15 minutes, baseline the hour before it (alerting.md § Kök neden analizi).
+// RCA windows: "now" is the last 15 minutes, baseline the hour before it (alerting.md § Root cause analysis).
 const (
 	RCACurrent  = 15 * time.Minute
 	RCABaseline = time.Hour

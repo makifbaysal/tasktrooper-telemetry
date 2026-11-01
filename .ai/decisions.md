@@ -1,531 +1,531 @@
-# Mimari kararlar (ADR)
+# Architecture decisions (ADR)
 
-Format: bağlam → karar → sonuç. Yeni karar en alta, numara artarak.
+Format: context → decision → consequence. New decisions go at the bottom, with increasing numbers.
 
-## ADR-001 — Wire protokolü olarak OTLP
-**Bağlam:** Kendi protokolümüz SDK'ları sıfırdan yazmayı gerektirir; müşteriler zaten OTel kullanıyor olabilir.
-**Karar:** Backend SDK'ları OTel SDK üzerine ince katman; ingest OTLP kabul eder. RUM için hafif özel JSON beacon.
-**Sonuç:** Hızlı dil kapsamı, mevcut OTel kullanıcıları SDK'sız gelebilir. Browser bundle küçük kalır (< 15 KB gz hedef).
+## ADR-001 — OTLP as the wire protocol
+**Context:** A protocol of our own would require writing SDKs from scratch; customers may already be using OTel.
+**Decision:** Backend SDKs are a thin layer on top of the OTel SDK; ingest accepts OTLP. A lightweight custom JSON beacon for RUM.
+**Consequence:** Fast language coverage; existing OTel users can come without an SDK. The browser bundle stays small (< 15 KB gz target).
 
-## ADR-002 — Telemetri deposu ClickHouse
-**Bağlam:** Yüksek yazma hızı, kolon bazlı agregasyon, log full-text, uzun retention.
-**Karar:** Metrik, span, log, RUM tek ClickHouse cluster'ında. Prometheus/Loki/Tempo ayrı stack'i değil.
-**Sonuç:** Tek sorgu dili ile korelasyon (trace ↔ log ↔ RUM) kolay. Operasyon yükü tek sisteme iner.
+## ADR-002 — ClickHouse as the telemetry store
+**Context:** High write rate, columnar aggregation, log full-text, long retention.
+**Decision:** Metrics, spans, logs and RUM in a single ClickHouse cluster. Not a separate Prometheus/Loki/Tempo stack.
+**Consequence:** Correlation (trace ↔ log ↔ RUM) is easy with a single query language. Operational load comes down to one system.
 
-## ADR-003 — Ingest buffer olarak Redpanda
-**Bağlam:** ClickHouse yavaşlaması ingest kaybına yol açmamalı; stream alert'leri için event akışı lazım.
-**Karar:** Redpanda (Kafka API uyumlu, JVM yok).
-**Sonuç:** Replay, backpressure, stream consumer'lar (alert, pattern çıkarma).
+## ADR-003 — Redpanda as the ingest buffer
+**Context:** A ClickHouse slowdown must not cause ingest loss; stream alerts need an event stream.
+**Decision:** Redpanda (Kafka API compatible, no JVM).
+**Consequence:** Replay, backpressure, stream consumers (alerting, pattern extraction).
 
 ## ADR-004 — Backend Go, frontend React + Vite
-**Bağlam:** Ingest yolu yüksek throughput ister; ekip Go ve React'e hakim.
-**Karar:** Tüm servisler Go. Dashboard React 19 + Vite SPA (SSR ihtiyacı yok, auth arkasında).
-**Sonuç:** Tek binary deploy, düşük memory. Dashboard statik host edilebilir.
+**Context:** The ingest path needs high throughput; the team knows Go and React well.
+**Decision:** All services in Go. Dashboard is a React 19 + Vite SPA (no need for SSR, it sits behind auth).
+**Consequence:** Single-binary deploy, low memory. The dashboard can be hosted statically.
 
-## ADR-005 — Grafikler kendi SVG komponentlerimiz
-**Bağlam:** Observability grafikleri sınırlı sayıda form (time series, bar, histogram, heatmap, sparkline); design system'e tam uyum ve küçük bundle istiyoruz.
-**Karar:** `apps/web/src/components/charts` altında hafif SVG komponentleri. Çok yoğun veri (>10k nokta) gerekirse uPlot'a geçiş değerlendirilecek.
-**Sonuç:** Token'larla tam uyum, dark mode, hover katmanı elimizde.
+## ADR-005 — Charts are our own SVG components
+**Context:** Observability charts come in a limited number of forms (time series, bar, histogram, heatmap, sparkline); we want full design system alignment and a small bundle.
+**Decision:** Lightweight SVG components under `apps/web/src/components/charts`. If very dense data (>10k points) is needed, moving to uPlot will be considered.
+**Consequence:** Full alignment with tokens, dark mode, and the hover layer is in our hands.
 
-## ADR-006 — Load test motoru k6
-**Bağlam:** Kendi load generator'ımızı yazmak yerine olgun motor.
-**Karar:** k6 Go kütüphanesi runner'a gömülü; declarative YAML → k6 script derleme.
-**Sonuç:** Script modu ile ileri kullanıcıya tam güç; metrikler OTLP ile bize akar.
+## ADR-006 — k6 as the load test engine
+**Context:** A mature engine instead of writing our own load generator.
+**Decision:** The k6 Go library embedded in the runner; declarative YAML → compiled to a k6 script.
+**Consequence:** Script mode gives advanced users full power; metrics flow to us via OTLP.
 
-## ADR-007 — LLM yorumlama için, çıkarma için değil
-**Bağlam:** Kod analizinde halüsinasyon riski.
-**Karar:** Envanter tree-sitter extractor'ları ile deterministik çıkarılır; LLM sadece kritiklik, açıklama ve öneri üretir.
-**Sonuç:** Envanter güvenilir; LLM kapatılabilir.
+## ADR-007 — LLM for interpretation, not for extraction
+**Context:** Hallucination risk in code analysis.
+**Decision:** The inventory is extracted deterministically with tree-sitter extractors; the LLM only produces criticality, explanations and suggestions.
+**Consequence:** The inventory is reliable; the LLM can be turned off.
 
-## ADR-008 — KPI = SLO, alert'ler burn rate üzerinden
-**Bağlam:** Kullanıcı "anasayfa hızlı açılsın" gibi deneyim hedefleri tanımlamak istiyor; ham eşik alert'leri gürültülü.
-**Karar:** KPI bir SLO'dur: hedef (sayfa/endpoint/journey/app start), good-event tanımı, objective, pencere (7d/28d).
-Alert'ler multi-window burn rate (hızlı 1h+5m, yavaş 6h+30m) + opsiyonel "hedefin altında" kuralı.
-**Sonuç:** Kısa sıçramalar sayfa açmaz; bütçe tükeniyorsa erkenden uyarır. Frontend ve backend KPI'ları aynı modelde.
+## ADR-008 — KPI = SLO, alerts via burn rate
+**Context:** Users want to define experience goals such as "the home page should open fast"; raw threshold alerts are noisy.
+**Decision:** A KPI is an SLO: target (page/endpoint/journey/app start), good-event definition, objective, window (7d/28d).
+Alerts are multi-window burn rate (fast 1h+5m, slow 6h+30m) + an optional "below target" rule.
+**Consequence:** Short spikes don't page; if the budget is running out it warns early. Frontend and backend KPIs share the same model.
 
-## ADR-009 — Kök neden: trace grafiğinde delta attribution
-**Bağlam:** "Hata benden mi, çağırdığım servisten mi?" sorusuna otomatik cevap; ML modeli açıklanamaz ve eğitim verisi yok.
-**Karar:** `edges_1m`'den çağrı ağacı kurulur; her çocuğun katkısı = `çağrı/istek × (şimdi − baseline)`; latency'de paralel
-HTTP çağrılarında sadece kritik yol sayılır; açıklanmayan kalan "own code". En büyük payı takip ederek yaprağa / own code'a
-iner; güven = yol boyunca payların çarpımı. Kanıt (deploy, migration, sorgu fingerprint, kaynak) kök düğüme iliştirilir.
-**Sonuç:** Deterministik, açıklanabilir, her adımda "ne kadarını açıklıyor" gösterilebilir. Ortak bağımlılıkta korelasyonlu
-düşüşleri ayırt edemez — kardeş ≥%15 ise alternatif olarak listelenir.
+## ADR-009 — Root cause: delta attribution on the trace graph
+**Context:** An automatic answer to "is the error mine or the service I call?"; an ML model isn't explainable and there is no training data.
+**Decision:** A call tree is built from `edges_1m`; each child's contribution = `calls/request × (now − baseline)`; for latency, only the
+critical path is counted for parallel HTTP calls; the unexplained remainder is "own code". It descends to a leaf / own code by following
+the largest share; confidence = product of the shares along the path. Evidence (deploy, migration, query fingerprint, resource) is attached to the root node.
+**Consequence:** Deterministic, explainable, and "how much does it explain" can be shown at every step. It cannot distinguish correlated
+drops on a shared dependency — if a sibling is ≥15% it is listed as an alternative.
 
-## ADR-010 — Telemetri deposu: Cassandra değil ClickHouse (yeniden değerlendirme)
-**Bağlam:** Yüksek yazma yükü (hedef 200k span/sn + 500k log/sn tek bölge) için Cassandra / ScyllaDB önerildi.
-**Değerlendirme:**
-- Cassandra/Scylla: yazma throughput'u ve lineer ölçek çok iyi, multi-DC replikasyon olgun. Ama sorgu sadece partition key
-  üzerinden; `GROUP BY`, percentile, ad-hoc filtre, full-text yok. Ürünün tüm ekranları agregasyon (servis/endpoint/zaman bazlı
-  p95, top-N query, lag per group, log arama). Her görünüm yazarken ayrı tabloya önceden hesaplanmak zorunda kalır; yeni ekran =
-  yeni tablo + backfill. Time-series + TTL'de tombstone/compaction yükü (TWCS şart), kolon sıkıştırması olmadığı için disk ~5–10×.
-- ClickHouse: kolon bazlı, 10–20× sıkıştırma, node başına milyonlarca satır/sn batch insert, vektörize `quantilesTDigest`,
-  materialized view ile rollup, `tokenbf_v1` ile log arama, tablo bazlı TTL + S3 tiering. Sharding (`Distributed`) +
-  `ReplicatedMergeTree` + ClickHouse Keeper ile yatay ölçek. Sentry (Snuba), PostHog, SigNoz, Uptrace, Cloudflare aynı iş için kullanıyor.
-**Karar:** ADR-002 geçerli: telemetri ClickHouse. Yüksek yük için: Redpanda buffer (ingest ClickHouse'tan bağımsız), writer'da
-büyük batch (≥50k satır / 1 sn), `async_insert` kapalı (batch'i biz yapıyoruz), shard key `cityHash64(org_id, project_id, service)`,
-hot/cold tiering (7 gün NVMe → S3). Metadata Postgres, rate limit/cache Redis, blob'lar (sourcemap, crash dump, replay) S3.
-**Sonuç:** Cassandra eklenmiyor. İleride çok yüksek QPS'li key-value ihtiyacı (ör. trace-by-id cache, session state) çıkarsa
-ScyllaDB değerlendirilir; şu an trace-by-id `trace_index` tablosuyla ClickHouse'ta çözülüyor.
+## ADR-010 — Telemetry store: ClickHouse, not Cassandra (re-evaluation)
+**Context:** Cassandra / ScyllaDB was proposed for high write load (target 200k spans/s + 500k logs/s in a single region).
+**Evaluation:**
+- Cassandra/Scylla: write throughput and linear scaling are very good, multi-DC replication is mature. But queries only go through
+  the partition key; no `GROUP BY`, percentile, ad-hoc filter or full-text. Every screen of the product is aggregation (p95 per
+  service/endpoint/time, top-N query, lag per group, log search). Every view would have to be precomputed into a separate table at write time; new screen =
+  new table + backfill. Tombstone/compaction load with time-series + TTL (TWCS required), and disk ~5–10× since there is no columnar compression.
+- ClickHouse: columnar, 10–20× compression, millions of rows/s batch insert per node, vectorized `quantilesTDigest`,
+  rollup via materialized views, log search with `tokenbf_v1`, per-table TTL + S3 tiering. Horizontal scale with sharding (`Distributed`) +
+  `ReplicatedMergeTree` + ClickHouse Keeper. Sentry (Snuba), PostHog, SigNoz, Uptrace and Cloudflare use it for the same job.
+**Decision:** ADR-002 stands: telemetry in ClickHouse. For high load: Redpanda buffer (ingest independent of ClickHouse), large
+batches in the writer (≥50k rows / 1 s), `async_insert` off (we do the batching), shard key `cityHash64(org_id, project_id, service)`,
+hot/cold tiering (7 days NVMe → S3). Metadata in Postgres, rate limit/cache in Redis, blobs (sourcemap, crash dump, replay) in S3.
+**Consequence:** Cassandra is not added. If a very high QPS key-value need (e.g. trace-by-id cache, session state) comes up later,
+ScyllaDB will be considered; for now trace-by-id is solved in ClickHouse with the `trace_index` table.
 
-## ADR-011 — SDK stratejisi: OpenTelemetry dağıtımı + RUM JSON
-**Bağlam:** Go (gin, fiber), Java (Spring, Quarkus), Kotlin, .NET backend; Android, iOS, Flutter, React Native mobil; web JS/TS.
-**Karar:**
-- **Backend SDK'ları = OTel distro'su.** Kendi exporter'ımızı yazmıyoruz; OTLP/HTTP protobuf ile `ingest-gw`'ye. Distro'nun
-  işi: tek satır init, DSN, resource (service/env/version), `trooper.*` attribute'ları (route template, entry route, consumer
-  group/topic, caller), PII varsayılanları, sampling. Framework auto-instrumentation'ı OTel'in kendi kütüphanelerinden gelir;
-  sadece eksik olan için kod yazarız (ör. route template, consumer group, Fiber/Gin route).
+## ADR-011 — SDK strategy: OpenTelemetry distribution + RUM JSON
+**Context:** Go (gin, fiber), Java (Spring, Quarkus), Kotlin, .NET backends; Android, iOS, Flutter, React Native mobile; web JS/TS.
+**Decision:**
+- **Backend SDKs = an OTel distro.** We don't write our own exporter; OTLP/HTTP protobuf to `ingest-gw`. The distro's
+  job: one-line init, DSN, resource (service/env/version), `trooper.*` attributes (route template, entry route, consumer
+  group/topic, caller), PII defaults, sampling. Framework auto-instrumentation comes from OTel's own libraries;
+  we only write code for what's missing (e.g. route template, consumer group, Fiber/Gin route).
   - Go: `trooper-go` + `troopergin`, `trooperfiber`, `trooperecho`, `trooperchi`, `trooperhttp`, `trooperkafka` (franz-go, sarama),
     `trooperamqp`, `troopersql`, `trooperredis`, `trooperslog`.
-  - JVM (Java, Kotlin): OTel Java agent **extension** (`trooper-javaagent.jar` — agent + extension tek jar) → Spring Boot, Quarkus
-    (JVM mode), Ktor, Kafka, RabbitMQ, JDBC hepsi agent'tan. Agent kullanamayanlar için `trooper-spring-boot-starter` ve
-    `trooper-quarkus` (Quarkus'un `quarkus-opentelemetry` extension'ını yapılandırır, native image dahil), `trooper-ktor` plugin.
+  - JVM (Java, Kotlin): an OTel Java agent **extension** (`trooper-javaagent.jar` — agent + extension in one jar) → Spring Boot, Quarkus
+    (JVM mode), Ktor, Kafka, RabbitMQ, JDBC all from the agent. For those who can't use the agent: `trooper-spring-boot-starter` and
+    `trooper-quarkus` (configures Quarkus's `quarkus-opentelemetry` extension, including native image), and the `trooper-ktor` plugin.
   - .NET: `TaskTrooper.Telemetry` NuGet — `AddTaskTrooper()` (ASP.NET Core, HttpClient, EF Core/SqlClient, Confluent.Kafka, RabbitMQ).
-- **Client SDK'ları (web, RN, Flutter, Android, iOS) = RUM JSON** (`POST /v1/rum`, şema `proto/rum/v1/rum.proto`). OTel client
-  SDK'ları ağır ve RUM kavramlarını (session, view, vital, crash, app start) kapsamıyor. Network istekleri `traceparent`
-  header'ı ile backend trace'ine bağlanır.
-  - Web: `@tasktrooper/browser` framework'süz çalışır (History API ile SPA route, window error, fetch/XHR, Web Vitals). Framework'ün
-    hataları yuttuğu yerler için ince paketler: `@tasktrooper/react` (ErrorBoundary, React 19 root error callback'leri),
-    `@tasktrooper/vue` (`app.config.errorHandler`), `@tasktrooper/angular` (`ErrorHandler` provider). Svelte, Solid, Next.js, Nuxt ek paket istemez.
-  - `@tasktrooper/react-native` (JS; react-navigation ekran takibi, ErrorUtils, fetch/XHR, AppState, offline kuyruk).
+- **Client SDKs (web, RN, Flutter, Android, iOS) = RUM JSON** (`POST /v1/rum`, schema `proto/rum/v1/rum.proto`). OTel client
+  SDKs are heavy and don't cover RUM concepts (session, view, vital, crash, app start). Network requests are linked to the backend trace via the `traceparent`
+  header.
+  - Web: `@tasktrooper/browser` works without a framework (SPA routes via the History API, window error, fetch/XHR, Web Vitals). Thin packages for where
+    the framework swallows errors: `@tasktrooper/react` (ErrorBoundary, React 19 root error callbacks),
+    `@tasktrooper/vue` (`app.config.errorHandler`), `@tasktrooper/angular` (`ErrorHandler` provider). Svelte, Solid, Next.js and Nuxt need no extra package.
+  - `@tasktrooper/react-native` (JS; react-navigation screen tracking, ErrorUtils, fetch/XHR, AppState, offline queue).
   - `tasktrooper_flutter` (Dart), `TaskTrooper` Android (Kotlin, AAR), `TaskTrooper` iOS (Swift Package).
-**Sonuç:** Backend dil kapsamı ucuz ve OTel kullanan müşteri SDK'sız gelebilir. Client tarafı tek şema → tek writer yolu.
+**Consequence:** Backend language coverage is cheap and a customer using OTel can come without an SDK. Client side is a single schema → a single writer path.
 
-## ADR-012 — Cloud entegrasyonları: AWS, Google Cloud, Vercel, Neon
-**Bağlam:** Müşterinin DB/queue/deploy verisinin bir kısmı sadece bulut sağlayıcının API'sinde var (RDS/ElastiCache CPU-disk,
-MSK broker metrikleri, SQS/Pub/Sub kuyrukları, Cloud SQL, Neon compute, Vercel deploy + log + Web Vitals). SQL ile alınamıyor.
-**Karar:**
-- Yeni servis `services/integrations` (`cmd/trooper-cloud`): Postgres `integrations` tablosundaki her bağlantı için
-  **keşif** (kaynakları `databases` / `broker_clusters` satırı olarak upsert, `collector = 'cloud'`, `integration_id`) ve
-  **metrik çekme** (60 sn) yapar. Metrikleri collector ile **aynı OTLP isimleriyle** ingest-gw'ye yollar (contracts §5) —
-  writer ve api değişmeden "Cloud integration" kaynaklı veriyi gösterir.
-  - AWS: STS AssumeRole (external id ile, önerilen) veya access key. CloudWatch `GetMetricData`: RDS/Aurora, ElastiCache,
-    MSK (broker node + `SumOffsetLag`), SQS. Keşif: `rds:DescribeDBInstances`, `elasticache:DescribeReplicationGroups`,
+## ADR-012 — Cloud integrations: AWS, Google Cloud, Vercel, Neon
+**Context:** Part of the customer's DB/queue/deploy data exists only in the cloud provider's API (RDS/ElastiCache CPU-disk,
+MSK broker metrics, SQS/Pub/Sub queues, Cloud SQL, Neon compute, Vercel deploy + log + Web Vitals). It can't be fetched via SQL.
+**Decision:**
+- New service `services/integrations` (`cmd/trooper-cloud`): for each connection in the Postgres `integrations` table it does
+  **discovery** (upserts resources as `databases` / `broker_clusters` rows, `collector = 'cloud'`, `integration_id`) and
+  **metric pulling** (60 s). It sends metrics to ingest-gw **with the same OTLP names** as the collector (contracts §5) —
+  writer and api show "Cloud integration" sourced data without changes.
+  - AWS: STS AssumeRole (with external id, recommended) or access key. CloudWatch `GetMetricData`: RDS/Aurora, ElastiCache,
+    MSK (broker node + `SumOffsetLag`), SQS. Discovery: `rds:DescribeDBInstances`, `elasticache:DescribeReplicationGroups`,
     `kafka:ListClustersV2`, `sqs:ListQueues`.
-  - Google Cloud: service account JSON (veya workload identity). Cloud Monitoring `timeSeries.list`: Cloud SQL, Memorystore Redis,
-    Pub/Sub (`num_undelivered_messages`, `oldest_unacked_message_age`). Keşif: Cloud SQL Admin, Memorystore, Pub/Sub API.
-  - Neon: API key. Projeler/branch'ler/compute endpoint'leri → `databases` (engine postgres); compute durumu, CU, active time,
-    storage → `trooper.db.*`; `pg_stat_statements` için mevcut collector'ın direct modu (Neon rolü ile) kullanılır.
-  - Vercel: access token (+ team id). REST API ile projeler ve **deploy'lar** → `deploy_markers` (servis eşlemesi: Vercel proje
-    adı = servis adı, değiştirilebilir). **Drains**: Vercel log / trace / speed-insights / web-analytics drain'leri
-    ingest-gw'deki `POST /v1/drains/vercel`'e gelir (`x-vercel-signature` HMAC-SHA1 doğrulaması) ve log, span, RUM vital /
-    view'a çevrilir.
-- SQS ve Pub/Sub, RabbitMQ gibi **kuyruk** modelidir: `broker_clusters.kind ∈ {kafka, rabbitmq, sqs, pubsub}`; lag = görünür /
-  teslim edilmemiş mesaj, ek olarak en eski mesaj yaşı (`oldest_age_s`).
-- Kimlik bilgileri: UI'dan girilen secret'lar Postgres `secrets` tablosunda AES-256-GCM ile şifreli (`TT_SECRETS_KEY`, 32 byte
-  base64); `credentials_ref = 'secret:<id>'`. Diğer referanslar `env:` / `file:` (collector ile aynı). Secret'lar API
-  cevaplarında asla dönmez.
-**Sonuç:** Bulut verisi ayrı bir pipeline istemiyor; sadece yeni bir "kaynak". Lambda / Cloud Run / Vercel Functions için
-RED metrikleri span'lardan gelir (OTel/Vercel trace drain); bulut metriklerinden servis RED'i türetilmez.
+  - Google Cloud: service account JSON (or workload identity). Cloud Monitoring `timeSeries.list`: Cloud SQL, Memorystore Redis,
+    Pub/Sub (`num_undelivered_messages`, `oldest_unacked_message_age`). Discovery: Cloud SQL Admin, Memorystore, Pub/Sub API.
+  - Neon: API key. Projects/branches/compute endpoints → `databases` (engine postgres); compute state, CU, active time,
+    storage → `trooper.db.*`; for `pg_stat_statements` the existing collector's direct mode (with the Neon role) is used.
+  - Vercel: access token (+ team id). Projects and **deploys** via the REST API → `deploy_markers` (service mapping: Vercel project
+    name = service name, can be changed). **Drains**: Vercel log / trace / speed-insights / web-analytics drains
+    arrive at `POST /v1/drains/vercel` on ingest-gw (`x-vercel-signature` HMAC-SHA1 verification) and are converted to logs, spans, RUM vitals /
+    views.
+- SQS and Pub/Sub are a **queue** model like RabbitMQ: `broker_clusters.kind ∈ {kafka, rabbitmq, sqs, pubsub}`; lag = visible /
+  undelivered messages, plus the oldest message age (`oldest_age_s`).
+- Credentials: secrets entered from the UI are encrypted with AES-256-GCM in the Postgres `secrets` table (`TT_SECRETS_KEY`, 32 bytes
+  base64); `credentials_ref = 'secret:<id>'`. Other references are `env:` / `file:` (same as the collector). Secrets are never returned in API
+  responses.
+**Consequence:** Cloud data doesn't need a separate pipeline; it's just a new "source". For Lambda / Cloud Run / Vercel Functions,
+RED metrics come from spans (OTel/Vercel trace drain); service RED is not derived from cloud metrics.
 
-## ADR-013 — Dashboard veri modu: senkron API + uzak cache
-**Bağlam:** Ekranlar `src/data/*` fonksiyonlarını senkron çağırıyor (`services`, `endpointSeries(...)`). Hepsini async'e çevirmek
-27 ekranı yeniden yazmak demek.
-**Karar:** Fonksiyon imzaları aynı kalır. `VITE_DATA=api` iken (default `mock`):
-- Liste verisi (`services`, `monitors`, `incidents`, `kpis`, `databases`, `clusters`, `topics`, `consumerGroups`, senaryolar,
-  entegrasyonlar …) uygulama açılırken `hydrate()` ile api'den çekilir ve mevcut export edilen dizilerin **içi değiştirilir**
-  (referans aynı kalır). 60 sn'de bir ve mutasyon sonrası yenilenir.
-- Detay/seri fonksiyonları `remote(path, fallback)` kullanır: cache'te varsa döner, yoksa isteği başlatır ve boş/sıfır
-  fallback döner; cevap gelince veri versiyonu artar ve `useApp()`/`useData()` kullanan ekranlar yeniden render olur.
-- Mutasyonlar (`addDatabase`, `addLagMonitor`, ack/resolve …) api'ye POST eder, sonra ilgili cache'i geçersiz kılar.
-**Sonuç:** Ekran kodu değişmez; ~~mock mod geliştirme/demo için korunur~~ (ADR-028 ile kaldırıldı). Yükleme sırasında grafikler kısa süre sıfır görünür
-(kabul edildi; kritik ekranlarda `remoteStatus()` ile ince yükleme çubuğu).
+## ADR-013 — Dashboard data mode: synchronous API + remote cache
+**Context:** Screens call `src/data/*` functions synchronously (`services`, `endpointSeries(...)`). Converting all of them to async means
+rewriting 27 screens.
+**Decision:** Function signatures stay the same. When `VITE_DATA=api` (default `mock`):
+- List data (`services`, `monitors`, `incidents`, `kpis`, `databases`, `clusters`, `topics`, `consumerGroups`, scenarios,
+  integrations …) is fetched from api via `hydrate()` when the app opens and the **contents** of the existing exported arrays are replaced
+  (the reference stays the same). Refreshed every 60 s and after mutations.
+- Detail/series functions use `remote(path, fallback)`: returns from cache if present, otherwise starts the request and returns an empty/zero
+  fallback; when the response arrives the data version increments and screens using `useApp()`/`useData()` re-render.
+- Mutations (`addDatabase`, `addLagMonitor`, ack/resolve …) POST to api, then invalidate the related cache.
+**Consequence:** Screen code doesn't change; ~~mock mode is kept for development/demo~~ (removed by ADR-028). During loading, charts briefly show zero
+(accepted; on critical screens a thin loading bar via `remoteStatus()`).
 
-## ADR-014 — Code intelligence servisi (`services/codeintel`)
-**Bağlam:** Faz 4: repo okuyup envanter, alert önerisi ve load test taslağı üretmek. Tablolar (`repositories`,
-`inventory_items`, `alert_suggestions`) 001'de var, servis yok.
-**Karar:**
-- Ayrı Go servisi `codeintel` (:8096). api ile aynı Postgres'i kullanır; ClickHouse'u sadece okur (gözlem eşleştirme).
-  api tetikler (`repositories.analyze_requested_at`), codeintel 15 sn'de bir yoklar (trooper-cloud `syncRequestedAt` deseni).
-- Repo erişimi: GitHub App (app id + private key secret'ı, installation token) **veya** token (`secret:`), dev/demo için
-  `local` provider (`file://` yol). Clone shallow; analiz bitince kaynak silinir.
-- Parse: tree-sitter yerine **Go'da yazılmış deterministik extractor'lar** (Go için `go/ast`; TS/JS ve Python için hafif
-  tokenizer + framework kalıpları). Gerekçe: CGO'suz tek binary, extractor'lar zaten kalıp tabanlı. Kapsam code-intelligence.md
-  tablosu.
-- LLM (Claude): sadece **yorumlama** (kritiklik, özet, failure mode, monitor önerisi, loadtest_hint). Model ID `TT_CODEINTEL_MODEL`,
-  anahtar `ANTHROPIC_API_KEY`; ikisinden biri yoksa LLM adımı kapalı → statik kurallar. Sonuçlar dosya hash'i ile cache'lenir.
-- Alert-as-code: scan sırasında `.trooper/monitors/*.yaml` okunur → `monitors` tablosuna `source='code'` upsert
-  (`code_ref` = repo:path). UI ve api bu monitor'leri read-only tutar. Repo'dan silinen dosyanın monitor'ü silinir.
-- Webhook: `POST /v1/webhooks/github` (HMAC `X-Hub-Signature-256`) → default branch push'unda incremental analiz.
-**Sonuç:** Ek dil/framework yeni extractor dosyası demek. Tree-sitter doğruluğu gerekirse sonradan eklenebilir.
-**Ek (GitLab / Bitbucket, contracts §18a):** OAuth uygulaması yerine repo başına token + repo başına webhook. Self-managed
-GitLab adresi ayrı bir integration satırında değil `repositories.base_url`'de (repo başına tek alan; aynı projede farklı
-GitLab'lar mümkün, sorgular basit kalır). Webhook secret'ını kullanıcı değil api üretir (zayıf secret riski yok) ve bir kez
-gösterir. Bitbucket push payload'ı dosya listelemediği için her push `{*}` kuyruğa koyar; asıl daraltma git diff incremental'da.
+## ADR-014 — Code intelligence service (`services/codeintel`)
+**Context:** Phase 4: read a repo and produce an inventory, alert suggestions and load test drafts. The tables (`repositories`,
+`inventory_items`, `alert_suggestions`) exist in 001, but there is no service.
+**Decision:**
+- Separate Go service `codeintel` (:8096). Uses the same Postgres as api; only reads ClickHouse (observation matching).
+  api triggers (`repositories.analyze_requested_at`), codeintel polls every 15 s (trooper-cloud `syncRequestedAt` pattern).
+- Repo access: GitHub App (app id + private key secret, installation token) **or** token (`secret:`), and for dev/demo a
+  `local` provider (`file://` path). Shallow clone; source is deleted when analysis finishes.
+- Parsing: instead of tree-sitter, **deterministic extractors written in Go** (`go/ast` for Go; a lightweight
+  tokenizer + framework patterns for TS/JS and Python). Rationale: single binary without CGO, and the extractors are pattern-based anyway. Scope: the code-intelligence.md
+  table.
+- LLM (Claude): only for **interpretation** (criticality, summary, failure mode, monitor suggestion, loadtest_hint). Model ID `TT_CODEINTEL_MODEL`,
+  key `ANTHROPIC_API_KEY`; if either is missing the LLM step is off → static rules. Results are cached by file hash.
+- Alert-as-code: during a scan `.trooper/monitors/*.yaml` is read → upserted into the `monitors` table with `source='code'`
+  (`code_ref` = repo:path). UI and api keep these monitors read-only. A file's monitor is deleted when the file is removed from the repo.
+- Webhook: `POST /v1/webhooks/github` (HMAC `X-Hub-Signature-256`) → incremental analysis on default branch push.
+**Consequence:** An extra language/framework means a new extractor file. Tree-sitter accuracy can be added later if needed.
+**Addendum (GitLab / Bitbucket, contracts §18a):** A per-repo token + per-repo webhook instead of an OAuth application. The self-managed
+GitLab address is not in a separate integration row but in `repositories.base_url` (one field per repo; different
+GitLabs in the same project are possible, queries stay simple). The webhook secret is generated by api, not the user (no weak secret risk), and shown
+once. Since the Bitbucket push payload doesn't list files, every push enqueues `{*}`; the actual narrowing happens in the git diff incremental.
 
-## ADR-015 — Load test kontrolcüsü ve runner (`services/loadtest`)
-**Bağlam:** Faz 5: api senaryo/run CRUD'u var, runner yok; run'lar `queued` kalıyor.
-**Karar:**
-- Modül `services/loadtest`: `loadtest-ctl` (:8097) + `loadtest-runner`. ctl `loadtest_runs.state='queued'` satırlarını
-  `FOR UPDATE SKIP LOCKED` ile alır; domain doğrulaması ve plan limitlerini kontrol eder; runner'ı başlatır
-  (`TT_LOADTEST_EXECUTOR=local` alt süreç, `k8s` → Job manifesti, bölge başına bir Job).
-- Yük motoru: k6 gömmek yerine **kendi Go motorumuz** (VU ve arrival-rate modları, stage'ler, check'ler, threshold'lar,
-  think time, şablon değişkenleri). Gerekçe: k6'yı kütüphane olarak gömmek desteklenen bir API değil ve bağımlılık ağacı ağır;
-  declarative senaryo formatımız zaten sınırlı. Ham k6 script modu: runner `k6` binary'si PATH'te varsa onu çağırır.
-- Korelasyon: runner her isteğe `traceparent` + `baggage: tt.svc=loadtest:<run_id>` koyar → hedef servisin SDK'ları bunu
-  `trooper.caller` olarak yazar; UI test trafiğini caller ile ayırır. Ek header `x-trooper-loadtest-run: <run_id>`.
-- Runner metrikleri OTLP ile kendi ingest'imize (`service.name = loadtest`, attr `trooper.loadtest.run`), canlı özet her 5 sn
-  `loadtest_runs.live` (jsonb) kolonuna. Bitince `summary`, `thresholds_passed`, `state ∈ passed|failed|aborted|error`.
-- Güvenlik: hedef host `loadtest_domains`'de doğrulanmış olmalı (DNS TXT `trooper-verify=<token>` veya
-  `https://<host>/.well-known/trooper-verify` içeriği = token); `localhost`/`*.localhost`/`127.0.0.1` dev'de
-  (`TT_LOADTEST_ALLOW_LOCAL=true`) muaf. Limitler: `TT_LOADTEST_MAX_VUS`, `TT_LOADTEST_MAX_DURATION`, aylık VU-dakika.
-  Abort: api `POST /loadtests/runs/{id}/stop` → `abort_requested_at`; ctl runner'ı durdurur. Opsiyonel otomatik abort
+## ADR-015 — Load test controller and runner (`services/loadtest`)
+**Context:** Phase 5: api has scenario/run CRUD, but no runner; runs stay `queued`.
+**Decision:**
+- Module `services/loadtest`: `loadtest-ctl` (:8097) + `loadtest-runner`. ctl picks up `loadtest_runs.state='queued'` rows
+  with `FOR UPDATE SKIP LOCKED`; checks domain verification and plan limits; starts the runner
+  (`TT_LOADTEST_EXECUTOR=local` child process, `k8s` → Job manifest, one Job per region).
+- Load engine: instead of embedding k6, **our own Go engine** (VU and arrival-rate modes, stages, checks, thresholds,
+  think time, template variables). Rationale: embedding k6 as a library is not a supported API and its dependency tree is heavy;
+  our declarative scenario format is limited anyway. Raw k6 script mode: the runner invokes the `k6` binary if it is on PATH.
+- Correlation: the runner puts `traceparent` + `baggage: tt.svc=loadtest:<run_id>` on every request → the target service's SDKs write this
+  as `trooper.caller`; the UI separates test traffic by caller. Extra header `x-trooper-loadtest-run: <run_id>`.
+- Runner metrics go via OTLP to our own ingest (`service.name = loadtest`, attr `trooper.loadtest.run`), live summary every 5 s
+  into the `loadtest_runs.live` (jsonb) column. When finished: `summary`, `thresholds_passed`, `state ∈ passed|failed|aborted|error`.
+- Security: the target host must be verified in `loadtest_domains` (DNS TXT `trooper-verify=<token>` or
+  `https://<host>/.well-known/trooper-verify` content = token); `localhost`/`*.localhost`/`127.0.0.1` are exempt in dev
+  (`TT_LOADTEST_ALLOW_LOCAL=true`). Limits: `TT_LOADTEST_MAX_VUS`, `TT_LOADTEST_MAX_DURATION`, monthly VU-minutes.
+  Abort: api `POST /loadtests/runs/{id}/stop` → `abort_requested_at`; ctl stops the runner. Optional automatic abort
   (`spec.gate.abortErrorRate`).
-**Sonuç:** k6 ekosisteminin tamamı yok; declarative kapsam bilinçli olarak sınırlı.
+**Consequence:** The full k6 ecosystem is not available; the declarative scope is deliberately limited.
 
-## ADR-016 — Kullanıcı kimliği: OIDC + oturum, API key'ler korunur
-**Bağlam:** Dashboard şu an tek bir dev api key'i ile çalışıyor; kullanıcı, org, rol yok.
-**Karar:**
-- api OIDC Authorization Code + PKCE akışını yürütür (`TT_OIDC_ISSUER`, `TT_OIDC_CLIENT_ID`, `TT_OIDC_CLIENT_SECRET`,
-  `TT_OIDC_REDIRECT_URL`). Başarılı girişte `users` upsert, httpOnly `tt_session` cookie (Postgres `sessions`, 7 gün, kaydırmalı).
-- İstekte kimlik sırası: `Authorization: Bearer <api key>` (otomasyon, CLI, SDK upload) → `tt_session` cookie. Cookie ile
-  gelen isteklerde proje `X-Trooper-Project` header'ından (yoksa kullanıcının ilk projesi).
-- Roller org seviyesinde: `owner | admin | member | viewer`. viewer sadece GET; admin+ üye/anahtar/entegrasyon yönetir.
-- OIDC yapılandırılmamışsa (`TT_OIDC_ISSUER` boş) **dev login**: `POST /auth/dev-login {email}` sadece `TT_AUTH_DEV=true`
-  iken; UI bu durumda e-posta ile giriş gösterir. ~~Mevcut `VITE_API_KEY` akışı dev için çalışmaya devam eder~~ (ADR-028 ile kaldırıldı).
-- `audit_log` tablosu: kim, ne zaman, hangi mutasyon.
-**Sonuç:** SAML/SCIM sonraki iş. API key'ler proje kapsamlı kalır.
+## ADR-016 — User identity: OIDC + session, API keys are kept
+**Context:** The dashboard currently runs with a single dev api key; there are no users, orgs or roles.
+**Decision:**
+- api runs the OIDC Authorization Code + PKCE flow (`TT_OIDC_ISSUER`, `TT_OIDC_CLIENT_ID`, `TT_OIDC_CLIENT_SECRET`,
+  `TT_OIDC_REDIRECT_URL`). On successful login: `users` upsert, httpOnly `tt_session` cookie (Postgres `sessions`, 7 days, sliding).
+- Identity order on a request: `Authorization: Bearer <api key>` (automation, CLI, SDK upload) → `tt_session` cookie. For requests coming
+  with a cookie, the project comes from the `X-Trooper-Project` header (otherwise the user's first project).
+- Roles at org level: `owner | admin | member | viewer`. viewer is GET only; admin+ manages members/keys/integrations.
+- If OIDC is not configured (`TT_OIDC_ISSUER` empty), **dev login**: `POST /auth/dev-login {email}` only when `TT_AUTH_DEV=true`;
+  in that case the UI shows email login. ~~The existing `VITE_API_KEY` flow keeps working for dev~~ (removed by ADR-028).
+- `audit_log` table: who, when, which mutation.
+**Consequence:** SAML/SCIM is follow-up work. API keys stay project-scoped.
 
-## ADR-017 — Slack App ve GitHub App entegrasyonları
-**Bağlam:** Alert'ler bugün Slack'e sadece incoming webhook ile gidiyor (kanal webhook'a sabit). Repo bağlamak token/kurulum id
-elle girmeyi gerektiriyor.
-**Karar:**
-- **Slack App** (OAuth v2, bot scope'ları `chat:write`, `chat:write.public`, `channels:read`, `groups:read`, `channels:join`,
-  `users:read.email`): org başına bir
-  kurulum, bot token `secrets`'ta şifreli. Monitor/KPI kuralı bildirim hedefi `slack:<channel_id>` (görünen ad `#kanal`
-  ayrıca saklanır); notifier `chat.postMessage` ile o kanala yazar, mesaj `ts`'ini saklar ve resolve/hatırlatma/ack aynı
-  mesajın **thread**'ine gider (ilk mesaj `chat.update` ile durum rengini değiştirir). Eski `slack:` webhook kanalları çalışmaya
-  devam eder.
-- Mesaj içeriği: başlık, durum, değer/eşik, servis/endpoint, grafik linki, **olası kök neden + güven yüzdesi** (alert-engine'in
-  RCA sonucu: `rootCause.summary`, `rootCause.confidence` → "Likely cause: … (78% confidence)"; confidence < 0.3 ise "low
-  confidence" etiketi, RCA yoksa satır gösterilmez), deploy (son 1 saat), Ack / Open butonları (Slack interactivity →
-  api `POST /slack/interactions`, imza `X-Slack-Signature` doğrulaması).
-- **GitHub App**: kurulum akışı api'de (`/integrations/github/install` → GitHub → `/integrations/github/callback?installation_id=`),
-  kurulumun repo listesi UI'da seçilir, seçilen repolar `repositories`'e eklenir ve analiz kuyruğa girer. App webhook'u
-  (tek URL) codeintel'e gelir: `push` (default branch) → incremental analiz, `installation`/`installation_repositories` →
-  repo ekle/kaldır senkronu, `pull_request` → ileride. Ortak GitHub App istemcisi `services/pkg/githubapp`.
-**Sonuç:** Kanal seçimi UI'da listeden yapılır; webhook URL'si kopyalamak gerekmez.
+## ADR-017 — Slack App and GitHub App integrations
+**Context:** Today alerts go to Slack only via incoming webhook (the channel is fixed to the webhook). Connecting a repo requires entering a token/installation id
+by hand.
+**Decision:**
+- **Slack App** (OAuth v2, bot scopes `chat:write`, `chat:write.public`, `channels:read`, `groups:read`, `channels:join`,
+  `users:read.email`): one
+  installation per org, bot token encrypted in `secrets`. Monitor/KPI rule notification target `slack:<channel_id>` (display name `#channel`
+  stored separately); the notifier writes to that channel with `chat.postMessage`, stores the message `ts`, and resolve/reminder/ack go to the
+  **thread** of the same message (the first message changes its status color via `chat.update`). Old `slack:` webhook channels keep
+  working.
+- Message content: title, status, value/threshold, service/endpoint, chart link, **likely root cause + confidence percentage** (alert-engine's
+  RCA result: `rootCause.summary`, `rootCause.confidence` → "Likely cause: … (78% confidence)"; if confidence < 0.3 a "low
+  confidence" label, if there is no RCA the line is not shown), deploy (last 1 hour), Ack / Open buttons (Slack interactivity →
+  api `POST /slack/interactions`, `X-Slack-Signature` signature verification).
+- **GitHub App**: the installation flow is in api (`/integrations/github/install` → GitHub → `/integrations/github/callback?installation_id=`),
+  the installation's repo list is selected in the UI, selected repos are added to `repositories` and analysis is queued. The App webhook
+  (single URL) comes to codeintel: `push` (default branch) → incremental analysis, `installation`/`installation_repositories` →
+  repo add/remove sync, `pull_request` → later. Shared GitHub App client `services/pkg/githubapp`.
+**Consequence:** Channel selection is done from a list in the UI; no need to copy a webhook URL.
 
-## ADR-018 — AI kullanım kotası: kredi, org + üye limiti
-**Bağlam:** LLM çağrıları (bugün codeintel zenginleştirme; ileride RCA, öneri) tek bir Anthropic anahtarıyla yapılıyor ve
-tek sınır analiz başına öğe sayısı (`TT_CODEINTEL_LLM_MAX_ITEMS`). Paket bazında "bu ay şu kadar hakkın var" ve kişi bazında
-tavan gerekiyor.
-**Karar:**
-- Birim **kredi**: 1 kredi = 0,01 USD model maliyeti. Token → kredi dönüşümü model fiyat tablosuyla (config; model id sabit
-  kodlanmaz). Farklı modeller tek ölçüde toplanır.
-- Dönem UTC takvim ayı; ayın 1'inde sıfırlanır (sayaç değil, `ai_usage` defterinden SUM).
-- Limit katmanları: **paket varsayılanı** (`free` 100, `team` 5.000, `enterprise` sınırsız) → **org override**
-  (`orgs.ai_monthly_credits`) → **üye tavanı** (`memberships.ai_monthly_credits`, sadece o kişinin başlattığı işler).
-  Otomatik işler (webhook ile analiz) sadece org limitinden düşer.
-- Kontrol her LLM çağrısından **önce** (tahmini maliyetle), kayıt çağrıdan **sonra** (gerçek token). Org başına Postgres
-  advisory lock ile sıralanır; limit "soft": en fazla bir çağrı kadar aşılabilir.
-- Limit dolunca iş durmaz: LLM adımı atlanır, statik kurallarla devam edilir ve sonuçta `quota_exceeded` görünür.
-- %80 ve %100 eşiklerinde org'un seçtiği bildirim hedeflerine (Slack kanalı vb.) tek mesaj (ay+eşik başına dedupe).
-- Ortak mantık `services/pkg/aiquota` (bağımlılıksız; Postgres erişimi çağıranın verdiği arayüzle).
-**Sonuç:** Faturalama/ödeme yok; paket `orgs.plan`'dan okunur. Kullanım ekranı Settings → Usage.
+## ADR-018 — AI usage quota: credits, org + member limits
+**Context:** LLM calls (today codeintel enrichment; later RCA, suggestions) are made with a single Anthropic key, and
+the only limit is items per analysis (`TT_CODEINTEL_LLM_MAX_ITEMS`). We need a per-plan "you have this much this month" and a per-person
+ceiling.
+**Decision:**
+- Unit **credit**: 1 credit = 0.01 USD of model cost. Token → credit conversion via a model price table (config; model ids are not
+  hard-coded). Different models are summed in a single measure.
+- Period is the UTC calendar month; resets on the 1st (not a counter, a SUM from the `ai_usage` ledger).
+- Limit layers: **plan default** (`free` 100, `team` 5,000, `enterprise` unlimited) → **org override**
+  (`orgs.ai_monthly_credits`) → **member ceiling** (`memberships.ai_monthly_credits`, only jobs started by that person).
+  Automatic jobs (analysis via webhook) only count against the org limit.
+- Check **before** every LLM call (with estimated cost), record **after** the call (actual tokens). Serialized per org with a Postgres
+  advisory lock; the limit is "soft": it can be exceeded by at most one call.
+- When the limit is reached the job doesn't stop: the LLM step is skipped, it continues with static rules, and `quota_exceeded` shows up in the result.
+- At the 80% and 100% thresholds, a single message to the notification targets chosen by the org (Slack channel etc.) (deduped per month+threshold).
+- Shared logic in `services/pkg/aiquota` (dependency-free; Postgres access through an interface provided by the caller).
+**Consequence:** No billing/payment; the plan is read from `orgs.plan`. The usage screen is Settings → Usage.
 
-## ADR-019 — Host, Kubernetes ve container izleme (trooper-agent modları + opsiyonel eBPF)
-**Bağlam:** Altyapı tarafında sadece DB ve broker izleniyor. Host, K8s cluster, pod, container ve process görünürlüğü yok.
-New Relic bunu Pixie (eBPF) ile yapıyor.
-**Karar:**
-- Yeni ajan yazmıyoruz; `trooper-agent` (services/collector) **modlar** kazanır: `db` (bugünkü), `host` (host + container +
-  process; K8s'te DaemonSet), `cluster` (K8s API'den nesne durumu + Warning event'leri; tek replika Deployment).
-  `TT_AGENT_MODES=host,cluster` gibi birleştirilebilir.
-- Host metrikleri gopsutil, container metrikleri K8s'te kubelet `/stats/summary` (+ `/pods` metadata), K8s dışında Docker Engine
-  API (salt-okunur socket). Process'ler host başına CPU+bellek top 20; komut argümanları **toplanmaz** (PII).
-- Cluster modu salt-okunur RBAC (get/list/watch); metrikler 30 sn'de bir snapshot, Warning event'leri OTLP log
+## ADR-019 — Host, Kubernetes and container monitoring (trooper-agent modes + optional eBPF)
+**Context:** On the infrastructure side only DBs and brokers are monitored. There is no host, K8s cluster, pod, container or process visibility.
+New Relic does this with Pixie (eBPF).
+**Decision:**
+- We don't write a new agent; `trooper-agent` (services/collector) gains **modes**: `db` (today's), `host` (host + container +
+  process; DaemonSet in K8s), `cluster` (object state + Warning events from the K8s API; single-replica Deployment).
+  They can be combined, e.g. `TT_AGENT_MODES=host,cluster`.
+- Host metrics via gopsutil; container metrics via kubelet `/stats/summary` (+ `/pods` metadata) in K8s, and the Docker Engine
+  API (read-only socket) outside K8s. Processes: top 20 by CPU+memory per host; command arguments are **not collected** (PII).
+- Cluster mode uses read-only RBAC (get/list/watch); metrics are a snapshot every 30 s, Warning events as OTLP logs
   (`service.name=k8s`).
-- **eBPF**: kendi eBPF kodumuzu yazmıyoruz. Helm chart opsiyonel olarak OpenTelemetry eBPF Instrumentation (OBI) DaemonSet'i
-  kurar (`ebpf.enabled`, varsayılan kapalı); OBI enstrümante edilmemiş HTTP/gRPC/SQL servislerinden span + RED metriği üretip
-  OTLP ile ingest-gw'ye yollar → mevcut trace/servis haritası yolu. UI bu servisleri "eBPF" rozetiyle gösterir.
-- Veri tipli ClickHouse tablolarına (`hosts_1m`, `containers_1m`, `processes_1m`, `k8s_pods_1m`, `k8s_nodes_1m`,
-  `k8s_workloads_1m`) yazılır; servis ↔ pod bağı pod label'ından (`tasktrooper.io/service` > `app.kubernetes.io/name` > `app`).
-- Alert: yeni monitor kind `infra` (host/container/pod/node/workload); alert-engine RCA, servis incident'ında aynı servisin
-  pod'larındaki OOMKilled/CrashLoop/restart ve host CPU doygunluğunu kök neden adayı yapar.
-- Dağıtım: tek chart `deploy/helm/trooper-agent` (Linux DaemonSet + cluster Deployment + RBAC + opsiyonel OBI + opsiyonel
-  Windows HostProcess DaemonSet + `db.enabled` ile DB/broker collector); K8s dışı host için `docker run` / systemd.
-- Cluster modu list + watch kullanır; K8s dışı container'lar Docker → Podman → cgroup v2 sırasıyla, GPU `nvidia-smi` ile (§22).
-**Sonuç:** Pixie'deki tam protokol ayrıştırma (MySQL/Kafka payload, flame graph) kapsam dışı; OBI'nin verdiği kadar.
+- **eBPF**: we don't write our own eBPF code. The Helm chart optionally installs the OpenTelemetry eBPF Instrumentation (OBI) DaemonSet
+  (`ebpf.enabled`, off by default); OBI produces spans + RED metrics from uninstrumented HTTP/gRPC/SQL services and
+  sends them via OTLP to ingest-gw → the existing trace/service map path. The UI shows these services with an "eBPF" badge.
+- Data is written to typed ClickHouse tables (`hosts_1m`, `containers_1m`, `processes_1m`, `k8s_pods_1m`, `k8s_nodes_1m`,
+  `k8s_workloads_1m`); the service ↔ pod link comes from the pod label (`tasktrooper.io/service` > `app.kubernetes.io/name` > `app`).
+- Alerting: new monitor kind `infra` (host/container/pod/node/workload); in a service incident, alert-engine RCA makes OOMKilled/CrashLoop/restart
+  in the same service's pods and host CPU saturation root cause candidates.
+- Distribution: a single chart `deploy/helm/trooper-agent` (Linux DaemonSet + cluster Deployment + RBAC + optional OBI + optional
+  Windows HostProcess DaemonSet + DB/broker collector with `db.enabled`); for non-K8s hosts `docker run` / systemd.
+- Cluster mode uses list + watch; non-K8s containers in the order Docker → Podman → cgroup v2, GPU via `nvidia-smi` (§22).
+**Consequence:** Pixie's full protocol parsing (MySQL/Kafka payload, flame graph) is out of scope; we get as much as OBI provides.
 
-## ADR-020 — Serverless: AWS Lambda ve Azure Functions
-**Bağlam:** Serverless fonksiyonlar görünmüyor; AWS entegrasyonu sadece RDS/ElastiCache/MSK/SQS keşfediyor, Azure entegrasyonu yok.
-**Karar:**
-- **AWS Lambda** mevcut AWS entegrasyonunun yeni servisi (`config.services` içinde `lambda`): ListFunctions + tag + event source
-  mapping keşfi (10 dk), CloudWatch `AWS/Lambda` metrikleri (60 sn): Invocations, Errors, Throttles, Duration
+## ADR-020 — Serverless: AWS Lambda and Azure Functions
+**Context:** Serverless functions are not visible; the AWS integration only discovers RDS/ElastiCache/MSK/SQS, and there is no Azure integration.
+**Decision:**
+- **AWS Lambda** is a new service of the existing AWS integration (`lambda` in `config.services`): ListFunctions + tag + event source
+  mapping discovery (10 min), CloudWatch `AWS/Lambda` metrics (60 s): Invocations, Errors, Throttles, Duration
   (avg/max/p95/p99), ConcurrentExecutions, IteratorAge.
-- **Azure** yeni sağlayıcı (`provider='azure'`): service principal (tenant/client id + secret), abonelik listesi. Function App'ler
-  ARM'dan keşfedilir; Azure Monitor metrikleri **app** seviyesindedir (FunctionExecutionCount, FunctionExecutionUnits,
-  Requests, Http5xx, HttpResponseTime, MemoryWorkingSet) → Azure'da bir "fonksiyon" satırı = bir Function App; içindeki
-  fonksiyonlar `meta.functions`.
-- Trace/cold start: müşteri fonksiyonu OTel ile enstrümante eder (AWS: OTel/ADOT Lambda layer veya `@tasktrooper/node`
-  `wrapLambda`; Azure: Functions OpenTelemetry modu) ve OTLP'yi ingest-gw'ye yollar. Cold start sayısı span'lardaki
-  `faas.coldstart=true`'dan hesaplanır (CloudWatch'ta yok).
-- Maliyet tahmini api'de: GB-saniye + istek fiyatı (sabitler config'te), UI'da "tahmini" etiketiyle.
-- Metadata Postgres `serverless_functions`, metrikler ClickHouse `faas_1m`; alert için monitor kind `faas`.
-**Sonuç:** Google Cloud Functions/Run, Vercel Functions ileride aynı tabloya eklenebilir.
+- **Azure** is a new provider (`provider='azure'`): service principal (tenant/client id + secret), subscription list. Function Apps
+  are discovered from ARM; Azure Monitor metrics are at the **app** level (FunctionExecutionCount, FunctionExecutionUnits,
+  Requests, Http5xx, HttpResponseTime, MemoryWorkingSet) → in Azure one "function" row = one Function App; the functions
+  inside are in `meta.functions`.
+- Trace/cold start: the customer instruments the function with OTel (AWS: OTel/ADOT Lambda layer or `@tasktrooper/node`
+  `wrapLambda`; Azure: Functions OpenTelemetry mode) and sends OTLP to ingest-gw. The cold start count is computed from
+  `faas.coldstart=true` on spans (not in CloudWatch).
+- Cost estimate in api: GB-seconds + request price (constants in config), labelled "estimated" in the UI.
+- Metadata in Postgres `serverless_functions`, metrics in ClickHouse `faas_1m`; monitor kind `faas` for alerting.
+**Consequence:** Google Cloud Functions/Run and Vercel Functions can later be added to the same table.
 
-## ADR-021 — Session replay: web için rrweb, mobil için wireframe
-**Bağlam:** RUM oturumları sayı ve olay listesi olarak görünüyor; kullanıcının ekranda ne yaşadığı görünmüyor. New Relic web
-ve mobil session replay sunuyor. "Kapsam dışı (v1)" listesindeydi.
-**Karar:**
-- **Web:** kayıt `rrweb` (`@rrweb/record` 2.2.0) ile DOM snapshot + mutation; ayrı paket `@tasktrooper/replay` (browser
-  SDK'yı şişirmemek için, `@tasktrooper/browser`'a integration olarak takılır). Oynatma UI'da `@rrweb/replay` 2.2.0.
-- **Mobil (Android, iOS):** piksel/ekran görüntüsü **toplanmaz**. View hiyerarşisinden **wireframe** (dikdörtgen, tür, renk,
-  maskeli metin) kare kare çıkarılır, sadece değişince ve en fazla 2 kare/sn; dokunmalar ayrı event. Oynatıcı bizim (SVG).
-  Böylece görüntü içinde PII sızması yapısal olarak imkânsız.
-- **React Native:** RN native view'larla çizer → native SDK'nın replay'i (Android `trooper-replay`, iOS `TaskTrooperReplay`)
-  aynen çalışır; `@tasktrooper/react-native` `TrooperRum` native module'ü üzerinden başlatır, oturum JS'ten `setContext` ile gelir.
-- **Flutter:** tek bir `FlutterView` yüzeyine çizdiği için native traversal işe yaramaz; `tasktrooper_flutter` Dart tarafında
-  **Element ağacından** wireframe çıkarır (widget tipi → kind, `Material`/`ColoredBox`/`DecoratedBox` → renk/radius,
-  `RenderBox` → global rect), aynı wire formatı.
-- **Gizlilik default:** web'de tüm metin ve input maskeli (`maskAllText`, `maskAllInputs` true), password her zaman,
-  `data-trooper-block` öğesi yer tutucu, canvas / cross-origin iframe / network gövdesi kaydedilmez. Mobilde metin maskeli,
-  görseller sadece kutu, input her zaman maskeli. Unmask açıkça (`data-trooper-unmask` / `trooperUnmask()`).
-- **Örnekleme:** oturum başına karar: `sampleRate` (default 0.1) kaydeder; `onErrorSampleRate` (default 1.0) bellekte son 60 sn'yi
-  tutar, hata olunca flush edip kayda devam eder. Karar oturum boyunca sabit (web: localStorage, sekmeler arası ortak).
-- **Taşıma:** segment'ler (≤ 5 sn veya ≤ 256 KB) `POST /v1/replay` → `tt.replay` → writer blob'u **S3**'e (`tt-replays` bucket),
-  indeksi ClickHouse `replay_segments`'e yazar. Retention 30 gün. Oturum meta verisi (kullanıcı, cihaz, hatalar, view'lar)
-  `rum_events`'ten gelir; replay ayrı bir oturum kavramı getirmez (`session_id` ortak).
-- **Korelasyon:** oynatıcının zaman çizelgesi `rum_events`'ten (view, action, error, resource); resource event'lerindeki
-  `trace_id` ile replay'den backend trace'ine (`/traces/:id`) geçilir. Hata detayından "Watch replay" ilgili saniyeye atlar.
-**Sonuç:** Mobilde gerçek görüntü yok (bilinçli); web'de canvas/WebGL içerik boş görünür. Detay: contracts.md §23.
-Web'de karar/sayaç localStorage'da sekmeler arası ortak; buffer modundaki sekme `storage` event'iyle `session`'a geçer.
+## ADR-021 — Session replay: rrweb for web, wireframe for mobile
+**Context:** RUM sessions are visible as counts and event lists; what the user experienced on screen is not visible. New Relic offers web
+and mobile session replay. It was on the "Out of scope (v1)" list.
+**Decision:**
+- **Web:** recording with `rrweb` (`@rrweb/record` 2.2.0), DOM snapshot + mutation; separate package `@tasktrooper/replay` (so as not to bloat the browser
+  SDK; plugs into `@tasktrooper/browser` as an integration). Playback in the UI with `@rrweb/replay` 2.2.0.
+- **Mobile (Android, iOS):** pixels/screenshots are **not collected**. A **wireframe** (rectangle, type, color,
+  masked text) is extracted from the view hierarchy frame by frame, only on change and at most 2 frames/s; touches are separate events. The player is ours (SVG).
+  This way PII leaking inside images is structurally impossible.
+- **React Native:** RN draws with native views → the native SDK's replay (Android `trooper-replay`, iOS `TaskTrooperReplay`)
+  works as is; `@tasktrooper/react-native` starts it via the `TrooperRum` native module, and the session comes from JS via `setContext`.
+- **Flutter:** since it draws onto a single `FlutterView` surface, native traversal doesn't work; `tasktrooper_flutter` extracts the wireframe on the Dart side
+  **from the Element tree** (widget type → kind, `Material`/`ColoredBox`/`DecoratedBox` → color/radius,
+  `RenderBox` → global rect), same wire format.
+- **Privacy default:** on web all text and inputs are masked (`maskAllText`, `maskAllInputs` true), passwords always,
+  `data-trooper-block` elements become placeholders, canvas / cross-origin iframes / network bodies are not recorded. On mobile text is masked,
+  images are boxes only, inputs always masked. Unmask explicitly (`data-trooper-unmask` / `trooperUnmask()`).
+- **Sampling:** decision per session: `sampleRate` (default 0.1) records; `onErrorSampleRate` (default 1.0) keeps the last 60 s in memory,
+  flushes on error and keeps recording. The decision is fixed for the session (web: localStorage, shared across tabs).
+- **Transport:** segments (≤ 5 s or ≤ 256 KB) `POST /v1/replay` → `tt.replay` → the writer writes the blob to **S3** (`tt-replays` bucket),
+  and the index to ClickHouse `replay_segments`. Retention 30 days. Session metadata (user, device, errors, views)
+  comes from `rum_events`; replay doesn't introduce a separate session concept (`session_id` is shared).
+- **Correlation:** the player's timeline comes from `rum_events` (view, action, error, resource); via the `trace_id` on resource events
+  you can go from the replay to the backend trace (`/traces/:id`). "Watch replay" from an error detail jumps to the relevant second.
+**Consequence:** No real image on mobile (deliberate); on web, canvas/WebGL content appears empty. Details: contracts.md §23.
+On web the decision/counter is shared across tabs in localStorage; a tab in buffer mode switches to `session` via the `storage` event.
 
-## ADR-022 — Continuous profiling: pprof + folded stack, ClickHouse'ta stack satırları
-**Bağlam:** Endpoint yavaşladığında "where time goes" bağımlılık kırılımı veriyor ama kendi kodumuzun (`app` kategorisi) içinde
-hangi fonksiyonun CPU/bellek yaktığı görünmüyor. New Relic thread profiler ve flame graph sunuyor.
-**Karar:**
-- SDK'lar sürekli, düşük overhead'li profil alır (varsayılan: her 60 sn'de 10 sn CPU, 60 sn'de bir heap/goroutine) ve
-  `POST /v1/profiles`'a yollar. İki wire formatı: **pprof** (Go'nun yerel formatı) ve **folded stack** (`a;b;c 123`, JVM/Node
-  için basit; bağımlılık gerektirmez). OTLP profiles sinyali henüz stabil değil — stabil olunca gw'de kabul edilir.
-- **Go:** `runtime/pprof`; istek goroutine'ine pprof label `trooper.route` / `trooper.method` konur → flame graph endpoint
-  bazında filtrelenebilir. **JVM:** JFR (`jdk.ExecutionSample`, `jdk.ObjectAllocationSample`, `jdk.JavaMonitorEnter`), native
-  agent yok. **Node:** `node:inspector` CPU profiler + sampling heap profiler. **.NET:** ayrı paket `TaskTrooper.Telemetry.Profiling`,
-  süreç içi EventPipe oturumu (`DiagnosticsClient` kendi PID'ine) + TraceEvent ile parse: SampleProfiler → `cpu`/`wall`,
-  `GCAllocationTick` → `alloc_space`, contention → `lock`; Activity → thread eşlemesiyle route etiketi.
-  **Python:** `tasktrooper` paketi (ADR-024) — `sys._current_frames()` örnekleyici thread (100 Hz) → `cpu`/`wall`, opsiyonel
+## ADR-022 — Continuous profiling: pprof + folded stack, stack rows in ClickHouse
+**Context:** When an endpoint slows down, "where time goes" gives a dependency breakdown, but inside our own code (the `app` category)
+it's not visible which function is burning CPU/memory. New Relic offers a thread profiler and flame graphs.
+**Decision:**
+- SDKs take continuous, low-overhead profiles (default: 10 s of CPU every 60 s, heap/goroutine once every 60 s) and
+  send them to `POST /v1/profiles`. Two wire formats: **pprof** (Go's native format) and **folded stack** (`a;b;c 123`, simple for JVM/Node;
+  needs no dependencies). The OTLP profiles signal is not stable yet — it will be accepted in gw once stable.
+- **Go:** `runtime/pprof`; pprof labels `trooper.route` / `trooper.method` are set on the request goroutine → the flame graph can be filtered
+  per endpoint. **JVM:** JFR (`jdk.ExecutionSample`, `jdk.ObjectAllocationSample`, `jdk.JavaMonitorEnter`), no native
+  agent. **Node:** `node:inspector` CPU profiler + sampling heap profiler. **.NET:** separate package `TaskTrooper.Telemetry.Profiling`,
+  in-process EventPipe session (`DiagnosticsClient` on its own PID) + parsing with TraceEvent: SampleProfiler → `cpu`/`wall`,
+  `GCAllocationTick` → `alloc_space`, contention → `lock`; route label via Activity → thread mapping.
+  **Python:** the `tasktrooper` package (ADR-024) — a `sys._current_frames()` sampler thread (100 Hz) → `cpu`/`wall`, optional
   `tracemalloc` → `inuse_space`.
-- **OTLP profiles:** gw `POST /v1development/profiles` (OTLP/HTTP protobuf + JSON) ve gRPC `ProfilesService/Export`
-  kabul eder (OTel Collector / eBPF profiler'ları doğrudan bağlanır); writer pprof yoluyla aynı tablolara açar.
-- Writer profilleri stack satırlarına açar: ClickHouse `profile_stacks` (stack = frame dizisi, root önce; değer) ve
-  `profiles` (profil başına özet). Flame graph, top functions ve diff api'de `GROUP BY stack` ile hesaplanır.
-- **Diff:** iki pencere/versiyon karşılaştırması pay (değer / toplam) üzerinden — deploy öncesi/sonrası "hangi fonksiyon
-  büyüdü" sorusu. Retention 14 gün.
-- Kardinalite: frame adı = fonksiyon (dosya/satır yok, Node'da `fn (file)`), stack derinliği ≤ 128, profil başına ≤ 10k benzersiz
-  stack (küçükler `[other]`'a birleşir).
-**Sonuç:** Thread dump / anlık "thread profiler" yok; sürekli profil zaten aynı soruyu cevaplar. Detay: contracts.md §24.
+- **OTLP profiles:** gw accepts `POST /v1development/profiles` (OTLP/HTTP protobuf + JSON) and gRPC `ProfilesService/Export`
+  (OTel Collector / eBPF profilers connect directly); the writer unpacks them into the same tables via the pprof path.
+- The writer unpacks profiles into stack rows: ClickHouse `profile_stacks` (stack = frame array, root first; value) and
+  `profiles` (summary per profile). Flame graph, top functions and diff are computed in api with `GROUP BY stack`.
+- **Diff:** comparison of two windows/versions by share (value / total) — the "which function grew" question before/after a
+  deploy. Retention 14 days.
+- Cardinality: frame name = function (no file/line, `fn (file)` in Node), stack depth ≤ 128, ≤ 10k unique
+  stacks per profile (smaller ones merge into `[other]`).
+**Consequence:** No thread dump / on-demand "thread profiler"; continuous profiling already answers the same question. Details: contracts.md §24.
 
 ## ADR-023 — AI / LLM monitoring: OTel GenAI semantic conventions
-**Bağlam:** Müşteriler uygulamalarında LLM çağırıyor (OpenAI, Anthropic, Gemini, Bedrock, Azure OpenAI…). Bugün bu çağrılar
-sadece `HTTP · api.openai.com` bağımlılığı olarak görünüyor: model, token, maliyet ve prompt yok. New Relic "AI monitoring"
-sunuyor. (Not: ADR-018 bizim kendi LLM kotamızdır; bu ADR müşterinin LLM kullanımını izler — UI'da "AI monitoring".)
-**Karar:**
-- Wire = normal OTLP span'ı, **OTel GenAI semantic conventions** (`gen_ai.provider.name`, `gen_ai.operation.name`,
-  `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens|output_tokens`, …). Yeni endpoint yok;
-  OTel'in kendi GenAI instrumentation'larından (Spring AI, Microsoft.Extensions.AI, OpenLLMetry, Vercel AI SDK) gelen span'lar
-  da aynen çalışır.
-- SDK'lar sıfır-kod sarmalayıcı verir: **Node** `instrumentOpenAI(client)` / `instrumentAnthropic(client)` + Vercel AI SDK
-  telemetry'si; **Go** `llm.Start(ctx, …)` yardımcıları + OpenAI/Anthropic HTTP `RoundTripper`'ı (stream dahil token'ları
-  cevaptan okur); **JVM** Spring AI / LangChain4j span'larını OTel'den alır + Anthropic/OpenAI Java client sarmalayıcısı;
-  **.NET** `Microsoft.Extensions.AI` ActivitySource'u varsayılan açık.
-- **Prompt / completion içeriği varsayılan toplanmaz** (PII). `captureContent: true` ile açılır; writer içeriği span
-  attribute'larından ayırıp `llm_content` tablosuna yazar (alan başına ≤ 32 KB, retention 7 gün), span'da sadece token/meta kalır.
-- Writer: GenAI client span'ı bağımlılık kategorisi **`ai`** (`dep = "<provider> · <model>"`) olur → "Time spent" ve RCA'da
-  görünür; ayrıca `llm_1m` rollup'ı (provider, model, operation, servis, entry route; çağrı, hata, token'lar, süre digest'i).
-- **Maliyet** api'de hesaplanır: model başına fiyat tablosu (1M token başına input/output/cache read) kod içi varsayılan +
-  org override (Postgres `llm_prices`). Fiyatlar değişir → UI'da "est." etiketi, fiyat bilinmeyen modelde maliyet boş.
-- UI: sidebar'da **AI monitoring** (provider/model/servis/endpoint bazında çağrı, token, maliyet, hata, p95; son çağrılar +
-  prompt çekmecesi), servis detayında **AI** sekmesi (LLM çağrısı varsa), trace detayında GenAI span paneli.
-**Sonuç:** Python için `tasktrooper` paketi (ADR-024) `instrument_openai` / `instrument_anthropic` verir; OpenLLMetry de çalışır.
-LLM alert'leri monitor kind `llm` (contracts §25, alerting.md). Detay: contracts.md §25.
+**Context:** Customers call LLMs in their applications (OpenAI, Anthropic, Gemini, Bedrock, Azure OpenAI…). Today these calls
+only show up as an `HTTP · api.openai.com` dependency: no model, tokens, cost or prompt. New Relic offers "AI monitoring".
+(Note: ADR-018 is our own LLM quota; this ADR monitors the customer's LLM usage — "AI monitoring" in the UI.)
+**Decision:**
+- Wire = a normal OTLP span, **OTel GenAI semantic conventions** (`gen_ai.provider.name`, `gen_ai.operation.name`,
+  `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens|output_tokens`, …). No new endpoint;
+  spans from OTel's own GenAI instrumentations (Spring AI, Microsoft.Extensions.AI, OpenLLMetry, Vercel AI SDK)
+  work as is too.
+- SDKs provide zero-code wrappers: **Node** `instrumentOpenAI(client)` / `instrumentAnthropic(client)` + Vercel AI SDK
+  telemetry; **Go** `llm.Start(ctx, …)` helpers + an OpenAI/Anthropic HTTP `RoundTripper` (reads tokens from the response,
+  including streams); **JVM** takes Spring AI / LangChain4j spans from OTel + an Anthropic/OpenAI Java client wrapper;
+  **.NET** the `Microsoft.Extensions.AI` ActivitySource is on by default.
+- **Prompt / completion content is not collected by default** (PII). Enabled with `captureContent: true`; the writer separates the content from the span
+  attributes and writes it to the `llm_content` table (≤ 32 KB per field, retention 7 days); only tokens/meta stay on the span.
+- Writer: a GenAI client span becomes dependency category **`ai`** (`dep = "<provider> · <model>"`) → visible in "Time spent" and RCA;
+  plus the `llm_1m` rollup (provider, model, operation, service, entry route; calls, errors, tokens, duration digest).
+- **Cost** is computed in api: a per-model price table (input/output/cache read per 1M tokens) with in-code defaults +
+  org override (Postgres `llm_prices`). Prices change → "est." label in the UI; cost is empty for models with unknown prices.
+- UI: **AI monitoring** in the sidebar (calls, tokens, cost, errors, p95 per provider/model/service/endpoint; recent calls +
+  prompt drawer), an **AI** tab in service detail (if there are LLM calls), a GenAI span panel in trace detail.
+**Consequence:** For Python, the `tasktrooper` package (ADR-024) provides `instrument_openai` / `instrument_anthropic`; OpenLLMetry also works.
+LLM alerts are monitor kind `llm` (contracts §25, alerting.md). Details: contracts.md §25.
 
-## ADR-024 — Python SDK (`tasktrooper`): OTel dağıtımı + profiling + LLM
-**Bağlam:** LLM uygulamalarının çoğu Python. Python SDK roadmap'te "faz 2" idi; AI monitoring ve profiling için gerekli.
-**Karar:**
-- PyPI paketi `tasktrooper` (`sdks/python`, Python ≥ 3.9): ADR-011'deki gibi ince OTel dağıtımı — `opentelemetry-sdk` +
+## ADR-024 — Python SDK (`tasktrooper`): OTel distribution + profiling + LLM
+**Context:** Most LLM applications are Python. The Python SDK was "phase 2" on the roadmap; it's needed for AI monitoring and profiling.
+**Decision:**
+- PyPI package `tasktrooper` (`sdks/python`, Python ≥ 3.9): a thin OTel distribution as in ADR-011 — `opentelemetry-sdk` +
   OTLP/HTTP protobuf exporter, DSN, resource (`telemetry.distro.name=trooper-python`), ParentBased(TraceIdRatio) +
-  `tt=r:` tracestate, `trooper.entry.route/method`, `trooper.caller` (baggage `tt.svc`), `trooper.sample_rate`; config adları
-  contracts §2 (`TROOPER_DSN`, …). Framework instrumentation'ı OTel contrib paketlerinden (extras: `tasktrooper[django]`,
-  `[fastapi]`, `[flask]`, `[celery]`, `[requests]`, `[sqlalchemy]`…); route template FastAPI/Flask/Django router'ından.
-- `tasktrooper.init(...)` asla throw etmez; `tasktrooper-run` launcher + `import tasktrooper.auto`.
-- Profiling (§24) ve LLM (`instrument_openai`, `instrument_anthropic`, sync + async + stream; §25) aynı pakette, ek bağımlılık yok.
-**Sonuç:** Paket yayını diğer SDK'larla birlikte (hesap gerektirir).
+  `tt=r:` tracestate, `trooper.entry.route/method`, `trooper.caller` (baggage `tt.svc`), `trooper.sample_rate`; config names per
+  contracts §2 (`TROOPER_DSN`, …). Framework instrumentation from OTel contrib packages (extras: `tasktrooper[django]`,
+  `[fastapi]`, `[flask]`, `[celery]`, `[requests]`, `[sqlalchemy]`…); route template from the FastAPI/Flask/Django router.
+- `tasktrooper.init(...)` never throws; `tasktrooper-run` launcher + `import tasktrooper.auto`.
+- Profiling (§24) and LLM (`instrument_openai`, `instrument_anthropic`, sync + async + stream; §25) in the same package, no extra dependencies.
+**Consequence:** Package publishing happens together with the other SDKs (requires accounts).
 
-## ADR-025 — MCP sunucusu: `services/mcp`, salt okunur, stdio, api'yi sarar
-**Bağlam:** Yerel kodlama agent'ları (OpenCode, Claude Code) telemetriye doğal dilde sorgu sunsun; her ekip
-üçüncü parti observability MCP'si yazmasın. API'de 150+ uç var, agent tool seti bunların aynası olamaz.
-**Karar:**
-- Yeni Go modülü `services/mcp` (`cmd/tt-mcp`), `services/go.work`'e eklenir; resmi Go MCP SDK, **stdio**
-  transport (streamable-HTTP uzatma hedefi, v1'de tasarlanmıyor).
-- Tool'lar `services/api`'yi (`openapi.yaml`) sarar; ClickHouse/Postgres'e doğrudan bağlanılmaz (contracts §26).
-  Tenant (org/project) api key'den gelir; ek olarak `TT_ORG_ID`/`TT_PROJECT_ID` startup'ta `/me` ile doğrulanır.
-- v1 **salt okunur**: 12 tool (servis KPI, endpoint, endpoint RCA, trace, log, monitor, incident + timeline,
-  load test run, deploy marker). Write tool yok. Her tool input doğrulama, sonuç cap'i (64 KB; kesilirse
-  `truncated`/`total`/`hint` işaretleri) ve secret/stack içermeyen hata döner. Detay: `.ai/mcp.md`.
-**Sonuç:** Tool seti bilinçli olarak dar; api'ye yeni uç eklenince MCP de senkron büyür. Write tool'ları
-v2'de ayrı ADR ile gelir.
+## ADR-025 — MCP server: `services/mcp`, read-only, stdio, wraps api
+**Context:** Local coding agents (OpenCode, Claude Code) should offer natural-language queries over telemetry; no team should have to
+write a third-party observability MCP. The API has 150+ endpoints; the agent tool set can't mirror them.
+**Decision:**
+- New Go module `services/mcp` (`cmd/tt-mcp`), added to `services/go.work`; official Go MCP SDK, **stdio**
+  transport (streamable-HTTP is an extension target, not designed in v1).
+- Tools wrap `services/api` (`openapi.yaml`); no direct connection to ClickHouse/Postgres (contracts §26).
+  Tenant (org/project) comes from the api key; additionally `TT_ORG_ID`/`TT_PROJECT_ID` are verified at startup via `/me`.
+- v1 is **read-only**: 12 tools (service KPIs, endpoint, endpoint RCA, trace, log, monitor, incident + timeline,
+  load test run, deploy marker). No write tools. Every tool returns input validation, a result cap (64 KB; if truncated,
+  `truncated`/`total`/`hint` markers) and errors without secrets/stacks. Details: `.ai/mcp.md`.
+**Consequence:** The tool set is deliberately narrow; when a new endpoint is added to api, MCP grows in sync. Write tools
+come in v2 with a separate ADR.
 
-## ADR-026 — CI sözleşmesi: Make hedefleri + go.work modül matrisi
-**Bağlam:** PR'lerde her Go modülünün derlenmesi/vet + unit testi, web typecheck + build, JS SDK build + vitest
-ve workflow lint doğrulanmalı; modül listesi iki yerde tutulamaz.
-**Karar:**
-- `.github/workflows/ci.yml` modül matrisini `services/go.work`'ten türetir; `make check` aynı kapıları lokal
-  koşar — CI sözleşmesi = Makefile hedefleri.
-- PR CI unit-only'dir; integration/e2e (`make e2e-ingest`) local'dedir ve ertelenmiştir, CI'ya girmez.
-- Imaj build'leri ci.yml'de değil, `.github/workflows/docker.yml`'dedir (release/registry akışı). Matris
-  `services/*/Dockerfile`'dan türetilir (context repo kökü — ADR-027 ile; önceden `services/` —, `GOWORK=off`; `CMD` arg'lı Dockerfile'lar binary başına
-  satır). PR: build + Trivy (CRITICAL, ignore-unfixed), push yok. `main`: `ghcr.io/<owner>/<repo>/<image>:{sha,main}`'e
-  push; `packages: write` yalnız bu job'da. Deploy adımı yok.
-- Imajlar `TT_ENV` set etmez; production ortamı `TT_ENV=production` + gerçek `TT_SECRETS_KEY` vermek zorunda, aksi halde
-  servis açılmaz (fail-closed, contracts §10).
-**Sonuç:** `go.work`'e modül eklemek CI'ı otomatik genişletir; matrix senkron derdi yok.
+## ADR-026 — CI contract: Make targets + go.work module matrix
+**Context:** On PRs, every Go module's build/vet + unit tests, web typecheck + build, JS SDK build + vitest
+and workflow lint must be verified; the module list can't be kept in two places.
+**Decision:**
+- `.github/workflows/ci.yml` derives the module matrix from `services/go.work`; `make check` runs the same gates locally
+  — CI contract = Makefile targets.
+- PR CI is unit-only; integration/e2e (`make e2e-ingest`) is local and deferred, it doesn't enter CI.
+- Image builds are not in ci.yml but in `.github/workflows/docker.yml` (release/registry flow). The matrix
+  is derived from `services/*/Dockerfile` (context is the repo root — via ADR-027; previously `services/` —, `GOWORK=off`; Dockerfiles with a `CMD` arg get one
+  row per binary). PR: build + Trivy (CRITICAL, ignore-unfixed), no push. `main`: push to `ghcr.io/<owner>/<repo>/<image>:{sha,main}`;
+  `packages: write` only in this job. No deploy step.
+- Images don't set `TT_ENV`; the production environment must provide `TT_ENV=production` + a real `TT_SECRETS_KEY`, otherwise
+  the service won't start (fail-closed, contracts §10).
+**Consequence:** Adding a module to `go.work` expands CI automatically; no matrix sync headaches.
 
-## ADR-027 — Self-observability: platform kendi SDK'larıyla kendini izler (dogfooding)
-**Bağlam:** architecture.md "tüm servisler kendi SDK'mızla enstrümante edilir" diyordu ama servisler yalnızca Prometheus
-`/metrics` veriyordu. Platformun kendi trace/log/profil/LLM verisini kendi dashboard'unda görmek hem ürün doğrulaması hem
-operasyon için gerekli.
-**Karar:**
-- Platform verisi **ayrı bir projeye** gider (`TaskTrooper` / `tasktrooper`, `make self` → `api bootstrap`, ADR-028). Müşteri verisiyle karışmaz; production'da operatör kendi self projesinin DSN'ini verir.
-- Her Go servisi `main`'de `trooper.Start` çağırır (`github.com/makifbaysal/tasktrooper-telemetry/sdks/go`; ADR-029 ile proxy.golang.org'dan sürümlü).
-  DSN yoksa (default) hiçbir şey export edilmez — davranış bugünküyle aynı. Enstrümantasyon: HTTP (chi / net/http), pgx,
-  go-redis, franz-go, slog → OTel logs, Go runtime metrikleri, opsiyonel profiling (`TROOPER_PROFILING`), codeintel'in
-  Anthropic çağrıları `llm` transport'u ile (GenAI span; içerik kaydı kapalı). Prometheus `/metrics` aynen kalır.
-- Servis adları sabit: `tt-ingest-gw`, `tt-ingest-writer`, `tt-api`, `tt-alert-engine`, `tt-notifier`, `tt-trooper-cloud`,
-  `tt-symbolicator`, `tt-codeintel`, `tt-loadtest-ctl`, `tt-loadtest-runner`, `tt-mcp`, `tt-trooper-agent`; dashboard RUM
-  app'i `tt-web` (`@tasktrooper/browser` + `@tasktrooper/react` + `@tasktrooper/replay`, `VITE_TROOPER_DSN` yoksa kapalı).
-- **Geri besleme döngüsü yasak:** ingest-gw ve ingest-writer, `TT_SELF_PROJECT_ID` projesine ait istek/kayıtlar için span
-  ve log üretmez (sayaçlar/Prometheus devam eder). Aksi halde self trafiği kendi span'larını ingest edip sonsuz döngü kurar.
-  SDK exporter'ının kendi HTTP çağrıları zaten enstrümante değildir; servisler outbound HTTP client'larını sararken
-  ingest uçlarına giden istekleri hariç tutar.
-- Platform altyapısı (Postgres, ClickHouse, Redpanda, Redis) `trooper-agent` ile self projesine raporlanır
+## ADR-027 — Self-observability: the platform monitors itself with its own SDKs (dogfooding)
+**Context:** architecture.md said "all services are instrumented with our own SDK", but the services only exposed Prometheus
+`/metrics`. Seeing the platform's own trace/log/profile/LLM data in its own dashboard is needed both for product validation and for
+operations.
+**Decision:**
+- Platform data goes to **a separate project** (`TaskTrooper` / `tasktrooper`, `make self` → `api bootstrap`, ADR-028). It doesn't mix with customer data; in production the operator provides the DSN of their own self project.
+- Every Go service calls `trooper.Start` in `main` (`github.com/makifbaysal/tasktrooper-telemetry/sdks/go`; versioned from proxy.golang.org via ADR-029).
+  Without a DSN (default) nothing is exported — behavior is the same as today. Instrumentation: HTTP (chi / net/http), pgx,
+  go-redis, franz-go, slog → OTel logs, Go runtime metrics, optional profiling (`TROOPER_PROFILING`), codeintel's
+  Anthropic calls via the `llm` transport (GenAI span; content capture off). Prometheus `/metrics` stays as is.
+- Service names are fixed: `tt-ingest-gw`, `tt-ingest-writer`, `tt-api`, `tt-alert-engine`, `tt-notifier`, `tt-trooper-cloud`,
+  `tt-symbolicator`, `tt-codeintel`, `tt-loadtest-ctl`, `tt-loadtest-runner`, `tt-mcp`, `tt-trooper-agent`; the dashboard RUM
+  app is `tt-web` (`@tasktrooper/browser` + `@tasktrooper/react` + `@tasktrooper/replay`, off if `VITE_TROOPER_DSN` is not set).
+- **Feedback loop forbidden:** ingest-gw and ingest-writer don't produce spans and logs for requests/records belonging to the `TT_SELF_PROJECT_ID` project
+  (counters/Prometheus continue). Otherwise self traffic would ingest its own spans and create an infinite loop.
+  The SDK exporter's own HTTP calls are not instrumented anyway; when services wrap their outbound HTTP clients they
+  exclude requests to the ingest endpoints.
+- Platform infrastructure (Postgres, ClickHouse, Redpanda, Redis) is reported to the self project with `trooper-agent`
   (`deploy/self/agent.yaml`, `make self`).
-- Docker build context'i `services/` yerine repo köküdür (Dockerfile'lar `sdks/go`'yu da kopyalar); ADR-026'daki
-  "context `services/`" bu ADR ile güncellenir.
-**Sonuç:** Platform kendi dashboard'unda "TaskTrooper" projesi olarak görünür; SDK'daki bir regresyon ilk önce bizde görülür.
-Self proje kotası/sampling'i ayrı ayarlanabilir. Detay: contracts.md §27.
+- The Docker build context is the repo root instead of `services/` (Dockerfiles also copy `sdks/go`); the
+  "context `services/`" in ADR-026 is updated by this ADR.
+**Consequence:** The platform appears in its own dashboard as the "TaskTrooper" project; a regression in the SDK is seen by us first.
+The self project's quota/sampling can be tuned separately. Details: contracts.md §27.
 
-## ADR-028 — Dummy / seed veri yok: platform yalnızca gerçek veriyle çalışır
-**Bağlam:** Dashboard default olarak mock veriyle açılıyordu (`VITE_DATA=mock`), `tools/demo` sahte servis/RUM trafiği ve
-monitor/KPI/load test seed'i üretiyordu (api `source: "code"`'u reddettiği için seed zaten kırıktı), Postgres'e dev seed
-(`002_seed.sql`: Acme org, Shop projesi, `tt_dev_*` key'leri) uygulanıyordu. Sahte veri gerçek hataları gizliyor, iki kod yolunu
-(mock + api) bakımda tutmayı gerektiriyordu. ADR-027 ile platform kendi gerçek verisini üretebiliyor.
-**Karar:**
-- `tools/demo` ve `make demo*` kaldırılır. `apps/web` mock modu kaldırılır: `VITE_DATA` yok, tüm `src/data/*` yalnızca api'den
-  okur; veri yoksa ekranlar empty state + kurulum yönergesi (SDK snippet'i) gösterir. ADR-013'ün senkron fonksiyon + uzak cache
-  yapısı kalır, mock dalları silinir.
-- Postgres dev seed'leri (`002_seed.sql`, `014_self_project.sql`) kaldırılır. Kurulum gerçek akışla yapılır:
-  - **Onboarding:** giriş yapan (OIDC veya `TT_AUTH_DEV=true` dev login) ve hiç org'u olmayan kullanıcı UI'da "org + ilk proje
-    oluştur" adımına düşer → `POST /api/v1/orgs {name, project}` (kullanıcı owner olur) → ingest key bir kez gösterilir + SDK
-    kurulum snippet'leri.
-  - **Bootstrap komutu:** `api bootstrap --org <ad> --project <ad> --owner <email> [--ingest-key-out file]` — idempotent; org,
-    proje, owner üyeliği ve bir ingest key oluşturur, DSN'i yazdırır. Self-observability projesi (ADR-027) ve CI/otomasyon için.
-    `make self` bunu kullanır; `TT_SELF_PROJECT_ID` bu komutun verdiği proje id'sidir (sabit `2` değil).
-- Testler kendi fixture'larını kurar (org/proje/key'i test içinde oluşturur); hiçbir test seed'e dayanmaz. SDK örnek/README'lerindeki
-  DSN'ler yer tutucu (`<ingest-key>`) olur.
-- `VITE_API_KEY` dev kısayolu kalkar; dashboard yalnızca oturum cookie'si ile çalışır.
-**Sonuç:** İlk açılışta dashboard boştur; veri, SDK bağlanınca (veya `make self` ile platformun kendisi) gelir. ADR-013'teki "mock mod
-korunur" maddesi ve contracts §11'deki `VITE_DATA` bu ADR ile geçersizdir.
+## ADR-028 — No dummy / seed data: the platform only works with real data
+**Context:** The dashboard opened with mock data by default (`VITE_DATA=mock`), `tools/demo` generated fake service/RUM traffic and
+monitor/KPI/load test seeds (the seed was already broken because api rejects `source: "code"`), and a dev seed was applied to Postgres
+(`002_seed.sql`: Acme org, Shop project, `tt_dev_*` keys). Fake data hid real bugs and required maintaining two code paths
+(mock + api). With ADR-027 the platform can produce its own real data.
+**Decision:**
+- `tools/demo` and `make demo*` are removed. `apps/web` mock mode is removed: no `VITE_DATA`, all `src/data/*` read only from api;
+  when there is no data, screens show an empty state + setup instructions (SDK snippet). ADR-013's synchronous function + remote cache
+  structure stays; the mock branches are deleted.
+- Postgres dev seeds (`002_seed.sql`, `014_self_project.sql`) are removed. Setup is done via the real flow:
+  - **Onboarding:** a user who has logged in (OIDC or `TT_AUTH_DEV=true` dev login) and has no org lands on a "create org + first
+    project" step in the UI → `POST /api/v1/orgs {name, project}` (the user becomes owner) → the ingest key is shown once + SDK
+    setup snippets.
+  - **Bootstrap command:** `api bootstrap --org <name> --project <name> --owner <email> [--ingest-key-out file]` — idempotent; creates the org,
+    project, owner membership and an ingest key, and prints the DSN. For the self-observability project (ADR-027) and CI/automation.
+    `make self` uses it; `TT_SELF_PROJECT_ID` is the project id this command returns (not a fixed `2`).
+- Tests set up their own fixtures (create org/project/key within the test); no test relies on a seed. DSNs in SDK examples/READMEs
+  become placeholders (`<ingest-key>`).
+- The `VITE_API_KEY` dev shortcut is removed; the dashboard only works with the session cookie.
+**Consequence:** On first launch the dashboard is empty; data arrives once an SDK connects (or the platform itself via `make self`). The "mock mode
+is kept" item in ADR-013 and `VITE_DATA` in contracts §11 are invalidated by this ADR.
 
-## ADR-029 — SDK'lar public registry'lerde yayınlanır (tag tetiklemeli release)
-**Bağlam:** SDK'lar yalnızca monorepo'dan local path/`replace` ile kullanılabiliyordu; müşteri (ve kendi uygulamalarımız) paket
-yöneticisinden sürümlü paket çekemiyordu. Paket isimleri yayınlanabilir değildi (`@trooper/*`, `github.com/makifbaysal/tasktrooper-telemetry/sdks/go`,
-`io.tasktrooper`/`com.tasktrooper`), repo'da lisans yoktu.
-**Karar:**
-- **Lisans:** SDK'lar Apache-2.0 (`sdks/LICENSE`, her paket kopyasını taşır). Servisler + web bu ADR'nin kapsamı dışında.
-- **İsimler:**
-  | Ekosistem | Registry | İsim |
+## ADR-029 — SDKs are published on public registries (tag-triggered release)
+**Context:** SDKs could only be used from the monorepo via local path/`replace`; customers (and our own applications) couldn't pull versioned packages
+from a package manager. Package names were not publishable (`@trooper/*`, `github.com/makifbaysal/tasktrooper-telemetry/sdks/go`,
+`io.tasktrooper`/`com.tasktrooper`), and the repo had no license.
+**Decision:**
+- **License:** SDKs are Apache-2.0 (`sdks/LICENSE`, each package carries a copy). Services + web are outside the scope of this ADR.
+- **Names:**
+  | Ecosystem | Registry | Name |
   |---|---|---|
   | Go | proxy.golang.org (GitHub) | `github.com/makifbaysal/tasktrooper-telemetry/sdks/go[/integrations/<x>]` |
   | JS | npm | `@tasktrooper/{core,browser,react,vue,angular,react-native,node,replay}` |
-  | JVM + Android | Maven Central (Central Portal) | groupId `ai.tasktrooper` (Java/Kotlin package isimleri değişmez) |
+  | JVM + Android | Maven Central (Central Portal) | groupId `ai.tasktrooper` (Java/Kotlin package names don't change) |
   | .NET | NuGet | `TaskTrooper.Telemetry*` |
   | Python | PyPI | `tasktrooper` |
   | Flutter | pub.dev | `tasktrooper_flutter`, `tasktrooper_dio` |
-  | iOS | CocoaPods + SwiftPM | pod `TaskTrooper`; SwiftPM repo kökündeki `Package.swift` |
-- **Release:** her ekosistem bağımsız sürümlenir, tag ile tetiklenir; workflow tag sürümünü paket sürümüyle doğrular, test eder, yayınlar.
-  | Tag | Workflow | Kimlik doğrulama |
+  | iOS | CocoaPods + SwiftPM | pod `TaskTrooper`; SwiftPM `Package.swift` at the repo root |
+- **Release:** each ecosystem is versioned independently and triggered by a tag; the workflow checks the tag version against the package version, tests, and publishes.
+  | Tag | Workflow | Authentication |
   |---|---|---|
-  | `sdks/go/vX.Y.Z`, `sdks/go/integrations/<x>/vX.Y.Z` | `release-go.yml` (proxy ısıtma) | — |
-  | `js-vX.Y.Z` | `release-npm.yml` | npm trusted publishing (OIDC); ilk yayın `NPM_TOKEN` |
-  | `jvm-vX.Y.Z`, `android-vX.Y.Z` | `release-jvm.yml`, `release-android.yml` | `MAVEN_CENTRAL_*` user token + `GPG_*` imza |
+  | `sdks/go/vX.Y.Z`, `sdks/go/integrations/<x>/vX.Y.Z` | `release-go.yml` (proxy warm-up) | — |
+  | `js-vX.Y.Z` | `release-npm.yml` | npm trusted publishing (OIDC); first publish `NPM_TOKEN` |
+  | `jvm-vX.Y.Z`, `android-vX.Y.Z` | `release-jvm.yml`, `release-android.yml` | `MAVEN_CENTRAL_*` user token + `GPG_*` signing |
   | `dotnet-vX.Y.Z` | `release-dotnet.yml` (env `nuget`) | NuGet trusted publishing (OIDC) |
   | `python-vX.Y.Z` | `release-python.yml` (env `pypi`) | PyPI trusted publishing (OIDC) |
-  | `tasktrooper_flutter-vX.Y.Z`, `tasktrooper_dio-vX.Y.Z` | `release-flutter.yml` | pub.dev automated publishing (OIDC); ilk yayın elle |
-  | `ios-vX.Y.Z` | `release-ios.yml` | `COCOAPODS_TRUNK_TOKEN`; SwiftPM için düz `X.Y.Z` tag'i workflow atar |
-- Mümkün olan her yerde uzun ömürlü token yerine OIDC trusted publishing kullanılır.
-- Platformun kendisi de yayınlanmış SDK'yı kullanır (gerçek dogfooding): Go servisleri `sdks/go` için `replace` kullanmaz,
-  proxy.golang.org'dan sürümlü modül çeker; `apps/web` npm'den `@tasktrooper/*` kurar. SDK değişikliği platforma yeni sürüm
-  yayınlanıp bağımlılık yükseltilince girer. SDK örnekleri local path ile kalır.
-**Sonuç:** "Paket yayınlama" roadmap maddesi kapanır. Paket isimleri artık public sözleşmedir; yeniden adlandırma breaking change'dir.
-Detay: sdk.md § Dağıtım.
+  | `tasktrooper_flutter-vX.Y.Z`, `tasktrooper_dio-vX.Y.Z` | `release-flutter.yml` | pub.dev automated publishing (OIDC); first publish by hand |
+  | `ios-vX.Y.Z` | `release-ios.yml` | `COCOAPODS_TRUNK_TOKEN`; for SwiftPM the workflow pushes a plain `X.Y.Z` tag |
+- Wherever possible, OIDC trusted publishing is used instead of long-lived tokens.
+- The platform itself also uses the published SDK (real dogfooding): Go services don't use `replace` for `sdks/go`,
+  they pull the versioned module from proxy.golang.org; `apps/web` installs `@tasktrooper/*` from npm. An SDK change reaches the platform once a new version
+  is published and the dependency is bumped. SDK examples stay on local paths.
+**Consequence:** The "Package publishing" roadmap item is closed. Package names are now a public contract; renaming is a breaking change.
+Details: sdk.md § Distribution.
 
-## ADR-030 — Production host'ları: `telemetry.tasktrooper.ai` altında alt alan adları
-**Bağlam:** SaaS'ın public adresi belirlenmemişti; dokümanlarda `ingest.tasktrooper.io`, `ingest.tasktrooper.dev` ve `<api-host>` gibi
-birbirini tutmayan örnekler vardı. Landing, docs ve dashboard aynı web uygulamasında (`apps/web`) yayınlanıyor.
-**Karar:** Tek kök `telemetry.tasktrooper.ai`, dışarı açılan her servis kendi alt alan adında, hepsi 443 + TLS:
+## ADR-030 — Production hosts: subdomains under `telemetry.tasktrooper.ai`
+**Context:** The SaaS's public address hadn't been decided; the docs had inconsistent examples such as `ingest.tasktrooper.io`, `ingest.tasktrooper.dev` and `<api-host>`.
+Landing, docs and dashboard are served from the same web application (`apps/web`).
+**Decision:** A single root `telemetry.tasktrooper.ai`; every externally exposed service on its own subdomain, all on 443 + TLS:
 
-| Host | Servis | İç port |
+| Host | Service | Internal port |
 |---|---|---|
-| `telemetry.tasktrooper.ai` | `apps/web` (landing `/`, `/docs`, `/login`, dashboard; SPA, bilinmeyen path → `index.html`) | statik |
-| `api.telemetry.tasktrooper.ai` | `services/api` (`/api/v1/...`, OIDC callback, Slack/GitHub callback'leri) | 8080 |
-| `ingest.telemetry.tasktrooper.ai` | `ingest-gw` (OTLP/HTTP, `/v1/rum`, `/v1/replay`, `/v1/profiles`; OTLP gRPC h2 ile aynı host:443) | 4318, 4317 |
-| `hooks.telemetry.tasktrooper.ai` | `codeintel` webhook'ları (`/v1/webhooks/<github\|gitlab\|bitbucket>`) | 8096 |
+| `telemetry.tasktrooper.ai` | `apps/web` (landing `/`, `/docs`, `/login`, dashboard; SPA, unknown path → `index.html`) | static |
+| `api.telemetry.tasktrooper.ai` | `services/api` (`/api/v1/...`, OIDC callback, Slack/GitHub callbacks) | 8080 |
+| `ingest.telemetry.tasktrooper.ai` | `ingest-gw` (OTLP/HTTP, `/v1/rum`, `/v1/replay`, `/v1/profiles`; OTLP gRPC over h2 on the same host:443) | 4318, 4317 |
+| `hooks.telemetry.tasktrooper.ai` | `codeintel` webhooks (`/v1/webhooks/<github\|gitlab\|bitbucket>`) | 8096 |
 | `symbols.telemetry.tasktrooper.ai` | `symbolicator` (`trooper-cli` sourcemap/dSYM/mapping upload) | 8095 |
 
-- Diğer servisler (ingest-writer, alerting, collector'ın iç uçları, loadtest-ctl, integrations, ClickHouse, Postgres, Redpanda, Redis)
-  dışarı açılmaz.
-- Web ve api aynı site (`tasktrooper.ai` eTLD+1) → `tt_session` cookie'si (host-only, api host'unda, `SameSite=Lax`, `Secure`)
-  `fetch(..., { credentials: 'include' })` ile gider; CORS yalnızca `https://telemetry.tasktrooper.ai`.
-- DSN biçimi: `https://<ingest-key>@ingest.telemetry.tasktrooper.ai/<project-id>`.
-**Sonuç:** Env değerleri ve DNS kayıtları contracts.md §2a'da. Örnek ve dokümanlar bu host'ları kullanır; başka alan adı örneği yazılmaz.
+- Other services (ingest-writer, alerting, the collector's internal endpoints, loadtest-ctl, integrations, ClickHouse, Postgres, Redpanda, Redis)
+  are not exposed externally.
+- Web and api are the same site (`tasktrooper.ai` eTLD+1) → the `tt_session` cookie (host-only, on the api host, `SameSite=Lax`, `Secure`)
+  is sent with `fetch(..., { credentials: 'include' })`; CORS only for `https://telemetry.tasktrooper.ai`.
+- DSN format: `https://<ingest-key>@ingest.telemetry.tasktrooper.ai/<project-id>`.
+**Consequence:** Env values and DNS records are in contracts.md §2a. Examples and docs use these hosts; no other domain examples are written.
 
-## ADR-031 — Demo dağıtımı: tek Mac, self-hosted GitHub Actions runner, Cloudflare Tunnel
-**Bağlam:** Ürünün herkese açık bir demosu gerekiyor; production altyapısı (ADR-030 host'ları, çok node'lu kurulum) henüz
-yok. Elde bir Mac mini (Apple Silicon, 16 GB) ve Docker Desktop var. Ev ağında port açmak ve statik IP istenmiyor.
-**Karar:**
-- Tüm platform tek makinede, mevcut `deploy/docker-compose.yml` + `deploy/demo/docker-compose.demo.yml` (restart
-  politikası, public URL'ler, `TT_AUTH_DEV=false`, `TT_COOKIE_SECURE=true`, dashboard için Caddy `web` servisi). Demoda
-  çalışanlar: ClickHouse, Postgres, Redpanda, Redis, s3, ingest-gw, ingest-writer, api, alert-engine, notifier, web
-  ve (ADR-032 ile) loadtest — küçük limitler: 50 VU, 15 dk, tek eşzamanlı run, ayda 3000 VU-dk, `TT_LOADTEST_ALLOW_LOCAL=false`.
-  codeintel, trooper-cloud yok. Image'lar makinede kaynaktan build edilir (arm64; ghcr image'ları amd64).
-- Yayın: Cloudflare Tunnel (giden bağlantı, port yok). Host'lar zone'un bir seviye altında: `telemetry.`,
-  `telemetry-api.`, `telemetry-ingest.tasktrooper.ai` — Cloudflare'in ücretsiz sertifikası iki seviyeyi
-  (`api.telemetry.…`) kapsamıyor. Tunnel'dan yalnız OTLP/HTTP (4318) geçer, gRPC (4317) yok.
-- Giriş: Google OIDC (`TT_OIDC_ISSUER=https://accounts.google.com`); dev login kapalı.
-- Deploy: `deploy-demo` workflow'u, yalnız manuel (`workflow_dispatch`) ve yalnız `main`, `demo` environment'ı,
-  makinedeki self-hosted runner'da (label `trooper-demo`) koşar. Secret'lar GitHub'da: `DEMO_ENV` = `deploy/.env`'in
-  tamamı; workflow dosyayı yazar, `deploy/demo/deploy.sh`'ı çalıştırır, sonunda siler. `deploy.sh`: infra → `make migrate`
-  → dashboard build (checkout dışına, `~/trooper-demo/web`) → servisler `up -d --build` → health check.
-- Repo public: self-hosted runner'a fork PR'ı ulaşmasın diye "Require approval for all external contributors" zorunlu;
-  başka hiçbir workflow `trooper-demo` label'ını kullanmaz.
-- Self-observability (ADR-027) herhangi bir müşteri gibi: dashboard'da açılan projenin DSN'i `demo` environment secret'ı
-  `DEMO_TROOPER_DSN`; özel bootstrap yok. Go servisleri ve dashboard RUM'u public ingest host'una, `trooper-agent`
-  container'ı (`deploy/demo/agent.yaml`, modlar `db,host`) Postgres/Redis/Redpanda ve container metriklerini gönderir.
-  `TT_SELF_PROJECT_ID` (döngü koruması) DSN'in proje id'sinden türetilir.
-- Self-telemetry gönderen container'lar `dns: [1.1.1.1, 8.8.8.8]` kullanır (ev router'ının eski DNS önbelleği public ingest
-  host'unu başka yere çözmesin); `TROOPER_VERSION` = git kısa sha (deploy marker). Dashboard: `/assets/*` uzun önbellek,
-  diğer her path `no-cache`; build `rsync --delete-after` ile kopyalanır (deploy sırasında 404 yok).
-**Sonuç:** Kurulum ve adımlar `deploy/demo/README.md`. Makine kapanınca demo da kapanır (uptime garantisi yok); yedek ve
-kısa retention ayrı iş. Production'a geçişte ADR-030 host'ları ve ayrı altyapı geçerli olur.
+## ADR-031 — Demo deployment: a single Mac, self-hosted GitHub Actions runner, Cloudflare Tunnel
+**Context:** The product needs a public demo; production infrastructure (ADR-030 hosts, multi-node setup) doesn't exist
+yet. There is a Mac mini (Apple Silicon, 16 GB) with Docker Desktop on hand. Opening ports on the home network and a static IP are not wanted.
+**Decision:**
+- The whole platform on a single machine, with the existing `deploy/docker-compose.yml` + `deploy/demo/docker-compose.demo.yml` (restart
+  policy, public URLs, `TT_AUTH_DEV=false`, `TT_COOKIE_SECURE=true`, a Caddy `web` service for the dashboard). Running in the
+  demo: ClickHouse, Postgres, Redpanda, Redis, s3, ingest-gw, ingest-writer, api, alert-engine, notifier, web
+  and (via ADR-032) loadtest — small limits: 50 VUs, 15 min, a single concurrent run, 3000 VU-min per month, `TT_LOADTEST_ALLOW_LOCAL=false`.
+  No codeintel or trooper-cloud. Images are built from source on the machine (arm64; ghcr images are amd64).
+- Exposure: Cloudflare Tunnel (outbound connection, no ports). Hosts are one level below the zone: `telemetry.`,
+  `telemetry-api.`, `telemetry-ingest.tasktrooper.ai` — Cloudflare's free certificate doesn't cover two levels
+  (`api.telemetry.…`). Only OTLP/HTTP (4318) goes through the Tunnel, no gRPC (4317).
+- Login: Google OIDC (`TT_OIDC_ISSUER=https://accounts.google.com`); dev login off.
+- Deploy: the `deploy-demo` workflow, manual only (`workflow_dispatch`) and `main` only, `demo` environment,
+  runs on the self-hosted runner on the machine (label `trooper-demo`). Secrets are in GitHub: `DEMO_ENV` = the whole of `deploy/.env`;
+  the workflow writes the file, runs `deploy/demo/deploy.sh`, and deletes it at the end. `deploy.sh`: infra → `make migrate`
+  → dashboard build (outside the checkout, `~/trooper-demo/web`) → services `up -d --build` → health check.
+- The repo is public: "Require approval for all external contributors" is mandatory so that fork PRs don't reach the self-hosted runner;
+  no other workflow uses the `trooper-demo` label.
+- Self-observability (ADR-027) like any customer: the DSN of the project opened in the dashboard is the `demo` environment secret
+  `DEMO_TROOPER_DSN`; no special bootstrap. Go services and the dashboard RUM send to the public ingest host; the `trooper-agent`
+  container (`deploy/demo/agent.yaml`, modes `db,host`) sends Postgres/Redis/Redpanda and container metrics.
+  `TT_SELF_PROJECT_ID` (loop protection) is derived from the DSN's project id.
+- Containers sending self-telemetry use `dns: [1.1.1.1, 8.8.8.8]` (so the home router's stale DNS cache doesn't resolve the public ingest
+  host elsewhere); `TROOPER_VERSION` = git short sha (deploy marker). Dashboard: long cache for `/assets/*`,
+  `no-cache` for every other path; the build is copied with `rsync --delete-after` (no 404s during deploy).
+**Consequence:** Setup and steps are in `deploy/demo/README.md`. When the machine is off the demo is down too (no uptime guarantee); backups and
+short retention are separate work. On moving to production, the ADR-030 hosts and separate infrastructure apply.
 
-## ADR-032 — MCP write tool'ları: opt-in, onaylı, `source = agent`
-**Bağlam:** ADR-025 MCP'yi salt okunur açtı; agent'lar sorunu bulabiliyor ama projeye alert, KPI veya load test tanımlayamıyor,
-kullanıcı her öneriyi UI'dan elle giriyor. Alert tasarımı için gereken veri (hata grupları, KPI'lar, öneriler, envanter, şablonlar,
-bildirim kanalları, infra) da tool yüzeyinde yoktu. API key'ler `admin` rolünde (identity.go), yani anahtarın kendisi yazmayı
-sınırlamıyor.
-**Karar:**
-- 15 yeni okuma tool'u (toplam 27): errors, KPI'lar, öneriler, envanter, monitor şablonları, bildirim kanalları (Slack App kanalları
-  + tanımlı kanallar; config/secret asla), RUM özeti, AI kullanımı, host / veritabanı / consumer group, load test senaryoları +
-  domain'ler, tek run, ve `tt_preview_monitor` (POST ama kaydetmez — eşik gürültüsünü kayıttan önce görmek için).
-- 11 write tool'u yalnız `TT_MCP_ALLOW_WRITE=true` ile kaydedilir (default kapalı): monitor create / update / delete, öneri kabulü,
-  KPI create / update / delete, Slack test mesajı, load test senaryosu oluşturma, run başlatma ve durdurma.
-- Her write `confirm` ister; yoksa istek gönderilmez, gönderilecek gövde (`dryRun`) döner. Agent bunu kullanıcıya gösterir ve
-  onaydan sonra `confirm: true` ile tekrarlar. İstisna `tt_stop_loadtest` (yükü yalnız azaltır).
-- Agent'ın oluşturduğu monitor, KPI ve senaryo `source = 'agent'` (check constraint'lar `014_agent_source.sql`; UI rozeti). Agent
-  yalnız `agent` kayıtlarını siler; repo'dan yönetilen (`code`) kayıtları değiştirmez.
-- Load test: draft senaryo koşmaz, hedef doğrulanmış domain olmalı (domain ekleme kullanıcıda), agent senaryosuna `gate` yoksa
-  otomatik abort eşiği eklenir.
-- Kullanım akışı `skills/trooper-alerts`: önce oku, eşiği veriden türet, preview et, toplu liste halinde onay al; veri yetersizse
-  load test öner.
-**Sonuç:** Onay MCP istemcisinin değil tool sözleşmesinin parçası; dikkatsiz bir agent `confirm: true`'yu ilk çağrıda verebilir —
-asıl koruma env bayrağı ve `agent` kaynağıyla geri alınabilirlik. Ayrı yazma kapsamlı API key rolü (read-only key) açık iş.
-Demo (ADR-031) bu karar ile `loadtest` servisini de çalıştırır; limitler `deploy/demo/docker-compose.demo.yml`'de.
+## ADR-032 — MCP write tools: opt-in, confirmed, `source = agent`
+**Context:** ADR-025 opened MCP read-only; agents can find problems but can't define alerts, KPIs or load tests for the project,
+and the user enters every suggestion by hand in the UI. The data needed for alert design (error groups, KPIs, suggestions, inventory, templates,
+notification channels, infra) was also missing from the tool surface. API keys are in the `admin` role (identity.go), i.e. the key itself doesn't
+restrict writes.
+**Decision:**
+- 15 new read tools (27 total): errors, KPIs, suggestions, inventory, monitor templates, notification channels (Slack App channels
+  + defined channels; never config/secrets), RUM summary, AI usage, host / database / consumer group, load test scenarios +
+  domains, a single run, and `tt_preview_monitor` (POST but doesn't save — to see threshold noise before saving).
+- 11 write tools are registered only with `TT_MCP_ALLOW_WRITE=true` (off by default): monitor create / update / delete, suggestion acceptance,
+  KPI create / update / delete, Slack test message, load test scenario creation, starting and stopping a run.
+- Every write requires `confirm`; without it the request is not sent, and the body that would be sent (`dryRun`) is returned. The agent shows this to the user and
+  repeats with `confirm: true` after approval. Exception: `tt_stop_loadtest` (it only reduces load).
+- Monitors, KPIs and scenarios created by the agent have `source = 'agent'` (check constraints in `014_agent_source.sql`; UI badge). The agent
+  only deletes `agent` records; it doesn't change records managed from the repo (`code`).
+- Load test: draft scenarios don't run, the target must be a verified domain (adding domains is up to the user), and if the agent's scenario has no `gate`
+  an automatic abort threshold is added.
+- Usage flow in `skills/trooper-alerts`: read first, derive the threshold from data, preview, get approval as a batch list; if data is insufficient,
+  suggest a load test.
+**Consequence:** Confirmation is part of the tool contract, not the MCP client; a careless agent could pass `confirm: true` on the first call —
+the real protection is the env flag and reversibility via the `agent` source. A separate write-scoped API key role (read-only key) is open work.
+With this decision the demo (ADR-031) also runs the `loadtest` service; limits are in `deploy/demo/docker-compose.demo.yml`.

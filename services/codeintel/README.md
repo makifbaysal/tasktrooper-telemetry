@@ -186,7 +186,7 @@ Metrics: `codeintel_analyses_total{result}`, `codeintel_webhooks_total{event,res
 ## AI quota
 
 Every LLM batch is checked against the org's monthly AI credits (ADR-018, `services/pkg/aiquota`, `.ai/code-intelligence.md`
-§ AI kotası) before it is sent and recorded in `ai_usage` (`feature=codeintel.enrich`, `ref=repo:<id>`) after it returns. The member
+§ AI quota) before it is sent and recorded in `ai_usage` (`feature=codeintel.enrich`, `ref=repo:<id>`) after it returns. The member
 cap applies when `repositories.analyze_requested_by` is set (manual analysis from the dashboard); webhook-queued analyses clear it.
 A denial keeps the remaining items on static criticality; the result lands in `repositories.analysis.llm`
 (`{status: ok|disabled|quota_exceeded, reason?, credits, skipped?}`).

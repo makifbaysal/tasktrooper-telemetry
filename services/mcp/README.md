@@ -84,9 +84,9 @@ Variables already in the environment win over the env file; only the `TT_*` keys
 `curl -fsSL https://telemetry.tasktrooper.ai/install-agent.sh | bash` detects the installed coding tools (Claude Code, Cursor,
 Antigravity, Codex, OpenCode, Gemini CLI, Muse Code), asks which ones and global vs project scope, verifies the key, writes the
 env file and registers the server + skills. Binaries come from GitHub Releases tagged `mcp/vX.Y.Z`
-(`.github/workflows/release-mcp.yml`). Details: `.ai/mcp.md` § Kurulum.
+(`.github/workflows/release-mcp.yml`). Details: `.ai/mcp.md` § Install.
 
-Connection recipes (OpenCode, Claude Code, `.mcp.json`): `.ai/mcp.md` § Bağlanma (elle).
+Connection recipes (OpenCode, Claude Code, `.mcp.json`): `.ai/mcp.md` § Connecting (manual).
 
 ## Self telemetry (ADR-027)
 

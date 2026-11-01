@@ -170,7 +170,7 @@ func TestE2E(t *testing.T) {
 	}
 }
 
-// readTools / writeTools are the approved tool surface (.ai/mcp.md § Tool yüzeyi).
+// readTools / writeTools are the approved tool surface (.ai/mcp.md § Tool surface).
 var (
 	readTools = []string{
 		"tt_endpoint_rca", "tt_get_incident", "tt_get_service_kpis", "tt_get_trace",

@@ -8,7 +8,7 @@ import java.util.function.BiConsumer;
 
 /**
  * Helpers for consumer/worker spans: process name, retry attempt, DLQ flag, and the {@code tt-attempt} message header
- * that carries the attempt number across retry topics / re-publishes (contracts.md §4 "Retry sayısı taşıma").
+ * that carries the attempt number across retry topics / re-publishes (contracts.md §4 "Carrying the retry count").
  *
  * <p>Retry topic producer example (Kafka):
  *

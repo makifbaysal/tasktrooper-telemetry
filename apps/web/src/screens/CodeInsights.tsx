@@ -374,7 +374,7 @@ function DriftRow({ icon, title, meta, count, onClick }: { icon: ReactNode; titl
 }
 
 
-/** Code-sourced monitor suggestion (design-system § Öneri kartı): accept creates the monitor, reject hides it. */
+/** Code-sourced monitor suggestion (design-system § Suggestion card): accept creates the monitor, reject hides it. */
 export function SuggestionCard({ s, compact: small }: { s: SuggestionRow; compact?: boolean }) {
   const nav = useNavigate();
   const [busy, setBusy] = useState<'accept' | 'reject' | null>(null);

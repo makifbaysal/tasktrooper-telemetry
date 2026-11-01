@@ -2,7 +2,7 @@ name: Release MCP
 
 # Builds the tt-mcp binary (services/mcp) for macOS, Linux and Windows and attaches it to a GitHub Release, where
 # apps/web/public/install-agent.sh downloads it. The Go module path is not go-installable (replace directive), so binaries are
-# the distribution. Tag: mcp/vX.Y.Z (git tag mcp/v0.1.0 && git push origin mcp/v0.1.0). See .ai/mcp.md § Kurulum.
+# the distribution. Tag: mcp/vX.Y.Z (git tag mcp/v0.1.0 && git push origin mcp/v0.1.0). See .ai/mcp.md § Install.
 
 on:
   push:

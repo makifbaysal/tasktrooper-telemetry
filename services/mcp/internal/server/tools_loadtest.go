@@ -114,7 +114,7 @@ func (s *Server) registerLoadtestWriteTools(srv *mcp.Server) {
 type scenarioInput struct {
 	confirmField
 	Name string         `json:"name" jsonschema:"e.g. \"checkout baseline (agent)\""`
-	Spec map[string]any `json:"spec" jsonschema:"Scenario spec (.ai/load-testing.md § Senaryo formatı). Minimal: {target: \"https://api.example.com\", mode: \"vus\", levels: [{name: \"warm\", ramp: 30, hold: 60, target: 5}, {name: \"steady\", ramp: 30, hold: 300, target: 20}], steps: [\"GET /v1/products\", \"POST /v1/orders\"], weights: [80, 20], requests: {\"POST /v1/orders\": {body: \"{\\\"sku\\\": \\\"{{int 1-500}}\\\"}\", checks: [\"status == 201\"]}}, thinkTime: 1, thresholds: [\"http_req_failed rate < 1%\", \"http_req_duration p(95) < 500 ms\"], gate: {abortErrorRate: 0.2, abortP95Ms: 5000}}. Ramps and holds are seconds"`
+	Spec map[string]any `json:"spec" jsonschema:"Scenario spec (.ai/load-testing.md § Scenario format). Minimal: {target: \"https://api.example.com\", mode: \"vus\", levels: [{name: \"warm\", ramp: 30, hold: 60, target: 5}, {name: \"steady\", ramp: 30, hold: 300, target: 20}], steps: [\"GET /v1/products\", \"POST /v1/orders\"], weights: [80, 20], requests: {\"POST /v1/orders\": {body: \"{\\\"sku\\\": \\\"{{int 1-500}}\\\"}\", checks: [\"status == 201\"]}}, thinkTime: 1, thresholds: [\"http_req_failed rate < 1%\", \"http_req_duration p(95) < 500 ms\"], gate: {abortErrorRate: 0.2, abortP95Ms: 5000}}. Ramps and holds are seconds"`
 }
 
 func (s *Server) createScenario(ctx context.Context, _ *mcp.CallToolRequest, in scenarioInput) (*mcp.CallToolResult, any, error) {

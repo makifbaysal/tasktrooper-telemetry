@@ -1,122 +1,122 @@
 # Roadmap
 
-## Faz 0 — Temel ✅
-- [x] Mimari ve ürün dokümanları
-- [x] Design system (token + temel komponentler)
-- [x] Dashboard ekranları (ilk sürüm mock data ile; ADR-028 ile mock kaldırıldı, yalnızca gerçek veri)
-- [x] `deploy/docker-compose.yml` (ClickHouse, Postgres, Redpanda, Redis) + şemalar (`deploy/clickhouse`, `deploy/postgres`)
-- [x] `services/pkg` ortak paketler, `proto/rum/v1`, servisler arası sözleşme (`contracts.md`)
+## Phase 0 — Foundation ✅
+- [x] Architecture and product docs
+- [x] Design system (tokens + core components)
+- [x] Dashboard screens (first version with mock data; mock removed with ADR-028, real data only)
+- [x] `deploy/docker-compose.yml` (ClickHouse, Postgres, Redpanda, Redis) + schemas (`deploy/clickhouse`, `deploy/postgres`)
+- [x] `services/pkg` shared packages, `proto/rum/v1`, inter-service contract (`contracts.md`)
 
-## Faz 1 — Backend APM MVP ✅
+## Phase 1 — Backend APM MVP ✅
 
-Durum: servisler (`ingest`, `api`, `alerting`, `collector`, `integrations` = `trooper-cloud`, `symbolicator`) ve SDK'lar (Go, JVM,
-.NET, JS, Android, iOS, Flutter, React Native) hazır; testler ve uçtan uca akış (SDK → gw → Redpanda → writer → ClickHouse → api → UI)
-çalışıyor. Dashboard yalnızca api'den gerçek veriyi gösterir (ADR-013, ADR-028); veri yoksa ekranlar SDK kurulum yönergeli empty state gösterir.
+Status: services (`ingest`, `api`, `alerting`, `collector`, `integrations` = `trooper-cloud`, `symbolicator`) and SDKs (Go, JVM,
+.NET, JS, Android, iOS, Flutter, React Native) are ready; tests and the end-to-end flow (SDK → gw → Redpanda → writer → ClickHouse → api → UI)
+work. The dashboard only shows real data from the api (ADR-013, ADR-028); if there is no data, screens show an empty state with SDK setup instructions.
 
-- [x] UI `src/data/*` → api (APM, infra, alerting, KPI, load test, entegrasyonlar)
+- [x] UI `src/data/*` → api (APM, infra, alerting, KPI, load test, integrations)
 - [x] `consumer_1m.messaging_system`, `broker_topics_1m`, `broker_lag_1m.oldest_age_s`; db metadata (version/zone/instance class/disk)
-- [x] KPI headline `metric` + seri, `degradedSince`; tüm monitor tipleri için preview; incident `pending` + `quiet`
-- [x] ingest: Vercel drain, GeoIP, tail sampling, Prometheus `/metrics`, RUM backfill (≤ 24 saat) düzeltmesi
-- [x] SDK: Android NDK crash + ApplicationExitInfo + R8 upload plugin, iOS tüm thread stack + dSYM script, Flutter plugin, RN `TrooperRum`
-  native module, JVM `tt-attempt` + tracestate oranı + `trooper.sdk.errors`
-- [x] collector: MongoDB, Kafka topic metadata, MSK IAM / OAUTHBEARER / KIP-848, broker node metrikleri, MySQL prepared statements
-- [x] Cloud entegrasyonları (ADR-012): AWS (RDS, ElastiCache, MSK, SQS), GCP (Cloud SQL, Memorystore, Pub/Sub), Neon, Vercel
-  (deploy + drain) + Integrations ekranı
+- [x] KPI headline `metric` + series, `degradedSince`; preview for all monitor types; incident `pending` + `quiet`
+- [x] ingest: Vercel drain, GeoIP, tail sampling, Prometheus `/metrics`, RUM backfill (≤ 24 hours) fix
+- [x] SDK: Android NDK crash + ApplicationExitInfo + R8 upload plugin, iOS all-thread stack + dSYM script, Flutter plugin, RN `TrooperRum`
+  native module, JVM `tt-attempt` + tracestate ratio + `trooper.sdk.errors`
+- [x] collector: MongoDB, Kafka topic metadata, MSK IAM / OAUTHBEARER / KIP-848, broker node metrics, MySQL prepared statements
+- [x] Cloud integrations (ADR-012): AWS (RDS, ElastiCache, MSK, SQS), GCP (Cloud SQL, Memorystore, Pub/Sub), Neon, Vercel
+  (deploy + drain) + Integrations screen
 - [x] Symbolication: sourcemap, R8/ProGuard, dSYM, NDK, Dart + `trooper-cli`
-- [x] Paket yayınlama (npm, PyPI, Maven Central, NuGet, pub.dev, CocoaPods/SwiftPM, Go proxy) — ADR-029
-- [x] Quarkus `tt-attempt` otomatik okuma; `@tasktrooper/node`
-- [x] ingest-gw internal servis credential'ı (`TT_INTERNAL_TOKEN`, contracts §2)
-- [ ] Gerçek AWS/GCP/Neon/Vercel hesaplarıyla doğrulama (şu an fake sunucularla test edildi)
-- [x] Auth (OIDC + dev login, ADR-016), org/proje/üye/API key yönetimi + audit log
-- [x] api: 1 saatten kısa range'ler (`15m`, `30m`)
+- [x] Package publishing (npm, PyPI, Maven Central, NuGet, pub.dev, CocoaPods/SwiftPM, Go proxy) — ADR-029
+- [x] Quarkus `tt-attempt` automatic reading; `@tasktrooper/node`
+- [x] ingest-gw internal service credential (`TT_INTERNAL_TOKEN`, contracts §2)
+- [ ] Verification with real AWS/GCP/Neon/Vercel accounts (currently tested against fake servers)
+- [x] Auth (OIDC + dev login, ADR-016), org/project/member/API key management + audit log
+- [x] api: ranges shorter than 1 hour (`15m`, `30m`)
 
-## Faz 2 — RUM + Logs ✅
-- [x] `@tasktrooper/browser`, `/v1/rum`, `rum_events` + MV'ler, frontend ekranları gerçek veriye
-- [x] Log ingestion + pattern + Logs ekranı
+## Phase 2 — RUM + Logs ✅
+- [x] `@tasktrooper/browser`, `/v1/rum`, `rum_events` + MVs, frontend screens on real data
+- [x] Log ingestion + patterns + Logs screen
 - [x] `@tasktrooper/react-native`
-- [x] Vercel log kaynağı (`vercel.source`) Logs ekranında filtre
+- [x] Vercel log source (`vercel.source`) as a filter on the Logs screen
 
-## Faz 3 — Alerting ✅
+## Phase 3 — Alerting ✅
 - [x] `alert-engine` (threshold, latency, log_match, error_new, anomaly, composite, job_missed, consumer_lag/oldest_age, kpi_burn) +
-  `notifier` (Slack, PagerDuty, Opsgenie, e-posta, webhook, Teams); stream kuralları; mute, bakım pencereleri, hatırlatma
-- [x] KPI'lar (SLO) + burn-rate alert'leri
-- [x] Kök neden analizi (`rca` endpoint, incident `rootCause`)
-- [x] Alert-as-code (`.trooper/monitors`, codeintel senkronlar)
-- [x] AlertEditor'da anomaly/composite/job_missed/error_new formları
-- [x] Slack App: alert mesajı kök neden + confidence ile kanala, thread reply, ack/mute butonları (ADR-017)
-- [x] KPI kurallarında hatırlatma; çoklu shard'da stream kuralları
+  `notifier` (Slack, PagerDuty, Opsgenie, email, webhook, Teams); stream rules; mute, maintenance windows, reminders
+- [x] KPIs (SLO) + burn-rate alerts
+- [x] Root cause analysis (`rca` endpoint, incident `rootCause`)
+- [x] Alert-as-code (`.trooper/monitors`, synced by codeintel)
+- [x] anomaly/composite/job_missed/error_new forms in AlertEditor
+- [x] Slack App: alert message to the channel with root cause + confidence, thread reply, ack/mute buttons (ADR-017)
+- [x] Reminders in KPI rules; stream rules with multiple shards
 
-## Faz 4 — Code intelligence ✅
-- [x] GitHub App kurulum, repo seçimi, push webhook → incremental analiz (30 sn debounce)
-- [x] TS/JS + Go extractor'ları
-- [x] LLM zenginleştirme (opsiyonel), kritiklik skoru, alert önerileri, kapsama metriği
-- [x] Webhook path'leriyle incremental analiz
-- [x] `last_analyzed_sha` git-diff tabanlı incremental (manuel istek ve webhook taşması dahil; fallback: full scan)
-- [x] GitLab (cloud + self-managed) / Bitbucket Cloud kaynakları (clone, webhook, api, UI)
+## Phase 4 — Code intelligence ✅
+- [x] GitHub App installation, repo selection, push webhook → incremental analysis (30 s debounce)
+- [x] TS/JS + Go extractors
+- [x] LLM enrichment (optional), criticality score, alert suggestions, coverage metric
+- [x] Incremental analysis with webhook paths
+- [x] `last_analyzed_sha` git-diff based incremental (including manual requests and webhook overflow; fallback: full scan)
+- [x] GitLab (cloud + self-managed) / Bitbucket Cloud sources (clone, webhook, api, UI)
 
-## Faz 5 — Load testing ✅
-- [x] Senaryo/run CRUD (api + UI)
-- [x] `loadtest-ctl` + `loadtest-runner` (kendi Go motoru, ADR-015)
-- [x] Domain doğrulama, limitler
-- [x] Envanter/trafikten senaryo üretimi, canlı run ekranı
+## Phase 5 — Load testing ✅
+- [x] Scenario/run CRUD (api + UI)
+- [x] `loadtest-ctl` + `loadtest-runner` (own Go engine, ADR-015)
+- [x] Domain verification, limits
+- [x] Scenario generation from inventory/traffic, live run screen
 
-## Faz 6 — AI kotası, altyapı ve serverless ✅
-- [x] AI kullanım kotası: kredi defteri, paket varsayılanları, org + üye limiti, %80/%100 bildirimi, Usage ekranı (ADR-018)
-- [x] trooper-agent `host` / `cluster` modları: host, container, process, K8s node/pod/workload, Warning event'leri (ADR-019)
-- [x] Helm chart (DaemonSet + Deployment + RBAC) + opsiyonel eBPF (OBI)
-- [x] Monitor kind `infra`, RCA'da pod/host sinyalleri
-- [x] AWS Lambda keşif + CloudWatch metrikleri, Azure Functions sağlayıcısı, `faas` monitor'ları, maliyet tahmini (ADR-020)
+## Phase 6 — AI quota, infrastructure and serverless ✅
+- [x] AI usage quota: credit ledger, plan defaults, org + member limits, 80%/100% notifications, Usage screen (ADR-018)
+- [x] trooper-agent `host` / `cluster` modes: host, container, process, K8s node/pod/workload, Warning events (ADR-019)
+- [x] Helm chart (DaemonSet + Deployment + RBAC) + optional eBPF (OBI)
+- [x] Monitor kind `infra`, pod/host signals in RCA
+- [x] AWS Lambda discovery + CloudWatch metrics, Azure Functions provider, `faas` monitors, cost estimation (ADR-020)
 - [x] `@tasktrooper/node` `wrapLambda`
-- [x] UI: Hosts, Kubernetes, Serverless ekranları; servis detayında altyapı sekmesi
-- [x] K8s cluster modunda list yerine watch (binlerce pod üstü için)
-- [x] containerd/Podman host'ları, GPU ve Windows node metrikleri
-- [x] Azure: fonksiyon bazında metrik (App Insights), app setting'den servis eşlemesi
-- [x] Pod bazında trace/log filtresi, trace detay sayfası; iki Helm chart'ın birleştirilmesi (`services/collector/deploy/helm` eski DB chart'ı)
-- [x] Gerçek K8s doğrulaması: kind cluster (host + cluster modu, OOMKilled pod, watch); Lambda keşfi LocalStack ile
-- [ ] Gerçek EKS/AKS, Lambda CloudWatch metrikleri ve Azure hesabıyla doğrulama (hesap gerektirir)
-- [ ] NVIDIA dışı GPU'lar, cgroup v1 host'larında Docker/Podman'sız container metrikleri, gerçek Windows node testi
+- [x] UI: Hosts, Kubernetes, Serverless screens; infrastructure tab in service detail
+- [x] Watch instead of list in K8s cluster mode (for thousands of pods and more)
+- [x] containerd/Podman hosts, GPU and Windows node metrics
+- [x] Azure: per-function metrics (App Insights), service mapping from app settings
+- [x] Per-pod trace/log filter, trace detail page; merging the two Helm charts (`services/collector/deploy/helm` old DB chart)
+- [x] Real K8s verification: kind cluster (host + cluster mode, OOMKilled pod, watch); Lambda discovery with LocalStack
+- [ ] Verification with real EKS/AKS, Lambda CloudWatch metrics and an Azure account (requires accounts)
+- [ ] Non-NVIDIA GPUs, container metrics without Docker/Podman on cgroup v1 hosts, real Windows node test
 
-## Faz 7 — Session replay, continuous profiling, AI monitoring (New Relic parity) ✅
-- [x] Sözleşme: ADR-021/022/023, contracts §23–25, ClickHouse `005_replay_profiles_llm.sql`, Postgres `012_llm_prices.sql`
+## Phase 7 — Session replay, continuous profiling, AI monitoring (New Relic parity) ✅
+- [x] Contract: ADR-021/022/023, contracts §23–25, ClickHouse `005_replay_profiles_llm.sql`, Postgres `012_llm_prices.sql`
 - [x] ingest: `/v1/replay` → `tt.replay` → S3 + `replay_segments`; `/v1/profiles` → `tt.profiles` → `profile_stacks`/`profiles`;
-  GenAI span'ları → `dep_kind=ai`, `llm_1m`, `llm_content` (OpenLLMetry ve Vercel AI SDK adları dahil)
-- [x] api: `/replays*`, `/profiles/*`, `/ai/*` + fiyat tablosu; sessions `hasReplay`, error `replay`, trace span `llm`
-- [x] SDK: `@tasktrooper/replay` (rrweb), Android/iOS wireframe replay; Go/JVM (JFR)/Node profiling; Node/Go/JVM/.NET LLM span'ları
-- [x] UI: Replays sekmesi + oynatıcı, Profiling sekmesi + flame graph/diff, AI monitoring ekranı + servis AI sekmesi
-- [x] Demo: replay (web rrweb + mobil wireframe), profil (iki versiyon, diff hikâyeleri), LLM trafiği (Anthropic/OpenAI/Gemini)
-- [ ] Gerçek cihazda mobil replay doğrulaması (main thread maliyeti, Compose/SwiftUI çıktısı)
+  GenAI spans → `dep_kind=ai`, `llm_1m`, `llm_content` (including OpenLLMetry and Vercel AI SDK names)
+- [x] api: `/replays*`, `/profiles/*`, `/ai/*` + price table; sessions `hasReplay`, error `replay`, trace span `llm`
+- [x] SDK: `@tasktrooper/replay` (rrweb), Android/iOS wireframe replay; Go/JVM (JFR)/Node profiling; Node/Go/JVM/.NET LLM spans
+- [x] UI: Replays tab + player, Profiling tab + flame graph/diff, AI monitoring screen + service AI tab
+- [x] Demo: replay (web rrweb + mobile wireframe), profile (two versions, diff stories), LLM traffic (Anthropic/OpenAI/Gemini)
+- [ ] Mobile replay verification on a real device (main thread cost, Compose/SwiftUI output)
 
-## Faz 7b — Tamamlayıcılar
-- [x] Flutter (Dart Element ağacı) ve React Native (native SDK köprüsü) replay
-- [x] .NET (`TaskTrooper.Telemetry.Profiling`, EventPipe) ve Python profiling
-- [x] Python SDK `tasktrooper` (ADR-024): OTel dağıtımı + profiling + LLM
-- [x] LLM alert'leri (monitor kind `llm`, şablonlar, editör), fiyat tablosu `services/pkg/llmprice`
-- [x] OTLP profiles sinyali (`/v1development/profiles`, gRPC)
-- [x] Web replay: buffer sekmesi `storage` event'i
-- [x] Mobil replay emülatör/simulator doğrulaması
+## Phase 7b — Complements
+- [x] Flutter (Dart Element tree) and React Native (native SDK bridge) replay
+- [x] .NET (`TaskTrooper.Telemetry.Profiling`, EventPipe) and Python profiling
+- [x] Python SDK `tasktrooper` (ADR-024): OTel distribution + profiling + LLM
+- [x] LLM alerts (monitor kind `llm`, templates, editor), price table `services/pkg/llmprice`
+- [x] OTLP profiles signal (`/v1development/profiles`, gRPC)
+- [x] Web replay: buffer tab `storage` event
+- [x] Mobile replay emulator/simulator verification
 
-## Faz 8 — MCP sunucusu (local coding agent entegrasyonu) ✅
-- [x] Sözleşme: ADR-025/026, contracts §26, `.ai/mcp.md` (12 salt okunur `tt_*` tool'u)
-- [x] `services/mcp` modülü: stdio transport (stdout = protokol), `TT_*` config + startup `/me` kontrolü,
-  tek shared HTTP client, 64 KB sonuç cap'i (`truncated`/`total`/`hint`), `internal/redact` PII maskesi
-- [x] Testler: doğrulama/redact/hata eşlemesi (table-driven), in-memory e2e (12 tool + 3 çağrı),
-  stdio stdout saflığı (gerçek binary subprocess)
-- [x] Dockerfile (distroless; build context `services/`, ADR-027 ile repo kökü); CI modül matrisi `go.work`'ten otomatik
-- [ ] Canlı stack üzerinde gerçek MCP client ile manuel doğrulama
+## Phase 8 — MCP server (local coding agent integration) ✅
+- [x] Contract: ADR-025/026, contracts §26, `.ai/mcp.md` (12 read-only `tt_*` tools)
+- [x] `services/mcp` module: stdio transport (stdout = protocol), `TT_*` config + startup `/me` check,
+  single shared HTTP client, 64 KB result cap (`truncated`/`total`/`hint`), `internal/redact` PII mask
+- [x] Tests: validation/redact/error mapping (table-driven), in-memory e2e (12 tools + 3 calls),
+  stdio stdout purity (real binary subprocess)
+- [x] Dockerfile (distroless; build context `services/`, repo root with ADR-027); CI module matrix automatically from `go.work`
+- [ ] Manual verification with a real MCP client on a live stack
 
-## Faz 9 — Self-observability (ADR-027)
-- [x] Sözleşme: ADR-027, contracts §27; self proje `make self` → `api bootstrap` (ADR-028)
-- [x] Go servisleri `trooper.Start` ile enstrümante (HTTP, pgx, go-redis, franz-go, ClickHouse, slog → OTel logs, runtime
-  metrikleri, opsiyonel profiling; codeintel LLM span'ları) — `TROOPER_DSN` yoksa export yok
-- [x] Geri besleme döngüsü koruması: ingest-gw / ingest-writer `TT_SELF_PROJECT_ID` trafiği için span/log üretmez
-- [x] api CORS: `traceparent`, `tracestate`, `baggage` (RUM → api trace'i uçtan uca)
-- [x] Docker build context repo kökü (Dockerfile'lar `sdks/go`'yu kopyalar)
-- [x] Dashboard RUM `tt-web` (`@tasktrooper/browser` + `@tasktrooper/react` + `@tasktrooper/replay`, `VITE_TROOPER_DSN` yoksa SDK chunk'ı
-  yüklenmez): route template view adları, React root error handler'ları, Web Vitals, api'ye `traceparent`, kullanıcı yalnız
-  internal id ile `identify`, replay default kapalı + tüm metin maskeli
-- [x] Altyapı: `deploy/self/agent.yaml` (Postgres, Redis, Redpanda `tt.*` topic / `tt-*` group + host + Docker container'ları),
+## Phase 9 — Self-observability (ADR-027)
+- [x] Contract: ADR-027, contracts §27; self project `make self` → `api bootstrap` (ADR-028)
+- [x] Go services instrumented with `trooper.Start` (HTTP, pgx, go-redis, franz-go, ClickHouse, slog → OTel logs, runtime
+  metrics, optional profiling; codeintel LLM spans) — no export if `TROOPER_DSN` is missing
+- [x] Feedback loop protection: ingest-gw / ingest-writer do not produce spans/logs for `TT_SELF_PROJECT_ID` traffic
+- [x] api CORS: `traceparent`, `tracestate`, `baggage` (RUM → api trace end to end)
+- [x] Docker build context is the repo root (Dockerfiles copy `sdks/go`)
+- [x] Dashboard RUM `tt-web` (`@tasktrooper/browser` + `@tasktrooper/react` + `@tasktrooper/replay`, the SDK chunk is not loaded if `VITE_TROOPER_DSN`
+  is missing): route template view names, React root error handlers, Web Vitals, `traceparent` to the api, user `identify` only with
+  the internal id, replay off by default + all text masked
+- [x] Infrastructure: `deploy/self/agent.yaml` (Postgres, Redis, Redpanda `tt.*` topic / `tt-*` group + host + Docker containers),
   `make self` / `make self-down`
-- [ ] ClickHouse için collector'da `clickhouse` db engine'i (şimdilik yalnız container metrikleri: CPU/memory/net)
-- [x] Dummy veri yok (ADR-028): `tools/demo`, web mock modu ve Postgres seed'leri kaldırıldı; onboarding (`POST /orgs`) +
-  `api bootstrap`; testler kendi fixture'larını kurar
-- [ ] Self proje için ayrı kota/sampling ayarı; production'da self projesinin operatör tarafından açılması (runbook)
+- [ ] `clickhouse` db engine in the collector for ClickHouse (for now only container metrics: CPU/memory/net)
+- [x] No dummy data (ADR-028): `tools/demo`, web mock mode and Postgres seeds removed; onboarding (`POST /orgs`) +
+  `api bootstrap`; tests set up their own fixtures
+- [ ] Separate quota/sampling settings for the self project; enabling the self project by the operator in production (runbook)

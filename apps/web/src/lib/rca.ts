@@ -2,7 +2,7 @@ import type { RcaHop, RcaNode, RcaResult } from '@/data/types';
 
 /**
  * Root cause drill-down over a KPI's call tree. Same algorithm the alert engine runs
- * server-side (see .ai/alerting.md § Kök neden analizi):
+ * server-side (see .ai/alerting.md § Root cause analysis):
  *
  * 1. At each node, the change to explain is `current - baseline`.
  * 2. Each child contributes `callsPerReq × (child.current - child.baseline)`.

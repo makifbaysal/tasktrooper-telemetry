@@ -1,194 +1,194 @@
 # Design system
 
-Kaynak: `apps/web/src/styles/tokens.css` (token'lar), `apps/web/src/components/ui` (komponentler), `apps/web/src/components/charts` (grafikler).
-Canlı showcase: dashboard'da **`/design-system`** sayfası (sidebar'da link yok, URL ile açılır).
-Görsel sistemin tasarım kaydı (Impeccable): [`apps/web/DESIGN.md`](../apps/web/DESIGN.md) + `apps/web/.impeccable/design.json`; ürün bağlamı [`apps/web/PRODUCT.md`](../apps/web/PRODUCT.md). Çelişkide `tokens.css` ve bu dosya esastır, DESIGN.md aynı PR'da güncellenir.
+Source: `apps/web/src/styles/tokens.css` (tokens), `apps/web/src/components/ui` (components), `apps/web/src/components/charts` (charts).
+Live showcase: the **`/design-system`** page in the dashboard (no link in the sidebar, open by URL).
+Design record of the visual system (Impeccable): [`apps/web/DESIGN.md`](../apps/web/DESIGN.md) + `apps/web/.impeccable/design.json`; product context [`apps/web/PRODUCT.md`](../apps/web/PRODUCT.md). On conflict `tokens.css` and this file win; DESIGN.md is updated in the same PR.
 
-**Tema kaynağı: TaskTrooper.** Renkler, tipografi, radius ve kalıplar TaskTrooper uygulamasının temasını izler
-(`../tasktrooper-company/desktop/ui/src/styles/globals.css` ve ops konsolu `components/operations/**`). Orada tema
-değişirse bu dosya ve `tokens.css` aynı PR'da güncellenir.
+**Theme source: TaskTrooper.** Colors, typography, radius and patterns follow the TaskTrooper app's theme
+(`../tasktrooper-company/desktop/ui/src/styles/globals.css` and the ops console `components/operations/**`). If the theme changes
+there, this file and `tokens.css` are updated in the same PR.
 
-## İlkeler
+## Principles
 
-1. **Veri yüksek sesle konuşur, arayüz sessiz kalır.** Hue-265 soğuk nötrler, primary = TaskTrooper laciverti (`--accent`), marka işareti `--brand-mark #15214b`, sıcak amber (`--accent-warm`) sadece seçim/vurgu. Renk sadece veri ve durum için.
-2. **Yoğun ama ferah.** Body 14px (Inter), 4px grid, tablolar sıkı; kartlar arası 16px. Etiketler (`.eyebrow`, tablo başlığı, metric label) sentence case, 12–14px; büyük harf yalnızca sidebar grup adlarında.
-3. **Durum asla tek başına renk değildir.** Status her zaman ikon + etiket (`StatusBadge`).
-4. **Light ve dark eşit vatandaş.** Dark tema aynı rampalardan seçilmiş ayrı adımlar, otomatik ters çevirme değil. Tema: `system | light | dark` (topbar'dan), `data-theme` attribute'u ile.
-5. **Ham değer yasak.** Komponentlerde hex, px font size, rastgele spacing yazılmaz; token kullanılır.
-6. **Hareket tek katmanda ve kapatılabilir.** Dekoratif hareket (kart reveal + ambient nefes, liquid cursor, sidebar daraltma) sadece `styles/motion.css` + `components/layout/motion.ts`'te; token'lar `--dur-slow/--dur-reveal/--dur-ambient/--reveal-shift`. OS `prefers-reduced-motion` veya hesap menüsündeki **Reduce motion** (`data-motion="reduced"`, localStorage `trooper-motion`) hepsini kapatır. Ekran başlıklarının üstünde eyebrow/kicker yok; ikinci bir accent rengi (mor primary, yeşil sinyal) eklenmez.
+1. **Data speaks loudly, the interface stays quiet.** Hue-265 cool neutrals, primary = TaskTrooper navy (`--accent`), brand mark `--brand-mark #15214b`, warm amber (`--accent-warm`) only for selection/emphasis. Color only for data and status.
+2. **Dense but airy.** Body 14px (Inter), 4px grid, tight tables; 16px between cards. Labels (`.eyebrow`, table header, metric label) sentence case, 12–14px; uppercase only in sidebar group names.
+3. **Status is never color alone.** Status is always icon + label (`StatusBadge`).
+4. **Light and dark are equal citizens.** The dark theme uses separate steps picked from the same ramps, not automatic inversion. Theme: `system | light | dark` (from the topbar), via the `data-theme` attribute.
+5. **Raw values are forbidden.** No hex, px font size or arbitrary spacing in components; use tokens.
+6. **Motion lives in one layer and can be turned off.** Decorative motion (card reveal + ambient breathing, liquid cursor, sidebar collapse) only in `styles/motion.css` + `components/layout/motion.ts`; tokens `--dur-slow/--dur-reveal/--dur-ambient/--reveal-shift`. OS `prefers-reduced-motion` or **Reduce motion** in the account menu (`data-motion="reduced"`, localStorage `trooper-motion`) turns all of it off. No eyebrow/kicker above screen titles; no second accent color (purple primary, green signal) is added.
 
-## Token'lar
+## Tokens
 
-### Yüzeyler & mürekkep
-| Token | Kullanım |
+### Surfaces & ink
+| Token | Usage |
 |---|---|
-| `--bg-page` | Sayfa zemini |
-| `--bg-surface` | Kart, grafik yüzeyi |
+| `--bg-page` | Page background |
+| `--bg-surface` | Card, chart surface |
 | `--bg-raised` | Input, popover, tooltip |
-| `--bg-sunken` | Kod bloğu, segmented zemin, well |
-| `--bg-hover` / `--bg-active` | Satır/nav hover ve seçili |
-| `--text-primary` / `--text-secondary` / `--text-muted` | Metin hiyerarşisi (muted = eksen, meta) |
-| `--border` / `--border-strong` / `--divider` | Kenar, input kenarı, tablo çizgisi |
-| `--accent`, `--accent-hover`, `--accent-soft`, `--accent-text` | Primary aksiyon (lacivert), seçili tab, link |
-| `--brand-mark`, `--accent-warm` | Logo kutusu (iki temada sabit), seçim rengi |
-| `--scrollbar-thumb(-hover)`, `--scrollbar-track` | İnce, yuvarlak, temaya göre scrollbar (8px) |
+| `--bg-sunken` | Code block, segmented background, well |
+| `--bg-hover` / `--bg-active` | Row/nav hover and selected |
+| `--text-primary` / `--text-secondary` / `--text-muted` | Text hierarchy (muted = axis, meta) |
+| `--border` / `--border-strong` / `--divider` | Edge, input edge, table line |
+| `--accent`, `--accent-hover`, `--accent-soft`, `--accent-text` | Primary action (navy), selected tab, link |
+| `--brand-mark`, `--accent-warm` | Logo box (fixed in both themes), selection color |
+| `--scrollbar-thumb(-hover)`, `--scrollbar-track` | Thin, rounded, theme-aware scrollbar (8px) |
 
-### Diff (diverging çift)
-`--diff-increase` (turuncu, pay büyüdü) · `--diff-decrease` (mavi, pay küçüldü) — light + dark ayrı adımlar. Sadece karşılaştırma
-grafiklerinde (profil diff flame graph, "Biggest changes" swatch'ı). Status renkleri diff için **kullanılmaz**; şiddet
-`color-mix(in srgb, var(--diff-*) N%, var(--bg-surface))` ile (oklch'de karıştırma hue'yu magentaya kaydırır). Değişmeyen = `--bg-sunken`.
+### Diff (diverging pair)
+`--diff-increase` (orange, share grew) · `--diff-decrease` (blue, share shrank) — separate light + dark steps. Only in comparison
+charts (profile diff flame graph, "Biggest changes" swatch). Status colors are **not used** for diff; intensity via
+`color-mix(in srgb, var(--diff-*) N%, var(--bg-surface))` (mixing in oklch shifts the hue toward magenta). Unchanged = `--bg-sunken`.
 
-### Status (dark temada TaskTrooper `.dark` adımları; `-soft` arka plan, `-text` metin)
-`--status-good` · `--status-warning` · `--status-serious` · `--status-critical` (+ `-soft` arka plan, `-text` metin)
+### Status (TaskTrooper `.dark` steps in the dark theme; `-soft` background, `-text` text)
+`--status-good` · `--status-warning` · `--status-serious` · `--status-critical` (+ `-soft` background, `-text` text)
 
-Eşleme: `ok/resolved → good`, `warning/pending → warning`, `acknowledged → serious`, `critical/firing → critical`, `muted → neutral`.
+Mapping: `ok/resolved → good`, `warning/pending → warning`, `acknowledged → serious`, `critical/firing → critical`, `muted → neutral`.
 
-### Tipografi
-| Token | px / lh | Kullanım |
+### Typography
+| Token | px / lh | Usage |
 |---|---|---|
-| `--text-xs` | 11/14 | micro: eksen tick, badge, uppercase etiketler |
-| `--text-sm` | 12/16 | caption: ikincil metin, meta |
+| `--text-xs` | 11/14 | micro: axis tick, badge, uppercase labels |
+| `--text-sm` | 12/16 | caption: secondary text, meta |
 | `--text-md` | 14/20 | **body default** |
-| `--text-lg` | 16/24 | heading: section ve kart başlığı |
-| `--text-xl` | 20/28 | title: drawer / ikincil başlık |
-| `--text-2xl` | 28/36 | sayfa başlığı (PageHeader h1, `-0.022em`), stat / metric değeri |
-| `--text-hero` | 44/48 | Sayfa başına en fazla bir hero sayı |
+| `--text-lg` | 16/24 | heading: section and card title |
+| `--text-xl` | 20/28 | title: drawer / secondary title |
+| `--text-2xl` | 28/36 | page title (PageHeader h1, `-0.022em`), stat / metric value |
+| `--text-hero` | 44/48 | At most one hero number per page |
 
-Public sayfalar (landing, docs, login) için akışkan adımlar: `--text-display` (40→68px, hero h1), `--text-headline` (28→40px, bölüm başlığı), `--text-lede` (16→19px); gövde ölçüsü `--measure` 68ch. App shell içinde kullanılmaz.
+Fluid steps for public pages (landing, docs, login): `--text-display` (40→68px, hero h1), `--text-headline` (28→40px, section title), `--text-lede` (16→19px); body measure `--measure` 68ch. Not used inside the app shell.
 
-Etiketler sentence case: metric label (`--text-md`, secondary), tablo başlığı (`--text-sm`, secondary) ve `.eyebrow` (`--text-sm`) büyük harf/tracking taşımaz; büyük harf yalnızca sidebar grup adlarında. Başlık üstünde kicker/eyebrow yasak.
+Labels are sentence case: metric label (`--text-md`, secondary), table header (`--text-sm`, secondary) and `.eyebrow` (`--text-sm`) carry no uppercase/tracking; uppercase only in sidebar group names. Kicker/eyebrow above titles is forbidden.
 
-Font: `--font-sans` (Inter), `--font-mono` (JetBrains Mono — route, log, kod, trace id, yol chip'leri). Sayılar `tabular-nums`, büyük değerler `letter-spacing: -0.02em`.
+Font: `--font-sans` (Inter), `--font-mono` (JetBrains Mono — route, log, code, trace id, path chips). Numbers `tabular-nums`, large values `letter-spacing: -0.02em`.
 
 ### Spacing, radius, layout
-- Spacing: `--space-1..12` (4px grid) + public sayfalar için `--space-16/24/32`.
-- Radius: `--radius-xs 4` (bar ucu) · `sm 6` (chip, segmented item) · `md 8` (buton, input, nav item) · `lg 14` (kart, rounded-xl) · `full` (badge).
-- Kontrol yükseklikleri: `--control-h-sm 30`, `--control-h-md 36`.
-- Layout: sidebar 240px (topbar'daki butonla daraltılır, localStorage `trooper-sidebar`), topbar 56px (yarı saydam + blur), içerik max 1440px. 900px altı sidebar `--scrim` üstünde overlay drawer (aynı buton açar; navigasyon, Escape veya scrim'e dokunma kapatır); 640px altı topbar iki satıra sarılır, zaman aralığı kendi satırında. Topbar'da hızlı geçiş (`GlobalSearch`: servis + sayfa, `/` veya ⌘K). Topbar'daki env seçici ve zaman aralığı sadece onları okuyan ekranlarda görünür (`scopeFor`, `AppShell.tsx`): Overview, servis/endpoint/trace, altyapı, KPI detay, AI monitoring; Incidents, Settings, Load tests, Code insights'ta gizli. Ekran düzeni (Overview, Incidents, Services) `styles/screens.css`'te, sadece yapı.
-- Kartlar düz: gölge yok, `1px --divider` çerçeve, `--radius-md`; hover'da (`card--interactive`) sadece `--border-strong`. Kart içindeki kart kutu olmaz, ebeveyninin bölgesi olur (çerçevesiz, aralarında hairline). Alarm durumundaki kart (`.card--rail-*`, `.rca`): status rengine karışmış çerçeve + üstte 2px inset çizgi; renkli sol/sağ kenar (>1px) yasak.
-- İçerik ritmi: `.content` padding `--space-8`, bölümler arası `--space-8`, bölüm içi `--space-4`.
-- Public sayfalar: `--public-max` 1200px kolon, `--public-nav-h` 72px; nav, hero ve bölümler aynı iç kenara (`--inline`) hizalı. Marka zemini `--field-*` (lacivert, iki temada aynı): hero, kod bandı, kod blokları, login paneli. Hero animasyonu `--ease-out-expo`; reduced motion son kareyi gösterir. Kök neden bulgusu (`.finding`) grafiğin son lane'i: geniş düzende SVG'nin `FINDING_Y` çizgisinin altına absolute oturur (sabit oran, sahne yeniden boyutlanmaz), reco-db'den inen kesikli çizgi bağlar; kart/gölge yok, sinyal tonlu ince bant. Dört adım: belirti → yol → neden → önerilen çözüm; dar düzende (≤720px) grafiğin altına iner.
+- Spacing: `--space-1..12` (4px grid) + `--space-16/24/32` for public pages.
+- Radius: `--radius-xs 4` (bar end) · `sm 6` (chip, segmented item) · `md 8` (button, input, nav item) · `lg 14` (card, rounded-xl) · `full` (badge).
+- Control heights: `--control-h-sm 30`, `--control-h-md 36`.
+- Layout: sidebar 240px (collapsed by the button in the topbar, localStorage `trooper-sidebar`), topbar 56px (semi-transparent + blur), content max 1440px. Below 900px the sidebar is an overlay drawer above `--scrim` (opened by the same button; navigation, Escape or tapping the scrim closes it); below 640px the topbar wraps onto two rows, the time range on its own row. Quick switch in the topbar (`GlobalSearch`: service + page, `/` or ⌘K). The env selector and time range in the topbar are visible only on screens that read them (`scopeFor`, `AppShell.tsx`): Overview, service/endpoint/trace, infrastructure, KPI detail, AI monitoring; hidden on Incidents, Settings, Load tests, Code insights. Screen layout (Overview, Incidents, Services) is in `styles/screens.css`, structure only.
+- Cards are flat: no shadow, `1px --divider` border, `--radius-md`; on hover (`card--interactive`) only `--border-strong`. A card inside a card is not a box, it becomes a region of its parent (no border, hairline between them). Card in alarm state (`.card--rail-*`, `.rca`): border mixed with the status color + 2px inset line on top; colored left/right edge (>1px) is forbidden.
+- Content rhythm: `.content` padding `--space-8`, `--space-8` between sections, `--space-4` within a section.
+- Public pages: `--public-max` 1200px column, `--public-nav-h` 72px; nav, hero and sections aligned to the same inner edge (`--inline`). Brand background `--field-*` (navy, same in both themes): hero, code band, code blocks, login panel. Hero animation `--ease-out-expo`; reduced motion shows the last frame. The root cause finding (`.finding`) is the chart's last lane: in the wide layout it sits absolutely below the SVG's `FINDING_Y` line (fixed ratio, the stage does not resize), connected by a dashed line coming down from reco-db; no card/shadow, a thin band in the signal tone. Four steps: symptom → path → cause → suggested fix; in the narrow layout (≤720px) it drops below the chart.
 
-## Komponentler (`components/ui`)
+## Components (`components/ui`)
 
-| Komponent | Not |
+| Component | Note |
 |---|---|
-| `Button` | `primary` (sayfada tek ana aksiyon), `secondary` (default), `ghost`, `danger`; `sm`/`md`; `iconOnly` için `aria-label` zorunlu |
-| `Badge` | `neutral, accent, good, warning, serious, critical` tonları |
-| `StatusBadge` | Durum için tek doğru yol — ikon + etiket |
-| `Card` | `title`, `subtitle`, `actions`, `flush` (tablo/list için padding'siz) |
-| `StatTile` | label · value(+unit) · delta (yön × `upIsGood`) · opsiyonel sparkline |
-| `Table` | Kolon tanımlı, `numeric` sağa hizalı tabular, `sortValue` ile sıralanabilir, `onRowClick`; `childRows` ile iç içe satırlar (ebeveynin hemen altında girintili, aynı sıralama — ör. Azure Function App'in fonksiyonları). Karttan genişse içinde kayar, kırpılan kenarda gölge; `empty` string ise dolgulu `.table__empty` |
-| `Tabs` / `Segmented` | Tabs = sayfa içi bölüm (ok tuşları / Home / End ile gezinme, taşınca kırpılan kenar solar — `data-fade`); Segmented = filtre/zaman aralığı |
-| `Field`, `Input`, `Textarea`, `SearchInput`, `Select`, `Toggle` | Form elemanları (`Textarea mono` JSON/header şablonları için) |
-| `PageHeader` | breadcrumb + başlık + alt başlık + aksiyonlar |
-| `EmptyState`, `Meter`, `CodeBlock`, `Callout` | Yardımcılar |
-| `Skeleton`, `SkeletonText`, `SkeletonRows`, `SkeletonPage` | Yükleme hali: içeriğin şeklinde shimmer blokları (`.skel`, `prefers-reduced-motion` → düz). Ortada "Loading…" yazısı veya spinner yok; spinner yalnızca buton içi aksiyonlar ve replay buffering için. Grup başına tek `role="status"` + `label`. Boot ekranı (`main.tsx` `renderLoading`): oturum ipucu (`trooper-signed-in`) varsa app shell iskeleti, yoksa navy field zemini |
-| `ChoiceChips` | Çoklu seçim (region, servis, drain tipi): `Segmented` görünümü, birden çok `aria-pressed`, dar ekranda satır kırar |
-| `CopyCode` | Kopyala butonlu `CodeBlock` (IAM policy, CloudFormation/Terraform, drain URL); `wrap` tek satırlık uzun değeri (URL, ARN) kırar |
-| `Menu`, `MenuItem`, `MenuLabel`, `MenuDivider` | Trigger'a bağlı popover menü (kullanıcı menüsü, org/proje seçici). `trigger({open, toggle})` kendi butonunu çizer; Esc / dış tık / seçim kapatır; `align` start/end, `placement` below/above, `block` tam genişlik. `MenuItem selected` → check ikonu, `danger`, `hint` ikinci satır. Stil `styles/account.css` (`--bg-raised`, `--shadow-lg`) |
-| `Avatar` | Baş harfler `--accent-soft` disk üzerinde veya IdP resmi; `sm` / `md` (= `--control-h-sm`) / `lg` |
-| `SdkQuickstart` | SDK başına `Segmented` (Go, Node.js, Browser, Python, Java, .NET; `group` = all / backend / frontend) → kurulum komutu + `init` snippet'i, ikisi de `CopyCode`; `dsn` prop'u snippet'e gömülür (`components/ui/SdkSetup.tsx`) |
-| `ConnectSdk` | Veri yok empty state'i (ADR-028): `EmptyState` (ikon, başlık, ekranın veri gelince ne göstereceği) + projenin DSN'iyle `SdkQuickstart` (anahtar yerine `<ingest-key>`, `projectDsn()`) + "Settings → API keys" linki. `setup={false}` → sadece metin (filtre boş sonuç). Ana ekranların "henüz veri yok" hali bununla çizilir |
+| `Button` | `primary` (single main action on the page), `secondary` (default), `ghost`, `danger`; `sm`/`md`; `aria-label` required for `iconOnly` |
+| `Badge` | `neutral, accent, good, warning, serious, critical` tones |
+| `StatusBadge` | The one correct way for status — icon + label |
+| `Card` | `title`, `subtitle`, `actions`, `flush` (no padding, for table/list) |
+| `StatTile` | label · value(+unit) · delta (direction × `upIsGood`) · optional sparkline |
+| `Table` | Column-defined, `numeric` right-aligned tabular, sortable with `sortValue`, `onRowClick`; nested rows with `childRows` (indented right below the parent, same sort — e.g. an Azure Function App's functions). Scrolls inside if wider than the card, shadow on the clipped edge; if `empty` is a string, a padded `.table__empty` |
+| `Tabs` / `Segmented` | Tabs = in-page section (navigation with arrow keys / Home / End, the clipped edge fades on overflow — `data-fade`); Segmented = filter/time range |
+| `Field`, `Input`, `Textarea`, `SearchInput`, `Select`, `Toggle` | Form elements (`Textarea mono` for JSON/header templates) |
+| `PageHeader` | breadcrumb + title + subtitle + actions |
+| `EmptyState`, `Meter`, `CodeBlock`, `Callout` | Helpers |
+| `Skeleton`, `SkeletonText`, `SkeletonRows`, `SkeletonPage` | Loading state: shimmer blocks in the shape of the content (`.skel`, `prefers-reduced-motion` → flat). No "Loading…" text or spinner in the middle; spinner only for in-button actions and replay buffering. One `role="status"` + `label` per group. Boot screen (`main.tsx` `renderLoading`): app shell skeleton if there is a session hint (`trooper-signed-in`), otherwise navy field background |
+| `ChoiceChips` | Multi-select (region, service, drain type): `Segmented` look, multiple `aria-pressed`, wraps on narrow screens |
+| `CopyCode` | `CodeBlock` with a copy button (IAM policy, CloudFormation/Terraform, drain URL); `wrap` breaks a long single-line value (URL, ARN) |
+| `Menu`, `MenuItem`, `MenuLabel`, `MenuDivider` | Popover menu attached to a trigger (user menu, org/project selector). `trigger({open, toggle})` draws its own button; Esc / outside click / selection closes it; `align` start/end, `placement` below/above, `block` full width. `MenuItem selected` → check icon, `danger`, `hint` second line. Style `styles/account.css` (`--bg-raised`, `--shadow-lg`) |
+| `Avatar` | Initials on an `--accent-soft` disc or IdP picture; `sm` / `md` (= `--control-h-sm`) / `lg` |
+| `SdkQuickstart` | `Segmented` per SDK (Go, Node.js, Browser, Python, Java, .NET; `group` = all / backend / frontend) → install command + `init` snippet, both `CopyCode`; the `dsn` prop is embedded in the snippet (`components/ui/SdkSetup.tsx`) |
+| `ConnectSdk` | No-data empty state (ADR-028): `EmptyState` (icon, title, what the screen will show once data arrives) + `SdkQuickstart` with the project's DSN (`<ingest-key>` instead of the key, `projectDsn()`) + "Settings → API keys" link. `setup={false}` → text only (empty filter result). The "no data yet" state of the main screens is drawn with this |
 
-Entegrasyon kalıpları (`screens/Integrations.tsx`): `ProviderMark` (sağlayıcı kimliği — marka rengi/logosu yok, nötr kutu + kısaltma),
-`IntegrationStatusBadge` (ok → Connected, error → Error, pending → Syncing…, disabled → Disabled; hep ikon + etiket),
-`IntegrationSourceBadge` (keşfedilen DB/cluster satırında "AWS · aws-prod", tıkla → entegrasyon çekmecesi; sync hatalıysa critical ton),
-`DeployList` (deploy marker listesi: versiyon, commit mesajı, yazar, kaynak, link, build durumu).
+Integration patterns (`screens/Integrations.tsx`): `ProviderMark` (provider identity — no brand color/logo, neutral box + abbreviation),
+`IntegrationStatusBadge` (ok → Connected, error → Error, pending → Syncing…, disabled → Disabled; always icon + label),
+`IntegrationSourceBadge` ("AWS · aws-prod" on a discovered DB/cluster row, click → integration drawer; critical tone if sync failed),
+`DeployList` (deploy marker list: version, commit message, author, source, link, build status).
 
-Code insights / load test kalıpları: `SuggestionCard` (`screens/CodeInsights.tsx` — öneri kartı: kritiklik + "From code" + calibrated/not calibrated badge,
-hedef, koşul mono, gerekçe, `dosya:satır` GitHub linki, Reject / Customize / Accept; kabul sonrası "Monitor created" + monitöre link),
-`ConnectRepoDrawer` (`screens/ConnectRepo.tsx` — birincil "Connect GitHub" (api'ye tam sayfa yönlendirme), dönüşte `?github=<id>` ile repo seçici:
-arama, Private/Added badge'leri, çoklu seçim; token / local path "Advanced" altında), repo satırı durumları (Analyzing… / Analyzing push… +
-`pending_paths`, Disconnected warning, Analysis failed + hata metni, "Webhook active"), `RunBlockedCallout` + `ScenarioSource`
-(`screens/LoadTests.tsx` — draft / domain / limit / api nedenli "çalışamaz" uyarısı, domain için Domains linki; Draft · needs review warning badge'i),
-`LoadTestDomains` (`screens/LoadTestDomains.tsx` — TXT kaydı ve `/.well-known/trooper-verify` talimatları `CopyCode` ile, Verify / Checking… durumu),
-run ekranı `TargetCard` (hedef servis RED: "All traffic" slot 1 vs "Load test" slot 2, ölçü başına ayrı grafik).
+Code insights / load test patterns: `SuggestionCard` (`screens/CodeInsights.tsx` — suggestion card: criticality + "From code" + calibrated/not calibrated badge,
+target, condition mono, rationale, `file:line` GitHub link, Reject / Customize / Accept; after accept "Monitor created" + link to the monitor),
+`ConnectRepoDrawer` (`screens/ConnectRepo.tsx` — primary "Connect GitHub" (full-page redirect to the api), on return a repo picker via `?github=<id>`:
+search, Private/Added badges, multi-select; token / local path under "Advanced"), repo row states (Analyzing… / Analyzing push… +
+`pending_paths`, Disconnected warning, Analysis failed + error text, "Webhook active"), `RunBlockedCallout` + `ScenarioSource`
+(`screens/LoadTests.tsx` — "cannot run" warning with draft / domain / limit / api reasons, Domains link for domain; Draft · needs review warning badge),
+`LoadTestDomains` (`screens/LoadTestDomains.tsx` — TXT record and `/.well-known/trooper-verify` instructions with `CopyCode`, Verify / Checking… state),
+run screen `TargetCard` (target service RED: "All traffic" slot 1 vs "Load test" slot 2, a separate chart per measure).
 
-Hesap / bildirim kalıpları: `Login` (`screens/Login.tsx`, `/login` sayfası: sol `--field-*` marka paneli + sağda form, `.signin*` sınıfları `public.css`'te; oturum düşünce router dışında da render edilir), `Onboarding` (`screens/Onboarding.tsx`, router dışında, `.login__card`; adım 1 org + ilk proje formu → `POST /orgs`, adım 2 geniş kart `.onboarding__card`: DSN ve ingest key bir kez `CopyCode` + uyarı `Callout` + `SdkQuickstart` + "Continue to the dashboard"), `NotifyPicker` (`screens/NotifyPicker.tsx` — chip'li hedef girişi: Slack kanalı `#ad`, private kilit ikonu, serbest hedef mono; arama listesi `Menu` stilinde), `MonitorSourceBadge` (`code` → accent + kilit "Managed in repository", `suggestion` → accent + ✨), `LikelyCause` (özet + güven badge'i; < %30 warning tonunda "low confidence"). Rol gereği kapalı aksiyonlar gizlenir ya da `disabled` + `title` ile nedeni söylenir (`denied()`); salt okunur formlar `<fieldset disabled>`.
+Account / notification patterns: `Login` (`screens/Login.tsx`, `/login` page: `--field-*` brand panel on the left + form on the right, `.signin*` classes in `public.css`; also rendered outside the router when the session drops), `Onboarding` (`screens/Onboarding.tsx`, outside the router, `.login__card`; step 1 org + first project form → `POST /orgs`, step 2 wide card `.onboarding__card`: DSN and ingest key once via `CopyCode` + warning `Callout` + `SdkQuickstart` + "Continue to the dashboard"), `NotifyPicker` (`screens/NotifyPicker.tsx` — target input with chips: Slack channel `#name`, private lock icon, free target mono; search list in `Menu` style), `MonitorSourceBadge` (`code` → accent + lock "Managed in repository", `suggestion` → accent + ✨), `LikelyCause` (summary + confidence badge; < 30% "low confidence" in warning tone). Actions disabled by role are hidden or `disabled` + `title` states the reason (`denied()`); read-only forms `<fieldset disabled>`.
 
-Altyapı / K8s kalıpları (`screens/k8sShared.tsx`): `InfraStatusBadge` (ok/warning/critical + `stale` → nötr saat ikonu "Stale"), `PodPhaseBadge` (reason varsa onu gösterir — CrashLoopBackOff/OOMKilled/ImagePullBackOff critical, diğerleri warning; yoksa phase), `UsageCell` / `LimitCell` (0..1 meter; kullanılan / limit, limit yoksa "no limit"), `EventList` (K8s Warning event akışı), `AgentSetup` (veri yokken Helm + `docker run` talimatı, eBPF opsiyonel notu), `EbpfBadge` (accent, SDK'sız eBPF servisi). Kapasite grafikleri birim başına tek grafik: used / requested / allocatable (veya usage / request / limit) `LINE_SLOTS` 1-2-3.
+Infrastructure / K8s patterns (`screens/k8sShared.tsx`): `InfraStatusBadge` (ok/warning/critical + `stale` → neutral clock icon "Stale"), `PodPhaseBadge` (shows the reason if any — CrashLoopBackOff/OOMKilled/ImagePullBackOff critical, others warning; otherwise phase), `UsageCell` / `LimitCell` (0..1 meter; used / limit, "no limit" if there is no limit), `EventList` (K8s Warning event stream), `AgentSetup` (Helm + `docker run` instructions when there is no data, note on optional eBPF), `EbpfBadge` (accent, eBPF service without SDK). Capacity charts are one chart per unit: used / requested / allocatable (or usage / request / limit) `LINE_SLOTS` 1-2-3.
 
-AI kullanım / serverless kalıpları: `AiQuotaBanner` (`screens/Usage.tsx` — sayfa üstü `Callout`, warning/critical ton badge + metin + View usage + kapat; ay ve eşik başına kapatılır), `AiCapEditor` (üye tavanı: `Meter` + "used / cap" veya "No cap", kalem → inline sayı input'u, Enter kaydeder / Esc vazgeçer; Usage ve Members tablosunda), kredi formatı `credits()` (100 altı 2 ondalık). `FaasStatusBadge` (`screens/Serverless.tsx` — ok/warning/critical `StatusBadge`, `idle` / `missing` nötr "Idle" / "Missing"), maliyet her yerde `usd()` + "est." etiketi; fonksiyon detayında birim başına ayrı grafik (sayılar, ms, concurrency, cold start kolonları), hata serisi `--series-8`.
+AI usage / serverless patterns: `AiQuotaBanner` (`screens/Usage.tsx` — page-top `Callout`, warning/critical tone badge + text + View usage + close; dismissed per month and threshold), `AiCapEditor` (member cap: `Meter` + "used / cap" or "No cap", pencil → inline number input, Enter saves / Esc cancels; in the Usage and Members tables), credit format `credits()` (2 decimals below 100). `FaasStatusBadge` (`screens/Serverless.tsx` — ok/warning/critical `StatusBadge`, `idle` / `missing` neutral "Idle" / "Missing"), cost everywhere `usd()` + "est." label; in function detail a separate chart per unit (counts, ms, concurrency, cold start columns), error series `--series-8`.
 
-AI monitoring kalıpları (`screens/AiMonitoring.tsx`, ADR-023 — "AI usage" (kota) ile karıştırma): `AiMonitoringBody` (`/ai` ve servis **AI** sekmesi aynı gövde, `service` kapsamı), `ProviderBadge` (sağlayıcı kimliği nötr `Badge` — marka/status rengi yok), maliyet hücresi (`usd()` / tek çağrı için `aiUsd()` 4 ondalık, her yerde "est."; fiyat yoksa muted **price unknown** → `AiPricesDrawer`, toplamlar "partial"), model renkleri sayfadaki alfabetik model listesine göre `LINE_SLOTS` (maliyet `Columns` stacked, "Other" `--text-muted`), dört `MetricCard` (maliyet, token input/output, çağrı + hata `--series-8`, p95 + TTFT hint'te). `AiCallDrawer` (meta, token/maliyet, hata `Callout`, OTel GenAI mesajları rol bazlı `.llm-msg` kartları — tool call / tool result `CodeBlock`; içerik yoksa "Content capture is off" `EmptyState` + Node/Go snippet; "Open trace" → `/traces/:id?span=`), `AiPricesDrawer` (fiyat tablosu USD / 1M token, Default / "Org override" badge, admin+ düzenle / sıfırla, viewer salt okunur `Callout`), `AiSetup` (LLM verisi yokken SDK başına `Segmented` + `CopyCode`), `LlmSpanSection` (trace span panelinde model, token, maliyet, TTFT + prompt çekmecesi). Stil `styles/aimon.css`.
+AI monitoring patterns (`screens/AiMonitoring.tsx`, ADR-023 — do not confuse with "AI usage" (quota)): `AiMonitoringBody` (`/ai` and the service **AI** tab share the same body, `service` scope), `ProviderBadge` (provider identity neutral `Badge` — no brand/status color), cost cell (`usd()` / `aiUsd()` with 4 decimals for a single call, "est." everywhere; if no price, muted **price unknown** → `AiPricesDrawer`, totals "partial"), model colors by `LINE_SLOTS` following the page's alphabetical model list (cost `Columns` stacked, "Other" `--text-muted`), four `MetricCard`s (cost, token input/output, calls + errors `--series-8`, p95 + TTFT in hint). `AiCallDrawer` (meta, token/cost, error `Callout`, OTel GenAI messages as role-based `.llm-msg` cards — tool call / tool result `CodeBlock`; if no content, "Content capture is off" `EmptyState` + Node/Go snippet; "Open trace" → `/traces/:id?span=`), `AiPricesDrawer` (price table USD / 1M tokens, Default / "Org override" badge, admin+ edit / reset, viewer read-only `Callout`), `AiSetup` (`Segmented` + `CopyCode` per SDK when there is no LLM data), `LlmSpanSection` (model, token, cost, TTFT + prompt drawer in the trace span panel). Style `styles/aimon.css`.
 
-Service map (`screens/ServiceMapScreen.tsx`, stil `styles/servicemap.css`): landing'in `smap` sınıflarını (public.css) yeniden kullanır; uygulama içinde `.svcmap` `--field-*` token'larını temaya eşler (kanvas `--bg-sunken`, node `--bg-surface` + `--text-primary`, çizgiler `--border*`) — lacivert field yalnızca landing'de. Node genişliği hem ad hem metrik satırını sığdırır. Tier şeritleri hafif zemin rengiyle ayrılır (Clients mavi, Services nötr, Data aqua, External magenta; status ailesi ve yakın tonlar kullanılmaz), aralarında kesik çizgili ayraç. Viewport yalnızca layout değişince (node seti / boyut) yeniden fit olur; 60 sn veri yenilemesi zoom/pan'i korur. Durum yalnızca `--status-*` ile ve her zaman ikon (node sağ üstü) + etiket (incident tag'i, tooltip, panel `StatusBadge`). Yerleşim istemcide: tier lane'leri, servisler çağrı derinliğine göre satır, satır başına en çok 6 node (sarar), komşu barycenter sıralaması; node aralıkları geniş (yatay 56, lane arası 150 birim). Viewport viewBox ile: scroll imleç etrafında zoom, sürükle pan, +/−/Fit (Fit küçük haritayı 1100 birim genişliğin ötesine büyütmez). Detay paneli kanvasın solunda overlay (slide-in, haritayı daraltmaz); seçilen node panelin dışında kalan alanda ortalanır. Sorunlu node'lar üstte kart carousel'i (`.svcmap__card`: üst kenarda status çizgisi + `StatusBadge`, scroll-snap, ok butonları). Servis detayının Map sekmesi aynı komponenti `serviceId` ile gömer (`.svcmap--embedded`, PageHeader yerine `.svcmap__bar`). Reduced motion: trafik noktaları yok.
+Service map (`screens/ServiceMapScreen.tsx`, style `styles/servicemap.css`): reuses the landing's `smap` classes (public.css); inside the app `.svcmap` maps the `--field-*` tokens to the theme (canvas `--bg-sunken`, node `--bg-surface` + `--text-primary`, lines `--border*`) — the navy field is only on the landing. Node width fits both the name and the metric row. Tier lanes are separated by a light background color (Clients blue, Services neutral, Data aqua, External magenta; the status family and nearby tones are not used), with a dashed divider between them. The viewport refits only when the layout changes (node set / size); the 60 s data refresh keeps zoom/pan. Status only via `--status-*` and always icon (node top right) + label (incident tag, tooltip, panel `StatusBadge`). Layout on the client: tier lanes, services in rows by call depth, at most 6 nodes per row (wraps), neighbor barycenter ordering; wide node spacing (horizontal 56, 150 units between lanes). Viewport via viewBox: scroll zooms around the cursor, drag pans, +/−/Fit (Fit does not enlarge a small map beyond 1100 units wide). The detail panel is an overlay on the left of the canvas (slide-in, does not shrink the map); the selected node is centered in the area outside the panel. Problem nodes in a card carousel on top (`.svcmap__card`: status line on the top edge + `StatusBadge`, scroll-snap, arrow buttons). The service detail's Map tab embeds the same component with `serviceId` (`.svcmap--embedded`, `.svcmap__bar` instead of PageHeader). Reduced motion: no traffic dots.
 
-Session replay (`components/replay`, ADR-021): `ReplayPlayer` (web, `@rrweb/replay` 2.2.0 Replayer, kayıt boyutunu sığdıracak şekilde
-ölçeklenen sahne; segment'ler geldikçe `addEvent`; imleç tıklama halkası `--accent-warm`) ve `WireframePlayer` (mobil, SVG: düğüm türüne göre
-kutu, kayıttaki bg/fg/radius/border; maskeli etiket = kelime başına çubuk, maskeli input = nokta, görsel = yer tutucu kutu + glif; dokunma
-`--accent-warm` halka + iz, klavye nötr panel; cihaz çerçevesi `--border-strong`). İkisi de aynı `PlaybackProps`'u alır (playing, speed,
-skipInactive, seek, onTime, onEnded). Ekran (`screens/ReplayDetail.tsx`): oynatıcı + kontroller (play/pause, 1×/2×/4×/8× `Segmented`, "Skip
-inactivity" `Toggle`) + scrubber (oynatılan `--accent`, yüklenen `--bg-active`, boş/inaktif aralık taralı; işaretler: view `--series-1`,
-tıklama `--series-3`, hata `--series-8`, başarısız istek `--series-2`, legend ile) + sağda olay listesi (aktif satır `--accent-soft` + sol
-ray, gelecektekiler soluk; hata → stack çekmecesi, `traceId` → trace linki). Başlıkta kilit ikonlu "Text and inputs are masked".
+Session replay (`components/replay`, ADR-021): `ReplayPlayer` (web, `@rrweb/replay` 2.2.0 Replayer, stage scaled to fit the recording
+size; `addEvent` as segments arrive; cursor click ring `--accent-warm`) and `WireframePlayer` (mobile, SVG: box by node
+type, bg/fg/radius/border from the recording; masked label = a bar per word, masked input = dots, image = placeholder box + glyph; touch
+`--accent-warm` ring + trail, keyboard neutral panel; device frame `--border-strong`). Both take the same `PlaybackProps` (playing, speed,
+skipInactive, seek, onTime, onEnded). Screen (`screens/ReplayDetail.tsx`): player + controls (play/pause, 1×/2×/4×/8× `Segmented`, "Skip
+inactivity" `Toggle`) + scrubber (played `--accent`, loaded `--bg-active`, empty/inactive range hatched; markers: view `--series-1`,
+click `--series-3`, error `--series-8`, failed request `--series-2`, with legend) + event list on the right (active row `--accent-soft` + left
+rail, future ones faded; error → stack drawer, `traceId` → trace link). "Text and inputs are masked" with a lock icon in the header.
 
-Profiling ekranı (`screens/Profiling.tsx`): tip `Segmented`, host / versiyon `Select`, Profile / Compare; host başına `TimeSeries` (core),
-`FlameGraph`, Top functions `Table` (satıra tıkla → flame graph'ta arama), Compare: versiyon↔versiyon veya zaman penceresi, diff flame graph +
-"Biggest changes" (swatch + `±x pp`). Profil yoksa `ProfilingSetup` (`TROOPER_PROFILING=true` `CopyCode`), endpoint sayfasında kompakt `Callout`.
+Profiling screen (`screens/Profiling.tsx`): type `Segmented`, host / version `Select`, Profile / Compare; `TimeSeries` (core) per host,
+`FlameGraph`, Top functions `Table` (click a row → search in the flame graph), Compare: version↔version or time window, diff flame graph +
+"Biggest changes" (swatch + `±x pp`). If there is no profile, `ProfilingSetup` (`TROOPER_PROFILING=true` `CopyCode`), a compact `Callout` on the endpoint page.
 
-Ekran seviyesi kalıplar (`screens/rca.tsx`):
+Screen-level patterns (`screens/rca.tsx`):
 
-| Kalıp | Not |
+| Pattern | Note |
 |---|---|
-| `RootCauseCard` | Servis/endpoint sayfasında golden signals'ın üstünde; sadece belirgin artışta (≥%30 ve mutlak eşik). Origin etiketi: "Your code" / "Your dependency" / "Not your code · downstream". Cümle + `PathCrumbs` + etkilenen KPI'lar; tıkla → `RcaDrawer` |
-| `RcaChain` | Dikey stepper: her düğümde önce → şimdi, çarpan, "explains %" barı, kök düğümde badge + kanıtlar |
-| `PathCrumbs` | Tek satır yol özeti (liste/incident satırlarında "Why:" bloğu) |
-| `KpiStrip` | Client app servis sayfasında app'in KPI kartları; bozuksa kök neden cümlesi |
+| `RootCauseCard` | On the service/endpoint page above golden signals; only on a significant increase (≥30% and absolute threshold). Origin label: "Your code" / "Your dependency" / "Not your code · downstream". Sentence + `PathCrumbs` + affected KPIs; click → `RcaDrawer` |
+| `RcaChain` | Vertical stepper: at each node before → now, multiplier, "explains %" bar, badge + evidence on the root node |
+| `PathCrumbs` | Single-line path summary ("Why:" block in list/incident rows) |
+| `KpiStrip` | The app's KPI cards on the client app service page; root cause sentence if broken |
 
-Yeni komponent: `components/ui/` altına ekle, `index.ts`'ten export et, `/design-system` sayfasına örnek koy, bu tabloyu güncelle.
+New component: add under `components/ui/`, export from `index.ts`, put an example on the `/design-system` page, update this table.
 
-## Data viz kuralları
+## Data viz rules
 
-Grafikler `components/charts` altında, saf SVG: `TimeSeries`, `Columns` (stacked), `Sparkline`, `BarList`, `PropBar`, `Legend`, `PartitionBars`.
-`PartitionBars`: partition başına lag kolonları (tek seri, tek renk); en yüksek kolon direkt etiketli, hover'da değer. Amaç skew'i göstermek (bir uzun kolon = hot partition).
-`TimeSeries` x etiketi varsayılan saat; 5 dk'dan kısa aralıkta saniyeli; göreli zaman için `formatX` (ör. planlanan yük `+2:00`). Nokta sayısı tick sayısından azsa etiket tekrar basılmaz.
+Charts live under `components/charts`, pure SVG: `TimeSeries`, `Columns` (stacked), `Sparkline`, `BarList`, `PropBar`, `Legend`, `PartitionBars`.
+`PartitionBars`: lag columns per partition (single series, single color); the tallest column is directly labeled, value on hover. The goal is to show skew (one tall column = hot partition).
+`TimeSeries` x label defaults to hours; with seconds for ranges shorter than 5 min; `formatX` for relative time (e.g. planned load `+2:00`). If there are fewer points than ticks, labels are not printed twice.
 
-- **Zaman aralıkları (topbar):** `15m` (15×1 dk), `30m` (30×1 dk), `1h` (60×1 dk), `6h` (72×5 dk), `24h` (96×15 dk), `7d` (84×2 sa) — `RANGE_POINTS` (`data/apm.ts`); api `timerange` paketi aynı bucket'ları döndürmeli, yoksa UI şimdiye hizalı boş bir eksen çizer (veri yok, sıfır seri).
-- **Form seçimi:** zaman → `TimeSeries` (line, tek seri ise opsiyonel `area`); zaman içinde parça-bütün → `Columns`; sıralı karşılaştırma → `BarList`; tek oran → `PropBar`; tek sayı → `StatTile` (grafik değil).
-- **Kategorik renk:** `--series-1..8`, sabit sıra (blue, orange, aqua, yellow, magenta, green, violet, red). Renk **entity'ye** bağlı, sıraya değil — servisler için `serviceSlot(id)` kullan. 8'den fazla seri → "Other" veya small multiples, asla üretilmiş renk.
-- **Scatter/çok-çiftli formlar:** en fazla ilk 3 slot.
-- **Çok çizgili grafiklerde ve endpoint stack'lerinde** `LINE_SLOTS` (`1,2,3,7,5,6,8`) sırası kullanılır — sarı (4) atlanır, çünkü turuncu↔sarı çizgiler özellikle dark modda ayırt edilemiyor. Sıra validator'dan geçti (light'ta kırmızı↔yeşil CVD ΔE 7.2: stack'lerde 2px boşluk + legend + tooltip ile telafi edilir). Servis renkleri `serviceSlot(id)`, endpoint renkleri servis içindeki sabit sıraya göre.
-- **Ölçekler çok farklıysa small multiples.** Ör. Overview'da her servis kendi kartında, kendi ölçeğinde trafik + error rate (ayrı iki grafik). Tek grafikte büyük seri küçükleri sıfıra yapıştırıyorsa ayır.
-- **Tablo satırında trend:** `Sparkline` (her satır kendi ölçeği), değer kolonunun yanında.
-- **Tek y-ekseni.** Dual-axis yasak; farklı ölçekler ayrı grafik (ör. load test: VU, RPS, p95 ayrı kartlar).
-- **Mark spec:** çizgi 2px, marker r=4 + 2px yüzey halkası, bar ≤ 24px kalınlık, 4px yuvarlak veri ucu / kare taban, stacked segmentler arası 2px boşluk, area %10 opaklık, grid 1px solid.
-- **Legend:** ≥ 2 seride her zaman; tek seride yok (başlık söyler).
-- **Metin seri rengi giymez.** Değer/etiket ink token'larında; kimlik yanındaki renkli işaretten gelir.
-- **Hover default:** line/area → crosshair + tooltip; columns → kolon bazlı tooltip.
-- **Eşik çizgisi:** `--status-critical` kesikli + etiket (`threshold` prop). Deploy/olay: `events` prop (`{ ts, label, detail? }` — dikey kesikli çizgi + etiket; `detail` hover tooltip'inde, ör. deploy commit mesajı · yazar · kaynak). Deploy marker'ları `deployEvents(service, from)` ile verilir.
-- **Time spent kategorileri** (`TIME_CATEGORIES`): App code 1, Database 2, Cache 3, External HTTP 7, Queue publish 5, AI / LLM 6 (dep_kind `ai`, ADR-023).
-- **FlameGraph** (`components/charts/FlameGraph.tsx`, ADR-022): icicle (kök üstte), DOM blokları, satır 20px. Renk paket/modül başına sabit
-  (`framePackage()` → hash → `--series-1..8`, metin okunsun diye `color-mix` ile %32 tint; `all` / `[pruned]` / `(root)` gibi özel frame'ler
-  `--bg-sunken`). Tıkla → zoom (atalar üstte soluk tam genişlik satır), breadcrumb + Reset, arama (eşleşmeyen soluk, eşleşen `--accent-warm`
-  çerçeve, "x% of total matches"), hover tooltip: total / self değeri + toplam payı (+ zoom'lu düğüm payı). Diff modu (`baseTotal` + düğümlerde
-  `baseValue`): renk = toplamdaki pay farkı, `--diff-*` çifti, `FlameDiffLegend` ile. Snapshot tipleri (heap, goroutine) profil başına gösterilir.
-- **Status renkleri seri olarak kullanılmaz.** 5xx/error serisi için `--series-8` (red) kullanılır, `--status-critical` değil.
-- Durum eşikleri (Web Vitals vb.) tabloda `StatusBadge` ile gösterilir; iyi değer düz sayı.
+- **Time ranges (topbar):** `15m` (15×1 min), `30m` (30×1 min), `1h` (60×1 min), `6h` (72×5 min), `24h` (96×15 min), `7d` (84×2 h) — `RANGE_POINTS` (`data/apm.ts`); the api `timerange` package must return the same buckets, otherwise the UI draws an empty axis aligned to now (no data, zero series).
+- **Form choice:** time → `TimeSeries` (line, optional `area` if single series); part-to-whole over time → `Columns`; ranked comparison → `BarList`; single ratio → `PropBar`; single number → `StatTile` (not a chart).
+- **Categorical color:** `--series-1..8`, fixed order (blue, orange, aqua, yellow, magenta, green, violet, red). Color is bound to the **entity**, not the order — use `serviceSlot(id)` for services. More than 8 series → "Other" or small multiples, never a generated color.
+- **Scatter/multi-pair forms:** at most the first 3 slots.
+- **In multi-line charts and endpoint stacks** the `LINE_SLOTS` (`1,2,3,7,5,6,8`) order is used — yellow (4) is skipped, because orange↔yellow lines cannot be told apart, especially in dark mode. The order passed the validator (in light, red↔green CVD ΔE 7.2: compensated in stacks with 2px gap + legend + tooltip). Service colors `serviceSlot(id)`, endpoint colors by the fixed order within the service.
+- **Small multiples if scales differ a lot.** E.g. on Overview each service in its own card, at its own scale, traffic + error rate (two separate charts). If a large series flattens small ones to zero in one chart, split them.
+- **Trend in a table row:** `Sparkline` (each row its own scale), next to the value column.
+- **Single y-axis.** Dual-axis is forbidden; different scales go in separate charts (e.g. load test: VU, RPS, p95 separate cards).
+- **Mark spec:** line 2px, marker r=4 + 2px surface ring, bar ≤ 24px thick, 4px rounded data end / square base, 2px gap between stacked segments, area 10% opacity, grid 1px solid.
+- **Legend:** always with ≥ 2 series; none with a single series (the title says it).
+- **Text does not wear the series color.** Values/labels in ink tokens; identity comes from the colored mark next to them.
+- **Hover default:** line/area → crosshair + tooltip; columns → per-column tooltip.
+- **Threshold line:** `--status-critical` dashed + label (`threshold` prop). Deploy/event: `events` prop (`{ ts, label, detail? }` — vertical dashed line + label; `detail` in the hover tooltip, e.g. deploy commit message · author · source). Deploy markers are provided via `deployEvents(service, from)`.
+- **Time spent categories** (`TIME_CATEGORIES`): App code 1, Database 2, Cache 3, External HTTP 7, Queue publish 5, AI / LLM 6 (dep_kind `ai`, ADR-023).
+- **FlameGraph** (`components/charts/FlameGraph.tsx`, ADR-022): icicle (root on top), DOM blocks, row 20px. Color fixed per package/module
+  (`framePackage()` → hash → `--series-1..8`, 32% tint via `color-mix` so text stays readable; special frames like `all` / `[pruned]` / `(root)`
+  `--bg-sunken`). Click → zoom (ancestors as faded full-width rows on top), breadcrumb + Reset, search (non-matching faded, matching `--accent-warm`
+  border, "x% of total matches"), hover tooltip: total / self value + share of total (+ share of the zoomed node). Diff mode (`baseTotal` + `baseValue`
+  on nodes): color = difference in share of total, the `--diff-*` pair, with `FlameDiffLegend`. Snapshot types (heap, goroutine) are shown per profile.
+- **Status colors are not used as series.** For the 5xx/error series use `--series-8` (red), not `--status-critical`.
+- Status thresholds (Web Vitals etc.) are shown in tables with `StatusBadge`; a good value is a plain number.
 
-## Ekran kalıpları
+## Screen patterns
 
-- **Liste ekranı:** PageHeader → filtre satırı (Segmented + Search) → `Card flush` içinde `Table`.
-- **Detay ekranı:** breadcrumb'lı PageHeader (sağda en fazla 1 primary) → 4'lü StatTile → 2–3'lü grafik grid → Tabs → tablo/list.
-- **Öneri kartı (kod kaynaklı):** başlık + kritiklik + tip badge'leri → hedef → koşul (mono) → gerekçe → `dosya:satır · confidence` → Dismiss / Edit / Accept.
-- Kod kaynaklı şeyler `Sparkles`/`Code2` ikonu + `accent` badge ile işaretlenir.
+- **List screen:** PageHeader → filter row (Segmented + Search) → `Table` inside `Card flush`.
+- **Detail screen:** PageHeader with breadcrumb (at most 1 primary on the right) → 4 StatTiles → grid of 2–3 charts → Tabs → table/list.
+- **Suggestion card (from code):** title + criticality + type badges → target → condition (mono) → rationale → `file:line · confidence` → Dismiss / Edit / Accept.
+- Things that come from code are marked with a `Sparkles`/`Code2` icon + `accent` badge.
 
-## Sayfa kompozisyonu (zorunlu)
+## Page composition (mandatory)
 
-1. **Önem sırası = dikey sıra = alan.** Her sayfa `Section`'lardan oluşan bir yığındır:
-   1. *Şu an ne bozuk* (firing incident, failing dependency, running test) — varsa en üstte, yoksa hiç render edilmez.
-   2. *Ana metrikler* — `MetricCard` ile, büyük; en önemli olan `span-2` / `metric--hero`.
-   3. *Kırılımlar* — ana liste/tablo (endpoint'ler, sayfalar, monitor'ler).
-   4. *İkincil bilgi* — küçük kartlar, en altta.
-2. **Bir bilgi bir kez.** Aynı metrik sayfada iki yerde görünmez: `StatTile` + ayrı grafik kartı yasak → `MetricCard` (değer + delta + grafik tek kartta). Tablo kolonu ile yanındaki liste aynı sayıyı tekrar etmez.
-3. **Özet sayfada, detay tıklayınca.** Liste satırı / kart tıklanınca `Drawer` (sağ panel) açılır: zaman grafikleri, kırılımlar, ilişkili kayıtlar orada. Ayrı tam sayfası olan varlıklar (servis, endpoint, run) için drawer başlığında "Open" aksiyonu.
-4. Tıklanabilir satır/kart görsel ipucu taşır (`card--interactive`, satır hover, chevron).
-5. Sayfa bölümleri arası boşluk `--space-8`, bölüm içi `--space-4`.
+1. **Order of importance = vertical order = area.** Every page is a stack of `Section`s:
+   1. *What is broken right now* (firing incident, failing dependency, running test) — at the top if any, otherwise not rendered at all.
+   2. *Main metrics* — with `MetricCard`, large; the most important one `span-2` / `metric--hero`.
+   3. *Breakdowns* — the main list/table (endpoints, pages, monitors).
+   4. *Secondary information* — small cards, at the bottom.
+2. **One piece of information once.** The same metric does not appear in two places on a page: `StatTile` + separate chart card is forbidden → `MetricCard` (value + delta + chart in one card). A table column and the list next to it do not repeat the same number.
+3. **Summary on the page, detail on click.** Clicking a list row / card opens a `Drawer` (right panel): time charts, breakdowns, related records live there. For entities with their own full page (service, endpoint, run), an "Open" action in the drawer header.
+4. Clickable rows/cards carry a visual hint (`card--interactive`, row hover, chevron).
+5. Spacing between page sections `--space-8`, within a section `--space-4`.
 
-| Komponent | Kullanım |
+| Component | Usage |
 |---|---|
-| `Section` | Başlık + alt başlık + aksiyon; ilgili kartları gruplar |
-| `MetricCard` | Değer + delta + hint + grafik. `className="metric--hero span-2"` ana metrik için |
-| `Delta` | Tek başına delta etiketi |
-| `Drawer`, `useDrawer`, `DrawerSection`, `KeyValues` | Tıklayınca detay paneli |
+| `Section` | Title + subtitle + action; groups related cards |
+| `MetricCard` | Value + delta + hint + chart. `className="metric--hero span-2"` for the main metric |
+| `Delta` | Standalone delta label |
+| `Drawer`, `useDrawer`, `DrawerSection`, `KeyValues` | Detail panel on click |

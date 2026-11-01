@@ -1,9 +1,9 @@
-# Mimari
+# Architecture
 
-## Genel görünüm
+## Overview
 
 ```
- ┌──────────── Müşteri tarafı ────────────┐
+ ┌──────────── Customer side ─────────────┐
  │ Backend SDK  Worker SDK  Browser SDK    │
  │ (node/go/py) (consumer)  Mobile SDK     │
  └──────┬──────────┬───────────┬───────────┘
@@ -16,107 +16,107 @@
  └──────────────┘   │ logs,rum, │   │  route normalize)│
                     │ metrics   │   └──────────────────┘
                     └─────┬─────┘
-                          │ (stream tüketimi)
+                          │ (stream consumption)
                           ▼
                    ┌──────────────┐      ┌──────────────┐
                    │ alert-engine │─────▶│ notifier     │──▶ Slack, PagerDuty,
-                   │ (eval loop + │      │ (dedupe,     │    e-posta, webhook
+                   │ (eval loop + │      │ (dedupe,     │    email, webhook
                    │  stream rule)│      │  routing)    │
                    └──────┬───────┘      └──────────────┘
                           │
  ┌──────────┐   ┌─────────┴────┐   ┌──────────────┐   ┌──────────────────┐
  │ apps/web │──▶│ api (query + │──▶│ PostgreSQL   │   │ codeintel        │
  │ dashboard│   │ control)     │   │ (metadata)   │◀──│ (repo sync, AST, │
- └──────────┘   └──────┬───────┘   └──────────────┘   │  LLM, öneri)     │
+ └──────────┘   └──────┬───────┘   └──────────────┘   │  LLM, suggestion)│
                        │                              └──────────────────┘
                        ▼
                 ┌──────────────┐    ┌─────────────────┐
-                │ loadtest-ctl │───▶│ k6 runner'lar    │──▶ müşteri hedefi
-                │ (orkestrasyon│    │ (K8s Job, bölge) │
+                │ loadtest-ctl │───▶│ k6 runners       │──▶ customer target
+                │ (orchestration│    │ (K8s Job, region)│
                 └──────────────┘    └─────────────────┘
 ```
 
-## Servisler
+## Services
 
-| Servis | Dil | Sorumluluk | Ölçek |
+| Service | Language | Responsibility | Scale |
 |---|---|---|---|
-| `ingest-gw` | Go | OTLP/HTTP + gRPC, RUM beacon; API key doğrulama, rate limit (Redis), şema validasyonu, Redpanda'ya yazma. Stateless. | Yatay, en yüksek trafik |
-| `ingest-writer` | Go | Redpanda tüketir, ClickHouse'a batch insert (≥10k satır veya 1 sn). Route normalizasyonu, error fingerprint, geo-ip, user-agent parse. | Partition sayısı kadar |
-| `api` | Go | Dashboard'un tek backend'i. Query (ClickHouse), control plane CRUD (Postgres), auth (OIDC + session), tenant izolasyonu. | Yatay |
-| `alert-engine` | Go | Monitor'leri periyodik değerlendirir (ClickHouse sorgusu) + düşük gecikmeli kurallar için stream değerlendirme. Incident state machine. KPI burn-rate değerlendirmesi ve `rca` paketi (çağrı ağacında delta attribution ile kök neden; bkz. alerting.md § Kök neden analizi). | Leader election + shard (monitor id hash) |
-| `notifier` | Go | Bildirim kanalları, dedupe, gruplama, escalation. | Küçük |
-| `codeintel` | Go + tree-sitter | Repo sync (GitHub/GitLab App), AST ile envanter çıkarma, LLM ile zenginleştirme, alert/senaryo önerisi. | Job tabanlı kuyruk |
-| `loadtest-ctl` | Go | Senaryo saklama, run orkestrasyonu, runner'lara iş dağıtma, sonuç toplama. | Küçük |
-| `loadtest-runner` | Go (k6 embed) | Senaryoyu koşar, metrikleri OTLP olarak kendi ingest'imize yollar. | K8s Job, çok bölge |
+| `ingest-gw` | Go | OTLP/HTTP + gRPC, RUM beacon; API key validation, rate limit (Redis), schema validation, writing to Redpanda. Stateless. | Horizontal, highest traffic |
+| `ingest-writer` | Go | Consumes Redpanda, batch inserts into ClickHouse (≥10k rows or 1 s). Route normalization, error fingerprint, geo-ip, user-agent parse. | As many as partitions |
+| `api` | Go | The dashboard's only backend. Query (ClickHouse), control plane CRUD (Postgres), auth (OIDC + session), tenant isolation. | Horizontal |
+| `alert-engine` | Go | Evaluates monitors periodically (ClickHouse query) + stream evaluation for low-latency rules. Incident state machine. KPI burn-rate evaluation and the `rca` package (root cause via delta attribution on the call tree; see alerting.md § Root cause analysis). | Leader election + shard (monitor id hash) |
+| `notifier` | Go | Notification channels, dedupe, grouping, escalation. | Small |
+| `codeintel` | Go + tree-sitter | Repo sync (GitHub/GitLab App), inventory extraction via AST, LLM enrichment, alert/scenario suggestions. | Job-based queue |
+| `loadtest-ctl` | Go | Scenario storage, run orchestration, distributing work to runners, collecting results. | Small |
+| `loadtest-runner` | Go (k6 embed) | Runs the scenario, sends metrics as OTLP to our own ingest. | K8s Job, multi-region |
 
-Tüm servisler kendi SDK'mız ile enstrümante edilir (dogfooding). Veri ayrı `TaskTrooper` projesine gider; ingest kendi projesinin trafiği için span üretmez (döngü yok). Bkz. ADR-027, contracts §27.
+All services are instrumented with our own SDK (dogfooding). Data goes to a separate `TaskTrooper` project; ingest does not produce spans for its own project's traffic (no loop). See ADR-027, contracts §27.
 
-## Veri akışı kararları
+## Data flow decisions
 
-- **Wire protokolü OTLP.** SDK'lar OpenTelemetry üzerine ince katman. Müşteri mevcut OTel collector'ını da bize yönlendirebilir. RUM için ek olarak hafif JSON beacon (`navigator.sendBeacon`) — OTel JS browser paketleri ağır.
-- **Buffer olarak Redpanda.** ClickHouse yavaşlarsa ingest düşmez; replay mümkün. Topic başına retention 24 saat.
-- **Ön-agregasyon.** `ingest-writer` span'lardan dakikalık RED rollup üretir (`red_1m`), ClickHouse materialized view ile saatliğe (`red_1h`) iner. Dashboard'lar rollup'tan okur, ham span sadece trace/drill-down için.
-- **Sampling.** Head sampling SDK'da (default %100, ayarlanabilir); hata ve yavaş istekler her zaman tutulur (tail sampling ingest-writer'da). RED metrikleri sampling'den **önce** sayılır, bu yüzden doğruluk kaybolmaz.
+- **Wire protocol is OTLP.** The SDKs are a thin layer on top of OpenTelemetry. Customers can also point their existing OTel collector at us. For RUM there is an additional lightweight JSON beacon (`navigator.sendBeacon`) — the OTel JS browser packages are heavy.
+- **Redpanda as buffer.** If ClickHouse slows down, ingest does not drop; replay is possible. Retention per topic is 24 hours.
+- **Pre-aggregation.** `ingest-writer` produces per-minute RED rollups from spans (`red_1m`), a ClickHouse materialized view rolls them down to hourly (`red_1h`). Dashboards read from rollups; raw spans are only for trace/drill-down.
+- **Sampling.** Head sampling in the SDK (default 100%, configurable); errors and slow requests are always kept (tail sampling in ingest-writer). RED metrics are counted **before** sampling, so no accuracy is lost.
 
-## Multi-tenancy & güvenlik
+## Multi-tenancy & security
 
-- Her satırda `org_id`, `project_id`. ClickHouse'da partition key'in parçası değil, ORDER BY'ın başında.
-- API key tipleri: `ingest` (sadece yazma, browser'da açık olabilir), `api` (okuma/yazma, gizli).
-- Browser ingest key'i domain allowlist ile korunur.
-- Repo erişimi GitHub App ile, minimum yetki (contents:read, metadata:read, pull_requests:write — alert-as-code PR için).
-- Kaynak kod kalıcı saklanmaz: analiz sonrası sadece envanter + özetler saklanır.
+- `org_id`, `project_id` on every row. In ClickHouse they are not part of the partition key, but at the start of ORDER BY.
+- API key types: `ingest` (write only, may be exposed in the browser), `api` (read/write, secret).
+- The browser ingest key is protected by a domain allowlist.
+- Repo access via GitHub App, with minimum permissions (contents:read, metadata:read, pull_requests:write — for alert-as-code PRs).
+- Source code is not stored permanently: after analysis only the inventory + summaries are kept.
 
 ## Monorepo
 
-Güncel yerleşim ve modül sahipliği: [`contracts.md` § 1](contracts.md#1-repo-yerleşimi-ve-sahiplik). Özet:
+Current layout and module ownership: [`contracts.md` § 1](contracts.md#1-repo-layout-and-ownership). Summary:
 
 ```
 apps/web/                         React dashboard
 services/                         Go 1.26, go.work
-  pkg/  ingest/  api/  alerting/  collector/      (codeintel, loadtest sonra)
+  pkg/  ingest/  api/  alerting/  collector/      (codeintel, loadtest later)
 sdks/
   go/  jvm/  dotnet/  js/packages/  android/  ios/  flutter/
-proto/rum/v1/                     RUM wire şeması
+proto/rum/v1/                     RUM wire schema
 deploy/
   docker-compose.yml  clickhouse/*.sql  postgres/*.sql
-.ai/                              dokümanlar
+.ai/                              docs
 ```
 
-Servis ↔ binary: `ingest` → `ingest-gw`, `ingest-writer`; `alerting` → `alert-engine`, `notifier`; `collector` →
-`trooper-agent` (DB/broker, host, container, process, GPU ve Kubernetes metrikleri; OTLP ile ingest'e yollar).
+Service ↔ binary: `ingest` → `ingest-gw`, `ingest-writer`; `alerting` → `alert-engine`, `notifier`; `collector` →
+`trooper-agent` (DB/broker, host, container, process, GPU and Kubernetes metrics; sends them to ingest via OTLP).
 
-### trooper-agent modları (ADR-019, contracts §20 + §22)
+### trooper-agent modes (ADR-019, contracts §20 + §22)
 
-Tek binary, `TT_AGENT_MODES` ile birleştirilebilen üç mod (varsayılan `db` = eski davranış). Her mod kendi OTLP
-resource'u ile ayrı bir emitter kullanır; bir kaynak okunamazsa ajan durmaz, `trooper.collector.up=0`
-(`kind` = `host|kubelet|containers|k8s`) yazılır.
+A single binary, three modes that can be combined with `TT_AGENT_MODES` (default `db` = old behavior). Each mode uses a
+separate emitter with its own OTLP resource; if a source cannot be read the agent does not stop, it writes
+`trooper.collector.up=0` (`kind` = `host|kubelet|containers|k8s`).
 
-| Mod | Nerede | Kaynak | Aralık | Çıktı |
+| Mode | Where | Source | Interval | Output |
 |---|---|---|---|---|
-| `db` | Helm'de cluster Deployment'ı (`db.enabled`), VM / `docker run` | SQL, Kafka/RabbitMQ API; hedefler statik YAML (`db.targets` → ConfigMap) ve/veya api (`db.fromApi`) | config `interval` | §5 metrikleri |
-| `host` | K8s'te Linux DaemonSet (hostPID, `/proc` `/sys` `/` salt-okunur) + opsiyonel Windows DaemonSet (HostProcess), K8s dışında `docker run` / systemd / Windows servisi | gopsutil; container'lar K8s'te kubelet `/stats/summary` + `/pods` (+ `/metrics/cadvisor` throttling), dışında sırayla Docker Engine API (Linux socket, Windows `//./pipe/docker_engine`) → Podman (Docker uyumlu socket) → cgroup v2 ağacı (Linux; containerd/nerdctl/diğerleri); aynı container id'de ilk kaynak kazanır. GPU: `nvidia-smi` varsa | 15 sn | `trooper.host.*`, `trooper.host.gpu.*`, `trooper.container.*`, `trooper.process.*` |
-| `cluster` | Tek replika Deployment | K8s API: her kind için `list` + `watch` (resourceVersion, bookmark; 410 Gone → yeniden list; backoff ile yeniden bağlanma), bellekteki durum; client-go yok | 30 sn snapshot | `trooper.k8s.*` + Warning event (watch) → OTLP log (`service.name=k8s`) |
+| `db` | Cluster Deployment in Helm (`db.enabled`), VM / `docker run` | SQL, Kafka/RabbitMQ API; targets from static YAML (`db.targets` → ConfigMap) and/or api (`db.fromApi`) | config `interval` | §5 metrics |
+| `host` | On K8s a Linux DaemonSet (hostPID, `/proc` `/sys` `/` read-only) + optional Windows DaemonSet (HostProcess), outside K8s `docker run` / systemd / Windows service | gopsutil; containers on K8s via kubelet `/stats/summary` + `/pods` (+ `/metrics/cadvisor` throttling), outside K8s in order Docker Engine API (Linux socket, Windows `//./pipe/docker_engine`) → Podman (Docker-compatible socket) → cgroup v2 tree (Linux; containerd/nerdctl/others); for the same container id the first source wins. GPU: if `nvidia-smi` exists | 15 s | `trooper.host.*`, `trooper.host.gpu.*`, `trooper.container.*`, `trooper.process.*` |
+| `cluster` | Single-replica Deployment | K8s API: `list` + `watch` for each kind (resourceVersion, bookmark; 410 Gone → re-list; reconnect with backoff), in-memory state; no client-go | 30 s snapshot | `trooper.k8s.*` + Warning event (watch) → OTLP log (`service.name=k8s`) |
 
-Cluster modu watch akışını düz `net/http` + streaming JSON ile okur; her kind (nodes, pods, replicasets, deployments,
-statefulsets, daemonsets, jobs, cronjobs, Warning events) bir `Reflector`'dır. Nodes/pods ilk list'i bitmeden scrape
-`up=0` döner; okunamayan (RBAC / API grubu yok) diğer kind'lar sadece kendi metriklerini düşürür (5 dk'da bir yeniden
-denenir). GPU metrikleri `gpus_1m` tablosuna gider (writer yönlendirir, `deploy/clickhouse/004_gpu.sql`); `nvidia-smi`
-yoksa sessizce atlanır. Windows build'i: `GOOS=windows` (process `fds` yok, `os.type=windows`).
+Cluster mode reads the watch stream with plain `net/http` + streaming JSON; each kind (nodes, pods, replicasets, deployments,
+statefulsets, daemonsets, jobs, cronjobs, Warning events) is a `Reflector`. Until the initial list of nodes/pods finishes, scrape
+returns `up=0`; other kinds that cannot be read (RBAC / API group missing) only drop their own metrics (retried every
+5 min). GPU metrics go to the `gpus_1m` table (routed by the writer, `deploy/clickhouse/004_gpu.sql`); if `nvidia-smi`
+is missing they are silently skipped. Windows build: `GOOS=windows` (no process `fds`, `os.type=windows`).
 
-Dağıtım: tek chart `deploy/helm/trooper-agent` — Linux host DaemonSet (`kubernetes.io/os: linux`), cluster Deployment
-(`cluster` ve/veya `db`), `windows.enabled` → `kubernetes.io/os: windows` nodeSelector'lı HostProcess DaemonSet
-(`services/collector/Dockerfile.windows`), RBAC, Secret, opsiyonel OBI eBPF DaemonSet. Eski
-`services/collector/deploy/helm/trooper-agent` chart'ı kaldırıldı.
-Sözleşme: contracts.md §20 + §22; detay ve env listesi `services/collector/README.md`.
+Deployment: a single chart `deploy/helm/trooper-agent` — Linux host DaemonSet (`kubernetes.io/os: linux`), cluster Deployment
+(`cluster` and/or `db`), `windows.enabled` → HostProcess DaemonSet with `kubernetes.io/os: windows` nodeSelector
+(`services/collector/Dockerfile.windows`), RBAC, Secret, optional OBI eBPF DaemonSet. The old
+`services/collector/deploy/helm/trooper-agent` chart was removed.
+Contract: contracts.md §20 + §22; details and env list in `services/collector/README.md`.
 
-## Lokal geliştirme (hedef)
+## Local development (target)
 
-`make dev` → docker compose ile altyapı + servisler `air` ile hot reload + `apps/web` Vite dev server.
-Web dashboard yalnızca api'den gerçek veri okur (ADR-013, ADR-028 — mock mod yok); `src/data/*` senkron fonksiyonlar + uzak cache,
-ekranlar veri kaynağını bilmez. İlk açılışta (org yoksa) onboarding ekranı org + ilk proje oluşturur; veri SDK bağlanınca gelir.
+`make dev` → infrastructure via docker compose + services with hot reload via `air` + `apps/web` Vite dev server.
+The web dashboard only reads real data from the api (ADR-013, ADR-028 — no mock mode); `src/data/*` are synchronous functions + remote cache,
+screens do not know the data source. On first launch (no org) the onboarding screen creates the org + first project; data arrives once an SDK connects.
 
-## Ölçek hedefleri (v1)
+## Scale targets (v1)
 
-- Ingest: 200k span/sn, 500k log satırı/sn (tek bölge)
-- Dashboard sorguları: p95 < 1 sn (son 24 saat, rollup)
-- Alert değerlendirme gecikmesi: < 60 sn (periyodik), < 10 sn (stream)
+- Ingest: 200k spans/s, 500k log lines/s (single region)
+- Dashboard queries: p95 < 1 s (last 24 hours, rollup)
+- Alert evaluation latency: < 60 s (periodic), < 10 s (stream)

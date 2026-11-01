@@ -12,7 +12,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Internal SDK error counter (contracts.md §4 "SDK iç metriği"): every swallowed error is counted per component and
+ * Internal SDK error counter (contracts.md §4 "SDK internal metric"): every swallowed error is counted per component and
  * exported as the cumulative counter {@code trooper.sdk.errors} (meter {@code TaskTrooper.Telemetry}, attribute
  * {@code component}).
  *
