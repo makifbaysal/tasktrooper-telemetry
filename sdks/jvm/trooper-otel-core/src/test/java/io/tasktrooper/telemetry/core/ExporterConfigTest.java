@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test;
 
 /** End to end: DSN → OTLP/HTTP protobuf POST /v1/traces with x-trooper-key, through OTel autoconfigure. */
 class ExporterConfigTest {
-    record Request(String path, String key, String contentType, int size) {}
+    record Request(String path, String key, String contentType, int size, String body) {}
 
     private HttpServer server;
     private final List<Request> requests = new CopyOnWriteArrayList<>();
@@ -29,7 +29,8 @@ class ExporterConfigTest {
         server.createContext("/", ex -> {
             byte[] body = ex.getRequestBody().readAllBytes();
             requests.add(new Request(ex.getRequestURI().getPath(), ex.getRequestHeaders().getFirst("x-trooper-key"),
-                    ex.getRequestHeaders().getFirst("Content-Type"), body.length));
+                    ex.getRequestHeaders().getFirst("Content-Type"), body.length,
+                    new String(body, java.nio.charset.StandardCharsets.ISO_8859_1)));
             ex.sendResponseHeaders(200, -1);
             ex.close();
         });
@@ -40,6 +41,8 @@ class ExporterConfigTest {
 
     @AfterEach
     void stop() {
+        SdkErrors.resetForTest();
+        SdkHeartbeat.earlyExportDelayMs = 5_000;
         server.stop(0);
         System.clearProperty("otel.metrics.exporter");
         System.clearProperty("otel.logs.exporter");
@@ -71,6 +74,42 @@ class ExporterConfigTest {
         assertThat(headers.get("baggage")).isEqualTo("tt.svc=orders-api");
         assertThat(sdk.getSdkTracerProvider().getSampler().getDescription()).startsWith("TrooperSampler");
         sdk.close();
+    }
+
+    private OpenTelemetrySdk initFor(String service) {
+        OpenTelemetry otel = TrooperSdk.init(TrooperConfig.builder()
+                .dsn("http://tt_test_key@127.0.0.1:" + server.getAddress().getPort() + "/1")
+                .service(service)
+                .build(), false);
+        assertThat(otel).isInstanceOf(OpenTelemetrySdk.class);
+        return (OpenTelemetrySdk) otel;
+    }
+
+    @Test
+    void heartbeatReachesMetricsEndpointEarlyWithoutTraffic() throws Exception {
+        System.clearProperty("otel.metrics.exporter"); // OTLP metrics, default 60 s interval
+        SdkHeartbeat.earlyExportDelayMs = 200;
+        OpenTelemetrySdk sdk = initFor("jvm-heartbeat");
+        try {
+            long deadline = System.currentTimeMillis() + 5_000;
+            while (requests.stream().noneMatch(r -> r.path().equals("/v1/metrics")) && System.currentTimeMillis() < deadline) {
+                Thread.sleep(25);
+            }
+            Request m = requests.stream().filter(r -> r.path().equals("/v1/metrics")).findFirst().orElseThrow();
+            assertThat(m.key()).isEqualTo("tt_test_key");
+            assertThat(m.body()).contains(SdkHeartbeat.METRIC).contains(SdkErrors.METER).contains("jvm-heartbeat");
+        } finally {
+            sdk.close();
+        }
+    }
+
+    @Test
+    void noHeartbeatWhenMetricsDisabled() throws Exception {
+        SdkHeartbeat.earlyExportDelayMs = 50;
+        OpenTelemetrySdk sdk = initFor("jvm-heartbeat-off"); // otel.metrics.exporter=none (start())
+        Thread.sleep(400);
+        sdk.close();
+        assertThat(requests).noneMatch(r -> r.path().equals("/v1/metrics"));
     }
 
     @Test

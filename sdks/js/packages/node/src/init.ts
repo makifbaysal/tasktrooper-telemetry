@@ -1,4 +1,4 @@
-import { logs, metrics, propagation, trace } from '@opentelemetry/api';
+import { logs, metrics, propagation, trace, type Meter } from '@opentelemetry/api';
 import { ExportResultCode, type ExportResult } from '@opentelemetry/core';
 import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-proto';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-proto';
@@ -44,6 +44,41 @@ export interface TrooperHandle {
 }
 
 let current: TrooperHandle | undefined;
+
+/**
+ * Delay of the one-off early metric export that brings the first `trooper.sdk.heartbeat` in within 10 s of init (the
+ * periodic reader's first export would otherwise wait a full interval, 30 s by default). Mutable for tests.
+ */
+export const heartbeatTiming = { earlyExportMs: 5_000 };
+
+/**
+ * `trooper.sdk.heartbeat` (gauge, 1, no attributes): presence signal so a service without traffic still shows up in the
+ * Services list (.ai/contracts.md §4). Identity comes from the resource.
+ */
+function bindHeartbeat(meter: Meter): void {
+  try {
+    meter
+      .createObservableGauge('trooper.sdk.heartbeat', { description: 'Presence signal of a running trooper SDK', unit: '1' })
+      .addCallback((r) => r.observe(1));
+  } catch (err) {
+    recordError('heartbeat', err);
+  }
+}
+
+/** One unref'd timer that flushes the reader ~5 s after init; never blocks init or keeps the process alive. */
+function scheduleEarlyExport(reader: IMetricReader, intervalMs: number): ReturnType<typeof setTimeout> | undefined {
+  if (intervalMs <= 10_000) return undefined;
+  try {
+    const t = setTimeout(() => {
+      reader.forceFlush().catch((err: unknown) => recordError('heartbeat', err));
+    }, heartbeatTiming.earlyExportMs);
+    t.unref?.();
+    return t;
+  } catch (err) {
+    recordError('heartbeat', err);
+    return undefined;
+  }
+}
 
 type Flushable = { forceFlush?: () => Promise<unknown>; getDelegate?: () => unknown; _getDelegate?: () => unknown };
 
@@ -188,7 +223,13 @@ export function init(options: TrooperOptions = {}): TrooperHandle {
       instrumentations: [...defaultInstrumentations(cfg), ...cfg.instrumentations],
     });
     sdk.start();
-    bindSelfMetrics(metrics.getMeter(SELF_METER, VERSION));
+    const selfMeter = metrics.getMeter(SELF_METER, VERSION);
+    bindSelfMetrics(selfMeter);
+    let earlyExport: ReturnType<typeof setTimeout> | undefined;
+    if (metricReaders.length > 0) {
+      bindHeartbeat(selfMeter);
+      earlyExport = scheduleEarlyExport(metricReaders[0]!, cfg.metricIntervalMs);
+    }
 
     let profiler: ContinuousProfiler | undefined;
     if (cfg.profiling && cfg.profilesUrl) {
@@ -221,6 +262,7 @@ export function init(options: TrooperOptions = {}): TrooperHandle {
       async shutdown() {
         if (stopped) return;
         stopped = true;
+        if (earlyExport) clearTimeout(earlyExport);
         try {
           if (profiler) await profiler.stop(cfg.exportTimeoutMs);
           await sdk.shutdown();

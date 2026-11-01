@@ -84,7 +84,13 @@ public static class TaskTrooperOpenTelemetryBuilderExtensions
                 var o = Options(sp);
                 if (o.Meters.Count > 0) b.AddMeter(o.Meters.ToArray());
                 if (Exporter(o, "v1/metrics") is { } exporterOptions && o.EnableMetrics)
-                    b.AddReader(new PeriodicExportingMetricReader(new OtlpMetricExporter(exporterOptions), exportIntervalMilliseconds: 30_000));
+                {
+                    const int intervalMs = 30_000;
+                    var reader = new PeriodicExportingMetricReader(new OtlpMetricExporter(exporterOptions), exportIntervalMilliseconds: intervalMs);
+                    b.AddReader(reader);
+                    TrooperHeartbeat.Ensure();
+                    TrooperHeartbeat.ScheduleEarlyExport(reader, intervalMs);
+                }
             });
         });
 

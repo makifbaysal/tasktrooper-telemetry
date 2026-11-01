@@ -111,6 +111,50 @@ export function decodeTraces(body: Uint8Array): DecodedSpan[] {
   return spans;
 }
 
+export interface DecodedMetric {
+  name: string;
+  scope: string;
+  resource: Record<string, AttrValue>;
+  /** Gauge / sum data points (NumberDataPoint). */
+  points: { value: number; attributes: Record<string, AttrValue> }[];
+}
+
+/** Decodes an ExportMetricsServiceRequest (gauge and sum points only). */
+export function decodeMetrics(body: Uint8Array): DecodedMetric[] {
+  const out: DecodedMetric[] = [];
+  for (const rm of fields(body).filter((f) => f.no === 1)) {
+    const rmf = fields(rm.bytes!);
+    const resBytes = rmf.find((f) => f.no === 1)?.bytes;
+    const resource = resBytes ? attributes(fields(resBytes), 1) : {};
+    for (const sm of rmf.filter((f) => f.no === 2)) {
+      const smf = fields(sm.bytes!);
+      const scopeBytes = smf.find((f) => f.no === 1)?.bytes;
+      const scope = scopeBytes ? text(fields(scopeBytes).find((f) => f.no === 1)?.bytes) : '';
+      for (const m of smf.filter((f) => f.no === 2)) {
+        const mf = fields(m.bytes!);
+        const data = mf.find((f) => f.no === 5 || f.no === 7); // gauge | sum
+        const points = data
+          ? fields(data.bytes!)
+              .filter((f) => f.no === 1)
+              .map((dp) => {
+                const d = fields(dp.bytes!);
+                const dbl = d.find((f) => f.no === 4)?.bytes;
+                const int = d.find((f) => f.no === 6)?.bytes;
+                const value = dbl
+                  ? Buffer.from(dbl).readDoubleLE(0)
+                  : int
+                    ? Number(Buffer.from(int).readBigInt64LE(0))
+                    : 0;
+                return { value, attributes: attributes(d, 7) };
+              })
+          : [];
+        out.push({ name: text(mf.find((f) => f.no === 1)?.bytes), scope, resource, points });
+      }
+    }
+  }
+  return out;
+}
+
 export interface Received {
   path: string;
   headers: IncomingHttpHeaders;

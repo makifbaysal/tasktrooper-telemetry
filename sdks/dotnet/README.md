@@ -208,6 +208,9 @@ Order (later wins): environment variables → `TaskTrooper` config section (`app
   it to `trooper.caller`.
 - Privacy: no headers, bodies or query values are captured (ASP.NET Core / HttpClient query strings are redacted by OpenTelemetry).
 - The SDK never throws into the host: internal errors are swallowed and counted in `trooper.sdk.errors` (meter `TaskTrooper.Telemetry`).
+- Heartbeat: gauge `trooper.sdk.heartbeat` = 1 (meter `TaskTrooper.Telemetry`, no attributes) from start, even without traffic, so the
+  service shows up in the Services list; first export ~5 s after the meter provider is built, then every 30 s. Not sent when
+  `EnableMetrics = false` or without a DSN.
 
 ## Build & test
 

@@ -154,6 +154,12 @@ known), or generically `TrooperConsumer.writeAttempt((k, v) -> headers.add(k, v.
 **SDK errors:** errors swallowed by the SDK are counted in `trooper.sdk.errors` (meter `TaskTrooper.Telemetry`, attribute
 `component`, e.g. `span_processor`, `sampler`, `spring_listener`), exported with the app's other OTel metrics.
 
+**Heartbeat:** every flavour (javaagent, Spring Boot, Quarkus, Ktor, `TrooperSdk`) registers the gauge
+`trooper.sdk.heartbeat` = 1 (meter `TaskTrooper.Telemetry`, no attributes; identity from the resource) so the service
+appears in the Services list before it has traffic. It is exported at the metric interval (OTel default 60 s) plus one
+early, non-blocking flush ~5 s after start. With metrics off (`otel.metrics.exporter=none`, or Quarkus'
+`quarkus.otel.metrics.enabled=false`) nothing is sent.
+
 ## Continuous profiling (ADR-022, contracts.md §24)
 
 ```bash
