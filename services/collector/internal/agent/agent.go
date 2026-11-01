@@ -22,6 +22,7 @@ import (
 	"github.com/tasktrooper/telemetry/services/collector/internal/config"
 	"github.com/tasktrooper/telemetry/services/collector/internal/emit"
 	"github.com/tasktrooper/telemetry/services/collector/internal/scrape"
+	"github.com/tasktrooper/telemetry/services/collector/internal/selftel"
 )
 
 // Publisher receives scrape results (the emitter).
@@ -194,8 +195,18 @@ type Runner struct {
 // It never panics and never returns an error: failures become trooper.collector.up = 0.
 func (r *Runner) Once(ctx context.Context) (ok bool) {
 	up := emit.UpAttrs(r.T.Key, r.T.Kind)
+	// self telemetry (ADR-027): one root span per scrape; the scrapers' own clients are not traced
+	ctx, span := selftel.StartRoot(ctx, "agent.scrape",
+		attribute.String("tt.collector.kind", r.T.Kind), attribute.String("tt.collector.target", r.T.ID))
+	var serr error
+	samples := 0
+	defer func() {
+		span.SetAttributes(attribute.Bool("tt.collector.up", ok), attribute.Int("tt.collector.samples", samples))
+		selftel.End(span, serr)
+	}()
 	defer func() {
 		if p := recover(); p != nil {
+			serr = fmt.Errorf("panic: %v", p)
 			r.fail(ctx, up, fmt.Errorf("panic: %v\n%s", p, debug.Stack()))
 			ok = false
 			if r.s != nil {
@@ -207,6 +218,7 @@ func (r *Runner) Once(ctx context.Context) (ok bool) {
 	if r.s == nil {
 		s, err := r.T.New()
 		if err != nil {
+			serr = err
 			r.fail(ctx, up, err)
 			return false
 		}
@@ -216,9 +228,11 @@ func (r *Runner) Once(ctx context.Context) (ok bool) {
 	defer cancel()
 	res, err := r.s.Scrape(sctx)
 	if err != nil {
+		serr = err
 		r.fail(ctx, up, err)
 		return false
 	}
+	samples = len(res.Gauges) + len(res.Counts)
 	if r.lastErr != "" {
 		r.Log.Info("target recovered", "target", r.T.ID)
 		r.lastErr = ""

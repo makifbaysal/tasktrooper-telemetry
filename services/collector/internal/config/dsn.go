@@ -18,7 +18,7 @@ type IngestDSN struct {
 	Insecure  bool
 }
 
-// ParseIngestDSN parses TT_DSN (contracts §2), e.g. http://tt_dev_ingest_key@localhost:4318/1.
+// ParseIngestDSN parses TT_DSN (contracts §2), e.g. http://<ingest-key>@localhost:4318/<project-id>.
 func ParseIngestDSN(s string) (IngestDSN, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
