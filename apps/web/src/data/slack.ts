@@ -44,6 +44,11 @@ export async function connectSlack(redirect = window.location.href): Promise<voi
   }
 }
 
+/** Posts a test message to one channel; rejects with Slack's reason in plain words (bot not invited, token revoked, ...). */
+export async function testSlack(channelId: string): Promise<void> {
+  await api('/integrations/slack/test', { method: 'POST', body: JSON.stringify({ channel: channelId }) });
+}
+
 export async function disconnectSlack(): Promise<void> {
   await mutate('DELETE', '/integrations/slack', undefined, ['/integrations']);
 }

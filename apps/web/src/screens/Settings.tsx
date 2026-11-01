@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
-import { ChevronRight, Hash, KeyRound, Lock, MessageSquare, Plug, ShieldAlert, Trash2, Unplug, UserPlus } from 'lucide-react';
+import { CheckCircle2, ChevronRight, Hash, KeyRound, Lock, MessageSquare, Plug, Send, ShieldAlert, Trash2, Unplug, UserPlus } from 'lucide-react';
 import {
   Avatar, Badge, Button, Callout, Card, CopyCode, Drawer, DrawerSection, EmptyState, Field, Input, KeyValues, PageHeader,
   SdkQuickstart, SearchInput, Section, Select, StatusBadge, Table, Tabs, useDrawer,
@@ -10,7 +10,7 @@ import {
   apiKeys, auditLog, can, createApiKey, denied, inviteMember, membersOf, projectDsn, removeMember, revokeApiKey, setMemberRole, useAuth,
   type ApiKeyRow, type AuditEntry, type KeyScope, type Member, type Role,
 } from '@/data/auth';
-import { connectSlack, disconnectSlack, slackChannels, slackWorkspace } from '@/data/slack';
+import { connectSlack, disconnectSlack, slackChannels, slackWorkspace, testSlack, type SlackChannel } from '@/data/slack';
 import { IntegrationStatusBadge, ProviderMark } from './Integrations';
 import { MemberAiCell, UsageTab } from './Usage';
 import { ago, dateTime } from '@/lib/format';
@@ -118,9 +118,12 @@ function SlackCard() {
           ? manage && <Button size="sm" variant="ghost" icon={<Unplug size={12} />} disabled={busy} onClick={() => void disconnect()}>Disconnect</Button>
           : <Button size="sm" variant="primary" icon={<MessageSquare size={12} />} disabled={!manage} title={manage ? undefined : denied('manage')} onClick={() => { setError(undefined); connectSlack().catch((e: unknown) => setError(e instanceof Error ? e.message : String(e))); }}>Connect Slack</Button>}>
         {ws ? (
+          <div className="stack" style={{ gap: 'var(--space-3)' }}>
           <div className="row" style={{ gap: 'var(--space-1)', flexWrap: 'wrap' }}>
             {channels.slice(0, 12).map((c) => <Badge key={c.id} icon={c.isPrivate ? <Lock /> : <Hash />}>{c.name}</Badge>)}
             {channels.length > 12 && <span className="muted">+{channels.length - 12} more</span>}
+          </div>
+          {manage && <SlackTest channels={channels} />}
           </div>
         ) : (
           <p className="secondary" style={{ margin: 0 }}>The app asks for <span className="mono">chat:write</span>, <span className="mono">chat:write.public</span>, <span className="mono">channels:read</span> and <span className="mono">groups:read</span>. Messages carry the likely cause with its confidence and Ack / Mute buttons.</p>
@@ -128,6 +131,35 @@ function SlackCard() {
         {error && <div style={{ color: 'var(--status-critical-text)', fontSize: 'var(--text-sm)', marginTop: 'var(--space-2)' }}>{error}</div>}
       </Card>
     </Section>
+  );
+}
+
+/** Send a test message to one channel: the quickest way to check the whole Slack path before an alert fires. */
+function SlackTest({ channels }: { channels: SlackChannel[] }) {
+  const [channel, setChannel] = useState('');
+  const [state, setState] = useState<{ kind: 'idle' | 'busy' } | { kind: 'ok' | 'error'; text: string }>({ kind: 'idle' });
+  const picked = channel || channels.find((c) => c.isMember)?.id || channels[0]?.id || '';
+  const name = channels.find((c) => c.id === picked)?.name ?? picked;
+  const send = async () => {
+    setState({ kind: 'busy' });
+    try { await testSlack(picked); setState({ kind: 'ok', text: `Sent to #${name}. Check Slack.` }); }
+    catch (e) { setState({ kind: 'error', text: e instanceof Error ? e.message : String(e) }); }
+  };
+  if (!channels.length) return <span className="muted" style={{ fontSize: 'var(--text-sm)' }}>No channels visible to the bot yet: invite it to a channel, then refresh.</span>;
+  return (
+    <div className="stack" style={{ gap: 'var(--space-1)' }}>
+      <div className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <Field label="Test the connection">
+          <Select value={picked} onChange={(e) => { setChannel(e.target.value); setState({ kind: 'idle' }); }}
+            options={channels.map((c) => ({ value: c.id, label: `${c.isPrivate ? '🔒 ' : '#'}${c.name}` }))} />
+        </Field>
+        <Button size="sm" icon={<Send size={12} />} disabled={!picked || state.kind === 'busy'} onClick={() => void send()}>
+          {state.kind === 'busy' ? 'Sending…' : 'Send test message'}
+        </Button>
+      </div>
+      {state.kind === 'ok' && <span className="row" style={{ gap: 'var(--space-1)', fontSize: 'var(--text-sm)', color: 'var(--status-good-text)' }}><CheckCircle2 size={14} aria-hidden />{state.text}</span>}
+      {state.kind === 'error' && <span className="row" style={{ gap: 'var(--space-1)', fontSize: 'var(--text-sm)', color: 'var(--status-critical-text)' }}><ShieldAlert size={14} aria-hidden />{state.text}</span>}
+    </div>
   );
 }
 

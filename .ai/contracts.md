@@ -475,6 +475,7 @@ offline kuyruktan gelen ≤ 24 saatlik event'ler kendi zamanlarında kalır.
   external_id /*slack ts*/, external_channel, created_at)`.
 - api uçları: `GET /integrations/slack/install` → Slack OAuth'a yönlendirir (state imzalı); `GET /integrations/slack/callback`;
   `GET /integrations/slack/channels?q=` → `[{id, name, isPrivate, isMember}]` (cache 5 dk); `DELETE /integrations/slack`;
+  `POST /integrations/slack/test {channel}` (admin+; kanala test mesajı, hata 502 + okunur mesaj: bot davetli değil, token iptal vb.);
   `POST /slack/interactions` (Ack / Mute 1h butonları; imza doğrulaması; Slack kullanıcısını e-posta ile `users`'a eşler).
 - Bildirim kind'ları: `firing | resolved | reminder | acknowledged`; ack bildirimini **alert-engine** kuyruğa koyar (api koymaz;
   dedupe `incident:<id>:acknowledged:<channel>`). Buton action id'leri: `tt_ack:<incidentId>`, `tt_mute1h:<monitorId>`.

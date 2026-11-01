@@ -156,6 +156,12 @@ func (c *Client) UserEmail(ctx context.Context, token, userID string) (string, e
 	return res.User.Profile.Email, nil
 }
 
+// PostMessage posts plain text to a channel (chat:write; public channels the bot has not joined need chat:write.public).
+func (c *Client) PostMessage(ctx context.Context, token, channel, text string) error {
+	var out struct{}
+	return c.call(ctx, "chat.postMessage", token, url.Values{"channel": {channel}, "text": {text}}, &out)
+}
+
 // Respond posts an ephemeral reply to an interaction's response_url (only the clicking user sees it).
 func (c *Client) Respond(ctx context.Context, responseURL, text string) error {
 	if responseURL == "" {

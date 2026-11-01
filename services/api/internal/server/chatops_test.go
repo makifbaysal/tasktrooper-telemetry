@@ -132,6 +132,17 @@ func fakeSlack(t *testing.T, responses *[]string) *httptest.Server {
 				return
 			}
 			_, _ = w.Write([]byte(`{"ok":true,"channels":[{"id":"G1","name":"oncall","is_private":true}],"response_metadata":{"next_cursor":""}}`))
+		case "/chat.postMessage":
+			switch {
+			case r.Header.Get("Authorization") != "Bearer xoxb-1":
+				_, _ = w.Write([]byte(`{"ok":false,"error":"invalid_auth"}`))
+			case r.PostForm.Get("channel") == "G9":
+				_, _ = w.Write([]byte(`{"ok":false,"error":"not_in_channel"}`))
+			case r.PostForm.Get("text") == "":
+				_, _ = w.Write([]byte(`{"ok":false,"error":"no_text"}`))
+			default:
+				_, _ = w.Write([]byte(`{"ok":true,"channel":"C2","ts":"1.2"}`))
+			}
 		case "/users.info":
 			email := map[string]string{"U1": "ada@example.com", "U2": "view@example.com", "U3": "stranger@example.com"}[r.PostForm.Get("user")]
 			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "user": map[string]any{"profile": map[string]any{"email": email}}})
@@ -361,6 +372,34 @@ func TestGitHubInstallAndRepos(t *testing.T) {
 	}
 	if w := do(h, "GET", "/api/v1/integrations/github/99/repos", "good", ""); w.Code != 404 {
 		t.Errorf("unknown integration: %d", w.Code)
+	}
+}
+
+func TestSlackTestMessage(t *testing.T) {
+	var responses []string
+	api := fakeSlack(t, &responses)
+	defer api.Close()
+	s, _ := chatServer(t, api, nil)
+	h := s.Handler()
+	tests := []struct {
+		name, body string
+		extra      []string
+		code       int
+		want       string
+	}{
+		{"public channel", `{"channel":"C2"}`, nil, 200, `"ok":true`},
+		{"hash prefix trimmed", `{"channel":"#C2"}`, nil, 200, `"channel":"C2"`},
+		{"private, bot not invited", `{"channel":"G9"}`, nil, 502, "invite it there"},
+		{"missing channel", `{"channel":" "}`, nil, 400, "channel is required"},
+		{"viewer", `{"channel":"C2"}`, []string{projectHeader, "80"}, 403, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := cookieReq(h, "POST", "/api/v1/integrations/slack/test", "sess-5", tt.body, tt.extra...)
+			if w.Code != tt.code || !strings.Contains(w.Body.String(), tt.want) {
+				t.Errorf("%d %s", w.Code, w.Body)
+			}
+		})
 	}
 }
 
