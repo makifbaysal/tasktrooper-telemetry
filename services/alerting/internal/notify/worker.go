@@ -13,8 +13,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/tasktrooper/telemetry/services/alerting/internal/obs"
+	"github.com/tasktrooper/telemetry/services/alerting/internal/selftel"
 )
 
 // WorkerConfig tunes the outbox poller.
@@ -148,6 +150,11 @@ func (w *Worker) Once(ctx context.Context) (int, error) {
 }
 
 func (w *Worker) handle(ctx context.Context, r Row) {
+	// one root span per delivery attempt (ADR-027); the empty outbox polls produce no spans
+	ctx, span := selftel.StartRoot(ctx, "notify.deliver", attribute.Int64("tt.project_id", r.ProjectID),
+		attribute.String("tt.notification.kind", r.Kind), attribute.Int("tt.notification.attempt", r.Attempts+1))
+	var serr error
+	defer func() { selftel.End(span, serr) }()
 	ch, err := w.Resolve(ctx, r.ProjectID, r.Channel)
 	if err == nil && w.Secrets != nil {
 		ch.Config, err = w.Secrets.ResolveConfig(ctx, r.ProjectID, ch.Config)
@@ -164,12 +171,15 @@ func (w *Worker) handle(ctx context.Context, r Row) {
 		cancel()
 	}
 	if err == nil {
+		span.SetAttributes(attribute.String("tt.channel.type", orDefault(ch.Type, "unknown")))
 		w.count("sent", ch.Type)
 		if merr := w.markSent(ctx, r, ch); merr != nil {
 			w.Log.Error("mark sent failed", "notification", r.ID, "err", merr)
 		}
 		return
 	}
+	serr = err
+	span.SetAttributes(attribute.String("tt.channel.type", orDefault(ch.Type, "unknown")))
 	terminal := IsPermanent(err) || r.Attempts+1 >= w.Cfg.MaxAttempts
 	w.count(map[bool]string{true: "failed", false: "retry"}[terminal], ch.Type)
 	w.Log.Warn("notification delivery failed", "notification", r.ID, "channel", r.Channel, "attempt", r.Attempts+1, "terminal", terminal, "err", err)

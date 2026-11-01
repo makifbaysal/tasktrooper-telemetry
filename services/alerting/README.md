@@ -16,9 +16,9 @@ docker compose -f deploy/docker-compose.yml up -d        # postgres, clickhouse 
 cd services/alerting
 GOWORK=off go run ./cmd/alert-engine
 GOWORK=off go run ./cmd/notifier
-# images (build context services/)
-docker build -f alerting/Dockerfile --build-arg CMD=alert-engine -t tt-alert-engine services/
-docker build -f alerting/Dockerfile --build-arg CMD=notifier     -t tt-notifier     services/
+# images (build context = repo root, ADR-027)
+docker build -f services/alerting/Dockerfile --build-arg CMD=alert-engine -t tt-alert-engine .
+docker build -f services/alerting/Dockerfile --build-arg CMD=notifier     -t tt-notifier     .
 ```
 
 `GOWORK=off` is only needed while other modules listed in `services/go.work` are missing; `go.mod` replaces
@@ -326,6 +326,35 @@ errors → backoff. App not installed for the org → terminal.
 `tt_alert_sli_minutes_written_total`, `tt_alert_reminders_total`, `tt_alert_stream_records_total{topic}`,
 `tt_alert_stream_matches_total{kind}`, `tt_alert_stream_handoffs_total{dir}`, `tt_notifier_deliveries_total{outcome,type}` (type `slack_app` for
 Slack App targets).
+
+## Self-observability (ADR-027, contracts §27)
+
+Both binaries report to the platform's own project with the Go SDK (`internal/selftel`). Without `TROOPER_DSN` (and
+`OTEL_EXPORTER_OTLP_ENDPOINT`) nothing is started and behaviour is unchanged; Prometheus `/metrics` stays as is.
+
+| Env | Default | |
+|---|---|---|
+| `TROOPER_DSN` | — | self project ingest DSN (dev: the DSN `make self` prints, `http://<ingest-key>@localhost:4318/<self-project-id>`) |
+| `TROOPER_SERVICE` | `tt-alert-engine` / `tt-notifier` | override |
+| `TROOPER_ENV` | `TT_ENV`, else `development` | |
+| `TROOPER_VERSION` | build `version` (`-ldflags -X main.version=…`) | |
+| `TROOPER_SAMPLE_RATE`, `TROOPER_PROFILING` | `1`, `false` | SDK options (§24 profiling) |
+
+What is traced:
+
+- **alert-engine:** root span `alert.cycle` per evaluation tick (`tt.alert.shards_held`, `tt.alert.monitors`, `tt.alert.kpis`;
+  standbys produce a short cycle span too); children `alert.evaluate` per monitor (`tt.monitor.kind`, `tt.monitor.id`,
+  `tt.org_id`, `tt.project_id`, `tt.alert.breached`, `tt.alert.no_data`, `tt.alert.stream`), `alert.kpis`, and every
+  Postgres (pgx, sanitized SQL) and ClickHouse query (`db.system=clickhouse`, `db.namespace`, `SanitizeSQL`'d
+  `db.query.text`) under them. Stream-triggered evaluations are root `alert.evaluate` spans; stream records themselves are
+  not traced (they are the customers' ingest traffic). `alert.ai_quota_check` per quota check.
+- **notifier:** root span `notify.deliver` per delivery attempt (`tt.project_id`, `tt.notification.kind`,
+  `tt.notification.attempt`, `tt.channel.type`) with Postgres and outgoing HTTP client spans. The HTTP client spans come from
+  `selftel.RedactedTransport`, not otelhttp: they record only scheme + host (`url.full`, `server.address`), method and status,
+  never the path or query — Slack/Teams/webhook URLs carry secrets there. Empty outbox polls produce no spans (DB spans are
+  only created under a recording parent).
+- Logs: the JSON slog output is unchanged and additionally exported as OTel logs (with `trace_id`/`span_id` locally).
+- Tenant ids appear only as span attributes, never as metric labels.
 
 ## Tests
 

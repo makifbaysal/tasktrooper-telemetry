@@ -20,15 +20,25 @@ import (
 	"github.com/tasktrooper/telemetry/services/alerting/internal/leader"
 	"github.com/tasktrooper/telemetry/services/alerting/internal/obs"
 	"github.com/tasktrooper/telemetry/services/alerting/internal/quotacheck"
+	"github.com/tasktrooper/telemetry/services/alerting/internal/selftel"
 	"github.com/tasktrooper/telemetry/services/alerting/internal/store"
 	"github.com/tasktrooper/telemetry/services/alerting/internal/stream"
 )
+
+// service is the fixed self-observability service name (ADR-027; TROOPER_SERVICE overrides).
+const service = "tt-alert-engine"
+
+var version = "dev"
 
 func main() {
 	common := config.Load()
 	log := logx.New("alert-engine", common.LogLevel)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// self-observability (ADR-027): no-op without TROOPER_DSN
+	flush := selftel.Start(ctx, service, version, log)
+	defer flush()
+	log = selftel.Logger(log, service)
 
 	pg, err := conn.Postgres(ctx, common.PostgresURL)
 	if err != nil {
@@ -92,6 +102,7 @@ func main() {
 	log.Info("alert-engine started", "addr", addr, "shards", el.Shards, "stream", config.Bool("TT_ALERT_STREAM", false))
 	if err := eng.Run(ctx); err != nil {
 		log.Error("engine stopped", "err", err)
+		flush()
 		os.Exit(1)
 	}
 	log.Info("alert-engine stopped")

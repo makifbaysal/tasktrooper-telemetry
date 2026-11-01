@@ -4,11 +4,14 @@ package conn
 import (
 	"context"
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/tasktrooper/telemetry/services/alerting/internal/selftel"
 )
 
 // Postgres opens and pings a pool.
@@ -18,6 +21,7 @@ func Postgres(ctx context.Context, url string) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("postgres url: %w", err)
 	}
 	cfg.MaxConns = 16
+	cfg.ConnConfig.Tracer = selftel.PGTracer() // spans only under a recording parent (ADR-027)
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, err
@@ -50,5 +54,12 @@ func ClickHouse(ctx context.Context, url string) (driver.Conn, error) {
 		_ = c.Close()
 		return nil, fmt.Errorf("clickhouse ping: %w", err)
 	}
-	return c, nil
+	addr := ""
+	if len(opts.Addr) > 0 {
+		addr = opts.Addr[0]
+		if h, _, err := net.SplitHostPort(addr); err == nil {
+			addr = h
+		}
+	}
+	return selftel.ClickHouse(c, opts.Auth.Database, addr), nil
 }

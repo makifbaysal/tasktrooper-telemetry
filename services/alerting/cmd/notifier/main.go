@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -16,14 +17,24 @@ import (
 	"github.com/tasktrooper/telemetry/services/alerting/internal/conn"
 	"github.com/tasktrooper/telemetry/services/alerting/internal/notify"
 	"github.com/tasktrooper/telemetry/services/alerting/internal/obs"
+	"github.com/tasktrooper/telemetry/services/alerting/internal/selftel"
 	"github.com/tasktrooper/telemetry/services/alerting/internal/store"
 )
+
+// service is the fixed self-observability service name (ADR-027; TROOPER_SERVICE overrides).
+const service = "tt-notifier"
+
+var version = "dev"
 
 func main() {
 	common := config.Load()
 	log := logx.New("notifier", common.LogLevel)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// self-observability (ADR-027): no-op without TROOPER_DSN
+	flush := selftel.Start(ctx, service, version, log)
+	defer flush()
+	log = selftel.Logger(log, service)
 
 	pg, err := conn.Postgres(ctx, common.PostgresURL)
 	if err != nil {
@@ -45,12 +56,15 @@ func main() {
 		Password: config.String("TT_NOTIFIER_SMTP_PASSWORD", ""),
 		From:     config.String("TT_NOTIFIER_SMTP_FROM", "alerts@tasktrooper.local"),
 	})
+	// client spans without URL paths (webhook URLs carry secrets)
+	d.HTTP.Transport = selftel.RedactedTransport(nil, "")
 	res := notify.NewSecretResolver(&store.Store{DB: pg}, key)
 	// Slack App targets slack:<channel id>#<name> (ADR-017): org bot token from integrations(provider='slack').
 	d.Slack = &notify.SlackApp{
 		Base:         config.String("TT_SLACK_API_URL", notify.SlackAPIBase),
 		Store:        &notify.PGSlackStore{DB: pg, Secrets: res},
 		PublicAppURL: config.String("TT_PUBLIC_APP_URL", config.String("TT_PUBLIC_URL", "")),
+		HTTP:         &http.Client{Timeout: 10 * time.Second, Transport: selftel.RedactedTransport(nil, "slack")},
 	}
 	w := &notify.Worker{DB: pg, D: d, Log: log, Reg: reg, Secrets: res, Cfg: notify.WorkerConfig{
 		Poll:        config.Duration("TT_NOTIFIER_POLL", 2*time.Second),
@@ -63,6 +77,7 @@ func main() {
 	log.Info("notifier started", "addr", addr)
 	if err := w.Run(ctx); err != nil {
 		log.Error("notifier stopped", "err", err)
+		flush()
 		os.Exit(1)
 	}
 	log.Info("notifier stopped")
