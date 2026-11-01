@@ -8,7 +8,9 @@ on:
   pull_request:
     paths:
       - "services/**"
+      - "sdks/go/**"
       - "deploy/**"
+      - ".dockerignore"
       - ".github/workflows/docker.yml"
 
 permissions:
@@ -21,7 +23,8 @@ concurrency:
 
 jobs:
   # Derived from services/*/Dockerfile, so a new service with a Dockerfile is picked up automatically.
-  # Every Dockerfile builds from context services/ with GOWORK=off. Dockerfiles that take ARG CMD (alerting,
+  # Every Dockerfile builds from the repo root (ADR-027: services/pkg + sdks/go are copied for the go.mod replaces;
+  # .dockerignore allow-lists services/ and sdks/go/) with GOWORK=off. Dockerfiles that take ARG CMD (alerting,
   # ingest) build one image per services/<svc>/cmd/* binary, named like the docker-compose services.
   # services/collector/Dockerfile.windows (HostProcess image) is not included.
   matrix:
@@ -58,7 +61,7 @@ jobs:
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: services
+          context: .
           file: services/${{ matrix.service }}/Dockerfile
           build-args: ${{ matrix.cmd && format('CMD={0}', matrix.cmd) || '' }}
           tags: local/${{ matrix.image }}:${{ github.sha }}
@@ -100,7 +103,7 @@ jobs:
       # build + load first so the scan gates the push; the push step below is a cache hit
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: services
+          context: .
           file: services/${{ matrix.service }}/Dockerfile
           build-args: ${{ matrix.cmd && format('CMD={0}', matrix.cmd) || '' }}
           tags: ${{ steps.name.outputs.image }}:${{ github.sha }}
@@ -117,7 +120,7 @@ jobs:
           exit-code: "1"
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: services
+          context: .
           file: services/${{ matrix.service }}/Dockerfile
           build-args: ${{ matrix.cmd && format('CMD={0}', matrix.cmd) || '' }}
           tags: |

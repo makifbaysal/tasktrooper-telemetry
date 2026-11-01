@@ -37,4 +37,4 @@ itest-down:
 	-docker rm -f ttcol-postgres ttcol-mysql ttcol-redis ttcol-rabbitmq ttcol-mongo ttcol-kafka4
 
 docker:
-	docker build -f Dockerfile -t trooper-agent:dev ..
+	docker build -f Dockerfile -t trooper-agent:dev ../..

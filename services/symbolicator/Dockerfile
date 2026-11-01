@@ -1,11 +1,13 @@
-# Build context: services/  ·  docker build -f symbolicator/Dockerfile -t tasktrooper/symbolicator services/
+# Build context: repo root (ADR-027)  ·  docker build -f services/symbolicator/Dockerfile -t tasktrooper/symbolicator .
+# services/pkg and sdks/go are copied for the go.mod replace directives (../pkg, ../../sdks/go).
 FROM golang:1.26 AS build
 WORKDIR /src
-COPY pkg/ pkg/
-COPY symbolicator/go.mod symbolicator/go.sum symbolicator/
-WORKDIR /src/symbolicator
+COPY services/pkg/ services/pkg/
+COPY sdks/go/ sdks/go/
+COPY services/symbolicator/go.mod services/symbolicator/go.sum services/symbolicator/
+WORKDIR /src/services/symbolicator
 RUN GOWORK=off go mod download
-COPY symbolicator/ .
+COPY services/symbolicator/ .
 RUN CGO_ENABLED=0 GOWORK=off go build -trimpath -ldflags="-s -w" -o /out/symbolicator ./cmd/symbolicator
 
 # swift-demangle is not available in this image: Swift frames keep their mangled names (frame.mangled).

@@ -3,6 +3,29 @@
 #   docker compose -f deploy/docker-compose.yml --profile app up -d --build
 name: tasktrooper
 
+# Shared env of the Go services (anchor). Self-observability (ADR-027, contracts §27): TROOPER_SELF_DSN is the ingest DSN of
+# the platform's own project, as seen from the containers — `make self` prints it (use host ingest-gw instead of localhost). Empty = off.
+# No seed data (ADR-028): create an org/project via the dashboard onboarding or `api bootstrap`.
+x-svc-env: &svc_env
+  TT_POSTGRES_URL: postgres://trooper:trooper@postgres:5432/trooper?sslmode=disable
+  TT_CLICKHOUSE_URL: clickhouse://trooper:trooper@clickhouse:9000/telemetry
+  TT_KAFKA_BROKERS: redpanda:9092
+  TT_REDIS_URL: redis://redis:6379/0
+  TT_LOG_LEVEL: info
+  # shared secret for platform-internal ingest (trooper-cloud, loadtest) — contracts §2
+  TT_INTERNAL_TOKEN: ${TT_INTERNAL_TOKEN:-tt_dev_internal_token}
+  TT_SECRETS_KEY: ${TT_SECRETS_KEY:-}
+  TT_PUBLIC_APP_URL: ${TT_PUBLIC_APP_URL:-http://localhost:5173}
+  # ChatOps (ADR-017) — empty means the app is not configured (endpoints return 501)
+  TT_SLACK_CLIENT_ID: ${TT_SLACK_CLIENT_ID:-}
+  TT_SLACK_CLIENT_SECRET: ${TT_SLACK_CLIENT_SECRET:-}
+  TT_SLACK_SIGNING_SECRET: ${TT_SLACK_SIGNING_SECRET:-}
+  TT_GITHUB_APP_ID: ${TT_GITHUB_APP_ID:-}
+  TT_GITHUB_APP_SLUG: ${TT_GITHUB_APP_SLUG:-}
+  TT_GITHUB_APP_PRIVATE_KEY: ${TT_GITHUB_APP_PRIVATE_KEY:-}
+  TT_GITHUB_WEBHOOK_SECRET: ${TT_GITHUB_WEBHOOK_SECRET:-}
+  TROOPER_DSN: ${TROOPER_SELF_DSN:-}
+
 services:
   clickhouse:
     image: clickhouse/clickhouse-server:25.8
@@ -81,31 +104,17 @@ services:
   # ── Go services (profile "app") ──
   ingest-gw:
     profiles: [app]
-    build: { context: ../services, dockerfile: ingest/Dockerfile, args: { CMD: ingest-gw } }
+    build: { context: .., dockerfile: services/ingest/Dockerfile, args: { CMD: ingest-gw } }
     ports: ["4317:4317", "4318:4318"]
-    environment: &svc_env
-      TT_POSTGRES_URL: postgres://trooper:trooper@postgres:5432/trooper?sslmode=disable
-      TT_CLICKHOUSE_URL: clickhouse://trooper:trooper@clickhouse:9000/telemetry
-      TT_KAFKA_BROKERS: redpanda:9092
-      TT_REDIS_URL: redis://redis:6379/0
-      TT_LOG_LEVEL: info
-      # shared secret for platform-internal ingest (trooper-cloud, loadtest) — contracts §2
-      TT_INTERNAL_TOKEN: ${TT_INTERNAL_TOKEN:-tt_dev_internal_token}
-      TT_SECRETS_KEY: ${TT_SECRETS_KEY:-}
-      TT_PUBLIC_APP_URL: ${TT_PUBLIC_APP_URL:-http://localhost:5173}
-      # ChatOps (ADR-017) — empty means the app is not configured (endpoints return 501)
-      TT_SLACK_CLIENT_ID: ${TT_SLACK_CLIENT_ID:-}
-      TT_SLACK_CLIENT_SECRET: ${TT_SLACK_CLIENT_SECRET:-}
-      TT_SLACK_SIGNING_SECRET: ${TT_SLACK_SIGNING_SECRET:-}
-      TT_GITHUB_APP_ID: ${TT_GITHUB_APP_ID:-}
-      TT_GITHUB_APP_SLUG: ${TT_GITHUB_APP_SLUG:-}
-      TT_GITHUB_APP_PRIVATE_KEY: ${TT_GITHUB_APP_PRIVATE_KEY:-}
-      TT_GITHUB_WEBHOOK_SECRET: ${TT_GITHUB_WEBHOOK_SECRET:-}
+    environment:
+      <<: *svc_env
+      # loop guard: requests of the self project produce no spans/logs (ADR-027)
+      TT_SELF_PROJECT_ID: ${TT_SELF_PROJECT_ID:-0}
     depends_on: [postgres, redpanda, redis]
 
   ingest-writer:
     profiles: [app]
-    build: { context: ../services, dockerfile: ingest/Dockerfile, args: { CMD: ingest-writer } }
+    build: { context: .., dockerfile: services/ingest/Dockerfile, args: { CMD: ingest-writer } }
     environment:
       <<: *svc_env
       # session replay blobs (contracts §23); without TT_S3_ENDPOINT the writer skips tt.replay
@@ -113,11 +122,12 @@ services:
       TT_S3_ACCESS_KEY: ${TT_S3_ACCESS_KEY:-trooper}
       TT_S3_SECRET_KEY: ${TT_S3_SECRET_KEY:-trooper-secret}
       TT_REPLAY_S3_BUCKET: ${TT_REPLAY_S3_BUCKET:-tt-replays}
+      TT_SELF_PROJECT_ID: ${TT_SELF_PROJECT_ID:-0}
     depends_on: [clickhouse, redpanda, s3]
 
   api:
     profiles: [app]
-    build: { context: ../services, dockerfile: api/Dockerfile }
+    build: { context: .., dockerfile: services/api/Dockerfile }
     ports: ["8080:8080"]
     environment:
       <<: *svc_env
@@ -132,33 +142,34 @@ services:
 
   alert-engine:
     profiles: [app]
-    build: { context: ../services, dockerfile: alerting/Dockerfile, args: { CMD: alert-engine } }
+    build: { context: .., dockerfile: services/alerting/Dockerfile, args: { CMD: alert-engine } }
     environment: *svc_env
     depends_on: [clickhouse, postgres]
 
   notifier:
     profiles: [app]
-    build: { context: ../services, dockerfile: alerting/Dockerfile, args: { CMD: notifier } }
+    build: { context: .., dockerfile: services/alerting/Dockerfile, args: { CMD: notifier } }
     environment: *svc_env
     depends_on: [postgres]
 
   # Cloud integrations (AWS / GCP / Neon / Vercel) → databases, broker_clusters, deploy_markers + OTLP metrics (ADR-012)
   trooper-cloud:
     profiles: [app]
-    build: { context: ../services, dockerfile: integrations/Dockerfile }
+    build: { context: .., dockerfile: services/integrations/Dockerfile }
     environment:
       TT_POSTGRES_URL: postgres://trooper:trooper@postgres:5432/trooper?sslmode=disable
-      TT_DSN: http://tt_dev_ingest_key@ingest-gw:4318/1
+      TT_DSN: ${TT_CLOUD_DSN:-http://ingest-gw:4318}   # keyless: authenticates with TT_INTERNAL_TOKEN
       TT_SECRETS_KEY: ${TT_SECRETS_KEY:-}
       TT_CLOUD_INGEST_KEYS: ${TT_CLOUD_INGEST_KEYS:-}
       TT_INTERNAL_TOKEN: ${TT_INTERNAL_TOKEN:-tt_dev_internal_token}
       TT_LOG_LEVEL: info
+      TROOPER_DSN: ${TROOPER_SELF_DSN:-}
     depends_on: [postgres, ingest-gw]
 
   # Code intelligence: repo analysis, alert-as-code, GitHub webhooks (ADR-014, ADR-017)
   codeintel:
     profiles: [app]
-    build: { context: ../services, dockerfile: codeintel/Dockerfile }
+    build: { context: .., dockerfile: services/codeintel/Dockerfile }
     ports: ["8096:8096"]
     environment:
       <<: *svc_env
@@ -169,7 +180,7 @@ services:
   # Load test controller + local runners (ADR-015)
   loadtest:
     profiles: [app]
-    build: { context: ../services, dockerfile: loadtest/Dockerfile }
+    build: { context: .., dockerfile: services/loadtest/Dockerfile }
     ports: ["8097:8097"]
     environment:
       <<: *svc_env
