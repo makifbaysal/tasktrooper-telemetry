@@ -116,7 +116,7 @@ function SlackCard() {
         subtitle={ws ? `${ws.connectedAt ? `Connected ${ago(ws.connectedAt)} · ` : ''}${channels.length} channel${channels.length === 1 ? '' : 's'} visible to the bot` : 'Install the TaskTrooper Slack App — no webhook URLs to copy.'}
         actions={ws
           ? manage && <Button size="sm" variant="ghost" icon={<Unplug size={12} />} disabled={busy} onClick={() => void disconnect()}>Disconnect</Button>
-          : <Button size="sm" variant="primary" icon={<MessageSquare size={12} />} disabled={!manage} title={manage ? undefined : denied('manage')} onClick={connectSlack}>Connect Slack</Button>}>
+          : <Button size="sm" variant="primary" icon={<MessageSquare size={12} />} disabled={!manage} title={manage ? undefined : denied('manage')} onClick={() => { setError(undefined); connectSlack().catch((e: unknown) => setError(e instanceof Error ? e.message : String(e))); }}>Connect Slack</Button>}>
         {ws ? (
           <div className="row" style={{ gap: 'var(--space-1)', flexWrap: 'wrap' }}>
             {channels.slice(0, 12).map((c) => <Badge key={c.id} icon={c.isPrivate ? <Lock /> : <Hash />}>{c.name}</Badge>)}

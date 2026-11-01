@@ -85,5 +85,19 @@ secret **`DEMO_TROOPER_DSN`** and run deploy-demo. Then:
 
 No secret = all of this is off.
 
+## Slack (ADR-017)
+"Connect Slack" needs one Slack App registered by whoever runs the server (users then just click "Add to Slack").
+Without it the Slack endpoints answer 501 and the dashboard says Slack isn't set up.
+1. https://api.slack.com/apps → **Create New App** → From scratch (name e.g. *TaskTrooper*, any workspace).
+2. **OAuth & Permissions** → Redirect URL `https://telemetry-api.tasktrooper.ai/api/v1/integrations/slack/callback`;
+   Bot Token Scopes `chat:write`, `chat:write.public`, `channels:read`, `groups:read`, `channels:join`, `users:read`,
+   `users:read.email`.
+3. **Interactivity & Shortcuts** → on, Request URL `https://telemetry-api.tasktrooper.ai/api/v1/slack/interactions`
+   (ack / mute buttons).
+4. **Manage Distribution** → Activate Public Distribution (only if workspaces other than the app's own will connect).
+5. **Basic Information** → App Credentials: store Client ID, Client Secret and Signing Secret as the `demo` environment
+   secrets **`DEMO_SLACK_CLIENT_ID`**, **`DEMO_SLACK_CLIENT_SECRET`**, **`DEMO_SLACK_SIGNING_SECRET`**, then run
+   deploy-demo. Kept out of `DEMO_ENV` on purpose: regenerating that would rotate `TT_SECRETS_KEY`.
+
 ## First sign-in
 Open `https://telemetry.tasktrooper.ai`, sign in with Google, onboarding creates the org, project and ingest key (DSN).

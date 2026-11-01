@@ -93,7 +93,7 @@ paths:
     get:
       tags: [APM]
       operationId: getOverviewSeries
-      summary: 'Project-wide RED series (rpm, errorRate, p50/p95/p99, s2xx..s5xx)'
+      summary: 'Project-wide RED series (rpm, errorRate, avg, p50/p95/p99, s2xx..s5xx)'
       parameters:
         - $ref: '#/components/parameters/range'
         - $ref: '#/components/parameters/env'

@@ -12,6 +12,7 @@ export function NotifyPicker({ value, onChange, disabled }: { value: string[]; o
   useData();
   const [q, setQ] = useState('');
   const [focus, setFocus] = useState(false);
+  const [slackErr, setSlackErr] = useState<string>();
   const ws = slackWorkspace();
   const channels = ws ? slackChannels(q) : [];
   const privateIds = new Set((ws ? slackChannels('') : []).filter((c) => c.isPrivate).map((c) => c.id));
@@ -60,7 +61,7 @@ export function NotifyPicker({ value, onChange, disabled }: { value: string[]; o
         )}
       </div>
       {!ws ? (
-        <span className="field__hint">Slack isn’t connected — <a href="#" onClick={(e) => { e.preventDefault(); connectSlack(); }}>Connect Slack</a> to pick channels from a list.</span>
+        <span className="field__hint">{slackErr ?? <>Slack isn’t connected — <a href="#" onClick={(e) => { e.preventDefault(); connectSlack().catch((x: unknown) => setSlackErr(x instanceof Error ? x.message : String(x))); }}>Connect Slack</a> to pick channels from a list.</>}</span>
       ) : ws ? <span className="field__hint">Slack workspace {ws.teamName}</span> : null}
     </div>
   );

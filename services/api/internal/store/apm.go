@@ -664,7 +664,7 @@ func (d *DB) appPlatforms(ctx context.Context, q Q) (map[string]string, error) {
 func (d *DB) RedSeries(ctx context.Context, q Q, f RedFilter) (model.SeriesSet, error) {
 	stepMin := q.W.StepMinutes()
 	if f.Ref != nil && f.Ref.Process {
-		b := timerange.NewBuilder(q.W, "rpm", "errorRate", "p50", "p95", "p99", "retried", "dlq")
+		b := timerange.NewBuilder(q.W, "rpm", "errorRate", "avg", "p50", "p95", "p99", "retried", "dlq")
 		rows, err := d.consumer(ctx, q.W, q.Env, nil, " AND service = ? AND process = ?", []any{f.Service, f.Ref.Route}, true)
 		if err != nil {
 			return model.SeriesSet{}, err
@@ -672,6 +672,7 @@ func (d *DB) RedSeries(ctx context.Context, q Q, f RedFilter) (model.SeriesSet, 
 		for _, r := range rows {
 			b.Set("rpm", r.bucket, r.processed/stepMin)
 			b.Set("errorRate", r.bucket, div(r.failed, r.processed))
+			b.Set("avg", r.bucket, div(r.dsum, r.processed))
 			b.Set("p50", r.bucket, qt(r.q, 0))
 			b.Set("p95", r.bucket, qt(r.q, 1))
 			b.Set("p99", r.bucket, qt(r.q, 2))
@@ -680,7 +681,7 @@ func (d *DB) RedSeries(ctx context.Context, q Q, f RedFilter) (model.SeriesSet, 
 		}
 		return labels(b, map[string]string{"rpm": "Messages / min", "errorRate": "Error rate", "retried": "Retries / min", "dlq": "DLQ / min"}), nil
 	}
-	b := timerange.NewBuilder(q.W, "rpm", "errorRate", "p50", "p95", "p99", "s2xx", "s3xx", "s4xx", "s5xx")
+	b := timerange.NewBuilder(q.W, "rpm", "errorRate", "avg", "p50", "p95", "p99", "s2xx", "s3xx", "s4xx", "s5xx")
 	var where string
 	var args []any
 	if f.Service != "" {
@@ -697,6 +698,7 @@ func (d *DB) RedSeries(ctx context.Context, q Q, f RedFilter) (model.SeriesSet, 
 	for _, r := range rows {
 		b.Set("rpm", r.bucket, r.count/stepMin)
 		b.Set("errorRate", r.bucket, div(r.errors, r.count))
+		b.Set("avg", r.bucket, div(r.dsum, r.count))
 		b.Set("p50", r.bucket, qt(r.q, 0))
 		b.Set("p95", r.bucket, qt(r.q, 2))
 		b.Set("p99", r.bucket, qt(r.q, 3))
@@ -714,6 +716,7 @@ func (d *DB) RedSeries(ctx context.Context, q Q, f RedFilter) (model.SeriesSet, 
 		for _, r := range crow {
 			b.Set("rpm", r.bucket, r.processed/stepMin)
 			b.Set("errorRate", r.bucket, div(r.failed, r.processed))
+			b.Set("avg", r.bucket, div(r.dsum, r.processed))
 			b.Set("p50", r.bucket, qt(r.q, 0))
 			b.Set("p95", r.bucket, qt(r.q, 1))
 			b.Set("p99", r.bucket, qt(r.q, 2))
