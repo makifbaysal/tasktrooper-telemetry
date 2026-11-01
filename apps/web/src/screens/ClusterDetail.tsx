@@ -4,15 +4,18 @@ import { Boxes, ChevronRight, X } from 'lucide-react';
 import { TimeSeries } from '@/components/charts';
 import { Badge, Button, Card, EmptyState, MetricCard, PageHeader, SearchInput, Section, Segmented, Select, Table, Tabs } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
-import { k8sClusterDetails, k8sEvents, k8sPods, k8sWorkloads, timestamps, useData, type K8sPod, type K8sWorkload } from '@/data';
+import { k8sClusterDetails, k8sEvents, k8sPods, k8sWorkloads, monitors, timestamps, useData, type K8sPod, type K8sWorkload } from '@/data';
+import type { ApiMonitor } from '@/data/api/ops';
+import { AlertsBody } from './Alerts';
+import { clusterAlertScope } from './infraAlerts';
 import { int } from '@/lib/format';
 import { LINE_SLOTS } from './shared';
 import {
   EventList, INFRA_RANK, InfraStatusBadge, LimitCell, PodPhaseBadge, ServiceLink, UsageCell, bytes, cores, hostUrl, lastSeenText, podUrl,
 } from './k8sShared';
 
-type Tab = 'pods' | 'workloads' | 'nodes' | 'namespaces' | 'events';
-const TABS: Tab[] = ['pods', 'workloads', 'nodes', 'namespaces', 'events'];
+type Tab = 'pods' | 'workloads' | 'nodes' | 'namespaces' | 'events' | 'alerts';
+const TABS: Tab[] = ['pods', 'workloads', 'nodes', 'namespaces', 'events', 'alerts'];
 
 /** used / requested / allocatable — one unit per chart, fixed slots. */
 const capacitySeries = (s: Record<'used' | 'requested' | 'allocatable', number[]>) => [
@@ -47,6 +50,9 @@ export function K8sClusterDetail() {
   const events = k8sEvents({ cluster, namespace: namespace || undefined, limit: 200 });
   if (!c) return <EmptyState icon={<Boxes />} title="Cluster not found">No data from a cluster called “{cluster}”.</EmptyState>;
   const ts = timestamps(range);
+  const alertScope = clusterAlertScope(c.name);
+  const clusterMonitors = (monitors as ApiMonitor[]).filter(alertScope.match);
+  const clusterFiring = clusterMonitors.filter((m) => m.state === 'firing').length;
 
   const match = (s: string) => !q || s.toLowerCase().includes(q.toLowerCase());
   const podRows = pods.filter((p) => (!workload || p.workload === workload) && (!node || p.node === node) && match(`${p.name} ${p.service} ${p.node}`)
@@ -105,9 +111,10 @@ export function K8sClusterDetail() {
           { id: 'nodes', label: <>Nodes <Badge tone={c.nodesReady < c.nodes ? 'critical' : 'neutral'}>{c.nodesReady}/{c.nodes}</Badge></> },
           { id: 'namespaces', label: <>Namespaces <Badge>{c.namespaceList.length}</Badge></> },
           { id: 'events', label: <>Events <Badge tone={events.length ? 'warning' : 'neutral'}>{events.length}</Badge></> },
+          { id: 'alerts', label: <>Alerts <Badge tone={clusterFiring ? 'critical' : 'neutral'}>{clusterFiring ? `${clusterFiring} firing` : clusterMonitors.length}</Badge></> },
         ]} />
 
-        {tab !== 'namespaces' && (
+        {tab !== 'namespaces' && tab !== 'alerts' && (
           <div className="row" style={{ gap: 'var(--space-3)', flexWrap: 'wrap' }}>
             <Select aria-label="Namespace" value={namespace} onChange={(e) => update({ ns: e.target.value, workload: '' })}
               options={[{ value: '', label: 'All namespaces' }, ...namespaces.map((n) => ({ value: n, label: n }))]} />
@@ -175,6 +182,7 @@ export function K8sClusterDetail() {
         )}
 
         {tab === 'events' && <Card><EventList events={events} /></Card>}
+        {tab === 'alerts' && <AlertsBody scope={{ ...alertScope, inTab: true }} />}
       </Section>
     </>
   );
