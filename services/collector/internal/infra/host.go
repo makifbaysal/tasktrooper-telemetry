@@ -228,6 +228,28 @@ var skipFS = map[string]bool{
 	"fusectl": true, "hugetlbfs": true, "binfmt_misc": true, "rpc_pipefs": true, "ramfs": true, "devfs": true,
 	"nullfs": true, "fuse.lxcfs": true, "shm": true, "efivarfs": true, "iso9660": true, "nfs": true, "nfs4": true,
 	"cifs": true, "smbfs": true, "fuse.sshfs": true,
+	// read-only images (Docker Desktop / LinuxKit root) and Docker Desktop's shares of the macOS / Windows disk
+	"erofs": true, "virtiofs": true, "fakeowner": true, "9p": true, "grpcfuse": true,
+}
+
+// diskCandidate reports whether a mount can fill up and counts for trooper.host.disk: a local, writable filesystem outside
+// the container runtimes' own trees. Read-only mounts are always "full" (an erofs or squashfs image is 100% used) and
+// would raise a false Critical.
+func diskCandidate(p disk.PartitionStat) bool {
+	if skipFS[p.Fstype] {
+		return false
+	}
+	for _, o := range p.Opts {
+		if o == "ro" {
+			return false
+		}
+	}
+	for _, prefix := range []string{"/var/lib/kubelet/", "/var/lib/docker/", "/snap/", "/run/", "/boot/efi"} {
+		if strings.HasPrefix(p.Mountpoint, prefix) {
+			return false
+		}
+	}
+	return true
 }
 
 // fullestDisk returns the highest used ratio over local filesystems ≥ 100 MB.
@@ -239,9 +261,7 @@ func (h *HostScraper) fullestDisk(ctx context.Context) (float64, bool) {
 	best, ok := 0.0, false
 	seen := map[string]bool{}
 	for _, p := range parts {
-		if skipFS[p.Fstype] || seen[p.Device] && p.Device != "" || strings.HasPrefix(p.Mountpoint, "/var/lib/kubelet/") ||
-			strings.HasPrefix(p.Mountpoint, "/var/lib/docker/") || strings.HasPrefix(p.Mountpoint, "/snap/") ||
-			strings.HasPrefix(p.Mountpoint, "/run/") || strings.HasPrefix(p.Mountpoint, "/boot/efi") {
+		if !diskCandidate(p) || seen[p.Device] && p.Device != "" {
 			continue
 		}
 		seen[p.Device] = true
