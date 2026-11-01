@@ -1,8 +1,10 @@
 // Package apiclient is the single HTTP client every tool uses to reach
-// services/api (ADR-025, contracts §26). It is read-only: only GET.
+// services/api (ADR-025, contracts §26). Reads are GET; the monitor write tools
+// (ADR-032, only with TT_MCP_ALLOW_WRITE) use Send.
 package apiclient
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,9 +19,8 @@ import (
 	"time"
 )
 
-// Client wraps services/api with one shared *http.Client. Every call is a GET,
-// so there are no non-idempotent requests to guard with retries; a request is
-// issued once and its error is mapped, never retried.
+// Client wraps services/api with one shared *http.Client. A request is issued
+// once and its error is mapped, never retried (writes are not idempotent).
 type Client struct {
 	base string
 	key  string
@@ -223,4 +224,76 @@ func PutInt(q url.Values, k string, n *int) {
 	if n != nil {
 		q.Set(k, strconv.Itoa(*n))
 	}
+}
+
+// Send performs an authenticated request with a JSON body (POST / PUT / PATCH / DELETE) and decodes a JSON
+// response into out (nil = ignore; 204 needs none). 400 / 409 carry the API's own validation message, which is
+// safe to show and tells the agent what to fix.
+func (c *Client) Send(ctx context.Context, method, path string, q url.Values, body, out any) error {
+	u := c.base + path
+	if len(q) > 0 {
+		u += "?" + q.Encode()
+	}
+	var rd io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return toolErrf("could not encode the request for %s", path)
+		}
+		rd = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, u, rd)
+	if err != nil {
+		return toolErrf("could not build request for %s", path)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.key)
+	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	res, err := c.hc.Do(req)
+	if err != nil {
+		if isTimeout(err) {
+			return toolErrf("the API did not answer in %s; the %s may or may not have been applied: check with a list call before retrying", c.hc.Timeout, method)
+		}
+		return toolErrf("the API is unavailable (%s); check TT_API_URL", brief(err))
+	}
+	defer drain(res)
+	switch {
+	case res.StatusCode == http.StatusNoContent:
+		return nil
+	case res.StatusCode == http.StatusOK || res.StatusCode == http.StatusCreated:
+		if out == nil {
+			return nil
+		}
+		if err := json.NewDecoder(res.Body).Decode(out); err != nil {
+			return toolErrf("the API returned an unreadable response for %s", path)
+		}
+		return nil
+	case res.StatusCode == http.StatusBadRequest, res.StatusCode == http.StatusConflict:
+		return toolErrf("the API rejected the input (HTTP %d): %s", res.StatusCode, apiMessage(res.Body))
+	case res.StatusCode == http.StatusUnauthorized, res.StatusCode == http.StatusForbidden:
+		return toolErrf("the API rejected the key (HTTP %d): check TT_API_KEY and that it may write", res.StatusCode)
+	case res.StatusCode == http.StatusNotFound:
+		return toolErrf("not found in this project (HTTP 404 on %s)", path)
+	case res.StatusCode == http.StatusNotImplemented, res.StatusCode == http.StatusBadGateway:
+		// readable server-side reasons: feature not configured, Slack refused the message, ...
+		return toolErrf("the API could not do it (HTTP %d): %s", res.StatusCode, apiMessage(res.Body))
+	default:
+		return toolErrf("the API is unavailable (HTTP %d on %s)", res.StatusCode, path)
+	}
+}
+
+// apiMessage reads the API's {"error": "..."} body, capped; anything else becomes a generic note.
+func apiMessage(r io.Reader) string {
+	var e struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r, 4<<10)).Decode(&e); err != nil || e.Error == "" {
+		return "no detail"
+	}
+	if len(e.Error) > 300 {
+		return e.Error[:300] + "…"
+	}
+	return e.Error
 }

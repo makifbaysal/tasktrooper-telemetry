@@ -112,8 +112,8 @@ func validateScenario(in *model.ScenarioInput) error {
 	if in.Source == "" {
 		in.Source = "manual"
 	}
-	if in.Source != "manual" && in.Source != "generated" {
-		return Invalid("source must be manual|generated")
+	if in.Source != "manual" && in.Source != "generated" && in.Source != "agent" {
+		return Invalid("source must be manual|generated|agent")
 	}
 	if len(in.Spec) == 0 || !json.Valid(in.Spec) || in.Spec[0] != '{' {
 		return Invalid("spec must be a JSON object")

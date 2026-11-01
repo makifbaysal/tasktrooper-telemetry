@@ -77,7 +77,7 @@ pnpm -r --filter "./sdks/js/packages/**" build
 rsync -a --delete-after apps/web/dist/ "$TT_DEMO_WEB_DIR/"
 
 step "services"
-"${dc[@]}" "${profiles[@]}" up -d --build ingest-gw ingest-writer api alert-engine notifier web "${agent[@]}"
+"${dc[@]}" "${profiles[@]}" up -d --build ingest-gw ingest-writer api alert-engine notifier loadtest web "${agent[@]}"
 
 step "health"
 wait_ok http://127.0.0.1:8080/healthz api

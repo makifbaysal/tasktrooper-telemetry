@@ -66,10 +66,11 @@ func TestLoad(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Only the TT_* keys this test manages are cleared, so a developer's
 			// other env (PATH, GOCACHE) stays intact.
+			t.Setenv("TT_MCP_ENV_FILE", emptyEnvFile(t)) // never the developer's own env file
 			for k := range tc.env {
 				t.Setenv(k, tc.env[k])
 			}
-			for _, k := range []string{"TT_API_KEY", "TT_API_URL", "TT_ORG_ID", "TT_PROJECT_ID", "TT_LOG_LEVEL"} {
+			for _, k := range []string{"TT_API_KEY", "TT_API_URL", "TT_ORG_ID", "TT_PROJECT_ID", "TT_LOG_LEVEL", "TT_MCP_ALLOW_WRITE"} {
 				if _, ok := tc.env[k]; !ok {
 					t.Setenv(k, "")
 				}

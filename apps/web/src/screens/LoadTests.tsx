@@ -1,7 +1,7 @@
 import { useData } from '@/data/remote';
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
-import { AlertTriangle, Check, ChevronRight, Gauge, Globe2, Pencil, Play, Plus, ShieldCheck, Sparkles, X } from 'lucide-react';
+import { AlertTriangle, Bot, Check, ChevronRight, Gauge, Globe2, Pencil, Play, Plus, ShieldCheck, Sparkles, X } from 'lucide-react';
 import { Sparkline, TimeSeries } from '@/components/charts';
 import {
   Badge, Button, Callout, Card, CodeBlock, Drawer, DrawerSection, EmptyState, KeyValues, Meter, PageHeader, Section, StatusBadge, Table, useDrawer,
@@ -84,6 +84,7 @@ export function RunBlockedCallout({ err, scenarioName, onClose }: { err: RunBloc
 
 export function ScenarioSource({ s }: { s: LoadTestScenario }) {
   if (scenarioState(s.id) === 'draft') return <Badge tone="warning" icon={<Sparkles />}>Draft · needs review</Badge>;
+  if (s.source === 'agent') return <Badge tone="accent" icon={<Bot />}>Agent</Badge>;
   return s.source === 'generated' ? <Badge tone="accent" icon={<Sparkles />}>Generated</Badge> : <Badge>Manual</Badge>;
 }
 
@@ -262,7 +263,7 @@ export function ScenarioDrawer({ sc, running, onClose, onRun, onEdit, onOpenRun 
           ['Peak VUs', sc.peakVus],
           ['Duration', duration(sc.duration)],
           ['Regions', sc.regions.join(', ')],
-          ['Source', sc.source === 'generated' ? (draft ? 'Generated from code · draft' : 'Generated') : 'Manual'],
+          ['Source', sc.source === 'agent' ? 'Created by an agent (MCP)' : sc.source === 'generated' ? (draft ? 'Generated from code · draft' : 'Generated') : 'Manual'],
         ]} />
       </DrawerSection>
       <DrawerSection title="Load levels" aside={spec.mode === 'rps' ? 'requests / sec' : 'virtual users'}>

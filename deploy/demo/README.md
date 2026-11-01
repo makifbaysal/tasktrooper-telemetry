@@ -12,7 +12,11 @@ workflow runs on a self-hosted runner on that machine; Cloudflare Tunnel publish
 One level under the zone on purpose: Cloudflare's free certificate does not cover `api.telemetry.tasktrooper.ai`.
 
 Runs: ClickHouse, Postgres, Redpanda, Redis, s3 (replay blobs), ingest-gw, ingest-writer, api, alert-engine, notifier,
-web. Not in the demo: codeintel, loadtest, trooper-cloud.
+loadtest, web. Not in the demo: codeintel, trooper-cloud.
+
+Load tests run on this machine with small caps (`docker-compose.demo.yml`: 50 VUs, 15 min, one run at a time, 3000
+VU-minutes a month) and only against verified domains: `TT_LOADTEST_ALLOW_LOCAL=false`, so a scenario can never target
+the demo host itself. Add and verify a target under Load tests → Domains first.
 
 ## One-time setup
 

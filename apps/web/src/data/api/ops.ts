@@ -49,7 +49,7 @@ export function mapMonitor(r: RawMonitor): ApiMonitor {
   return {
     id: r.id, name: r.name, kind: KINDS.has(r.kind) ? (r.kind as MonitorKind) : UI_KIND[r.kind] ?? 'metric_threshold', apiKind: r.kind,
     target: r.target, condition: r.condition, severity: sev(r.severity), state,
-    source: r.source === 'code' || r.source === 'template' || r.source === 'suggestion' ? r.source : 'manual', codeRef: r.codeRef || undefined,
+    source: r.source === 'code' || r.source === 'template' || r.source === 'suggestion' || r.source === 'agent' ? r.source : 'manual', codeRef: r.codeRef || undefined,
     lastChange: r.lastChange, channels: r.channels ?? [], queue: r.queue ?? undefined,
     targetSpec: r.targetSpec, rule: r.rule, query: r.query ?? undefined, status: r.status, mutedUntil, lastValue: r.lastValue,
   };
@@ -137,7 +137,7 @@ const mapScenario = (r: RawScenario): LoadTestScenario => {
   const id = localId(r.id);
   if (r.spec) scenarioSpecs.set(id, r.spec);
   return {
-    id, name: r.name, target: r.target ?? '', source: r.source === 'generated' ? 'generated' : 'manual', steps: r.steps ?? 0,
+    id, name: r.name, target: r.target ?? '', source: r.source === 'generated' || r.source === 'agent' ? r.source : 'manual', steps: r.steps ?? 0,
     peakVus: r.peakVus ?? 0, duration: r.duration ?? 0, regions: r.regions ?? [], lastRun: r.lastRun ? localId(r.lastRun) : undefined,
   };
 };

@@ -19,6 +19,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/tasktrooper/telemetry/services/mcp/internal/server"
 )
 
 // The session runs twice: plain, and with self telemetry on (ADR-027) against a fake collector with SDK debug
@@ -79,7 +81,7 @@ func stdioSession(t *testing.T, bin string, selfTel bool) {
 	defer collector.Close()
 
 	cmd := exec.Command(bin)
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(os.Environ(), noEnvFile(t),
 		"TT_API_URL="+api.URL,
 		"TT_API_KEY=tt_api_test_key",
 		"TT_LOG_LEVEL=debug", // debug logging on: it must still not touch stdout
@@ -159,7 +161,7 @@ func stdioSession(t *testing.T, bin string, selfTel bool) {
 		t.Fatalf("got %d response(s), want initialize + tools/list + tools/call (stderr: %q)", len(responses), stderr.String())
 	}
 
-	// tools/list response must carry the 12 approved tools.
+	// tools/list response must carry the read-only tool surface (no TT_MCP_ALLOW_WRITE).
 	var toolsResp map[string]any // responses may arrive in any order
 	for _, r := range responses {
 		if id, _ := r["id"].(float64); id == 2 {
@@ -168,8 +170,8 @@ func stdioSession(t *testing.T, bin string, selfTel bool) {
 	}
 	result, _ := toolsResp["result"].(map[string]any)
 	tools, _ := result["tools"].([]any)
-	if len(tools) != 12 {
-		t.Errorf("tools/list returned %d tools, want 12", len(tools))
+	if len(tools) != server.ToolCount(false) {
+		t.Errorf("tools/list returned %d tools, want %d", len(tools), server.ToolCount(false))
 	}
 
 	// Reap the child before reading stderr: os/exec copies stderr through its
@@ -219,7 +221,7 @@ func writeLine(t *testing.T, w io.Writer, line string) {
 func TestMissingKeyFailsFast(t *testing.T) {
 	bin := buildBinary(t)
 	cmd := exec.Command(bin)
-	cmd.Env = append(os.Environ(), "TT_API_URL=http://127.0.0.1:1", "TT_API_KEY=")
+	cmd.Env = append(os.Environ(), noEnvFile(t), "TT_API_URL=http://127.0.0.1:1", "TT_API_KEY=")
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	err := cmd.Run()
@@ -232,4 +234,15 @@ func TestMissingKeyFailsFast(t *testing.T) {
 	if !strings.Contains(errb.String(), "TT_API_KEY") {
 		t.Errorf("stderr does not name the missing variable: %q", errb.String())
 	}
+}
+
+// noEnvFile points tt-mcp at an empty env file, so a developer's ~/.config/tasktrooper/mcp.env (written by the
+// installer) cannot change what the test sees.
+func noEnvFile(t *testing.T) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "mcp.env")
+	if err := os.WriteFile(p, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return "TT_MCP_ENV_FILE=" + p
 }

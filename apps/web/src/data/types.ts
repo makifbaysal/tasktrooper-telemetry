@@ -113,7 +113,7 @@ export interface Monitor {
   severity: Severity;
   state: 'ok' | 'pending' | 'firing' | 'muted';
   /** code = alert-as-code (`.trooper/monitors/*.yaml`, read-only in the UI) · suggestion = accepted code-intel suggestion */
-  source: 'manual' | 'code' | 'template' | 'suggestion';
+  source: 'manual' | 'code' | 'template' | 'suggestion' | 'agent';
   /** source = code: `repo:path` of the YAML that defines it */
   codeRef?: string;
   lastChange: number;
@@ -175,7 +175,7 @@ export interface LoadTestScenario {
   id: string;
   name: string;
   target: string;
-  source: 'manual' | 'generated';
+  source: 'manual' | 'generated' | 'agent';
   steps: number;
   peakVus: number;
   duration: number;
@@ -314,7 +314,7 @@ export interface Kpi {
   burnRate1h: number;
   burnRate6h: number;
   status: Health;
-  source: 'manual' | 'code' | 'template';
+  source: 'manual' | 'code' | 'template' | 'agent';
   alerts: KpiAlertRule[];
   /** when the current degradation started (if any) */
   degradedSince?: number;

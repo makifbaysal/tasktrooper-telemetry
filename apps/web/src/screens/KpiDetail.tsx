@@ -11,7 +11,7 @@ import { badLabel, badSeries, goodPct } from './Kpis';
 
 const TARGET_KIND: Record<Kpi['target']['kind'], string> = { page: 'Page', endpoint: 'Endpoint', journey: 'User journey', app_start: 'App start' };
 const SLI_LABEL: Record<Kpi['sli'], string> = { latency: 'Latency', availability: 'Availability', success_rate: 'Success rate' };
-const SOURCE_LABEL: Record<Kpi['source'], string> = { code: 'Suggested from code', template: 'Template', manual: 'Manual' };
+const SOURCE_LABEL: Record<Kpi['source'], string> = { code: 'Suggested from code', template: 'Template', manual: 'Manual', agent: 'Created by an agent (MCP)' };
 
 export function KpiDetail() {
   const { kpiId = '' } = useParams();

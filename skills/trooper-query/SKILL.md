@@ -1,11 +1,12 @@
 ---
 name: trooper-query
-description: How to query TaskTrooper telemetry efficiently with the tt_* MCP tools (services, endpoints, traces, logs, incidents, monitors, deploys, load test runs). Use when answering a question about production data from TaskTrooper, e.g. "which endpoints of payments-api are slowest", "show error logs for trace X", "what deployed in the last day", "is anything alerting". For "something is wrong, find out why" use trooper-diagnose instead.
+description: How to query TaskTrooper telemetry efficiently with the tt_* MCP tools (services, endpoints, traces, logs, errors, incidents, monitors, KPIs, deploys, infra, apps, AI usage, load tests, notification channels). Use when answering a question about production data from TaskTrooper, e.g. "which endpoints of payments-api are slowest", "show error logs for trace X", "what deployed in the last day", "is anything alerting". For "something is wrong, find out why" use trooper-diagnose instead.
 ---
 
 # trooper-query
 
-12 read-only tools over `services/api`, one project (from the API key). Full contract: `.ai/mcp.md`.
+27 read tools over `services/api`, one project (from the API key). Full contract: `.ai/mcp.md`. Write tools (create
+monitors / KPIs, run load tests) exist only with `TT_MCP_ALLOW_WRITE=true` and belong to the `trooper-alerts` skill.
 
 ## Start here
 
@@ -32,6 +33,21 @@ Trace filters: `errorsOnly`, `minMs`, `sort: "slowest"`. Log filters: `level` (*
 `debug|info|warn|error`; not a minimum, so query `error` and `warn` separately), `q` (full text), `traceId` (32 hex), `route` (template, e.g. `/orders/:id`).
 RCA: `tt_endpoint_rca { service, endpoint, range, baseline: prev|1d|7d }`.
 
+## Beyond services, traces and logs
+
+| Question | Tool |
+|---|---|
+| Which exceptions, since when, stack | `tt_list_errors { service, route, status, range }` → `tt_get_error { fingerprint }` |
+| SLOs, error budget, burn rate | `tt_list_kpis { service }` |
+| Web / mobile app health (users, JS errors, vitals, crashes) | `tt_get_app_summary { app }` (app = a `web`/`mobile` service) |
+| LLM calls, tokens, cost | `tt_get_ai_overview { service, provider, model }` |
+| Hosts, databases, queues | `tt_list_hosts`, `tt_list_databases`, `tt_list_consumer_groups` |
+| What the code contains (routes, crons, consumers; dead / shadow) | `tt_list_inventory { kind, service }` (empty without a connected repo) |
+| Suggested alerts, ready-made monitor templates | `tt_list_alert_suggestions`, `tt_list_monitor_templates` |
+| Where alerts can go (Slack channels, configured channels) | `tt_list_notify_channels { q, refresh }` |
+| Load test scenarios, verified domains, one run | `tt_list_loadtest_scenarios`, `tt_get_loadtest_run { id }` |
+| How often a rule would have fired | `tt_preview_monitor { monitor, range }` (saves nothing) |
+
 ## Reading results
 
 - **Truncation:** results are capped at 64 KB. A trimmed result has `truncated: true`, `total` (original
@@ -57,7 +73,8 @@ RCA: `tt_endpoint_rca { service, endpoint, range, baseline: prev|1d|7d }`.
 - Relying on the log `route` filter: it matches only lines that carry a route (many log lines don't). An
   empty result means "no routed lines", not "no logs"; prefer `traceId` or `service` + `q`.
 - `tt_list_incidents { state: "acked" }` → rejected upstream; omit `state` and read each incident's `state`.
-- Expecting write actions: no tool acks incidents, creates monitors or starts load tests.
+- Expecting write actions here: no tool acks incidents. Monitors, KPIs and load tests are created only through the
+  `trooper-alerts` workflow, with the user's approval.
 
 ## Examples
 
@@ -84,3 +101,6 @@ repeat with `before: <nextBefore>`.
 
 **"Did the last checkout load test pass?"**
 `tt_list_loadtest_runs { limit: 5 }` (or `{ scenarioId }`) → check state and thresholds.
+
+**"Which Slack channels can alerts go to?"**
+`tt_list_notify_channels {}` → `slack.channels[].target` (pass `refresh: true` for a channel created minutes ago).

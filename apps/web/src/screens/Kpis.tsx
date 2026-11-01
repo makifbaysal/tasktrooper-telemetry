@@ -11,7 +11,7 @@ export const KPI_KIND_LABEL: Record<Kpi['target']['kind'], string> = {
   page: 'Page', endpoint: 'Endpoint', journey: 'User journey', app_start: 'App start',
 };
 export const SLI_LABEL: Record<Kpi['sli'], string> = { latency: 'Latency', availability: 'Availability', success_rate: 'Success rate' };
-export const SOURCE_LABEL: Record<Kpi['source'], string> = { code: 'Suggested from code', template: 'Template', manual: 'Manual' };
+export const SOURCE_LABEL: Record<Kpi['source'], string> = { code: 'Suggested from code', template: 'Template', manual: 'Manual', agent: 'Created by an agent (MCP)' };
 
 /** Bad-event share over time. Charts start at 0, so plot the small bad share, not the ~100% good share. */
 export const badSeries = (k: Kpi, range: TimeRange) => kpiSeries(k, range).map((g) => 1 - g);

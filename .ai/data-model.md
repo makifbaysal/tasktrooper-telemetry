@@ -112,12 +112,12 @@ projects(id, org_id, name, slug)
 api_keys(id, project_id, kind ingest|api, hash, allowed_origins[], last_used_at)
 services(id, project_id, name, type, language, first_seen, last_seen)
 endpoints(id, service_id, method, route, source enum(observed|code|both), code_ref jsonb)
-monitors(id, project_id, name, kind, query jsonb, condition jsonb, severity, source enum(manual|suggested|template),
+monitors(id, project_id, name, kind, query jsonb, condition jsonb, severity, source enum(manual|code|suggestion|suggested|template|agent),
          status enum(active|muted|draft), suggestion_id, created_by)
 incidents(id, monitor_id, kpi_id null, state enum(firing|acknowledged|resolved), started_at, resolved_at, peak_value,
           root_cause jsonb)            -- RcaResult snapshot: path, root node, confidence, summary
 kpis(id, project_id, name, description, owner, target jsonb, sli enum(latency|availability|success_rate),
-     good_when jsonb, objective real, window enum(7d|28d), source enum(code|template|manual), created_by)
+     good_when jsonb, objective real, window enum(7d|28d), source enum(code|template|manual|agent), created_by)
 kpi_alert_rules(id, kpi_id, kind enum(burn_rate|below_target), long_window, short_window, threshold real,
                 severity, channels text[])
 notification_channels(id, project_id, type, config jsonb)
@@ -131,7 +131,7 @@ databases(id, project_id, name, engine postgres|mysql|redis|mongodb, host, colle
           credentials_ref, cloud_resource_id, created_at)      -- credentials secret store'da, burada sadece ref
 llm_prices(org_id, provider, model, input_per_mtok, output_per_mtok, cache_read_per_mtok, cache_write_per_mtok)  -- org override, default'lar api'de
 broker_clusters(id, project_id, name, kind kafka|rabbitmq, endpoint, vhost, auth jsonb, credentials_ref, created_at)
-loadtest_scenarios(id, project_id, name, spec jsonb, source manual|generated)
+loadtest_scenarios(id, project_id, name, spec jsonb, source manual|generated|agent)
 loadtest_runs(id, scenario_id, state, started_at, finished_at, summary jsonb, thresholds_passed bool)
 ```
 

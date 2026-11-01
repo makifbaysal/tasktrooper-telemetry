@@ -1,7 +1,7 @@
 # MCP sunucusu (`services/mcp`, ADR-025)
 
-Yerel kodlama agent'ları (OpenCode, Claude Code, Cursor …) için **salt okunur** Model Context Protocol
-sunucusu. `services/api`'yi (`openapi.yaml`) sarar; ClickHouse/Postgres'e **dokunmaz**. ADR-025, sözleşme: contracts.md §26.
+Yerel kodlama agent'ları (OpenCode, Claude Code, Cursor …) için Model Context Protocol sunucusu: varsayılan **salt okunur**, `TT_MCP_ALLOW_WRITE` ile onaylı write tool'lar (ADR-032).
+`services/api`'yi (`openapi.yaml`) sarar; ClickHouse/Postgres'e **dokunmaz**. ADR-025, sözleşme: contracts.md §26.
 
 ## Mimari
 
@@ -21,22 +21,36 @@ sunucusu. `services/api`'yi (`openapi.yaml`) sarar; ClickHouse/Postgres'e **doku
 | `TT_API_URL` | ✓ | API base (default `http://localhost:8080`) — collector ile aynı ad |
 | `TT_API_KEY` | ✓ | Proje kapsamli api key (seed key yok, ADR-028: dashboard Settings → API keys veya `POST /api/v1/api-keys`) |
 | `TT_ORG_ID`, `TT_PROJECT_ID` | | Startup'ta `GET /me` ile doğrulanır; eşleşmezse sunucu **başlamaz** (yanlış anahtarla yanlış projeye okuma). API key auth'ta tenant anahtardan gelir, istek başlığından değil |
+| `TT_MCP_ALLOW_WRITE` | | `true` → 11 write tool kaydedilir (default `false`, ADR-032). API key zaten `admin` rolünde: bu bayrak agent'ın yazabilmesinin tek kapısıdır |
 | `TT_LOG_LEVEL` | | `logx` (JSON slog) |
+| `TT_MCP_ENV_FILE` | | Okunacak env dosyası (yoksa default arama sırası, bkz. Kurulum § Env dosyası) |
 
 **Anahtar gizliliği:** `TT_API_KEY` sadece outbound `Authorization` header'ına yazılır. Tool tanımına,
 tool çıktısına, hata mesajına ve log'a **asla** girmez; logx middleware'i `Authorization` header'ını loglamaz.
 
-## Kapsam: v1 salt okunur
+## Kapsam: varsayılan salt okunur, opt-in write (ADR-032)
 
-Write/akcióll tool **yok** (monitor create, incident ack/resolve, load test başlatma, repo analizi tetikleme,
-hata status change dahil). Agent'lar okur, kullanıcı UI'dan veya CLI ile yazar. v2'de write tool'lar ayrı
-ADR ile, açık kullanıcı onayı (ör. confirm parametresi) ile gelir.
+Varsayılan kurulum **salt okunur**: 27 tool, hepsi GET (tek istisna `tt_preview_monitor`: POST ama hiçbir şey kaydetmez).
+`TT_MCP_ALLOW_WRITE=true` ile 11 write tool daha kaydedilir (toplam 38). Write tool'ların kuralları:
 
-## Tool yüzeyi (12 tool)
+- **Onay:** her write tool `confirm` parametresi alır. `confirm` yoksa / `false` ise API'ye yazılmaz; sonuç
+  `{dryRun: true, wouldSend: {method, path, body}, next}` — agent bunu kullanıcıya gösterir, kullanıcı onaylayınca
+  aynı çağrıyı `confirm: true` ile tekrarlar. Tek istisna `tt_stop_loadtest` (yükü yalnız azaltır, acil durdurma).
+- **Kaynak:** agent'ın oluşturduğu monitor, KPI ve load test senaryosu `source: "agent"` taşır (migration
+  `014_agent_source.sql`); UI'da "Agent" rozeti. Kullanıcının verdiği `source` yok sayılır.
+- **Sahiplik:** `tt_delete_monitor` / `tt_delete_kpi` yalnız `source = agent` kayıtları siler; diğerleri reddedilir
+  (kullanıcı UI'dan siler ya da agent mute eder). Repo'dan yönetilen (`source = code`) monitor/KPI güncellenmez.
+- **Load test:** `tt_run_loadtest` gerçek trafik üretir; senaryo `draft` ise reddedilir, hedef doğrulanmış domain
+  olmalı (domain ekleme/doğrulama kullanıcıda). Agent oluşturduğu senaryoya `gate` yoksa
+  `{abortErrorRate: 0.5, abortP95Ms: 10000}` ekler.
+- Hâlâ sarılmayanlar: incident ack/resolve, repo analizi tetikleme, hata status değişikliği, kanal/entegrasyon
+  ekleme, domain ekleme, API key işlemleri.
+
+## Tool yüzeyi (27 okuma + 11 write)
 
 İsimler `tt_` önekli; tanımlar LLM'in tool **seçmesi** için yazılır (ne zaman çağrılan, ne zaman çağrılmayan).
-Hepsi `{ range?, env? }` kabul eder (default `1h`, enum `15m|30m|1h|6h|24h|7d` — contracts §8); `env` verilmezse
-tüm ortamlar. Sonuç şekilleri contracts.md'deki schema'lardır (api ile birebir passthrough).
+Zaman penceresi alan tool'lar `{ range?, env? }` kabul eder (default `1h`, enum `15m|30m|1h|6h|24h|7d` — contracts §8);
+`env` verilmezse tüm ortamlar. Sonuç şekilleri contracts.md'deki schema'lardır (api ile birebir passthrough).
 
 | # | Tool | Sarılan uç (operationId) |
 |---|---|---|
@@ -52,8 +66,43 @@ tüm ortamlar. Sonuç şekilleri contracts.md'deki schema'lardır (api ile bireb
 | 10 | `tt_get_incident` | `GET /api/v1/incidents/{id}` (`getIncidentsId`) + `GET /api/v1/incidents/{id}/events` (`getIncidentsIdEvents`) |
 | 11 | `tt_list_loadtest_runs` | `GET /api/v1/loadtests/runs` (`getLoadtestsRuns`) |
 | 12 | `tt_list_deploys` | `GET /api/v1/deploys` (`getDeploys`) |
+| 13 | `tt_list_errors` | `GET /api/v1/errors` (`getErrors`) — mesajlar `redact`'ten geçer |
+| 14 | `tt_get_error` | `GET /api/v1/errors/{fingerprint}` (`getErrorsFingerprint`) |
+| 15 | `tt_list_kpis` | `GET /api/v1/kpis` (`getKpis`) |
+| 16 | `tt_list_alert_suggestions` | `GET /api/v1/suggestions` (`getSuggestions`) |
+| 17 | `tt_list_inventory` | `GET /api/v1/inventory` (`getInventory`) |
+| 18 | `tt_list_monitor_templates` | `GET /api/v1/monitor-templates` |
+| 19 | `tt_list_notify_channels` | `GET /api/v1/integrations/slack` + `/integrations/slack/channels` (`refresh`) + `GET /api/v1/notification-channels` (yalnız ad + tip; config asla) |
+| 20 | `tt_get_app_summary` | `GET /api/v1/apps/{app}/summary` |
+| 21 | `tt_get_ai_overview` | `GET /api/v1/ai/overview` |
+| 22 | `tt_list_hosts` | `GET /api/v1/infra/hosts` |
+| 23 | `tt_list_databases` | `GET /api/v1/infra/databases` |
+| 24 | `tt_list_consumer_groups` | `GET /api/v1/infra/groups` |
+| 25 | `tt_preview_monitor` | `POST /api/v1/monitors/preview` (kaydetmez; seri son 60 bucket'a kırpılır) |
+| 26 | `tt_list_loadtest_scenarios` | `GET /api/v1/loadtests/scenarios` (spec çıkarılır) + `GET /api/v1/loadtests/domains` |
+| 27 | `tt_get_loadtest_run` | `GET /api/v1/loadtests/runs/{id}` |
 
-**Tool detayları** (isim → LLM tanımı → input → sonuç):
+**Write tool'lar** (`TT_MCP_ALLOW_WRITE=true`; hepsi `confirm` ile, bkz. Kapsam):
+
+| Tool | Sarılan uç | Not |
+|---|---|---|
+| `tt_create_monitor` | `POST /api/v1/monitors` | `source: agent`; `channels` zorunlu (boş liste = yalnız incident) |
+| `tt_update_monitor` | `GET` + `PATCH /api/v1/monitors/{id}` | name, severity, channels, status, condition, mutedUntil; `source = code` reddedilir |
+| `tt_delete_monitor` | `GET` + `DELETE /api/v1/monitors/{id}` | yalnız `source = agent` |
+| `tt_accept_suggestion` | `POST /api/v1/suggestions/{id}/accept` | threshold / severity / channels override |
+| `tt_create_kpi` | `POST /api/v1/kpis` | `source: agent`; endpoint `ref` = `"METHOD /route"`, latency SLI'da `good.thresholdMs` zorunlu |
+| `tt_update_kpi` | `GET` + `PUT /api/v1/kpis/{id}` | tam KPI; mevcut `source` korunur, `code` reddedilir |
+| `tt_delete_kpi` | `GET` + `DELETE /api/v1/kpis/{id}` | yalnız `source = agent` |
+| `tt_send_slack_test` | `POST /api/v1/integrations/slack/test` | `slack:<id>#ad` hedefini id'ye indirger; 502 mesajı (bot davetli değil vb.) agent'a geçer |
+| `tt_create_loadtest_scenario` | `POST /api/v1/loadtests/scenarios` | `source: agent`, `state: ready`; `target` http(s) URL, `steps` + `levels` (veya `script`) zorunlu |
+| `tt_run_loadtest` | `GET` scenario + `POST /api/v1/loadtests/scenarios/{id}/runs` | dry run hedef / tepe VU / süreyi gösterir; draft reddedilir |
+| `tt_stop_loadtest` | `POST /api/v1/loadtests/runs/{id}/stop` | confirm yok |
+
+Write hataları: 400/409 → API'nin `error` mesajı (≤ 300 karakter) geçer ("the API rejected the input (HTTP 400): …");
+501/502 → API'nin okunur nedeni (Slack App yapılandırılmamış, Slack mesajı reddetti); 5xx gövdesi asla geçmez; timeout
+→ "may or may not have been applied: check with a list call before retrying".
+
+**Tool detayları** (v1 tool'ları; isim → LLM tanımı → input → sonuç):
 
 1. **`tt_list_services`** — "List services in the project with throughput, error rate and latency
    summary; start here to discover service names." Input: `{ range?, env?, type? }` (`type` = `http|worker|web|mobile`,
@@ -90,23 +139,19 @@ tüm ortamlar. Sonuç şekilleri contracts.md'deki schema'lardır (api ile bireb
     Sonuç: `{ incident: Incident (+ rootCause), events: IncidentEvent[] }` (rootCause şemasız —
     bkz. "Bilinen bayraklar").
 11. **`tt_list_loadtest_runs`** — "Load test runs with state, thresholds and summary; use to check a
-    scenario's latest result, not to start tests." Input: `{ scenarioId? }`. Sonuç: `LoadTestRun[]`.
+    scenario's latest result." Input: `{ scenarioId? }`. Sonuç: `LoadTestRun[]`.
 12. **`tt_list_deploys`** — "Deploy markers (newest versions first seen, Vercel/CI markers); use to
     correlate an incident or latency change with a deployment." Input: `{ range?, env?, service?, source? }`.
     Sonuç: `DeployMarker[]`.
 
-**Bilinçli olarak dışarıda bırakılanlar** (v2 adayları, ayrı tool sayısı/kardinalite gerekçesiyle):
-`tt_list_errors`/`tt_get_error` (`getErrors`, `getErrorsFingerprint`), SLO KPI listesi (`getKpis`),
-RUM (`/apps/*`), infra/K8s (`/infra/*`), profiling (`/profiles/*`), AI monitoring (`/ai/*`), codeintel
-verisi (`/inventory`, `/suggestions` — bkz. aşağıdaki örtüşme notu).
+**Hâlâ dışarıda:** profiling (`/profiles/*`), session replay, `POST /api/v1/ai/incident-summary` (LLM kotası).
 
 ## Kod intelligence ile örtüşme
 
 `services/codeintel` (:8096) **sadece webhook + analiz** servisidir; sorgu API'si yoktur. Onun verisi
 (envanter, öneri, repo durumu) zaten `services/api` uçlarında (`GET /repos`, `GET /inventory`,
-`GET /suggestions`) okunur. Kural: MCP tool'ları codeintel'e **doğrudan** bağlanmaz; v2'de envanter/
-öneri tool'ları eklenirse yine api üzerinden ve salt okunur (`POST /repos/{id}/analyze`,
-`suggestions/{id}/accept|reject` gibi write'lar asla sarılmaz) tasarlanır.
+`GET /suggestions`) okunur. Kural: MCP tool'ları codeintel'e **doğrudan** bağlanmaz; envanter / öneri tool'ları api üzerinden okur. Tek write
+`tt_accept_suggestion` (ADR-032, onaylı); `POST /repos/{id}/analyze` ve `suggestions/{id}/reject` sarılmaz.
 
 ## Kesişen kurallar (her tool için)
 
@@ -130,13 +175,62 @@ verisi (`/inventory`, `/suggestions` — bkz. aşağıdaki örtüşme notu).
    kullanılamıyor. Başlangıçtaki `/me` kontrolü (config) en fazla 512 karakter gövde gösterebilir — bu
    stderr'e yazılır, tool çıktısı değildir.
 
-## Bağlanma
+## Kurulum (tek komut)
 
-Binary: `cd services/mcp && go install ./cmd/tt-mcp` (`$(go env GOPATH)/bin` PATH'te olmalı; değilse aşağıdaki
-`command`'a mutlak yol yazılır). API ayakta olmalı (compose `--profile app` veya servisleri lokal çalıştır) ve bir proje + api key bulunmalı: onboarding
+```bash
+curl -fsSL https://telemetry.tasktrooper.ai/install-agent.sh | bash
+```
+
+Script `apps/web/public/install-agent.sh` (web build ile `/install-agent.sh` olarak servis edilir; bash 3.2 uyumlu):
+
+1. Makinede kurulu kodlama tool'larını bulur (komut, home dizini, `/Applications/*.app`) ve hangilerine kurulacağını sorar.
+2. Kapsamı sorar: **global** (kullanıcı config'leri) veya **proje** (git kökü).
+3. API URL (default `https://telemetry-api.tasktrooper.ai`) ve api key'i alır; key gizli prompt'la (veya `TT_API_KEY` env'den)
+   okunur, `curl -H @-` ile `GET /api/v1/me`'de doğrulanır (argv'ye girmez). Sonra write tool'ları açılsın mı (y/N) sorar.
+4. `tt-mcp` binary'sini son `mcp/v*` GitHub Release'inden indirir, `checksums.txt` ile doğrular, `~/.local/bin`'e koyar.
+   Release yoksa Go ile kaynaktan derler (`git clone` + `go build`); `--source DIR` yerel checkout'tan derler.
+5. Env dosyasını yazar (umask 077, mod 600): global `~/.config/tasktrooper/mcp.env`, proje `<kök>/.tasktrooper/mcp.env`
+   (`.tasktrooper/` `.gitignore`'a eklenir). Key tool config'lerine **yazılmaz**, sadece bu dosyada durur.
+6. Skill'leri (`trooper-diagnose`, `trooper-query`, `trooper-alerts`) kopyalar, MCP sunucusunu her tool'un config'ine
+   `tasktrooper` adıyla ekler. JSON merge python3 / node ile yapılır, ilk değişiklikte `.tasktrooper.bak` yedeği alınır;
+   JSONC gibi parse edilemeyen dosyada script dosyaya dokunmaz, elle eklenecek snippet'i basar.
+
+Bayraklar: `--tools claude,cursor|all`, `--scope global|project`, `--project-dir`, `--api-url`, `--write|--read-only`,
+`--bin-dir`, `--source`, `-y` (sorusuz). Desteklenen tool'lar ve yazılan yerler:
+
+| Tool | MCP (global / proje) | Skill'ler (global / proje) |
+|---|---|---|
+| Claude Code | `claude mcp add --scope user` / `.mcp.json` | `~/.claude/skills` (symlink) / `.claude/skills` (symlink) |
+| Cursor | `~/.cursor/mcp.json` / `.cursor/mcp.json` | `~/.agents/skills` / `.agents/skills` |
+| Antigravity | `~/.gemini/config/mcp_config.json` (+ legacy `~/.gemini/antigravity/`) / `.agents/mcp_config.json` | `~/.gemini/config/skills` (symlink) / `.agents/skills` |
+| Codex | `codex mcp add` veya `~/.codex/config.toml` / `.codex/config.toml` | `~/.agents/skills` / `.agents/skills` |
+| OpenCode | `~/.config/opencode/opencode.json(c)` / `opencode.json` | `~/.agents/skills` / `.agents/skills` |
+| Gemini CLI | `gemini mcp add -s user` veya `~/.gemini/settings.json` / `.gemini/settings.json` | `~/.agents/skills` / `.agents/skills` |
+| Muse Code (Meta) | `~/.config/muse/settings.json` (`schema_version: 1`, `mcp_servers`) — proje config'i yok, hep global | `~/.agents/skills` |
+
+Global config'ler binary'nin mutlak yolunu kullanır; proje config'leri `tt-mcp` PATH'teyse adıyla yazar (repo'ya taşınabilir).
+**Bilinen boşluk:** Muse Code'un MCP anahtarı (`mcp_servers` vs `mcpServers`) kaynaklarda çelişkili, doğrulanmadı.
+
+**Env dosyası** (`internal/config/envfile.go`): `tt-mcp` startup'ta ilk bulduğu dosyayı okur; sıra
+`$TT_MCP_ENV_FILE` → cwd'den git köküne kadar `.tasktrooper/mcp.env` → `$XDG_CONFIG_HOME/tasktrooper/mcp.env`
+(default `~/.config/tasktrooper/mcp.env`). Sadece `TT_API_URL`, `TT_API_KEY`, `TT_MCP_ALLOW_WRITE`, `TT_ORG_ID`,
+`TT_PROJECT_ID`, `TT_LOG_LEVEL` okunur; ortamda zaten set olan değişken kazanır. Mod `077` bitlerinden biri açıksa
+uyarı log'lanır (`chmod 600`). `TT_MCP_ENV_FILE` verilip dosya yoksa sunucu başlamaz; default dosyaların yokluğu sorun değil.
+Proje kapsamı, tool'un MCP sunucusunu proje klasöründe başlatmasına dayanır.
+
+**Release:** `.github/workflows/release-mcp.yml`, `mcp/vX.Y.Z` tag'inde darwin/linux (arm64, amd64) + windows/amd64
+binary'lerini `tt-mcp_<os>_<arch>.tar.gz` ve `checksums.txt` ile GitHub Release'e koyar
+(`git tag mcp/v0.1.0 && git push origin mcp/v0.1.0`). Go module path'i repo ile eşleşmediği ve `replace` olduğu için
+`go install github.com/...` çalışmaz; dağıtım binary'dir.
+
+## Bağlanma (elle)
+
+Binary: release'ten indir veya `cd services/mcp && go build -o ~/.local/bin/tt-mcp ./cmd/tt-mcp` (`~/.local/bin` PATH'te
+olmalı; değilse aşağıdaki `command`'a mutlak yol yazılır). API ayakta olmalı (compose `--profile app` veya servisleri lokal çalıştır) ve bir proje + api key bulunmalı: onboarding
 (UI'da "org + proje oluştur", contracts §11) veya `api bootstrap --org <ad> --project <ad> --owner <email>`, ardından
 dashboard Settings → API keys. Platformun kendi verisi için `make self` (ADR-027/028). `tt-mcp`
-startup'ta `GET /me` çağırır, API yoksa başlamaz.
+startup'ta `GET /me` çağırır, API yoksa başlamaz. Env değişkenleri config'e yazılmak yerine env dosyasına da konabilir
+(bkz. Kurulum § Env dosyası); config'te sadece `command` kalır.
 
 **OpenCode** (`~/.config/opencode/opencode.json` veya proje `opencode.json`):
 
@@ -164,6 +258,16 @@ startup'ta `GET /me` çağırır, API yoksa başlamaz.
 claude mcp add tasktrooper \
   -e TT_API_URL=http://localhost:8080 -e TT_API_KEY=<api-key> \
   -e TT_ORG_ID=<org-id> -e TT_PROJECT_ID=<project-id> \
+  -- tt-mcp
+```
+
+Alert / KPI / load test tanımlatmak için write açık (ADR-032; agent yine her değişiklikte onay ister). Demo API'si
+`https://telemetry-api.tasktrooper.ai`; key dashboard Settings → API keys'ten, kullanıcı kendisi yapıştırır:
+
+```bash
+claude mcp add tasktrooper \
+  -e TT_API_URL=https://telemetry-api.tasktrooper.ai -e TT_API_KEY=<api-key> \
+  -e TT_MCP_ALLOW_WRITE=true \
   -- tt-mcp
 ```
 
@@ -195,9 +299,11 @@ Tool'ları **hangi sırayla** kullanacağını anlatan Agent Skills (`skills/<na
 |---|---|
 | [`trooper-diagnose`](../skills/trooper-diagnose/SKILL.md) | "X'te bir sorun var, neden?" — incident → KPI → endpoint RCA → trace → log → deploy; kanıtsız neden yok, zayıf kanıtta "unknown" |
 | [`trooper-query`](../skills/trooper-query/SKILL.md) | Telemetri sorusu; scope (`range`/`service`/`limit`), log sayfalama (`before`/`nextBefore`), `truncated` okuma |
+| [`trooper-alerts`](../skills/trooper-alerts/SKILL.md) | "Bu proje için alert / KPI kur" — envanter + mevcut monitor/KPI/öneri → veriden eşik → `tt_preview_monitor` → liste halinde onay → `confirm: true`; veri yetersizse load test önerir (onayla senaryo + run) |
 | [`trooper-contribute`](../skills/trooper-contribute/SKILL.md) | Bu repoda kod değişikliği; AGENTS.md + `.ai/` kurallarına işaret eden kontrol listesi |
 
-`trooper-diagnose` ve `trooper-query` yukarıdaki § Bağlanma ile kayıtlı `tasktrooper` MCP sunucusunu gerektirir.
+`trooper-diagnose`, `trooper-query` ve `trooper-alerts` yukarıdaki § Kurulum (veya § Bağlanma) ile kayıtlı `tasktrooper` MCP sunucusunu gerektirir. `trooper-alerts`
+write adımları için `TT_MCP_ALLOW_WRITE=true` ister; kapalıysa önerileri liste olarak verir, kullanıcı UI'dan oluşturur.
 
 **Keşif:** tek bağlantı commit'li `.claude/skills -> ../skills` symlink'i, kopya yok.
 - Claude Code proje skill'lerini `.claude/skills/<name>/SKILL.md`'den okur.

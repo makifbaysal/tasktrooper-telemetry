@@ -4,7 +4,7 @@ import { AppWindow, ArrowRight, Check, Server, Smartphone } from 'lucide-react';
 import { HeroScene } from '@/components/public/ServiceMap';
 import { PublicFooter, PublicNav, useHashScroll } from '@/components/public/PublicNav';
 import { CodeBlock } from '@/components/public/CodeBlock';
-import { DOC_SDKS, MCP_SETUP, SKILLS } from '@/components/public/docsContent';
+import { DOC_SDKS, INSTALL_CMD, INSTALL_TOOLS, SKILLS } from '@/components/public/docsContent';
 
 /**
  * Public landing page (signed-out `/`). Explains the product; sign-in lives on its own page (`/login`), there is no
@@ -247,13 +247,15 @@ export function Landing() {
         <section className="psec" aria-labelledby="agents-title">
           <div className="psec__head">
             <h2 id="agents-title">Ask your coding agent, with evidence.</h2>
-            <p>A read-only MCP server gives Claude Code, Cursor or OpenCode the same services, traces, logs, incidents and
-              deploys you see. Two agent skills tell it how to investigate with them.</p>
+            <p>An MCP server gives your coding agent the same services, traces, logs, incidents and deploys you see. Agent
+              skills tell it how to investigate and how to set up alerts and SLOs from your own traffic, with your approval
+              for every change. One command installs both in {INSTALL_TOOLS.slice(0, -1).join(', ')} or {INSTALL_TOOLS.at(-1)}.</p>
           </div>
           <div className="agents">
             <div className="agents__setup">
-              <CodeBlock caption="Claude Code" code={MCP_SETUP[1].code} />
-              <Link to="/docs#mcp" className="plink">MCP server and skills <ArrowRight size={14} aria-hidden /></Link>
+              <CodeBlock caption="Install for your coding agents" code={INSTALL_CMD} />
+              <p className="agents__hint">Finds the tools on your machine, asks which ones and whether globally or for one project.</p>
+              <Link to="/docs#install" className="plink">Install guide, MCP server and skills <ArrowRight size={14} aria-hidden /></Link>
             </div>
             <dl className="agents__skills">
               {SKILLS.filter((s) => s.needsMcp).map((s) => (

@@ -90,6 +90,9 @@ const LLM_DEFAULT_TH: Record<LlmMetric, string> = {
 };
 const LLM_DEFAULT_WINDOW = (m: LlmMetric) => (m === 'cost_usd_per_hour' || m === 'tokens' || m === 'input_tokens' || m === 'output_tokens' || m === 'cost_usd' ? '1h' : '15m');
 const LLM_WINDOWS = [{ value: '5m', label: '5 minutes' }, { value: '15m', label: '15 minutes' }, { value: '1h', label: '1 hour' }, { value: '6h', label: '6 hours' }, { value: '24h', label: '24 hours' }];
+/** Window a value is measured over (condition.window; the engine defaults to 5 minutes), re-checked every minute. */
+const MEASURE_WINDOWS = [{ value: '1m', label: '1 minute' }, { value: '5m', label: '5 minutes' }, { value: '10m', label: '10 minutes' }, { value: '15m', label: '15 minutes' }, { value: '30m', label: '30 minutes' }, { value: '1h', label: '1 hour' }];
+const windowLabel = (w: string) => MEASURE_WINDOWS.find((x) => x.value === w)?.label ?? LLM_WINDOWS.find((x) => x.value === w)?.label ?? w;
 const LLM_OPERATIONS = [{ value: '', label: 'Any operation' }, { value: 'chat', label: 'chat' }, { value: 'text_completion', label: 'text_completion' }, { value: 'embeddings', label: 'embeddings' }, { value: 'generate_content', label: 'generate_content' }];
 const llmFmt = (m: LlmMetric) => {
   const u = llmMeta(m).unit;
@@ -163,7 +166,7 @@ export function AlertEditor() {
   const [picked, setPicked] = useState<string[]>(Array.isArray(q.monitorIds) ? (q.monitorIds as string[]) : []);
   // job_missed
   const [process, setProcess] = useState(editing?.targetSpec?.process ?? '');
-  const [everyMin, setEveryMin] = useState(String(num(q.expectedEveryMin, 60)));
+  const [everyMin, setEveryMin] = useState(String(num(q.intervalMin ?? q.expectedEveryMin, 60)));
   const [graceMin, setGraceMin] = useState(String(num(q.graceMin, 10)));
   // error_new
   const [errScope, setErrScope] = useState<string>(kind === 'error_new' && editing && !editing.targetSpec?.service ? '*' : svcParam ?? '*');
@@ -281,7 +284,9 @@ export function AlertEditor() {
 
   const rule = { forMin: Number(forMin) || 0, ...(Number(renotify) ? { renotifyMin: Number(renotify) } : {}) };
   const common = { severity, channels, source: editing?.source === 'suggestion' ? 'suggestion' : !editing && templateId && (kind === 'infra' || kind === 'faas' || kind === 'llm') ? 'template' : 'manual' };
-  const ruleExtra = { ...(condWindow ? { window: condWindow } : {}) };
+  // every measured kind states its window ("error rate over the last 5 minutes"); the engine default is 5m
+  const measureWindow = condWindow ?? (kind === 'anomaly' ? '15m' : '5m');
+  const ruleExtra = { window: measureWindow };
   const autoName: Record<Kind, string> = {
     metric_threshold: `${svcLabel} ${ep ? `${ep.method} ${ep.route}` : ''} ${METRICS.find((m) => m.value === metric)!.label.toLowerCase()}`,
     anomaly: `${svcLabel} ${ep ? `${ep.method} ${ep.route}` : ''} ${METRICS.find((m) => m.value === metric)!.label.toLowerCase()} anomaly`,
@@ -299,11 +304,11 @@ export function AlertEditor() {
     metric_threshold: {
       name: finalName, kind: metric === 'p95' ? 'latency' : 'metric_threshold', target,
       query: metric === 'p95' ? { percentile: 'p95' } : { metric },
-      condition: { op: below ? '<' : '>', threshold: Number.isFinite(thValue) ? thValue : 0, minRequests: Number(minReq) || 0, ...rule }, ...common,
+      condition: { op: below ? '<' : '>', threshold: Number.isFinite(thValue) ? thValue : 0, minRequests: Number(minReq) || 0, ...ruleExtra, ...rule }, ...common,
     },
     anomaly: {
       name: finalName, kind: 'anomaly', target, query: { metric, baseline, direction, sensitivity: zValue },
-      condition: { op: '>', threshold: Number.isFinite(zValue) ? zValue : 3, minRequests: Number(minReq) || 0, ...rule }, ...common,
+      condition: { op: '>', threshold: Number.isFinite(zValue) ? zValue : 3, minRequests: Number(minReq) || 0, ...ruleExtra, ...rule }, ...common,
     },
     composite: {
       name: finalName, kind: 'composite', target: { service: svcParam ?? undefined }, query: { op: compOp, monitorIds: picked },
@@ -311,7 +316,7 @@ export function AlertEditor() {
     },
     job_missed: {
       name: finalName, kind: 'job_missed', target: { service, process: process || undefined },
-      query: { expectedEveryMin: every, graceMin: grace },
+      query: { intervalMin: every, graceMin: grace },
       condition: { op: '>', threshold: every + grace, forMin: 0, ...(Number(renotify) ? { renotifyMin: Number(renotify) } : {}) }, ...common,
     },
     infra: {
@@ -380,9 +385,9 @@ export function AlertEditor() {
     const metricLabel = METRICS.find((m) => m.value === metric)!.label.toLowerCase();
     switch (kind) {
       case 'metric_threshold':
-        return <>Fires when the {b(metricLabel)} of {scope} stays {b(`${opWord(below)} ${metric === 'error_rate' ? `${threshold}%` : `${threshold} ${unitOf(metric)}`}`)} for {b(forLabel(forMin))}. Quiet when there are fewer than {minReq || 0} requests.</>;
+        return <>Fires when the {b(metricLabel)} of {scope} over the {b(`last ${windowLabel(measureWindow)}`)} is {b(`${opWord(below)} ${metric === 'error_rate' ? `${threshold}%` : `${threshold} ${unitOf(metric)}`}`)}{Number(forMin) ? <> for {b(forLabel(forMin))} in a row</> : null}. Quiet when that window has fewer than {minReq || 0} requests.</>;
       case 'anomaly':
-        return <>Fires when the {b(metricLabel)} of {scope} moves {b(direction === 'both' ? 'away from' : direction === 'up' ? 'above' : 'below')} its usual level (last {baseline}) by more than {b(`${z}σ`)} for {b(forLabel(forMin))}.</>;
+        return <>Fires when the {b(metricLabel)} of {scope} moves {b(direction === 'both' ? 'away from' : direction === 'up' ? 'above' : 'below')} its usual level (last {baseline}) by more than {b(`${z}σ`)}, measured over the {b(`last ${windowLabel(measureWindow)}`)}{Number(forMin) ? <> for {b(forLabel(forMin))} in a row</> : null}.</>;
       case 'composite':
         return picked.length < 2 ? <>Pick at least two monitors below.</> : <>Fires when {b(compOp === 'and' ? `all ${picked.length}` : `any of ${picked.length}`)} picked monitors are firing{Number(forMin) ? <> for {b(forLabel(forMin))}</> : null}.</>;
       case 'job_missed':
@@ -390,9 +395,9 @@ export function AlertEditor() {
       case 'error_new':
         return <>Fires on the first event of an {b('error never seen before')} in {b(errScope === '*' ? 'any service' : services.find((s) => s.id === errScope)?.name ?? errScope)}.</>;
       case 'infra':
-        return <>Fires when the {b(`${agg === 'max' ? 'worst' : 'average'} ${INFRA_METRIC_LABEL[infraMetric].toLowerCase()}`)} of {b(`${INFRA_ENTITIES.find((e) => e.value === entity)!.label.toLowerCase()}s`)}{fService ? <> of {b(svcLabel)}</> : null} stays {b(`${opWord(op === '<')} ${ruleLabel}`)} for {b(forLabel(forMin))}.</>;
+        return <>Fires when the {b(`${agg === 'max' ? 'worst' : 'average'} ${INFRA_METRIC_LABEL[infraMetric].toLowerCase()}`)} of {b(`${INFRA_ENTITIES.find((e) => e.value === entity)!.label.toLowerCase()}s`)}{fService ? <> of {b(svcLabel)}</> : null} over the {b(`last ${windowLabel(measureWindow)}`)} is {b(`${opWord(op === '<')} ${ruleLabel}`)}{Number(forMin) ? <> for {b(forLabel(forMin))} in a row</> : null}.</>;
       case 'faas':
-        return <>Fires when the {b(FAAS_METRICS.find((m) => m.value === faasMetric)!.label.toLowerCase())} of {b(fnId !== '*' && fn ? fn.name : 'matching functions')} stays {b(`${opWord(op === '<')} ${ruleLabel}`)} for {b(forLabel(forMin))}.</>;
+        return <>Fires when the {b(FAAS_METRICS.find((m) => m.value === faasMetric)!.label.toLowerCase())} of {b(fnId !== '*' && fn ? fn.name : 'matching functions')} over the {b(`last ${windowLabel(measureWindow)}`)} is {b(`${opWord(op === '<')} ${ruleLabel}`)}{Number(forMin) ? <> for {b(forLabel(forMin))} in a row</> : null}.</>;
       case 'llm':
         return <>Fires when the {b(llmMeta(llmMetric).label.toLowerCase())} of LLM calls{lService ? <> in {b(lService)}</> : null}{lModel ? <> on {b(lModel)}</> : null} over {b(LLM_WINDOWS.find((w) => w.value === llmWindow)?.label ?? llmWindow)} is {b(`${opWord(op === '<')} ${llmThLabel}`)}{Number(forMin) ? <> for {b(forLabel(forMin))}</> : null}.</>;
       default:
@@ -477,7 +482,9 @@ export function AlertEditor() {
                   <Field label={`${below ? 'Below' : 'Above'} (${unitOf(metric)})`}><Input mono value={threshold} onChange={(e) => setThreshold(e.target.value)} inputMode="decimal" /></Field>
                   <ForField value={forMin} onChange={setForMin} />
                 </div>
-                <Field label="Minimum requests" hint="Skip evaluation when traffic is too low to be meaningful."><Input mono value={minReq} onChange={(e) => setMinReq(e.target.value)} /></Field>
+                <WindowField value={measureWindow} onChange={setCondWindow}
+                  hint={metric === 'error_rate' ? 'Failed ÷ all requests in this window.' : metric === 'p95' ? 'p95 of the requests in this window.' : 'Requests per minute averaged over this window.'} />
+                <Field label="Minimum requests" hint="Counted in the measured window; fewer never fire (1 of 2 failing is not 50 % of users)."><Input mono value={minReq} onChange={(e) => setMinReq(e.target.value)} /></Field>
               </div>
             </Card>
           )}
@@ -498,6 +505,7 @@ export function AlertEditor() {
                   </Field>
                   <ForField value={forMin} onChange={setForMin} />
                 </div>
+                <WindowField value={measureWindow} onChange={setCondWindow} hint="The current value is taken over this window, then compared with the baseline." />
                 <Field label="Direction"><Segmented label="Direction" value={direction} onChange={setDirection}
                   options={[{ id: 'up', label: 'Above baseline' }, { id: 'down', label: 'Below baseline' }, { id: 'both', label: 'Either' }]} /></Field>
                 <Field label="Minimum requests"><Input mono value={minReq} onChange={(e) => setMinReq(e.target.value)} /></Field>
@@ -640,7 +648,7 @@ export function AlertEditor() {
                 {kind === 'faas' && !relative && fn && fnId !== '*' && fn.timeoutS && isDuration(faasMetric) && (
                   <span className="muted" style={{ fontSize: 'var(--text-sm)' }}>Timeout of {fn.name}: {fn.timeoutS} s · 80% = {ms(fn.timeoutS * 800)}</span>
                 )}
-                {condWindow && <span className="muted" style={{ fontSize: 'var(--text-sm)' }}>Evaluated over a {condWindow} window (from the template).</span>}
+                <WindowField value={measureWindow} onChange={setCondWindow} hint={kind === 'infra' ? 'Each entity is measured over this window; the worst one is compared.' : 'Each function is measured over this window; the worst one is compared.'} />
               </div>
             </Card>
           )}
@@ -748,10 +756,19 @@ export function AlertEditor() {
   );
 }
 
+function WindowField({ value, onChange, hint }: { value: string; onChange: (v: string) => void; hint?: string }) {
+  const opts = MEASURE_WINDOWS.some((w) => w.value === value) ? MEASURE_WINDOWS : [{ value, label: windowLabel(value) }, ...MEASURE_WINDOWS];
+  return (
+    <Field label="Measured over" hint={`${hint ? `${hint} ` : ''}Re-checked every minute.`}>
+      <Select value={value} onChange={(e) => onChange(e.target.value)} options={opts.map((w) => ({ value: w.value, label: `Last ${w.label}` }))} />
+    </Field>
+  );
+}
+
 function ForField({ value, onChange, label = 'Must last' }: { value: string; onChange: (v: string) => void; label?: string }) {
   return (
     <Field label={label}><Select value={value} onChange={(e) => onChange(e.target.value)}
-      options={[{ value: '0', label: 'No wait, first check' }, { value: '5', label: '5 minutes' }, { value: '10', label: '10 minutes' }, { value: '15', label: '15 minutes' }]} /></Field>
+      options={[{ value: '0', label: 'No wait, first breach' }, { value: '5', label: '5 minutes' }, { value: '10', label: '10 minutes' }, { value: '15', label: '15 minutes' }]} /></Field>
   );
 }
 

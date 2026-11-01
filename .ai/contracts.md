@@ -84,7 +84,7 @@ sağlayıcısına kısıtlı.
 | api | `TT_COOKIE_SECURE` | `true` |
 | integrations | `TT_PUBLIC_INGEST_URL` | `https://ingest.telemetry.tasktrooper.ai` (Vercel drain) |
 | trooper-cli | `TROOPER_API_URL` | `https://symbols.telemetry.tasktrooper.ai` |
-| mcp (`tt-mcp`) | `TT_API_URL` | `https://api.telemetry.tasktrooper.ai` |
+| mcp (`tt-mcp`) | `TT_API_URL` | `https://api.telemetry.tasktrooper.ai` (demo: `https://telemetry-api.tasktrooper.ai`, ADR-031) |
 
 Üçüncü taraf kayıtları: Slack App redirect URL `https://api.telemetry.tasktrooper.ai/api/v1/integrations/slack/callback`, GitHub App
 callback `https://api.telemetry.tasktrooper.ai/api/v1/integrations/github/callback` ve webhook URL
@@ -1056,14 +1056,17 @@ OTel log event'i `gen_ai.client.inference.operation.details` gelirse içerik ora
 
 ## 26. MCP sunucusu (`services/mcp`, ADR-025)
 
-Yerel kodlama agent'ları için salt okunur MCP sunucusu (`cmd/tt-mcp`, stdio; resmi Go MCP SDK). Detay: `.ai/mcp.md`.
+Yerel kodlama agent'ları için MCP sunucusu; varsayılan salt okunur, write opt-in (ADR-032). (`cmd/tt-mcp`, stdio; resmi Go MCP SDK). Detay: `.ai/mcp.md`.
 
 - **Sarım:** Tool'lar `services/api`'yi (`openapi.yaml`) sarar; DB'ye doğrudan bağlantı yok. HTTP client
   `Authorization: Bearer <TT_API_KEY>`; tenant api key'den gelir (ADR-016). Ek doğrulama: `TT_ORG_ID` /
   `TT_PROJECT_ID` startup'ta `GET /me` ile eşleştirilmezse sunucu başlamaz.
-- **Env:** `TT_API_URL`, `TT_API_KEY`, `TT_ORG_ID`, `TT_PROJECT_ID`, `TT_LOG_LEVEL`. `TT_API_KEY` tool
+- **Env:** `TT_API_URL`, `TT_API_KEY`, `TT_ORG_ID`, `TT_PROJECT_ID`, `TT_LOG_LEVEL`, `TT_MCP_ALLOW_WRITE` (default `false`). `TT_API_KEY` tool
   tanımına, tool çıktısına, hata mesajına ve log'a girmez.
-- **v1 tool yüzeyi** (12, hepsi GET; write tool yok). `range` enum `15m|30m|1h|6h|24h|7d` (default `1h`):
+- **Env dosyası:** `tt-mcp` startup'ta `$TT_MCP_ENV_FILE` → `.tasktrooper/mcp.env` (cwd → git kökü) →
+  `~/.config/tasktrooper/mcp.env` sırasıyla ilk bulduğu dosyadan yukarıdaki değişkenleri okur; ortam kazanır, mod 600 beklenir.
+  Installer (`/install-agent.sh`) bu dosyayı yazar; binary'ler `mcp/vX.Y.Z` tag'inde GitHub Release'e çıkar (`.ai/mcp.md` § Kurulum).
+- **v1 tool yüzeyi** (12, hepsi GET). `range` enum `15m|30m|1h|6h|24h|7d` (default `1h`):
 
   | Tool | Sarılan uç (operationId) |
   |---|---|
@@ -1079,6 +1082,17 @@ Yerel kodlama agent'ları için salt okunur MCP sunucusu (`cmd/tt-mcp`, stdio; r
   | `tt_get_incident` | `GET /api/v1/incidents/{id}` (`getIncidentsId`) + `GET /api/v1/incidents/{id}/events` (`getIncidentsIdEvents`) |
   | `tt_list_loadtest_runs` | `GET /api/v1/loadtests/runs` (`getLoadtestsRuns`) |
   | `tt_list_deploys` | `GET /api/v1/deploys` (`getDeploys`) |
+
+  v2 (ADR-032) okuma ekleri: `tt_list_errors`, `tt_get_error`, `tt_list_kpis`, `tt_list_alert_suggestions`, `tt_list_inventory`,
+  `tt_list_monitor_templates`, `tt_list_notify_channels`, `tt_get_app_summary`, `tt_get_ai_overview`, `tt_list_hosts`,
+  `tt_list_databases`, `tt_list_consumer_groups`, `tt_preview_monitor` (POST, kaydetmez), `tt_list_loadtest_scenarios`,
+  `tt_get_loadtest_run` → 27 okuma tool'u. Write (yalnız `TT_MCP_ALLOW_WRITE=true`, 11): `tt_create_monitor`,
+  `tt_update_monitor`, `tt_delete_monitor`, `tt_accept_suggestion`, `tt_create_kpi`, `tt_update_kpi`, `tt_delete_kpi`,
+  `tt_send_slack_test`, `tt_create_loadtest_scenario`, `tt_run_loadtest`, `tt_stop_loadtest`. Sarılan uçlar `.ai/mcp.md` § Tool yüzeyi.
+- **Write sözleşmesi:** `confirm` olmadan istek gönderilmez (`{dryRun, wouldSend, next}`; istisna `tt_stop_loadtest`).
+  Oluşturulan monitor / KPI / senaryo `source = "agent"` (Postgres check constraint'ları `014_agent_source.sql`, api
+  doğrulaması, web rozeti). Silme yalnız `source = agent`; `source = code` güncellenmez. API 400/409/501/502 `error`
+  mesajı (≤ 300 karakter) tool hatasına geçer; 5xx gövdesi geçmez.
 
 - **Kesişen kurallar:** her tool org/project anahtarından gelir (ek tenant parametresi almaz); input enum/hex/limit
   doğrulaması API'ye gitmeden yapılır; tool çıktısı ≤ 64 KB JSON (aşarsa dizi kesilir + `truncated: true`,

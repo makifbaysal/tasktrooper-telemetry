@@ -345,6 +345,7 @@
 .agents { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: var(--space-12); align-items: start; }
 .agents__setup { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); }
 .agents__setup .pcode { align-self: stretch; }
+.agents__hint { margin: 0; color: var(--text-secondary); font-size: var(--text-sm); line-height: 1.5; }
 .agents__skills { margin: 0; border-bottom: 1px solid var(--divider); }
 .agents__skills > div { padding: var(--space-4) 0; border-top: 1px solid var(--divider); }
 .agents__skills dt { font-family: var(--font-mono); font-size: var(--text-md); font-weight: var(--weight-medium); }

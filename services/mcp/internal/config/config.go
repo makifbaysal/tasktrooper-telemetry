@@ -23,22 +23,31 @@ type Config struct {
 	OrgID     uint32
 	ProjectID uint32
 	LogLevel  slog.Level
+	// AllowWrite registers the monitor write tools (tt_create_monitor, tt_update_monitor, tt_delete_monitor,
+	// tt_accept_suggestion; ADR-032). Off by default: a key is admin-level, so writing is an explicit opt-in.
+	AllowWrite bool
+	// EnvFile is the env file that filled unset settings ("" = none); EnvWarning flags one other users can read.
+	EnvFile, EnvWarning string
 }
 
 // Load reads TT_* and fails fast on anything that would otherwise surface as a
 // confusing per-tool error later.
 func Load() (Config, error) {
+	envFile, envWarning, err := LoadEnvFile()
+	if err != nil {
+		return Config{}, err
+	}
 	c := Config{
+		EnvFile: envFile, EnvWarning: envWarning,
 		APIURL: strings.TrimRight(config.String("TT_API_URL", "http://localhost:8080"), "/"),
 		APIKey: config.String("TT_API_KEY", ""),
 	}
 	if c.APIKey == "" {
-		return Config{}, fmt.Errorf("TT_API_KEY is required (a project api key: Settings → API keys)")
+		return Config{}, fmt.Errorf("TT_API_KEY is required (a project api key: Settings → API keys); set it in the environment or in ~/.config/tasktrooper/mcp.env (the installer writes it)")
 	}
 	if u, err := url.ParseRequestURI(c.APIURL); err != nil || u.Host == "" {
 		return Config{}, fmt.Errorf("TT_API_URL is not a valid URL")
 	}
-	var err error
 	if c.OrgID, err = optionalID("TT_ORG_ID"); err != nil {
 		return Config{}, err
 	}
@@ -46,6 +55,7 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	c.LogLevel = parseLevel(config.String("TT_LOG_LEVEL", "info"))
+	c.AllowWrite = config.Bool("TT_MCP_ALLOW_WRITE", false)
 	return c, nil
 }
 
