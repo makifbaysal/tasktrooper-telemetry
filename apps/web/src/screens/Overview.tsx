@@ -21,7 +21,7 @@ import { LocalAIState } from '@/components/ui/LocalAIState';
 type Attention = Endpoint & { service: string; reason: 'errors' | 'slow'; score: number };
 
 export function Overview() {
-  const { range, env } = useApp();
+  const { range } = useApp();
   const nav = useNavigate();
   const inc = useDrawer<Incident>();
   const [askOpen, setAskOpen] = useState(false);
@@ -83,7 +83,6 @@ export function Overview() {
     <>
       <header className="overview-heading" aria-labelledby="overview-title">
         <div className="overview-heading__copy">
-          <span className="overview-heading__eyebrow">TaskTrooper · {env}</span>
           <h1 id="overview-title">Production overview</h1>
           <p>{services.length ? `${backend.length} backend services monitored over the last ${range}. Start with the active incidents.` : 'Waiting for the first data from an SDK.'}</p>
         </div>

@@ -7,7 +7,7 @@ import './styles/components.css';
 import './styles/charts.css';
 import './styles/account.css';
 import './styles/trace.css';
-import './styles/exploration.css';
+import './styles/screens.css';
 import { router } from './router';
 import { AppProvider } from './components/layout/context';
 import { API_URL, hydrate, startPolling } from './data/remote';

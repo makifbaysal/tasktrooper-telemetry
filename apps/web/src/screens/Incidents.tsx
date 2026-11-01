@@ -48,7 +48,6 @@ export function Incidents() {
     <>
       <header className="incidents-heading">
         <div className="incidents-heading__intro">
-          <span className="incidents-heading__eyebrow">LIVE OPERATIONS / INCIDENTS</span>
           <h1>Incidents <span>{openAll.length} open</span></h1>
         </div>
         <div className="incidents-heading__meta" aria-label="Incident summary">

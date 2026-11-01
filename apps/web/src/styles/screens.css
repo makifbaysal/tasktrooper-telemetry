@@ -1,0 +1,60 @@
+/* Screen-level layout for Overview, Incidents and Services. Structure only: colour, radius and
+   shadow come from tokens.css / components.css (see DESIGN.md). No eyebrows, no motion. */
+
+/* Page heading: title + one-line summary, actions on the right. */
+.overview-heading,
+.incidents-heading { display: flex; align-items: end; justify-content: space-between; gap: var(--space-5); padding-bottom: var(--space-5); border-bottom: 1px solid var(--divider); }
+.overview-heading__copy,
+.incidents-heading__intro { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); }
+.overview-heading h1,
+.incidents-heading h1 { font-size: var(--text-xl); line-height: var(--lh-xl); }
+.overview-heading p { color: var(--text-muted); }
+
+/* Overview */
+.overview-primary { display: grid; grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr); align-items: stretch; gap: var(--space-5); }
+.overview-primary > .metric { min-width: 0; }
+.overview-primary > :only-child { grid-column: 1 / -1; }
+.overview-secondary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-5); }
+.overview-incidents { display: flex; flex-direction: column; gap: var(--space-3); }
+.overview-incidents__heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.overview-incidents__heading h2 { font-size: var(--text-lg); line-height: var(--lh-lg); }
+.overview-incidents .card { flex: 1; }
+.overview-detail { display: flex; flex-direction: column; gap: var(--space-5); }
+.overview-detail > .card,
+.overview-detail .stack { width: 100%; }
+.ai-quota-banner__content { min-width: 0; width: 100%; }
+
+/* Incidents */
+.incidents-heading h1 span { margin-left: var(--space-2); color: var(--text-muted); font-size: var(--text-sm); font-weight: var(--weight-medium); }
+.incidents-heading__meta { display: flex; flex-wrap: wrap; gap: var(--space-4); color: var(--text-muted); font-size: var(--text-sm); }
+.incidents-heading__meta strong { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.incidents-filterbar { display: flex; justify-content: flex-end; padding-bottom: var(--space-4); border-bottom: 1px solid var(--divider); }
+.incidents-filterbar__controls { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.incidents-filterbar__search { width: calc(var(--space-12) * 4); }
+.incidents-workspace__feed { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
+.incidents-maintenance { border-top: 1px solid var(--divider); padding-top: var(--space-4); }
+.incidents-maintenance summary { cursor: pointer; font-weight: var(--weight-semibold); }
+.incidents-maintenance summary span { margin-left: var(--space-2); color: var(--text-muted); font-size: var(--text-sm); font-weight: var(--weight-regular); }
+.incidents-maintenance[open] > :not(summary) { margin-top: var(--space-4); }
+
+/* Services: rows that need attention */
+.services-attention { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; }
+.services-attention__row { display: grid; grid-template-columns: auto minmax(0, 22%) minmax(0, 1fr) auto; align-items: center; gap: var(--space-4); width: 100%; padding: var(--space-3) var(--space-4); background: var(--bg-surface); border: 0; border-bottom: 1px solid var(--divider); color: inherit; font: inherit; cursor: pointer; text-align: left; }
+.services-attention__row:last-child { border-bottom: 0; }
+.services-attention__row:hover { background: var(--bg-hover); }
+.services-attention__row:focus-visible { outline: 2px solid var(--focus-ring, var(--accent)); outline-offset: -2px; }
+.services-attention__row > span:nth-of-type(2) { color: var(--text-muted); font-size: var(--text-sm); }
+
+@media (max-width: 900px) {
+  .overview-primary { grid-template-columns: 1fr; }
+  .incidents-heading { align-items: flex-start; flex-direction: column; }
+  .incidents-filterbar { justify-content: flex-start; }
+}
+
+@media (max-width: 640px) {
+  .overview-heading { align-items: flex-start; flex-direction: column; }
+  .overview-secondary,
+  .incidents-workspace__feed { grid-template-columns: 1fr; }
+  .services-attention__row { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .services-attention__row > span:nth-of-type(2) { grid-column: 2; }
+}
