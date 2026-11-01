@@ -67,6 +67,8 @@ Actions → **deploy-demo** → Run workflow (branch `main`). The job checks out
 `DEMO_ENV`, runs [`deploy.sh`](deploy.sh) and removes the env file. `deploy.sh`:
 infra up → `make migrate` → dashboard build (copied to `~/trooper-demo/web`) → services `up -d --build` → health checks
 on api, ingest-gw and web. Data volumes (compose project `tasktrooper`) survive every deploy.
+Every deploy stamps `TROOPER_VERSION` with the short commit sha (service version, deploy markers). The containers that
+send self-telemetry resolve with 1.1.1.1 / 8.8.8.8, so a stale router DNS cache cannot point the public ingest host elsewhere.
 
 By hand on the machine (from a checkout with `deploy/.env`): `deploy/demo/deploy.sh`.
 

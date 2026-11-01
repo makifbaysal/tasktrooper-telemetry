@@ -27,6 +27,9 @@ set -a
 . deploy/.env
 set +a
 export TT_DEMO_WEB_DIR="${TT_DEMO_WEB_DIR:-$HOME/trooper-demo/web}"
+# service.version of the self-telemetry (deploy markers)
+TT_DEMO_VERSION="$(git rev-parse --short HEAD)"
+export TT_DEMO_VERSION
 mkdir -p "$TT_DEMO_WEB_DIR"
 
 # Docker Desktop's credential helper needs the login keychain, which a background runner may not have: use a config
@@ -69,8 +72,9 @@ step "dashboard"
 pnpm install --frozen-lockfile
 pnpm -r --filter "./sdks/js/packages/**" build
 (cd apps/web && VITE_API_URL="$TT_PUBLIC_API_URL" VITE_INGEST_URL="$TT_PUBLIC_INGEST_URL" \
-  VITE_TROOPER_DSN="$web_dsn" VITE_TROOPER_ENV=demo VITE_TROOPER_VERSION="$(git rev-parse --short HEAD)" pnpm exec vite build)
-rsync -a --delete apps/web/dist/ "$TT_DEMO_WEB_DIR/"
+  VITE_TROOPER_DSN="$web_dsn" VITE_TROOPER_ENV=demo VITE_TROOPER_VERSION="$TT_DEMO_VERSION" pnpm exec vite build)
+# new files first, old ones removed at the end: index.html is never missing while the site is served
+rsync -a --delete-after apps/web/dist/ "$TT_DEMO_WEB_DIR/"
 
 step "services"
 "${dc[@]}" "${profiles[@]}" up -d --build ingest-gw ingest-writer api alert-engine notifier web "${agent[@]}"
