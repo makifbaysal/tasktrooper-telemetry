@@ -18,6 +18,7 @@ import {
 import { findRootCause } from '@/lib/rca';
 import { can, denied } from '@/data/auth';
 import { LocalAICost } from '@/components/ui/LocalAICost';
+import { LocalAIState } from '@/components/ui/LocalAIState';
 import { targetLabel } from '@/data/slack';
 import { WhyBlock, badLabel, badSeries, kpiRca, objectivePct } from './Kpis';
 import { ago, clock, compact, dateTime, duration, ms, pct } from '@/lib/format';
@@ -618,9 +619,9 @@ export function IncidentDrawer({ incident: i, state, onClose, onAck, onResolve, 
         {state === 'firing' && can('write') && <Button size="sm" variant="primary" icon={<Check size={12} />} onClick={onAck}>Acknowledge</Button>}
         {onResolve && can('write') && !past && state !== 'resolved' && <Button size="sm" icon={<CheckCircle2 size={12} />} onClick={onResolve}>Resolve</Button>}
       </>}>
-      {(explanation || explainError) && <DrawerSection title="AI explanation" aside={explanation?.provider === 'mock' ? 'Offline mock · 0 tokens' : undefined}>
+      {(explanation || explainError || explaining) && <DrawerSection title="AI explanation" aside={explanation?.provider === 'mock' ? 'Offline mock · 0 tokens' : undefined}>
         {explanation && <p className="secondary" style={{ margin: 0 }}>{explanation.summary}</p>}
-        {explainError && <p role="alert" className="secondary" style={{ margin: 0 }}>{explainError}</p>}
+        <LocalAIState busy={explaining} error={explainError} onRetry={() => void explain()} />
       </DrawerSection>}
       <DrawerSection title="AI follow-up" aside="Offline mock · 0 tokens">
         <div className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}>
@@ -636,9 +637,9 @@ export function IncidentDrawer({ incident: i, state, onClose, onAck, onResolve, 
         {nextSteps.length > 0 && <ol className="stack" style={{ gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}>
           {nextSteps.map((step) => <li key={step}>{step}</li>)}
         </ol>}
-        {stepsError && <p role="alert" className="secondary">{stepsError}</p>}
+        <LocalAIState busy={suggesting} error={stepsError} onRetry={() => void suggestNextSteps()} />
         {report && <div style={{ marginTop: 'var(--space-3)' }}><CodeBlock>{report}</CodeBlock><p className="muted">Draft only; no report was saved.</p></div>}
-        {reportError && <p role="alert" className="secondary">{reportError}</p>}
+        <LocalAIState busy={reporting} error={reportError} onRetry={() => void draftReport()} />
       </DrawerSection>
       {state === 'pending' && (
         <Callout icon={<CircleDashed size={16} />}>
@@ -717,7 +718,7 @@ export function IncidentDrawer({ incident: i, state, onClose, onAck, onResolve, 
           {triage.groups.map((group) => <div key={group.label}>{group.label}: {group.count}</div>)}
           <span className="muted">Offline mock · 0 tokens · labels are not saved.</span>
         </div>}
-        {triageError && <p role="alert" className="secondary">{triageError}</p>}
+        <LocalAIState busy={triaging} error={triageError} onRetry={() => void triageLogs()} />
         {related.length === 0 ? <span className="muted">No warning or error logs from this service in the window.</span> : (
           <div className="stack" style={{ gap: 'var(--space-1)' }}>
             {related.map((l) => (

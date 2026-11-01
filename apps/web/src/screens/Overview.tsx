@@ -16,6 +16,7 @@ import { ServiceType } from './shared';
 import { PathCrumbs, incidentCause } from './rca';
 import { ruleSeries } from '@/lib/lagAlerts';
 import { LocalAICost } from '@/components/ui/LocalAICost';
+import { LocalAIState } from '@/components/ui/LocalAIState';
 
 const LAT: Latency = { p50: 88, avg: 104, p95: 214, p99: 470 };
 
@@ -187,7 +188,7 @@ export function Overview() {
               ]} />
             <div className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}><Button variant="primary" disabled={asking} onClick={() => void askTelemetry()}>{asking ? 'Checking…' : 'Ask'}</Button><LocalAICost /></div>
             {answer && <p className="secondary" style={{ margin: 0 }}>{answer}</p>}
-            {askError && <p role="alert" className="secondary" style={{ margin: 0 }}>{askError}</p>}
+            <LocalAIState busy={asking} error={askError} onRetry={() => void askTelemetry()} />
           </div>
         </DrawerSection>
       </Drawer>
