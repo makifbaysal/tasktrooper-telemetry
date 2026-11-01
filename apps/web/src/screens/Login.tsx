@@ -45,7 +45,7 @@ export function Login({ config, expired, onSignedIn }: { config: AuthConfig; exp
           </form>
         )}
         {!config.oidc && !config.devLogin && (
-          <Callout icon={<KeyRound size={16} />}>Sign-in isn’t configured on this api. Set <span className="mono">TT_OIDC_ISSUER</span>, or run the dashboard with <span className="mono">VITE_API_KEY</span>.</Callout>
+          <Callout icon={<KeyRound size={16} />}>Sign-in isn’t configured on this api. Set <span className="mono">TT_OIDC_ISSUER</span> (OIDC), or <span className="mono">TT_AUTH_DEV=true</span> for local development.</Callout>
         )}
         {error && <Callout icon={<KeyRound size={16} color="var(--status-critical)" />}>{error}</Callout>}
       </div>

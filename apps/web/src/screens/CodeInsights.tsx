@@ -4,18 +4,16 @@ import {
   AlertTriangle, Bell, Check, ChevronRight, CircleDashed, Code2, ExternalLink, Eye, EyeOff, FileCode2, FolderGit2, GitBranch, Gauge, Plus,
   RefreshCw, ShieldCheck, Sparkles, Trash2, Unplug, Webhook, X,
 } from 'lucide-react';
-import { TimeSeries } from '@/components/charts';
 import {
-  Badge, Button, Callout, Card, CodeBlock, Drawer, DrawerSection, EmptyState, KeyValues, Meter, MetricCard, PageHeader, Section, Segmented, Select,
+  Badge, Button, Callout, Card, Drawer, DrawerSection, EmptyState, KeyValues, Meter, MetricCard, PageHeader, Section, Segmented, Select,
   StatusBadge, Table, useDrawer,
 } from '@/components/ui';
-import { useApp } from '@/components/layout/context';
-import { isApi, monitors, series, services, timestamps, type InventoryItem, type TimeRange } from '@/data';
+import { monitors, services, useData, type InventoryItem } from '@/data';
 import {
   acceptSuggestion, acceptedSuggestions, analyzeRepo, codeIntelAvailable, codeLink, codeRefLink, deleteRepo, inventoryRows, refreshCodeIntel, rejectSuggestion, repoList,
   rotateWebhookSecret, suggestionRows, type InventoryRow, type RepoInfo, type RepoWebhook, type SuggestionRow,
 } from '@/data/codeintel';
-import { ago, compact } from '@/lib/format';
+import { ago } from '@/lib/format';
 import { CriticalityBadge } from './shared';
 import { ConnectRepoDrawer, WebhookSetup } from './ConnectRepo';
 
@@ -67,31 +65,9 @@ function whyCritical(i: InventoryRow): string {
   return 'Read-only or internal path; failures have no lasting side effects.';
 }
 
-/** Mock mode only: an illustrative handler excerpt (the api does not return source). */
-function handlerSnippet(i: InventoryItem): string {
-  if (i.kind === 'consumer') {
-    return `// ${i.file}:${i.line}
-consumer.wrap('${i.source}', { process: '${i.key}' }, async (msg) => {
-  const order = await orders.get(msg.orderId);
-  await shipments.create(order);         // side effect
-}, { retries: 3, dlq: '${(i.source ?? '').replace('.dlq', '')}.dlq' });`;
-  }
-  if (i.kind === 'cron') return `# ${i.file}:${i.line}\n@schedule("${i.source}")\ndef send_invoices():\n    for account in billing.due_today():\n        mailer.send_invoice(account)      # external call`;
-  if (i.kind === 'dependency') return `// ${i.file}:${i.line}\nclient := iyzico.New(cfg.APIKey, iyzico.WithTimeout(5*time.Second))\nres, err := client.CreatePayment(ctx, req)  // synchronous, on the charge path`;
-  const [method, route] = i.key.split(' ');
-  const m = (method ?? 'GET')[0] + (method ?? 'GET').slice(1).toLowerCase();
-  if (i.file.endsWith('.go')) return `// ${i.file}:${i.line}\nr.${m}("${route}", func(w http.ResponseWriter, r *http.Request) {\n    tx, _ := db.BeginTx(r.Context(), nil)\n    defer tx.Rollback()\n    // …\n})`;
-  return `// ${i.file}:${i.line}\n@${m}('${route}')\nasync handle(@Body() dto: Dto) {\n  return this.db.transaction(async (tx) => {\n    // …\n  });\n}`;
-}
-
-function trafficFor(i: InventoryItem, range: TimeRange) {
-  const base = i.kind === 'cron' ? 0.4 : i.criticality === 'critical' ? 220 : i.criticality === 'important' ? 90 : 25;
-  return series(`inv-${i.id}`, range, { base, noise: 0.18, daily: 0.35, min: 0 });
-}
-
 export function CodeInsights() {
+  useData();
   const nav = useNavigate();
-  const { range } = useApp();
   const drawer = useDrawer<InventoryRow>();
   const [params, setParams] = useSearchParams();
   // back from the GitHub App installation: ?github=<integrationId> opens the repo picker
@@ -103,38 +79,13 @@ export function CodeInsights() {
   const [filter, setFilter] = useState<Filter>('all');
   const [kind, setKind] = useState('');
   const [svc, setSvc] = useState('');
-  const [enrichment, setEnrichment] = useState<{ summary: string; failureModes: string[]; provider: string } | null>(null);
-  const [monitorDraft, setMonitorDraft] = useState<{ suggestions: { name: string; kind: string; condition: string; rationale: string }[] } | null>(null);
-  const [loadTestDraft, setLoadTestDraft] = useState<{ yaml: string; note: string } | null>(null);
-  const [aiError, setAiError] = useState('');
-  const [aiBusy, setAiBusy] = useState(false);
-  const [aiItemId, setAiItemId] = useState('');
-  const runLocalAI = async (action: 'inventory-enrichment' | 'monitor-suggestions' | 'loadtest-draft') => {
-    const selected = drawer.item;
-    if (!selected) return;
-    if (aiItemId !== selected.id) { setEnrichment(null); setMonitorDraft(null); setLoadTestDraft(null); setAiItemId(selected.id); }
-    setAiBusy(true); setAiError('');
-    try {
-      const response = await fetch(`/local-ai/${action}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: selected.key, kind: selected.kind, service: selected.service, file: selected.file, criticality: selected.criticality }),
-      });
-      if (!response.ok) throw new Error(`Local mock server returned HTTP ${response.status}`);
-      const result = await response.json();
-      if (action === 'inventory-enrichment') setEnrichment(result);
-      else if (action === 'monitor-suggestions') setMonitorDraft(result);
-      else setLoadTestDraft(result);
-    } catch (cause) { setAiError(cause instanceof Error ? cause.message : 'Could not reach the local mock server.'); }
-    finally { setAiBusy(false); }
-  };
-
   const repos = repoList();
   const inventory = inventoryRows();
   const analyzing = repos.some((r) => r.status === 'analyzing');
 
   // poll while an analysis runs
   useEffect(() => {
-    if (!analyzing || !isApi) return;
+    if (!analyzing) return;
     const t = setInterval(() => { void refreshCodeIntel(); }, 5000);
     return () => clearInterval(t);
   }, [analyzing]);
@@ -176,9 +127,9 @@ export function CodeInsights() {
         {header}
         <Card>
           <EmptyState icon={<FolderGit2 size={20} />} title="No repository connected" action={connectBtn}>
-            {isApi && !codeIntelAvailable
+            {!codeIntelAvailable
               ? 'The code-intelligence api is not available on this server yet. Once it is, connect a repository to see its endpoints, consumers and jobs here.'
-              : 'Install the TaskTrooper GitHub App and pick repositories (or use a token / local checkout under Advanced). TaskTrooper reads the routes, consumers and jobs, matches them with production traffic and suggests monitors for the critical paths.'}
+              : 'Install the TaskTrooper GitHub App and pick repositories (or use a token / local checkout under Advanced). TaskTrooper reads the routes, consumers and jobs, matches them with production traffic and suggests monitors for the critical paths. Traffic matching needs a TaskTrooper SDK on the services (Settings → API keys for the DSN).'}
           </EmptyState>
         </Card>
         {connectDrawer}
@@ -295,24 +246,12 @@ export function CodeInsights() {
         title={item ? <span className="mono">{item.key}</span> : ''}
         subtitle={item && <>{KIND_LABEL[item.kind]} · {item.service}</>}
         actions={item && <>
-          <Button size="sm" icon={<Sparkles size={14} />} disabled={aiBusy} onClick={() => void runLocalAI('inventory-enrichment')}>Enrich inventory</Button>
           {item.kind === 'endpoint' && !item.shadow && <Button size="sm" icon={<Gauge size={14} />} onClick={() => nav('/load-tests')}>Load test this</Button>}
         </>}>
         {item && (
           <>
             <DrawerSection title="Summary" aside={<CriticalityBadge c={item.criticality} />}>
               <p className="secondary" style={{ margin: 0 }}>{whyCritical(item)}</p>
-            </DrawerSection>
-
-            <DrawerSection title="Local AI drafts" aside="Offline mock · 0 tokens">
-              <div className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-                <Button size="sm" icon={<Bell size={12} />} disabled={aiBusy} onClick={() => void runLocalAI('monitor-suggestions')}>Suggest monitors</Button>
-                {item.kind === 'endpoint' && <Button size="sm" icon={<Gauge size={12} />} disabled={aiBusy} onClick={() => void runLocalAI('loadtest-draft')}>Draft load test</Button>}
-              </div>
-              {aiItemId === item.id && enrichment && <div className="stack" style={{ marginTop: 'var(--space-3)' }}><p>{enrichment.summary}</p><ul>{enrichment.failureModes.map((mode) => <li key={mode}>{mode}</li>)}</ul></div>}
-              {aiItemId === item.id && monitorDraft && <div className="stack" style={{ marginTop: 'var(--space-3)' }}>{monitorDraft.suggestions.map((suggestion) => <div key={suggestion.name}><strong>{suggestion.name}</strong><div className="mono secondary">{suggestion.kind} · {suggestion.condition}</div><div className="muted">{suggestion.rationale}</div></div>)}<span className="muted">Drafts only; no monitor was created.</span></div>}
-              {aiItemId === item.id && loadTestDraft && <div className="stack" style={{ marginTop: 'var(--space-3)' }}><CodeBlock>{loadTestDraft.yaml}</CodeBlock><span className="muted">{loadTestDraft.note}</span></div>}
-              {aiItemId === item.id && aiError && <p role="alert" className="secondary">{aiError}</p>}
             </DrawerSection>
 
             {item.shadow ? (
@@ -353,20 +292,11 @@ export function CodeInsights() {
               </DrawerSection>
             )}
 
-            {!isApi && (
-              <DrawerSection title="Production traffic" aside={item.observed ? `${compact(trafficFor(item, range).at(-1) ?? 0)} / min now` : undefined}>
-                {item.observed
-                  ? <TimeSeries timestamps={timestamps(range)} height={140} area format={(v) => compact(v)}
-                      series={[{ id: 't', label: 'Requests / min', slot: 1, data: trafficFor(item, range) }]} />
-                  : <EmptyState icon={<EyeOff size={20} />} title="No traffic in 30 days">Dead code, a feature flag that is off, or the SDK is not installed on this service.</EmptyState>}
-              </DrawerSection>
-            )}
-
             {item.file && (
               <DrawerSection title="Source" aside={link
                 ? <a className="row mono" style={{ gap: 4 }} href={link} target="_blank" rel="noreferrer"><FileCode2 size={12} aria-hidden />{item.file}:{item.line}<ExternalLink size={12} aria-hidden /></a>
                 : <span className="row mono" style={{ gap: 4 }}><FileCode2 size={12} aria-hidden />{item.file}:{item.line}</span>}>
-                {!isApi ? <CodeBlock>{handlerSnippet(item)}</CodeBlock> : <span className="muted">{link ? 'Open the handler on GitHub with the link above.' : 'Local checkout — open the file in your editor.'}</span>}
+                <span className="muted">{link ? 'Open the handler on GitHub with the link above.' : 'Local checkout — open the file in your editor.'}</span>
               </DrawerSection>
             )}
 

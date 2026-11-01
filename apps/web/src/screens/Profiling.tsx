@@ -8,7 +8,7 @@ import { FlameDiffLegend, FlameGraph, TimeSeries, framePackage, signedPp } from 
 import { Callout, Card, CopyCode, EmptyState, Section, Segmented, Select, Table } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
 import {
-  NOW, PROFILE_TYPES, RANGE_POINTS, deployEvents, diffChanges, flameGraph, formatProfileValue, isGaugeType, profileDiff, profileSeries,
+  PROFILE_TYPES, RANGE_POINTS, deployEvents, diffChanges, flameGraph, formatProfileValue, isGaugeType, profileDiff, profileSeries,
   profileTypes, seriesFormat, timestamps, topFunctions,
   type DiffChange, type Endpoint, type FlameGraphData, type ProfileComparison, type ProfileFilter, type ProfileType, type ProfileTypeInfo, type Service, type TimeRange, type TopFunction,
 } from '@/data';
@@ -207,7 +207,9 @@ function CompareView({ svc, info, range, host, initial }: { svc: Service; info: 
   const cmp: ProfileComparison = useMemo(() => {
     if (kind === 'version') return { kind, baseVersion: base, version: target };
     const shift = win === 'prev' ? span : win === 'day' ? 86_400_000 : 7 * 86_400_000;
-    return { kind, from: NOW - span, to: NOW, baseFrom: NOW - span - shift, baseTo: NOW - shift };
+    // minute-aligned so the request (and its cache key) stays stable across renders
+    const now = Math.floor(Date.now() / 60_000) * 60_000;
+    return { kind, from: now - span, to: now, baseFrom: now - span - shift, baseTo: now - shift };
   }, [kind, base, target, win, span]);
   const diff = profileDiff(svc.id, info.type, cmp, { host: host || undefined }, range);
   const d = diff.data;

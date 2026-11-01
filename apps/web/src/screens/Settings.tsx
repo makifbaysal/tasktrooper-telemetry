@@ -1,85 +1,26 @@
 import { useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
-import { ChevronRight, Copy, Hash, KeyRound, Lock, MessageSquare, Plug, ShieldAlert, Trash2, Unplug, UserPlus } from 'lucide-react';
-import { Columns } from '@/components/charts';
+import { ChevronRight, Hash, KeyRound, Lock, MessageSquare, Plug, ShieldAlert, Trash2, Unplug, UserPlus } from 'lucide-react';
 import {
-  Avatar, Badge, Button, Callout, Card, CodeBlock, CopyCode, Drawer, DrawerSection, EmptyState, Field, Input, KeyValues, PageHeader,
-  SearchInput, Section, Segmented, Select, StatusBadge, Table, Tabs, useDrawer,
+  Avatar, Badge, Button, Callout, Card, CopyCode, Drawer, DrawerSection, EmptyState, Field, Input, KeyValues, PageHeader,
+  SdkQuickstart, SearchInput, Section, Select, StatusBadge, Table, Tabs, useDrawer,
 } from '@/components/ui';
-import { useApp } from '@/components/layout/context';
-import { PROVIDERS, PROVIDER_LABEL, integrations, isApi, remoteStatus, series, timestamps, useData } from '@/data';
+import { PROVIDERS, PROVIDER_LABEL, integrations, remoteStatus, useData } from '@/data';
 import {
-  apiKeys, auditLog, can, createApiKey, denied, inviteMember, membersOf, removeMember, revokeApiKey, setMemberRole, useAuth,
+  apiKeys, auditLog, can, createApiKey, denied, inviteMember, membersOf, projectDsn, removeMember, revokeApiKey, setMemberRole, useAuth,
   type ApiKeyRow, type AuditEntry, type KeyScope, type Member, type Role,
 } from '@/data/auth';
 import { connectSlack, disconnectSlack, slackChannels, slackWorkspace } from '@/data/slack';
 import { IntegrationStatusBadge, ProviderMark } from './Integrations';
 import { MemberAiCell, UsageTab } from './Usage';
-import { ago, compact, dateTime } from '@/lib/format';
-
-type Lang = 'node' | 'browser' | 'react-native' | 'go';
-
-const SNIPPETS: Record<Lang, { install: string; code: string }> = {
-  node: {
-    install: 'pnpm add @trooper/node',
-    code: `import { init } from '@trooper/node';
-
-init({
-  dsn: process.env.TROOPER_DSN,
-  service: 'orders-api',
-  environment: 'production',
-  version: process.env.GIT_SHA,
-});
-
-// Worker / consumer
-import { consumer } from '@trooper/node';
-consumer.wrap('orders.created', async (msg) => handle(msg));`,
-  },
-  browser: {
-    install: 'pnpm add @trooper/browser',
-    code: `import { init, identify, track } from '@trooper/browser';
-
-init({
-  dsn: 'https://pk_live_3f9a@ingest.trooper.dev/shop-platform',
-  service: 'shop-web',
-  tracePropagationTargets: [/api\\.shop\\.com/],
-});
-
-identify({ id: user.id, plan: user.plan });
-track('checkout_started', { cart_value: 120 });`,
-  },
-  'react-native': {
-    install: 'pnpm add @trooper/react-native',
-    code: `import { init, withNavigation } from '@trooper/react-native';
-
-init({ dsn: TROOPER_DSN, service: 'shop-mobile' });
-export default withNavigation(App);`,
-  },
-  go: {
-    install: 'go get github.com/trooper-dev/trooper-go',
-    code: `shutdown := trooper.Init(trooper.Config{
-    DSN:         os.Getenv("TROOPER_DSN"),
-    Service:     "payments-api",
-    Environment: "production",
-})
-defer shutdown(ctx)
-
-r := chi.NewRouter()
-r.Use(trooperhttp.Middleware())`,
-  },
-};
-
-const CHANNELS = [
-  { id: 'pd', name: 'PagerDuty', detail: 'Services: payments, orders', monitors: 2 },
-  { id: 'hook', name: 'Webhook', detail: 'https://hooks.shop.com/trooper', monitors: 0 },
-];
+import { ago, dateTime } from '@/lib/format';
 
 type SettingsTab = 'project' | 'members' | 'usage' | 'keys' | 'audit';
 const TABS: SettingsTab[] = ['project', 'members', 'usage', 'keys', 'audit'];
 
 /** Error of a failed list read (e.g. 404 while the api has no such endpoint yet). */
 function readError(prefix: string): string | undefined {
-  return isApi ? remoteStatus().errors.find((e) => e.path.startsWith(prefix))?.error : undefined;
+  return remoteStatus().errors.find((e) => e.path.startsWith(prefix))?.error;
 }
 
 export function SettingsScreen() {
@@ -118,36 +59,16 @@ export function SettingsScreen() {
 function ProjectTab() {
   const nav = useNavigate();
   const cloud = integrations.filter((i) => PROVIDERS.includes(i.provider));
-  const [lang, setLang] = useState<Lang>('node');
-  const s = SNIPPETS[lang];
+  const { project } = useAuth();
   return (
     <>
       <Section title="Install the SDK" subtitle="Data appears within a minute of the first request">
-        <Card actions={<Segmented label="Platform" value={lang} onChange={setLang} options={[
-          { id: 'node', label: 'Node.js' }, { id: 'browser', label: 'Browser' }, { id: 'react-native', label: 'React Native' }, { id: 'go', label: 'Go' },
-        ]} />} title="1. Install, 2. initialize">
-          <div className="stack" style={{ gap: 'var(--space-3)' }}>
-            <div className="row"><div style={{ flex: 1 }}><CodeBlock>{s.install}</CodeBlock></div><Button iconOnly aria-label="Copy install command" icon={<Copy size={14} />} onClick={() => navigator.clipboard?.writeText(s.install)} /></div>
-            <CodeBlock>{s.code}</CodeBlock>
-          </div>
+        <Card title="1. Install, 2. initialize" subtitle={<>Replace <span className="mono">&lt;ingest-key&gt;</span> with an ingest key from the API keys tab.</>}>
+          <SdkQuickstart dsn={projectDsn(project?.id)} />
         </Card>
       </Section>
 
       <SlackCard />
-
-      <Section title="Other notification channels" subtitle="PagerDuty, e-mail and webhooks are configured per monitor target">
-        <Card flush>
-          <div className="list">
-            {CHANNELS.map((c) => (
-              <div key={c.id} className="list__row">
-                <div className="list__main"><span className="list__title">{c.name}</span><span className="list__meta">{c.detail}</span></div>
-                <span className="muted" style={{ fontSize: 'var(--text-xs)', whiteSpace: 'nowrap' }}>{c.monitors} monitor{c.monitors === 1 ? '' : 's'}</span>
-                <StatusBadge status="ok" label="Connected" />
-              </div>
-            ))}
-          </div>
-        </Card>
-      </Section>
 
       <Section title="Cloud integrations" subtitle="AWS, Google Cloud, Vercel and Neon — managed databases, queues, deploys and drains"
         actions={<Button size="sm" icon={<Plug size={12} />} onClick={() => nav('/settings/integrations')}>Manage</Button>}>
@@ -223,7 +144,7 @@ const ROLE_HINT: Record<Role, string> = {
 };
 
 function MembersTab() {
-  const { org, me, mode } = useAuth();
+  const { org, me } = useAuth();
   const manage = can('manage');
   const members = [...membersOf(org?.id)];
   const err = readError('/orgs/');
@@ -247,9 +168,7 @@ function MembersTab() {
   if (!org) {
     return (
       <Card>
-        <EmptyState icon={<KeyRound />} title="Members need a signed-in user">
-          {mode === 'key' ? 'The dashboard is using an api key, which belongs to a project rather than a person. Sign in with SSO to manage the org.' : 'No organisation selected.'}
-        </EmptyState>
+        <EmptyState icon={<KeyRound />} title="No organization selected" />
       </Card>
     );
   }
@@ -307,7 +226,7 @@ function MembersTab() {
 const SCOPE_LABEL: Record<KeyScope, string> = { ingest: 'Ingest (write-only, for SDKs)', api: 'Management api (read + write)' };
 
 function KeysTab() {
-  const { range } = useApp();
+  useData();
   const manage = can('manage');
   const keys = [...apiKeys()];
   const err = readError('/api-keys');
@@ -320,7 +239,6 @@ function KeysTab() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const k = drawer.item ? keys.find((x) => x.id === drawer.item!.id) ?? drawer.item : undefined;
-  const usage = k && !isApi ? series(`key-${k.id}`, range, { base: k.scope === 'ingest' ? 9000 : 0.6, noise: 0.25, daily: 0.4, min: 0 }) : [];
 
   const create = async () => {
     if (!name.trim()) return setError('Give the key a name, e.g. “Backend ingest” or “CI / Terraform”.');
@@ -395,12 +313,6 @@ function KeysTab() {
         {k && (
           <>
             {k.revokedAt && <Callout icon={<Trash2 size={16} />}>Revoked {ago(k.revokedAt)}. Requests with it are rejected with 401.</Callout>}
-            {!isApi && (
-              <DrawerSection title={k.scope === 'ingest' ? 'Events received' : 'API requests'} aside={`${compact(usage.at(-1) ?? 0)} / min now`}>
-                <Columns timestamps={timestamps(range)} height={160} format={(v) => compact(v)}
-                  series={[{ id: 'u', label: k.scope === 'ingest' ? 'Events / min' : 'Requests / min', data: usage, color: 'var(--series-1)' }]} />
-              </DrawerSection>
-            )}
             <DrawerSection title="Access">
               <KeyValues items={[
                 ['Scope', SCOPE_LABEL[k.scope]],

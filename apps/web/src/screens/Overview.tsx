@@ -1,22 +1,19 @@
-import { useState } from 'react';
 import { useNavigate } from 'react-router';
-import { ArrowRight, Sparkles } from 'lucide-react';
+import { Activity, ArrowRight, Sparkles } from 'lucide-react';
 import { TimeSeries } from '@/components/charts';
 import {
-  Badge, Button, Card, Drawer, DrawerSection, KeyValues, Meter, MetricCard, Section, Select, StatusBadge, Table, useDrawer,
+  Badge, Button, Card, ConnectSdk, Drawer, DrawerSection, KeyValues, Meter, MetricCard, Section, StatusBadge, Table, useDrawer,
 } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
 import {
-  deployMarkers, endpointsFor, incidents, inventory, isApi, kpiSeries, kpis, monitors, redSeries, series, serviceErrorSeries, services, suggestions, timestamps,
+  deployMarkers, endpointsFor, incidents, inventory, kpiSeries, kpis, monitors, redSeries, serviceErrorSeries, services, suggestions, timestamps,
   type Endpoint, type Incident,
 } from '@/data';
 import { ago, compact, ms, pct } from '@/lib/format';
-import { ErrorCell, latencyHint, type Latency } from './apm';
+import { ErrorCell } from './apm';
 import { ServiceType } from './shared';
 import { PathCrumbs, incidentCause } from './rca';
 import { ruleSeries } from '@/lib/lagAlerts';
-
-const LAT: Latency = { p50: 88, avg: 104, p95: 214, p99: 470 };
 
 type Attention = Endpoint & { service: string; reason: 'errors' | 'slow'; score: number };
 
@@ -24,28 +21,19 @@ export function Overview() {
   const { range, env } = useApp();
   const nav = useNavigate();
   const inc = useDrawer<Incident>();
-  const [askOpen, setAskOpen] = useState(false);
-  const [question, setQuestion] = useState('health');
-  const [answer, setAnswer] = useState('');
-  const [askError, setAskError] = useState('');
-  const [asking, setAsking] = useState(false);
   const ts = timestamps(range);
   const backend = services.filter((s) => s.type === 'http' || s.type === 'consumer' || s.type === 'worker');
   const rpm = backend.reduce((a, s) => a + s.rpm, 0);
   const prevRpm = backend.reduce((a, s) => a + s.prevRpm, 0);
-  const err = backend.reduce((a, s) => a + s.errorRate * s.rpm, 0) / rpm;
-  const prevErr = backend.reduce((a, s) => a + s.prevErrorRate * s.prevRpm, 0) / prevRpm;
-  // api: project-wide RED series (`/overview/series`); mock: synthesized curves (unchanged)
-  const red = isApi ? redSeries(range) : undefined;
-  const errSeries = red ? red.errorRate : series('err-all', range, { base: err, noise: 0.25, spikeAt: 0.82, spikeMul: 3.4, spikeWidth: 5 });
-  const rpmSeries = red ? red.rpm : series('t-rpm', range, { base: rpm });
-  const p95Now = red ? (red.p95.filter((v) => v > 0).at(-1) ?? 0) : 214;
+  const err = rpm ? backend.reduce((a, s) => a + s.errorRate * s.rpm, 0) / rpm : 0;
+  const prevErr = prevRpm ? backend.reduce((a, s) => a + s.prevErrorRate * s.prevRpm, 0) / prevRpm : 0;
+  // project-wide RED series (`/overview/series`)
+  const red = redSeries(range);
   // the newest bucket is still filling, so take the last non-empty one
   const lastNonZero = (xs: number[]) => xs.filter((v) => v > 0).at(-1) ?? 0;
-  const latNow: Latency = red ? { p50: lastNonZero(red.p50), avg: 0, p95: p95Now, p99: lastNonZero(red.p99) } : LAT;
-  const heroEvents = isApi
-    ? deployMarkers.filter((d) => d.ts >= ts[0] && d.state !== 'error' && d.state !== 'canceled').map((d) => ({ ts: d.ts, label: `deploy ${d.service} ${d.version}`, detail: d.commitMessage }))
-    : [{ ts: ts[Math.round(ts.length * 0.78)], label: 'deploy payments-api v1.18.3' }];
+  const p95Now = lastNonZero(red.p95);
+  const heroEvents = deployMarkers.filter((d) => d.ts >= ts[0] && d.state !== 'error' && d.state !== 'canceled')
+    .map((d) => ({ ts: d.ts, label: `deploy ${d.service} ${d.version}`, detail: d.commitMessage }));
 
   // One list instead of "slowest" + "most failing": an endpoint shows up once, with the reason it's here.
   const attention: Attention[] = backend
@@ -65,34 +53,24 @@ export function Overview() {
   const open = incidents.filter((i) => i.state !== 'resolved');
   const ordered = [...backend].sort((a, b) => ['critical', 'warning', 'ok'].indexOf(a.status) - ['critical', 'warning', 'ok'].indexOf(b.status) || b.rpm - a.rpm);
 
-  const askTelemetry = async () => {
-    setAsking(true);
-    setAskError('');
-    try {
-      const response = await fetch('/local-ai/ask-telemetry', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, rpm, errorRate: err, p95: p95Now, openIncidents: open.length }),
-      });
-      if (!response.ok) throw new Error(`Local mock server returned HTTP ${response.status}`);
-      const result = await response.json() as { answer: string };
-      setAnswer(result.answer);
-    } catch (cause) {
-      setAskError(cause instanceof Error ? cause.message : 'Could not reach the local mock server.');
-    } finally {
-      setAsking(false);
-    }
-  };
-
   return (
     <>
       <header className="overview-heading" aria-labelledby="overview-title">
         <div className="overview-heading__copy">
           <span className="overview-heading__eyebrow">TaskTrooper · {env}</span>
           <h1 id="overview-title">Production overview</h1>
-          <p>{backend.length} backend services monitored over the last {range}. Start with the active incidents.</p>
+          <p>{services.length ? `${backend.length} backend services monitored over the last ${range}. Start with the active incidents.` : 'Waiting for the first data from an SDK.'}</p>
         </div>
-        <Button icon={<Sparkles size={14} />} onClick={() => setAskOpen(true)}>Ask telemetry</Button>
       </header>
+
+      {services.length === 0 ? (
+        <Card>
+          <ConnectSdk icon={<Activity />} title="No telemetry yet">
+            Connect an SDK to your first service or app. Throughput, error rate, latency, incidents and the endpoints that need
+            attention show up here as soon as data arrives.
+          </ConnectSdk>
+        </Card>
+      ) : <>
 
       <div className="overview-primary">
       {open.length > 0 && (
@@ -115,7 +93,7 @@ export function Overview() {
 
         <MetricCard className="metric--hero" label="Error rate · all backend services" value={pct(err)} curr={err} prev={prevErr} upIsGood={false}
           hint={`${compact(rpm * err)} failed requests / min · SLO 1%`}>
-          <TimeSeries timestamps={ts} series={[{ id: 'err', label: 'Error rate', slot: 8, data: errSeries }]} area
+          <TimeSeries timestamps={ts} series={[{ id: 'err', label: 'Error rate', slot: 8, data: red.errorRate }]} area
             format={(v) => pct(v)} height={180} threshold={{ value: 0.01, label: 'SLO 1%' }}
             events={heroEvents} />
         </MetricCard>
@@ -123,11 +101,11 @@ export function Overview() {
       <div className="overview-secondary">
           <MetricCard label="Throughput" value={compact(rpm)} unit="rpm" curr={rpm} prev={prevRpm}>
             <TimeSeries timestamps={ts} height={72} area format={(v) => compact(v)}
-              series={[{ id: 'rpm', label: 'Throughput', slot: 1, data: rpmSeries }]} />
+              series={[{ id: 'rpm', label: 'Throughput', slot: 1, data: red.rpm }]} />
           </MetricCard>
-          <MetricCard label="Latency · p95 · all endpoints" value={String(Math.round(p95Now))} unit="ms" curr={p95Now} prev={red ? p95Now : 198} upIsGood={false}
-            hint={red ? `p50 ${ms(latNow.p50)} · p99 ${ms(latNow.p99)}` : latencyHint(LAT, 'p95')}>
-            <TimeSeries timestamps={ts} height={72} format={ms} series={[{ id: 'p95', label: 'p95 latency', slot: 1, data: red ? red.p95 : series('p95-all', range, { base: p95Now, spikeAt: 0.82, spikeMul: 1.6, spikeWidth: 5 }) }]} />
+          <MetricCard label="Latency · p95 · all endpoints" value={String(Math.round(p95Now))} unit="ms" curr={p95Now} prev={p95Now} upIsGood={false}
+            hint={`p50 ${ms(lastNonZero(red.p50))} · p99 ${ms(lastNonZero(red.p99))}`}>
+            <TimeSeries timestamps={ts} height={72} format={ms} series={[{ id: 'p95', label: 'p95 latency', slot: 1, data: red.p95 }]} />
           </MetricCard>
       </div>
 
@@ -174,22 +152,9 @@ export function Overview() {
         </div>
       </div>
 
+      </>}
+
       {inc.item && <IncidentDrawer incident={inc.item} onClose={inc.close} />}
-      <Drawer open={askOpen} onClose={() => setAskOpen(false)} title="Ask telemetry" subtitle="Read-only questions about the current overview">
-        <DrawerSection title="Question" aside="Offline mock · 0 tokens">
-          <div className="stack" style={{ gap: 'var(--space-3)' }}>
-            <Select aria-label="Telemetry question" value={question} onChange={(event) => { setQuestion(event.target.value); setAnswer(''); }}
-              options={[
-                { value: 'health', label: 'How is the project doing now?' },
-                { value: 'errors', label: 'What is happening with errors?' },
-                { value: 'latency', label: 'What is happening with latency?' },
-              ]} />
-            <div><Button variant="primary" disabled={asking} onClick={() => void askTelemetry()}>{asking ? 'Checking…' : 'Ask'}</Button></div>
-            {answer && <p className="secondary" style={{ margin: 0 }}>{answer}</p>}
-            {askError && <p role="alert" className="secondary" style={{ margin: 0 }}>{askError}</p>}
-          </div>
-        </DrawerSection>
-      </Drawer>
     </>
   );
 }
@@ -205,12 +170,13 @@ function IncidentDrawer({ incident, onClose }: { incident: Incident; onClose: ()
   const kpi = incident.kpiId ? kpis.find((k) => k.id === incident.kpiId) : undefined;
   const cause = incidentCause(incident);
   const data = kpi ? kpiSeries(kpi, range) : svc && isLag
-    ? (isApi && monitor?.queue ? ruleSeries({ ...monitor.queue, metric: 'lag' }, range) : series(`lag-${svc.id}`, range, { base: (svc.lag ?? 1000) * 0.4, spikeAt: 0.95, spikeMul: 2.5, spikeWidth: 4 }))
+    ? (monitor?.queue ? ruleSeries({ ...monitor.queue, metric: 'lag' }, range) : [])
     : svc && isLatency
-      ? (isApi ? redSeries(range, svc.id).p95 : series(`p95-${svc.id}`, range, { base: svc.p95, spikeAt: 0.8, spikeMul: 2.6, spikeWidth: 6 }))
+      ? redSeries(range, svc.id).p95
       : svc ? serviceErrorSeries(svc.id, range) : [];
   const fmt = kpi ? (v: number) => pct(v, 1) : isLag ? (v: number) => compact(v) : isLatency ? ms : (v: number) => pct(v);
-  const threshold = kpi ? { value: kpi.objective, label: `objective ${pct(kpi.objective, 1)}` } : isLag ? { value: 10_000, label: '10K' } : isLatency ? { value: 600, label: '600 ms' } : { value: 0.02, label: '2%' };
+  const threshold = kpi ? { value: kpi.objective, label: `objective ${pct(kpi.objective, 1)}` }
+    : isLag && monitor?.queue?.metric === 'lag' ? { value: monitor.queue.threshold, label: compact(monitor.queue.threshold) } : undefined;
 
   return (
     <Drawer open onClose={onClose} title={incident.title}

@@ -5,20 +5,19 @@ import {
 } from 'lucide-react';
 import { Sparkline, TimeSeries } from '@/components/charts';
 import {
-  Badge, Button, Callout, Card, CodeBlock, Drawer, DrawerSection, EmptyState, Field, Input, KeyValues, Section, Select, StatusBadge, Table, Tabs, useDrawer,
+  Badge, Button, Callout, Card, Drawer, DrawerSection, EmptyState, Field, Input, KeyValues, Section, Select, StatusBadge, Table, Tabs, useDrawer,
   type StatusKind,
 } from '@/components/ui';
 import {
-  ApiError, NOW, endpointNode, endpointsFor, isApi, kpis, incidents, logs, monitors, mutate, qs, remote, seg, series, serviceNode, services,
+  ApiError, kpis, incidents, monitors, mutate, qs, remote, seg, services,
   suggestions, timestamps, useData, type Incident, type Monitor, type RcaInfraCandidate, type RcaResult, type Suggestion, type TimeRange,
 } from '@/data';
 import {
   maintenanceAvailable, maintenanceWindows, monitorInput, resolvedIncidents, type ApiIncident, type ApiMonitor, type IncidentEvent, type MaintenanceWindow,
 } from '@/data/api/ops';
-import { findRootCause } from '@/lib/rca';
 import { can, denied } from '@/data/auth';
 import { targetLabel } from '@/data/slack';
-import { WhyBlock, badLabel, badSeries, kpiRca, objectivePct } from './Kpis';
+import { WhyBlock, badLabel, badSeries, objectivePct } from './Kpis';
 import { ago, clock, compact, dateTime, duration, ms, pct } from '@/lib/format';
 import { CriticalityBadge } from './shared';
 import { evaluate, formatRuleValue, metricMeta } from '@/lib/lagAlerts';
@@ -32,7 +31,7 @@ const KIND_LABEL: Record<Monitor['kind'], string> = {
   job_missed: 'Missed job', rum_vital: 'Web vital', kpi_burn: 'KPI budget burn', composite: 'Composite',
 };
 
-// ---------- mock metric behind each monitor (screen-local) ----------
+// ---------- the metric behind each monitor ----------
 
 interface MetricSpec {
   label: string;
@@ -40,31 +39,11 @@ interface MetricSpec {
   threshold: number;
   thresholdLabel: string;
   fmt: (v: number) => string;
-  /** spike position in 0..1 of the range; 1 = happening now */
-  spikeAt?: number;
-  spikeMul?: number;
-  daily?: number;
-  noise?: number;
 }
 
-const sec = (v: number) => `${(v / 1000).toFixed(1)} s`;
-
-const METRIC: Record<string, MetricSpec> = {
-  m1: { label: 'Error rate', base: 0.009, threshold: 0.02, thresholdLabel: '2%', fmt: (v) => pct(v), spikeAt: 1, spikeMul: 3.5, noise: 0.25 },
-  m2: { label: 'p95 latency', base: 380, threshold: 600, thresholdLabel: '600 ms', fmt: ms, spikeAt: 1, spikeMul: 2.2, noise: 0.15 },
-  m3: { label: 'Consumer lag', base: 2400, threshold: 10_000, thresholdLabel: '10K', fmt: (v) => compact(v), spikeAt: 1, spikeMul: 7.7, noise: 0.3 },
-  m4: { label: 'Error rate', base: 0.0042, threshold: 0.01, thresholdLabel: '1%', fmt: (v) => pct(v), noise: 0.3 },
-  m5: { label: 'Matching lines / 5m', base: 4, threshold: 20, thresholdLabel: '20', fmt: (v) => String(Math.round(v)), spikeAt: 0.02, spikeMul: 6, noise: 0.4 },
-  m6: { label: 'p75 LCP', base: 2100, threshold: 2500, thresholdLabel: '2.5 s', fmt: sec, spikeAt: 0.78, spikeMul: 1.3, noise: 0.08 },
-  m7: { label: 'Requests / min', base: 42_800, threshold: 21_400, thresholdLabel: '−50% baseline', fmt: (v) => compact(v), daily: 0.35, noise: 0.06 },
-  m8: { label: 'Hours since last success', base: 0, threshold: 26, thresholdLabel: '26 h', fmt: (v) => `${v.toFixed(0)} h` },
-};
-
 /** KPI burn monitors chart the KPI's bad-event share; the line is the burn multiplier × allowed share. */
-const KPI_OF_MONITOR: Record<string, string> = { m9: 'homepage-fast', m10: 'checkout-success', m11: 'order-api-success' };
-const kpiOfMonitor = (m: Monitor) => kpis.find((k) => k.id === (m as ApiMonitor).targetSpec?.kpiId || k.id === KPI_OF_MONITOR[m.id] || `KPI · ${k.name}` === m.target);
+const kpiOfMonitor = (m: Monitor) => kpis.find((k) => k.id === (m as ApiMonitor).targetSpec?.kpiId || `KPI · ${k.name}` === m.target);
 const slotOf = (m: Monitor) => (m.kind === 'metric_threshold' || m.kind === 'kpi_burn' ? 8 : 1);
-const FALLBACK: MetricSpec = { label: 'Value', base: 1, threshold: 2, thresholdLabel: 'threshold', fmt: (v) => v.toFixed(2) };
 
 function metricSeries(m: Monitor, range: TimeRange) {
   const k = m.kind === 'kpi_burn' ? kpiOfMonitor(m) : undefined;
@@ -80,17 +59,10 @@ function metricSeries(m: Monitor, range: TimeRange) {
     const qspec: MetricSpec = { label: metricMeta(q.metric).label.replace(/ (above|within)$/, ''), base: 0, threshold: ev.th, thresholdLabel: formatRuleValue(q.metric, ev.th), fmt: (v) => formatRuleValue(q.metric, v) };
     return { ts: timestamps(range), data: ev.data, spec: qspec };
   }
-  if (isApi) return apiMetricSeries(m as ApiMonitor, range);
-  const spec = METRIC[m.id] ?? FALLBACK;
-  const ts = timestamps(range);
-  const data = m.id === 'm8'
-    // hours since the nightly 02:00 run
-    ? ts.map((t) => { const d = new Date(t); return (d.getHours() + 22) % 24 + d.getMinutes() / 60; })
-    : series(`mon-${m.id}`, range, { base: spec.base, noise: spec.noise, daily: spec.daily ?? 0.2, spikeAt: spec.spikeAt, spikeMul: spec.spikeMul, spikeWidth: range === '1h' ? 8 : 4 });
-  return { ts, data, spec };
+  return apiMetricSeries(m as ApiMonitor, range);
 }
 
-// ---------- api mode: the series a saved monitor compares (GET /monitors/{id}/preview) ----------
+// ---------- the series a saved monitor compares (GET /monitors/{id}/preview) ----------
 
 interface Preview { timestamps: number[]; data: number[]; th: number; episodes: number; firingNow: boolean; now: number }
 /** kinds the api can replay; others chart nothing rather than request an error */
@@ -145,49 +117,19 @@ export function LikelyCause({ summary, confidence }: { summary: string; confiden
   );
 }
 
-/**
- * Why an incident is happening: KPI incidents use the KPI's call tree; error / latency monitors on
- * a service or endpoint use that node's tree. Undefined when nothing below it moved.
- */
+/** Why an incident is happening: the alert engine stores its root-cause analysis on the incident (RcaResult without children). */
 function incidentRca(i: Incident): RcaResult | undefined {
-  if (isApi) {
-    // the alert engine stores its root-cause analysis on the incident (RcaResult without children)
-    const r = (i as ApiIncident).rootCause as RcaResult | undefined;
-    return r && Array.isArray(r.path) && r.path.length && r.root ? r : undefined;
-  }
-  if (i.kpiId) {
-    const k = kpis.find((x) => x.id === i.kpiId);
-    return k ? kpiRca(k) : undefined;
-  }
-  const m = monitorOf(i);
-  if (m.kind !== 'metric_threshold' && m.kind !== 'latency') return undefined;
-  const sid = serviceIdOf(i.service);
-  if (!sid) return undefined;
-  const metric = m.kind === 'latency' ? 'latency' : 'errors';
-  const route = m.target.split(' · ')[1];
-  const ep = endpointsFor(sid).find((e) => `${e.method} ${e.route}` === route);
-  const tree = ep ? endpointNode(sid, ep.id, metric) : serviceNode(sid, metric);
-  if (!tree || tree.current - tree.baseline <= 0) return undefined;
-  const r = findRootCause(tree, metric === 'errors' ? 'ratio' : 'ms');
-  return r.path.length ? r : undefined;
+  const r = (i as ApiIncident).rootCause as RcaResult | undefined;
+  return r && Array.isArray(r.path) && r.path.length && r.root ? r : undefined;
 }
 
-// ---------- history (screen-local mock) ----------
+// ---------- history ----------
 
 export interface PastIncident extends Incident { resolvedAt: number; ackBy?: string }
-const H = 3600_000;
-const MOCK_HISTORY: PastIncident[] = [
-  { id: 'h1', monitorId: 'm5', title: 'Payment provider timeouts above 20 / 5m', severity: 'critical', state: 'resolved', startedAt: NOW - 26 * H, resolvedAt: NOW - 25.4 * H, value: '64', service: 'payments-api', ackBy: 'deniz' },
-  { id: 'h2', monitorId: 'm6', title: 'Checkout p75 LCP above 2.5 s', severity: 'warning', state: 'resolved', startedAt: NOW - 5.3 * H, resolvedAt: NOW - 5 * H, value: '2.8 s', service: 'shop-web' },
-  { id: 'h3', monitorId: 'm4', title: 'Create order error rate above 1%', severity: 'critical', state: 'resolved', startedAt: NOW - 50 * H, resolvedAt: NOW - 48 * H, value: '1.6%', service: 'orders-api', ackBy: 'mert' },
-  { id: 'h4', monitorId: 'm8', title: 'Nightly invoice job missed', severity: 'warning', state: 'resolved', startedAt: NOW - 74 * H, resolvedAt: NOW - 72 * H, value: '27 h', service: 'email-worker', ackBy: 'selin' },
-  { id: 'h5', monitorId: 'm7', title: 'Catalog throughput down 58%', severity: 'warning', state: 'resolved', startedAt: NOW - 146 * H, resolvedAt: NOW - 145.6 * H, value: '−58%', service: 'catalog-api' },
-  { id: 'h6', monitorId: 'm1', title: 'Charges error rate above 2%', severity: 'critical', state: 'resolved', startedAt: NOW - 70 * H, resolvedAt: NOW - 69.2 * H, value: '2.7%', service: 'payments-api', ackBy: 'deniz' },
-];
-/** Resolved incidents of the last 7 days: the api's (hydrated in place) or the mock history. */
-export const pastIncidents: PastIncident[] = isApi ? resolvedIncidents : MOCK_HISTORY;
-/** When it was acknowledged: the api's ackedAt, or ~6 min in for the mock history. */
-export const ackedAtOf = (i: Incident) => (i as ApiIncident).ackedAt ?? ((i as PastIncident).ackBy ? i.startedAt + 6 * 60_000 : undefined);
+/** Resolved incidents of the last 7 days (hydrated in place from the api). */
+export const pastIncidents: PastIncident[] = resolvedIncidents;
+/** When it was acknowledged (the api's ackedAt). */
+export const ackedAtOf = (i: Incident) => (i as ApiIncident).ackedAt;
 
 // ---------- acknowledgements (shared across screens for the session) ----------
 
@@ -196,18 +138,17 @@ const resolvedIds = new Set<string>();
 const ackListeners = new Set<() => void>();
 const notifyAcks = () => ackListeners.forEach((f) => f());
 
-/** Api mode: POST, then refresh the lists; the local mark shows the change until they land. */
+/** POST, then refresh the lists; the local mark shows the change until they land. */
 function incidentAction(id: string, action: 'ack' | 'resolve', mark: Set<string>) {
   mark.add(id);
   notifyAcks();
-  if (!isApi) return;
   mutate('POST', `/incidents/${seg(id)}/${action}`, undefined, ['/incidents'])
     .catch((e: unknown) => { console.warn(`[data] ${action} incident`, e); mark.delete(id); notifyAcks(); });
 }
 
 /**
  * Acknowledge / resolve state shared by the Incidents page, service Alerts tabs and the sidebar badge.
- * Mock: kept for the session. Api: POST /incidents/{id}/ack | resolve.
+ * POST /incidents/{id}/ack | resolve.
  */
 export function useAcks() {
   const [, bump] = useState(0);
@@ -305,10 +246,8 @@ export function AlertsBody({ serviceId, endpointRef }: { serviceId?: string; end
   });
 
   const { ack, resolve, stateOf } = useAcks();
-  // mock: muting is kept for the session; api: the monitor's state says muted
-  const [mockMuted, setMockMuted] = useState<Record<string, boolean>>({});
-  const isMuted = (m: Monitor) => (isApi ? m.state === 'muted' : !!mockMuted[m.id] || m.state === 'muted');
-  const toggleMute = (m: Monitor) => (isApi ? void setMonitorMute(m as ApiMonitor, !isMuted(m)) : setMockMuted({ ...mockMuted, [m.id]: !isMuted(m) }));
+  const isMuted = (m: Monitor) => m.state === 'muted';
+  const toggleMute = (m: Monitor) => void setMonitorMute(m as ApiMonitor, !isMuted(m));
   const scopedWindows = maintenanceWindows.filter((w) => !serviceId || !w.scope.services?.length || w.scope.services.includes(serviceId));
   const [decided, setDecided] = useState<Record<string, 'accepted' | 'rejected'>>({});
   const pending = scopedSuggestions.filter((s) => !decided[s.id]);
@@ -333,7 +272,8 @@ export function AlertsBody({ serviceId, endpointRef }: { serviceId?: string; end
 
         {tab === 'monitors' && scopedMonitors.length === 0 && (
           <Card>
-            <EmptyState icon={<Bell />} title={`No monitors on ${endpointRef ?? svc?.name ?? 'this service'} yet`}>
+            <EmptyState icon={<Bell />} title={`No monitors on ${endpointRef ?? svc?.name ?? 'this project'} yet`}
+              action={can('write') ? <Button variant="primary" icon={<Plus size={14} />} onClick={() => nav(`/alerts/new${serviceId ? `?service=${serviceId}${endpointRef ? `&endpoint=${encodeURIComponent(endpointRef)}` : ''}` : ''}`)}>Create a monitor</Button> : undefined}>
               {pending.length > 0
                 ? <><span>{pending.length} suggested from code are waiting. </span><a href="#" onClick={(e) => { e.preventDefault(); setTab('suggested'); }}>Review suggestions</a></>
                 : 'Create one, or define a KPI so alerts fire on what users feel.'}
@@ -364,7 +304,7 @@ export function AlertsBody({ serviceId, endpointRef }: { serviceId?: string; end
               <div className="row" style={{ gap: 'var(--space-4)', flexWrap: 'wrap' }}>
                 <Sparkles size={20} color="var(--accent)" aria-hidden />
                 <div style={{ flex: 1, minWidth: 240 }}>
-                  <div style={{ fontWeight: 600 }}>{pending.length} suggestions from {serviceId ? `${svc?.name}'s repository` : '3 connected repositories'}</div>
+                  <div style={{ fontWeight: 600 }}>{pending.length} suggestions from {serviceId ? `${svc?.name}'s repository` : 'connected repositories'}</div>
                   <div className="secondary">Scored by business impact; thresholds set from 14 days of real traffic. Click one for the reasoning.</div>
                 </div>
                 <Button onClick={() => nav('/code')}>View inventory</Button>
@@ -423,7 +363,7 @@ export function AlertsBody({ serviceId, endpointRef }: { serviceId?: string; end
       {monDrawer.item && (
         <MonitorDrawer monitor={monitors.find((x) => x.id === monDrawer.item!.id) ?? monDrawer.item} muted={isMuted(monDrawer.item)} onClose={monDrawer.close}
           onMute={() => toggleMute(monDrawer.item!)}
-          onDelete={isApi ? () => { void deleteMonitor(monDrawer.item!); monDrawer.close(); } : undefined}
+          onDelete={() => { void deleteMonitor(monDrawer.item!); monDrawer.close(); }}
           onEdit={() => nav(`/alerts/new?kind=${monDrawer.item!.kind}${serviceId ? `&service=${serviceId}` : ''}&edit=${monDrawer.item!.id}`)} />
       )}
       {sugDrawer.item && (
@@ -451,7 +391,7 @@ export function IncidentCard({ incident: i, state, onOpen, onAck }: { incident: 
         <StatusBadge status={incidentStatus(state)} />
         <Badge tone={sevTone(i.severity)}>{i.severity}</Badge>
         <span className="spacer" />
-        <span className="muted num" style={{ fontSize: 'var(--text-sm)', whiteSpace: 'nowrap' }}>for {duration(((isApi ? Date.now() : NOW) - i.startedAt) / 1000)}</span>
+        <span className="muted num" style={{ fontSize: 'var(--text-sm)', whiteSpace: 'nowrap' }}>for {duration((Date.now() - i.startedAt) / 1000)}</span>
       </div>
       <div>
         <h3 className="kpi-card__title" style={{ marginBottom: 2 }}>{i.title}</h3>
@@ -489,7 +429,7 @@ export function IncidentDrawer({ incident: i, state, onClose, onAck, onResolve, 
   const { ts, data, spec } = metricSeries(m, past ? '7d' : '6h');
   const sid = serviceIdOf(i.service);
   const forMin = (m as ApiMonitor).rule?.forMin ?? Number(/for (\d+)m/.exec(m.condition)?.[1] ?? 5);
-  const ackedAt = ackedAtOf(i) ?? i.startedAt + 6 * 60_000;
+  const ackedAt = ackedAtOf(i);
 
   const timeline: { ts: number; icon: ReactNode; text: ReactNode }[] = [
     { ts: i.startedAt - forMin * 60_000, icon: <CircleDashed size={14} color="var(--status-warning)" />, text: <>Pending — condition first breached</> },
@@ -498,144 +438,33 @@ export function IncidentDrawer({ incident: i, state, onClose, onAck, onResolve, 
     timeline.push({ ts: i.startedAt, icon: <Bell size={14} color="var(--status-critical)" />, text: <>Firing — held for {forMin} minutes</> });
     timeline.push({ ts: i.startedAt + 8_000, icon: <Send size={14} color="var(--text-muted)" />, text: <>Notified {channelsLabel(m)}</> });
   }
-  if (state === 'acknowledged' || (past && (i as PastIncident).ackBy)) {
-    timeline.push({ ts: ackedAt, icon: <Check size={14} color="var(--status-serious)" />, text: <>Acknowledged{(i as PastIncident).ackBy ? <> by {(i as PastIncident).ackBy}</> : isApi ? null : ' by you'}</> });
+  if (ackedAt) {
+    timeline.push({ ts: ackedAt, icon: <Check size={14} color="var(--status-serious)" />, text: <>Acknowledged{(i as PastIncident).ackBy ? <> by {(i as PastIncident).ackBy}</> : null}</> });
   }
   if (past) timeline.push({ ts: past, icon: <CheckCircle2 size={14} color="var(--status-good)" />, text: <>Resolved — back under threshold</> });
-  // api: the real timeline (pending, fired, notified, reminder, suppressed, acked, resolved)
-  const apiEvents = isApi ? remote<IncidentEvent[]>(`/incidents/${seg(i.id)}/events`, []) : [];
+  // the real timeline (pending, fired, notified, reminder, suppressed, acked, resolved) once the api answers
+  const apiEvents = remote<IncidentEvent[]>(`/incidents/${seg(i.id)}/events`, []);
   if (apiEvents.length) timeline.splice(0, timeline.length, ...[...apiEvents].sort((a, b) => a.ts - b.ts).map((e) => eventRow(e, m)));
 
   const events = timeline.filter((t) => t.ts >= ts[0]).slice(0, 3).map((t, k) => ({ ts: t.ts, label: ['Pending', 'Firing', 'Notified'][k] }));
-  const related = isApi ? [] : logs.filter((l) => l.service === i.service && (l.level === 'error' || l.level === 'warn')).slice(0, 6);
   const rca = past ? undefined : incidentRca(i);
-  // the engine's stored RCA (api) or the mock drill-down: one-line summary + confidence
+  // the engine's stored RCA: one-line summary + confidence
   const stored = (i as ApiIncident).rootCause as { summary?: string; confidence?: number; infra?: RcaInfraCandidate[] | null } | undefined;
   const infraCauses = Array.isArray(stored?.infra) ? [...stored.infra].sort((a, b) => b.confidence - a.confidence) : [];
   const likely = stored?.summary ? { summary: stored.summary, confidence: typeof stored.confidence === 'number' ? stored.confidence : undefined }
     : rca ? { summary: rca.summary, confidence: rca.confidence } : undefined;
   const nav = useNavigate();
-  const [explanation, setExplanation] = useState<{ summary: string; provider: string; usage: { inputTokens: number; outputTokens: number } } | null>(null);
-  const [explainError, setExplainError] = useState('');
-  const [explaining, setExplaining] = useState(false);
-  const [nextSteps, setNextSteps] = useState<string[]>([]);
-  const [stepsError, setStepsError] = useState('');
-  const [suggesting, setSuggesting] = useState(false);
-  const [report, setReport] = useState('');
-  const [reportError, setReportError] = useState('');
-  const [reporting, setReporting] = useState(false);
-  const [triage, setTriage] = useState<{ groups: { label: string; count: number }[] } | null>(null);
-  const [triageError, setTriageError] = useState('');
-  const [triaging, setTriaging] = useState(false);
-  useEffect(() => {
-    setExplanation(null); setExplainError(''); setNextSteps([]); setStepsError('');
-    setReport(''); setReportError(''); setTriage(null); setTriageError('');
-  }, [i.id]);
-
-  const incidentEvidence = [
-    `Service: ${i.service}; severity: ${i.severity}; observed value: ${i.value}`,
-    `Monitor: ${m.name}; target: ${m.target}; condition: ${m.condition}`,
-    ...related.slice(0, 4).map((l) => `${l.level}: ${l.message}`),
-  ].map((s) => s.slice(0, 500));
-
-  const explain = async () => {
-    setExplaining(true);
-    setExplainError('');
-    try {
-      const response = await fetch('/local-ai/incident-summary', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: i.title, evidence: incidentEvidence }),
-      });
-      if (!response.ok) throw new Error(`Local mock server returned HTTP ${response.status}`);
-      setExplanation(await response.json());
-    } catch (cause) {
-      setExplainError(cause instanceof Error ? cause.message : 'Could not reach the local mock server.');
-    } finally {
-      setExplaining(false);
-    }
-  };
-
-  const suggestNextSteps = async () => {
-    setSuggesting(true);
-    setStepsError('');
-    try {
-      const response = await fetch('/local-ai/incident-next-steps', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: i.title, evidence: incidentEvidence }),
-      });
-      if (!response.ok) throw new Error(`Local mock server returned HTTP ${response.status}`);
-      const result = await response.json() as { steps: string[] };
-      setNextSteps(result.steps);
-    } catch (cause) {
-      setStepsError(cause instanceof Error ? cause.message : 'Could not reach the local mock server.');
-    } finally {
-      setSuggesting(false);
-    }
-  };
-
-  const draftReport = async () => {
-    setReporting(true);
-    setReportError('');
-    try {
-      const response = await fetch('/local-ai/incident-report', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: i.title, evidence: incidentEvidence }),
-      });
-      if (!response.ok) throw new Error(`Local mock server returned HTTP ${response.status}`);
-      const result = await response.json() as { report: string };
-      setReport(result.report);
-    } catch (cause) {
-      setReportError(cause instanceof Error ? cause.message : 'Could not reach the local mock server.');
-    } finally {
-      setReporting(false);
-    }
-  };
-
-  const triageLogs = async () => {
-    setTriaging(true);
-    setTriageError('');
-    try {
-      const response = await fetch('/local-ai/triage-logs', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: i.title, logs: related.map((l) => l.message.slice(0, 500)) }),
-      });
-      if (!response.ok) throw new Error(`Local mock server returned HTTP ${response.status}`);
-      setTriage(await response.json());
-    } catch (cause) {
-      setTriageError(cause instanceof Error ? cause.message : 'Could not reach the local mock server.');
-    } finally {
-      setTriaging(false);
-    }
-  };
 
   return (
     <Drawer open onClose={onClose} width={720}
       title={i.title}
       subtitle={<span className="row" style={{ gap: 'var(--space-2)' }}><StatusBadge status={incidentStatus(state)} /><Badge tone={sevTone(i.severity)}>{i.severity}</Badge><span className="muted">started {dateTime(i.startedAt)}</span></span>}
       actions={<>
-        <Button size="sm" icon={<Sparkles size={12} />} disabled={explaining} onClick={() => void explain()}>{explaining ? 'Explaining…' : 'Explain'}</Button>
         {i.kpiId && <Button size="sm" icon={<Target size={12} />} onClick={() => nav(`/kpis/${i.kpiId}`)}>Open KPI</Button>}
         {sid && <Button size="sm" icon={<ExternalLink size={12} />} onClick={() => onOpenService(sid)}>Open {i.service}</Button>}
         {state === 'firing' && can('write') && <Button size="sm" variant="primary" icon={<Check size={12} />} onClick={onAck}>Acknowledge</Button>}
         {onResolve && can('write') && !past && state !== 'resolved' && <Button size="sm" icon={<CheckCircle2 size={12} />} onClick={onResolve}>Resolve</Button>}
       </>}>
-      {(explanation || explainError) && <DrawerSection title="AI explanation" aside={explanation?.provider === 'mock' ? 'Offline mock · 0 tokens' : undefined}>
-        {explanation && <p className="secondary" style={{ margin: 0 }}>{explanation.summary}</p>}
-        {explainError && <p role="alert" className="secondary" style={{ margin: 0 }}>{explainError}</p>}
-      </DrawerSection>}
-      <DrawerSection title="AI follow-up" aside="Offline mock · 0 tokens">
-        <div className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-          <Button size="sm" icon={<Sparkles size={12} />} disabled={suggesting} onClick={() => void suggestNextSteps()}>
-            {suggesting ? 'Drafting…' : 'Suggest next steps'}
-          </Button>
-          <Button size="sm" icon={<FileCode2 size={12} />} disabled={reporting} onClick={() => void draftReport()}>
-            {reporting ? 'Drafting…' : 'Draft incident report'}
-          </Button>
-        </div>
-        {nextSteps.length > 0 && <ol className="stack" style={{ gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}>
-          {nextSteps.map((step) => <li key={step}>{step}</li>)}
-        </ol>}
-        {stepsError && <p role="alert" className="secondary">{stepsError}</p>}
-        {report && <div style={{ marginTop: 'var(--space-3)' }}><CodeBlock>{report}</CodeBlock><p className="muted">Draft only; no report was saved.</p></div>}
-        {reportError && <p role="alert" className="secondary">{reportError}</p>}
-      </DrawerSection>
       {state === 'pending' && (
         <Callout icon={<CircleDashed size={16} />}>
           <strong>Pending.</strong> <span className="secondary">The condition is breached but has not held for {forMin} minutes yet. It fires and notifies {channelsLabel(m) || 'its channels'} if it holds; if it clears first, it closes quietly.</span>
@@ -702,29 +531,6 @@ export function IncidentDrawer({ incident: i, state, onClose, onAck, onResolve, 
         ]} />
       </DrawerSection>
 
-      <DrawerSection title="Related logs" aside={`${i.service} · warn & error`}>
-        <div style={{ marginBottom: 'var(--space-3)' }}>
-          <Button size="sm" icon={<Sparkles size={12} />} disabled={triaging || related.length === 0} onClick={() => void triageLogs()}>
-            {triaging ? 'Triage in progress…' : 'Triage logs'}
-          </Button>
-        </div>
-        {triage && <div className="stack" style={{ gap: 'var(--space-1)', marginBottom: 'var(--space-3)' }}>
-          {triage.groups.map((group) => <div key={group.label}>{group.label}: {group.count}</div>)}
-          <span className="muted">Offline mock · 0 tokens · labels are not saved.</span>
-        </div>}
-        {triageError && <p role="alert" className="secondary">{triageError}</p>}
-        {related.length === 0 ? <span className="muted">No warning or error logs from this service in the window.</span> : (
-          <div className="stack" style={{ gap: 'var(--space-1)' }}>
-            {related.map((l) => (
-              <div key={l.id} className="row mono" style={{ gap: 'var(--space-3)', fontSize: 'var(--text-xs)', alignItems: 'flex-start' }}>
-                <span className="muted" style={{ flexShrink: 0 }}>{clock(l.ts, true)}</span>
-                <span style={{ flexShrink: 0, width: 40, color: l.level === 'error' ? 'var(--status-critical)' : 'var(--status-warning)' }}>{l.level}</span>
-                <span className="secondary" style={{ overflowWrap: 'anywhere' }}>{l.message}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </DrawerSection>
     </Drawer>
   );
 }
@@ -733,12 +539,7 @@ function MonitorDrawer({ monitor: m, muted, onClose, onMute, onEdit, onDelete }:
   const { ts, data, spec } = metricSeries(m, '24h');
   const managed = m.source === 'code';
   const mutedUntil = (m as ApiMonitor).mutedUntil;
-  const changes = isApi ? [{ ts: m.lastChange, state: m.state }] : [
-    { ts: m.lastChange, state: m.state },
-    ...(m.state !== 'ok' ? [{ ts: m.lastChange - 26 * H, state: 'ok' as const }] : []),
-    { ts: m.lastChange - 27 * H, state: 'firing' as const },
-    { ts: m.lastChange - 27.6 * H, state: 'pending' as const },
-  ];
+  const changes = [{ ts: m.lastChange, state: m.state }];
   return (
     <Drawer open onClose={onClose} title={m.name}
       subtitle={<span className="row" style={{ gap: 'var(--space-2)' }}>{muted ? <StatusBadge status="muted" /> : <StatusBadge status={m.state} label={m.state === 'ok' ? 'OK' : undefined} />}<span className="muted">{m.target}</span></span>}
@@ -852,7 +653,7 @@ export function MaintenanceWindows({ serviceId }: { serviceId?: string }) {
     .sort((a, b) => b.startsAt - a.startsAt);
   const svcName = (id: string) => services.find((s) => s.id === id)?.name ?? id;
 
-  if (isApi && !maintenanceAvailable) {
+  if (!maintenanceAvailable) {
     return <Card><Callout icon={<Wrench size={16} />}>Maintenance windows need the api's <span className="mono">/maintenance-windows</span> endpoint, which this server does not have yet.</Callout></Card>;
   }
 
@@ -861,16 +662,14 @@ export function MaintenanceWindows({ serviceId }: { serviceId?: string }) {
     const w = { name: name.trim() || `Maintenance${scope ? ` · ${svcName(scope)}` : ''}`, startsAt, endsAt: startsAt + Number(minutes) * 60_000, scope: scope ? { services: [scope] } : {} };
     setBusy(true); setError(undefined);
     try {
-      if (isApi) await mutate('POST', '/maintenance-windows', w, ['/maintenance-windows']);
-      else maintenanceWindows.push({ id: `mw-${Date.now().toString(36)}`, ...w });
+      await mutate('POST', '/maintenance-windows', w, ['/maintenance-windows']);
       setName('');
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     setBusy(false); bump((n) => n + 1);
   };
   const remove = async (w: MaintenanceWindow) => {
     try {
-      if (isApi) await mutate('DELETE', `/maintenance-windows/${seg(w.id)}`, undefined, ['/maintenance-windows']);
-      else maintenanceWindows.splice(maintenanceWindows.indexOf(w), 1);
+      await mutate('DELETE', `/maintenance-windows/${seg(w.id)}`, undefined, ['/maintenance-windows']);
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     bump((n) => n + 1);
   };

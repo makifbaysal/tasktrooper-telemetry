@@ -1,11 +1,11 @@
 import { useData } from '@/data/remote';
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
-import { CheckCircle2 } from 'lucide-react';
+import { BellPlus, CheckCircle2, Siren } from 'lucide-react';
 import {
-  Badge, Card, EmptyState, SearchInput, Section, Select, StatusBadge, Table,
+  Badge, Button, Card, ConnectSdk, EmptyState, SearchInput, Section, Select, StatusBadge, Table,
 } from '@/components/ui';
-import { NOW, incidents, isApi, services, type Incident } from '@/data';
+import { incidents, monitors, services, type Incident } from '@/data';
 import { ago, duration } from '@/lib/format';
 import {
   INCIDENT_ORDER, IncidentCard, IncidentDrawer, MaintenanceWindows, ackedAtOf, monitorOf, pastIncidents, serviceIdOf, sevTone, useAcks, type PastIncident,
@@ -37,7 +37,7 @@ export function Incidents() {
   const mttr = pastIncidents.reduce((a, h) => a + (h.resolvedAt - h.startedAt), 0) / (pastIncidents.length || 1);
   const ackTimes = pastIncidents.map((h) => (ackedAtOf(h) ?? 0) - h.startedAt).filter((d) => d > 0);
   const tta = ackTimes.reduce((a, b) => a + b, 0) / (ackTimes.length || 1);
-  const week = all.filter((i) => i.startedAt > (isApi ? Date.now() : NOW) - 7 * 86400_000).length;
+  const week = all.filter((i) => i.startedAt > Date.now() - 7 * 86400_000).length;
 
   const selected = all.find((i) => i.id === params.get('id'));
   const openDrawer = (i: Incident) => setParams((p) => { const n = new URLSearchParams(p); n.set('id', i.id); return n; });
@@ -71,7 +71,19 @@ export function Incidents() {
 
       <Section title="Active queue" subtitle={week ? `${week} incidents in the last 7 days` : undefined}>
         {open.length === 0 ? (
-          <Card><EmptyState icon={<CheckCircle2 />} title="All clear">{q || svc !== 'all' || sev !== 'all' ? 'No open incident matches the filters.' : 'No monitor is firing or pending.'}</EmptyState></Card>
+          <Card>
+            {services.length === 0 && all.length === 0 ? (
+              <ConnectSdk icon={<Siren />} title="No services reporting yet">
+                Incidents open when a monitor or KPI on your telemetry fires. Connect an SDK first, then add monitors.
+              </ConnectSdk>
+            ) : monitors.length === 0 && all.length === 0 ? (
+              <EmptyState icon={<BellPlus />} title="No monitors yet" action={<Button variant="primary" icon={<BellPlus size={14} />} onClick={() => nav('/alerts/new')}>New monitor</Button>}>
+                Incidents open when a monitor or a KPI burn-rate alert fires.
+              </EmptyState>
+            ) : (
+              <EmptyState icon={<CheckCircle2 />} title="All clear">{q || svc !== 'all' || sev !== 'all' ? 'No open incident matches the filters.' : 'No monitor is firing or pending.'}</EmptyState>
+            )}
+          </Card>
         ) : (
           <div className="incidents-workspace__feed">
             {open.map((i) => <IncidentCard key={i.id} incident={i} state={stateOf(i)} onOpen={() => openDrawer(i)} onAck={() => ack(i.id)} />)}
@@ -97,9 +109,9 @@ export function Incidents() {
               } },
               { key: 'sev', header: 'Severity', sortValue: (h) => h.severity, render: (h) => <Badge tone={sevTone(h.severity)}>{h.severity}</Badge> },
               { key: 'peak', header: 'Peak', numeric: true, render: (h) => h.value },
-              { key: 'ack', header: isApi ? 'Acknowledged' : 'Acknowledged by', render: (h) => {
+              { key: 'ack', header: 'Acknowledged', render: (h) => {
                 const at = ackedAtOf(h);
-                return h.ackBy ?? (isApi && at ? <span className="muted">after {duration((at - h.startedAt) / 1000)}</span> : <span className="muted">—</span>);
+                return h.ackBy ?? (at ? <span className="muted">after {duration((at - h.startedAt) / 1000)}</span> : <span className="muted">—</span>);
               } },
               { key: 'dur', header: 'Duration', numeric: true, sortValue: (h) => h.resolvedAt - h.startedAt, render: (h) => duration((h.resolvedAt - h.startedAt) / 1000) },
               { key: 'start', header: 'Started', numeric: true, sortValue: (h) => h.startedAt, render: (h) => <span className="muted" style={{ whiteSpace: 'nowrap' }}>{ago(h.startedAt)}</span> },

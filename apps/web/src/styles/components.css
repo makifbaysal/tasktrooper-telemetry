@@ -345,3 +345,16 @@
   padding: var(--space-6); background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-lg); }
 .boot__title { font-size: var(--text-lg); font-weight: 600; color: var(--text-primary); }
 .boot__detail { font-size: var(--text-sm); color: var(--text-secondary); word-break: break-word; }
+
+/* ---------------- SDK setup (components/ui/SdkSetup.tsx, ADR-028) ---------------- */
+.sdk-setup { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.sdk-setup__note { margin: 0; font-size: var(--text-sm); color: var(--text-secondary); }
+.sdk-setup__note svg { vertical-align: middle; }
+.connect-sdk { display: flex; flex-direction: column; padding-bottom: var(--space-6); }
+.connect-sdk .empty { padding-bottom: var(--space-4); }
+.connect-sdk__setup { display: flex; flex-direction: column; gap: var(--space-3); width: min(calc(var(--space-12) * 14), 100%); margin: 0 auto; padding: 0 var(--space-4); text-align: left; }
+
+/* ---------------- Onboarding (screens/Onboarding.tsx) ---------------- */
+.onboarding__card { width: min(calc(var(--space-12) * 14), 100%); }
+.onboarding__steps { display: flex; gap: var(--space-2); color: var(--text-muted); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.06em; }
+.onboarding__steps [aria-current='step'] { color: var(--text-primary); font-weight: var(--weight-semibold); }

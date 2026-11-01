@@ -396,7 +396,7 @@ function ConnectIntegration({ provider, existing, onClose, onDone }: { provider:
 
   // aws
   const [awsAuth, setAwsAuth] = useState<'role' | 'keys'>(existing && !cfg.roleArn ? 'keys' : 'role');
-  const externalId = useMemo(() => (cfg.externalId as string | undefined) ?? randomId('tt-shopco-', 6), [cfg.externalId]);
+  const externalId = useMemo(() => (cfg.externalId as string | undefined) ?? randomId('tt-', 10), [cfg.externalId]);
   const [roleArn, setRoleArn] = useState((cfg.roleArn as string | undefined) ?? '');
   const [accessKeyId, setAccessKeyId] = useState((cfg.accessKeyId as string | undefined) ?? '');
   const [regions, setRegions] = useState<string[]>(arr('regions', ['eu-central-1']));

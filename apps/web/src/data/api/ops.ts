@@ -1,10 +1,10 @@
 /**
- * Api mode (ADR-013) for the operational lists exported from data/mock.ts: monitors, incidents,
- * load-test scenarios/runs, and the code-intelligence lists that have no endpoint yet.
+ * Api data (ADR-013) for the operational lists exported from data/apm.ts: monitors, incidents,
+ * load-test scenarios/runs and maintenance windows.
  * Imported for its side effect (hydrator registration) by data/kpi.ts.
  */
-import { NOW, incidents, inventory, monitors, repos, runs, scenarios, suggestions } from '../mock';
-import { ApiError, api, hydrateList, invalidate, isApi, qs, registerHydrator } from '../remote';
+import { incidents, monitors, runs, scenarios } from '../apm';
+import { ApiError, api, hydrateList, invalidate, qs, registerHydrator } from '../remote';
 import type { Incident, LoadTestRun, LoadTestScenario, Monitor, MonitorKind, QueueRule, Severity } from '../types';
 
 // ---------------------------------------------------------------- monitors
@@ -94,7 +94,7 @@ export function mapIncident(r: RawIncident): ApiIncident {
   };
 }
 
-/** Resolved incidents of the last 7 days (api mode; the mock history lives in screens/Alerts.tsx). */
+/** Resolved incidents of the last 7 days. */
 export const resolvedIncidents: (ApiIncident & { resolvedAt: number })[] = [];
 
 // ---------------------------------------------------------------- maintenance windows
@@ -109,10 +109,7 @@ export interface MaintenanceWindow {
 }
 export const maintenanceWindows: MaintenanceWindow[] = [];
 /** false when the api has no /maintenance-windows yet (404) */
-export let maintenanceAvailable = !isApi;
-if (!isApi) {
-  maintenanceWindows.push({ id: 'mw1', name: 'orders-db Postgres 16.6 minor upgrade', startsAt: NOW + 20 * 3600_000, endsAt: NOW + 21 * 3600_000, scope: { services: ['orders-api', 'order-events'] } });
-}
+export let maintenanceAvailable = false;
 
 interface RawWindow { id: string | number; name: string; startsAt: number | string; endsAt: number | string; scope?: MaintenanceWindow['scope'] | null }
 const mapWindow = (w: RawWindow): MaintenanceWindow => ({
@@ -179,21 +176,14 @@ export function postRemote<T>(key: string, path: string, body: unknown, fallback
 
 // ---------------------------------------------------------------- hydration
 
-if (isApi) {
-  // no api yet for code intelligence: show nothing rather than mock data
-  suggestions.splice(0);
-  repos.splice(0);
-  inventory.splice(0);
-
-  registerHydrator(() => hydrateList(monitors, '/monitors', (raw: RawMonitor[]) => raw.map(mapMonitor)));
-  registerHydrator(() => hydrateList(incidents, `/incidents${qs({ state: 'open', limit: 500 })}`, (raw: RawIncident[]) => raw.map(mapIncident)));
-  registerHydrator(() => hydrateList(resolvedIncidents, `/incidents${qs({ state: 'resolved', since: Date.now() - 7 * 86400_000, limit: 500 })}`,
-    // quiet ones (cleared while pending, never notified) are not part of the history
-    (raw: RawIncident[]) => raw.map(mapIncident).filter((i) => !i.quiet).map((i) => ({ ...i, resolvedAt: i.resolvedAt ?? i.startedAt }))));
-  registerHydrator(() => hydrateList(scenarios, '/loadtests/scenarios', (raw: RawScenario[]) => raw.map(mapScenario)));
-  registerHydrator(() => hydrateList(runs, '/loadtests/runs', (raw: RawRun[]) => raw.map(mapRun).sort((a, b) => b.startedAt - a.startedAt)));
-  // optional endpoint: a 404 must not block startup
-  registerHydrator(() => hydrateList(maintenanceWindows, '/maintenance-windows', (raw: RawWindow[]) => raw.map(mapWindow))
-    .then(() => { maintenanceAvailable = true; })
-    .catch((e: unknown) => { maintenanceAvailable = false; if (!(e instanceof ApiError && (e.status === 404 || e.status === 405))) console.warn('[data] /maintenance-windows', e); }));
-}
+registerHydrator(() => hydrateList(monitors, '/monitors', (raw: RawMonitor[]) => raw.map(mapMonitor)));
+registerHydrator(() => hydrateList(incidents, `/incidents${qs({ state: 'open', limit: 500 })}`, (raw: RawIncident[]) => raw.map(mapIncident)));
+registerHydrator(() => hydrateList(resolvedIncidents, `/incidents${qs({ state: 'resolved', since: Date.now() - 7 * 86400_000, limit: 500 })}`,
+  // quiet ones (cleared while pending, never notified) are not part of the history
+  (raw: RawIncident[]) => raw.map(mapIncident).filter((i) => !i.quiet).map((i) => ({ ...i, resolvedAt: i.resolvedAt ?? i.startedAt }))));
+registerHydrator(() => hydrateList(scenarios, '/loadtests/scenarios', (raw: RawScenario[]) => raw.map(mapScenario)));
+registerHydrator(() => hydrateList(runs, '/loadtests/runs', (raw: RawRun[]) => raw.map(mapRun).sort((a, b) => b.startedAt - a.startedAt)));
+// optional endpoint: a 404 must not block startup
+registerHydrator(() => hydrateList(maintenanceWindows, '/maintenance-windows', (raw: RawWindow[]) => raw.map(mapWindow))
+  .then(() => { maintenanceAvailable = true; })
+  .catch((e: unknown) => { maintenanceAvailable = false; if (!(e instanceof ApiError && (e.status === 404 || e.status === 405))) console.warn('[data] /maintenance-windows', e); }));

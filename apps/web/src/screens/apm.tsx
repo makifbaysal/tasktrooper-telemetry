@@ -5,9 +5,9 @@ import { TimeSeries, type Series } from '@/components/charts';
 import { Badge, Button, Drawer, DrawerSection, KeyValues, StatusBadge, Table } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
 import {
-  callerSeries, depErrorSeries, endpointCallers, endpointCalls, endpointsFor, outgoingSeries, series, services, timestamps,
+  callerSeries, depErrorSeries, depLatencySeries, endpointCallers, endpointCalls, endpointsFor, outgoingSeries, services, timestamps,
   type CallerTraffic, type Dependency, type Endpoint, type TimeRange,
-  databaseFor, topicForDep, isApi, redSeries,
+  databaseFor, topicForDep, redSeries,
 } from '@/data';
 import { ago, compact, ms, pct } from '@/lib/format';
 import { CALLER_KIND_LABEL, DEP_KIND_LABEL, errorTone, traceUrl } from './shared';
@@ -67,20 +67,6 @@ export function NameCell({ color, name, sub, mono }: { color?: string; name: Rea
   );
 }
 
-/**
- * Splits a traffic series into ok / client error / server error, so ONE stacked chart
- * shows volume and failures together (replaces separate throughput + status-code charts).
- */
-export function statusSplit(total: number[], errRate: number[], isConsumer: boolean) {
-  const s5 = total.map((v, i) => v * errRate[i]);
-  const s4 = total.map((v, i) => v * 0.012 * (1 + ((i * 7) % 5) / 10));
-  return [
-    { id: 'ok', label: isConsumer ? 'Processed' : '2xx–3xx', data: total.map((v, i) => Math.max(0, v - s5[i] - s4[i])), color: 'var(--series-1)' },
-    { id: '4xx', label: isConsumer ? 'Retried' : '4xx', data: s4, color: 'var(--series-4)' },
-    { id: '5xx', label: isConsumer ? 'Failed' : '5xx', data: s5, color: 'var(--series-8)' },
-  ];
-}
-
 const small = { fontSize: 'var(--text-xs)', marginBottom: 4 } as const;
 
 // ---------------------------------------------------------------- Dependency drawer
@@ -88,7 +74,6 @@ export function DependencyDrawer({ dep, serviceRpm, onClose }: { dep: Dependency
   const { range } = useApp();
   const nav = useNavigate();
   if (!dep) return null;
-  const depLatency: Latency = { avg: dep.avgMs, p50: dep.avgMs * 0.75, p95: dep.p95, p99: dep.p95 * 2 };
   const ts = timestamps(range);
   const target = dep.kind === 'http' ? services.find((s) => dep.name.endsWith(s.name)) : undefined;
   const db = databaseFor(dep);
@@ -115,8 +100,11 @@ export function DependencyDrawer({ dep, serviceRpm, onClose }: { dep: Dependency
         ['Error rate', <ErrorCell key="e" rate={dep.errorRate} />],
         ['Failed calls / min', compact(dep.callsPerMin * dep.errorRate)],
       ]} />
-      <DrawerSection title="Response time" aside={latencyHint(depLatency)}>
-        <TimeSeries timestamps={ts} height={190} format={ms} series={latencySeries(`dep-${dep.serviceId}-${dep.id}`, range, depLatency, dep.errorRate > 0.01 ? { spikeAt: 0.8, spikeMul: 2.6, spikeWidth: 6 } : {})} />
+      <DrawerSection title="Response time" aside={`avg ${ms(dep.avgMs)} · p95 ${ms(dep.p95)}`}>
+        <TimeSeries timestamps={ts} height={190} format={ms} series={[
+          { id: 'avg', label: 'avg', slot: 2, data: depLatencySeries(dep, range, 'avg') },
+          { id: 'p95', label: 'p95', slot: 1, data: depLatencySeries(dep, range, 'p95') },
+        ]} />
       </DrawerSection>
       <DrawerSection title="Error rate">
         {dep.errorRate === 0
@@ -209,29 +197,17 @@ export const LATENCY_STATS: { id: LatencyStat; slot: number }[] = [
   { id: 'p99', slot: 7 },
 ];
 
-/** Typical right-skewed ratios when only p95 is known (mock data). */
-export const latencyFromP95 = (p95: number, avg?: number): Latency => ({ p50: p95 * 0.42, avg: avg ?? p95 * 0.5, p95, p99: p95 * 2.1 });
-
-type Spike = { spikeAt?: number; spikeMul?: number; spikeWidth?: number };
-
-/** One line per statistic. Keys `p50-…`/`p95-…` stay stable so existing charts keep their shape. */
-export function latencySeries(key: string, range: TimeRange, l: Latency, spike: Spike = {}): Series[] {
-  return LATENCY_STATS.map((s) => ({ id: s.id, label: s.id, slot: s.slot, data: series(`${s.id}-${key}`, range, { base: l[s.id], ...spike }) }));
-}
-
 /**
- * Latency lines of the project (no serviceId), a service or an endpoint. api mode: p50 / p95 / p99 from
- * `redSeries` (avg isn't served); mock: the synthesized `latencySeries` (unchanged).
+ * Latency lines (p50 / p95 / p99) of the project (no serviceId), a service or an endpoint from `redSeries`
+ * (avg isn't served per bucket).
  */
-export function latencySeriesFor(key: string, range: TimeRange, l: Latency, spike: Spike = {}, serviceId?: string, endpointId?: string): Series[] {
-  if (!isApi) return latencySeries(key, range, l, spike);
+export function latencySeriesFor(range: TimeRange, serviceId?: string, endpointId?: string): Series[] {
   const red = redSeries(range, serviceId, endpointId);
   return LATENCY_STATS.filter((s) => s.id !== 'avg').map((s) => ({ id: s.id, label: s.id, slot: s.slot, data: red[s.id as 'p50' | 'p95' | 'p99'] }));
 }
 
-/** Status-class columns: api mode reads s2xx/s3xx/s4xx/s5xx from `redSeries`; mock splits total × error rate. */
-export function statusSplitFor(range: TimeRange, serviceId: string | undefined, total: number[], errRate: number[], isConsumer: boolean, endpointId?: string) {
-  if (!isApi) return statusSplit(total, errRate, isConsumer);
+/** Status-class columns from `redSeries` (s2xx/s3xx/s4xx/s5xx; consumers: processed / retried / failed). */
+export function statusSplitFor(range: TimeRange, serviceId: string | undefined, isConsumer: boolean, endpointId?: string) {
   const red = redSeries(range, serviceId, endpointId);
   return [
     { id: 'ok', label: isConsumer ? 'Processed' : '2xx–3xx', data: red.s2xx.map((v, i) => v + (red.s3xx[i] ?? 0)), color: 'var(--series-1)' },
@@ -240,16 +216,7 @@ export function statusSplitFor(range: TimeRange, serviceId: string | undefined, 
   ];
 }
 
-/** Derives the other statistics from an existing p95 series (e.g. a load-test run). */
-export function latencyFromP95Series(p95: number[]): Series[] {
-  const ratio: Record<LatencyStat, number> = { p50: 0.42, avg: 0.5, p95: 1, p99: 2.1 };
-  return LATENCY_STATS.map((s) => ({
-    id: s.id, label: s.id, slot: s.slot,
-    data: s.id === 'p95' ? p95 : p95.map((v, i) => v * ratio[s.id] * (1 + (((i * 13 + s.slot * 7) % 9) - 4) / 100)),
-  }));
-}
-
-/** "avg 104 ms · p50 88 ms · p99 470 ms" — the stats not shown as the headline value. */
-export function latencyHint(l: Latency, headline?: LatencyStat) {
-  return LATENCY_STATS.filter((s) => s.id !== headline).map((s) => `${s.id} ${ms(l[s.id])}`).join(' · ');
+/** "p50 88 ms · p99 470 ms" — the known stats not shown as the headline value (unknown / zero ones are skipped). */
+export function latencyHint(l: Partial<Latency>, headline?: LatencyStat) {
+  return LATENCY_STATS.filter((s) => s.id !== headline && (l[s.id] ?? 0) > 0).map((s) => `${s.id} ${ms(l[s.id]!)}`).join(' · ');
 }

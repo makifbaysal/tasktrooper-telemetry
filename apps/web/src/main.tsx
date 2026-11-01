@@ -10,11 +10,13 @@ import './styles/trace.css';
 import './styles/exploration.css';
 import { router } from './router';
 import { AppProvider } from './components/layout/context';
-import { API_URL, hydrate, isApi, startPolling } from './data/remote';
+import { API_URL, hydrate, startPolling } from './data/remote';
 import { authState, initAuth, useAuth } from './data/auth';
 import { Login } from './screens/Login';
+import { Onboarding } from './screens/Onboarding';
+import { rootErrorOptions, startTelemetry } from './lib/telemetry';
 
-const root = createRoot(document.getElementById('root')!);
+const root = createRoot(document.getElementById('root')!, rootErrorOptions);
 
 function renderApp() {
   root.render(
@@ -46,13 +48,23 @@ function SessionGate() {
 }
 
 async function boot() {
-  if (!isApi) return renderApp();
   renderStatus('Loading…');
-  // ADR-016: /auth/config + /me decide between session cookie, api key and the login screen
-  if ((await initAuth()) === 'login') {
+  // ADR-016 / ADR-028: /auth/config + /me decide between the login screen, onboarding (no org yet) and the app
+  let step;
+  try {
+    step = await initAuth();
+  } catch (e) {
+    return renderStatus('Could not reach the TaskTrooper API', `${API_URL} — ${e instanceof Error ? e.message : String(e)}`, () => void boot());
+  }
+  if (step === 'login') {
     const { config } = authState();
     if (config) return root.render(<StrictMode><Login config={config} onSignedIn={() => void boot()} /></StrictMode>);
   }
+  if (step === 'onboarding') return root.render(<StrictMode><Onboarding onDone={() => void start()} /></StrictMode>);
+  await start();
+}
+
+async function start() {
   try {
     await hydrate();
     startPolling();
@@ -62,4 +74,5 @@ async function boot() {
   }
 }
 
-void boot();
+// ADR-027: RUM of the dashboard itself — a no-op (and no SDK chunk loaded) without VITE_TROOPER_DSN
+void startTelemetry(router).finally(() => void boot());

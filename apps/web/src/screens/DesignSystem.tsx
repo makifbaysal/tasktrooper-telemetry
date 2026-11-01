@@ -3,10 +3,10 @@ import { Bell, Plus, Trash2 } from 'lucide-react';
 import { BarList, Columns, Sparkline, TimeSeries } from '@/components/charts';
 import { PropBar } from '@/components/charts/BarList';
 import {
-  Badge, Button, Callout, Card, ChoiceChips, CodeBlock, CopyCode, Delta, Drawer, DrawerSection, EmptyState, Field, Input, KeyValues, Meter, MetricCard,
+  Badge, Button, Callout, Card, ChoiceChips, CodeBlock, ConnectSdk, CopyCode, Delta, Drawer, DrawerSection, EmptyState, Field, Input, KeyValues, Meter, MetricCard,
   PageHeader, SearchInput, Section, Segmented, Select, StatTile, StatusBadge, Table, Tabs, Toggle, useDrawer,
 } from '@/components/ui';
-import { series, timestamps } from '@/data';
+import { timestamps } from '@/data';
 import { compact, ms } from '@/lib/format';
 
 const swatch = (name: string, note?: string) => (
@@ -16,6 +16,18 @@ const swatch = (name: string, note?: string) => (
     {note && <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>{note}</span>}
   </div>
 );
+
+/**
+ * Specimen data for this showcase only (not telemetry): a deterministic wave around `base`, 60 points (the 1h axis),
+ * with an optional bump at `spikeAt` (0..1).
+ */
+function sample(seed: number, o: { base: number; spikeAt?: number }): number[] {
+  return Array.from({ length: 60 }, (_, i) => {
+    const wave = 1 + 0.12 * Math.sin((i + seed * 7) / 6) + 0.05 * Math.sin((i * (seed + 3)) / 2.3);
+    const bump = o.spikeAt !== undefined ? 1 + 2 * Math.max(0, 1 - Math.abs(i - Math.round(o.spikeAt * 59)) / 4) : 1;
+    return o.base * wave * bump;
+  });
+}
 
 /** One specimen card. */
 function Spec({ title, children }: { title: string; children: React.ReactNode }) {
@@ -103,11 +115,11 @@ export function DesignSystem() {
         <div className="grid grid-3">
           <MetricCard className="metric--hero span-2" label="Throughput · hero (span-2)" value="18.4K" unit="rpm" curr={18400} prev={17100}
             hint="The page's most important metric gets the most space. Value, delta and chart live in one card.">
-            <TimeSeries timestamps={ts} height={160} area format={(v) => compact(v)} series={[{ id: 't', label: 'rpm', slot: 1, data: series('dsh', '1h', { base: 18000 }) }]} />
+            <TimeSeries timestamps={ts} height={160} area format={(v) => compact(v)} series={[{ id: 't', label: 'rpm', slot: 1, data: sample(1, { base: 18000 }) }]} />
           </MetricCard>
           <MetricCard label="Error rate · MetricCard" value="0.42%" curr={0.0042} prev={0.0031} upIsGood={false} badge={<StatusBadge status="warning" />} onClick={() => drawer.open('Error rate')}
             hint="Clickable → opens a Drawer">
-            <TimeSeries timestamps={ts} height={110} format={(v) => `${(v * 100).toFixed(1)}%`} series={[{ id: 'e', label: 'Error rate', slot: 8, data: series('dse', '1h', { base: 0.004, spikeAt: 0.8 }) }]} />
+            <TimeSeries timestamps={ts} height={110} format={(v) => `${(v * 100).toFixed(1)}%`} series={[{ id: 'e', label: 'Error rate', slot: 8, data: sample(2, { base: 0.004, spikeAt: 0.8 }) }]} />
           </MetricCard>
         </div>
         <div className="grid grid-2">
@@ -129,29 +141,29 @@ export function DesignSystem() {
       <Section title="Data display">
 
       <div className="grid grid-4">
-        <StatTile label="Throughput" value="18.4K" unit="rpm" curr={18400} prev={17100} trend={series('ds1', '1h', { base: 10 }).slice(-16)} />
+        <StatTile label="Throughput" value="18.4K" unit="rpm" curr={18400} prev={17100} trend={sample(3, { base: 10 }).slice(-16)} />
         <StatTile label="Error rate" value="0.42%" curr={0.0042} prev={0.0031} upIsGood={false} />
         <StatTile label="p95" value="182" unit="ms" curr={182} prev={182} />
-        <Card title="Sparkline"><Sparkline data={series('ds2', '1h', { base: 10 }).slice(-20)} width={160} height={40} /></Card>
+        <Card title="Sparkline"><Sparkline data={sample(4, { base: 10 }).slice(-20)} width={160} height={40} /></Card>
       </div>
 
       <div className="grid grid-2">
         <Card title="TimeSeries — line, ≥2 series → legend">
           <TimeSeries timestamps={ts} format={(v) => compact(v)} series={[
-            { id: 'a', label: 'catalog-api', slot: 1, data: series('dsa', '1h', { base: 4000 }) },
-            { id: 'b', label: 'orders-api', slot: 2, data: series('dsb', '1h', { base: 2400 }) },
-            { id: 'c', label: 'payments-api', slot: 3, data: series('dsc', '1h', { base: 900 }) },
+            { id: 'a', label: 'Series A', slot: 1, data: sample(5, { base: 4000 }) },
+            { id: 'b', label: 'Series B', slot: 2, data: sample(6, { base: 2400 }) },
+            { id: 'c', label: 'Series C', slot: 3, data: sample(7, { base: 900 }) },
           ]} />
         </Card>
         <Card title="TimeSeries — area + threshold + event">
           <TimeSeries timestamps={ts} area format={ms} threshold={{ value: 300, label: 'alert 300 ms' }} events={[{ ts: ts[40], label: 'deploy' }]}
-            series={[{ id: 'p95', label: 'p95', data: series('dsp', '1h', { base: 210, spikeAt: 0.75 }) }]} />
+            series={[{ id: 'p95', label: 'p95', data: sample(8, { base: 210, spikeAt: 0.75 }) }]} />
         </Card>
         <Card title="Columns — stacked, 2px gap, rounded data-end">
           <Columns timestamps={ts.slice(-30)} format={(v) => compact(v)} series={[
-            { id: 'ok', label: '2xx', data: series('c1', '1h', { base: 900 }).slice(-30), color: 'var(--series-1)' },
-            { id: '4', label: '4xx', data: series('c2', '1h', { base: 80 }).slice(-30), color: 'var(--series-4)' },
-            { id: '5', label: '5xx', data: series('c3', '1h', { base: 40, spikeAt: 0.8 }).slice(-30), color: 'var(--series-8)' },
+            { id: 'ok', label: '2xx', data: sample(9, { base: 900 }).slice(-30), color: 'var(--series-1)' },
+            { id: '4', label: '4xx', data: sample(10, { base: 80 }).slice(-30), color: 'var(--series-4)' },
+            { id: '5', label: '5xx', data: sample(11, { base: 40, spikeAt: 0.8 }).slice(-30), color: 'var(--series-8)' },
           ]} />
         </Card>
         <Card title="BarList & PropBar">
@@ -176,13 +188,16 @@ export function DesignSystem() {
           <CopyCode>{`{ "Effect": "Allow", "Action": ["cloudwatch:GetMetricData"], "Resource": "*" }`}</CopyCode>
           <CopyCode wrap>{'https://ingest.trooper.dev/v1/drains/vercel?key=<backend ingest key>&integration=int-vercel'}</CopyCode>
         </Card>
+        <Card title="ConnectSdk (no data yet)">
+          <ConnectSdk icon={<Bell size={18} />} title="No services yet">Services appear here as soon as an SDK reports traces.</ConnectSdk>
+        </Card>
       </div>
       </Section>
 
       <Drawer open={!!drawer.item} onClose={drawer.close} title={<span className="mono">{drawer.item}</span>} subtitle="orders-api · sample drawer"
         actions={<Button size="sm">Open full page</Button>}>
         <DrawerSection title="Traffic" aside="last hour">
-          <TimeSeries timestamps={ts} height={140} area format={(v) => compact(v)} series={[{ id: 't', label: 'rpm', slot: 1, data: series('dsd', '1h', { base: 2100 }) }]} />
+          <TimeSeries timestamps={ts} height={140} area format={(v) => compact(v)} series={[{ id: 't', label: 'rpm', slot: 1, data: sample(12, { base: 2100 }) }]} />
         </DrawerSection>
         <DrawerSection title="Details">
           <KeyValues items={[['Service', 'orders-api'], ['Owner', 'orders team'], ['Monitor', <StatusBadge key="m" status="ok" />], ['Source', <span key="s" className="mono">src/orders/create.controller.ts:42</span>]]} />

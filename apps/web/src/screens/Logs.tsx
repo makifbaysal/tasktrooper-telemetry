@@ -1,13 +1,13 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import { Bell, ExternalLink, ListTree } from 'lucide-react';
-import { Columns, TimeSeries } from '@/components/charts';
+import { Bell, ExternalLink, ListTree, ScrollText } from 'lucide-react';
+import { Columns } from '@/components/charts';
 import {
-  Badge, Button, Card, CodeBlock, Drawer, DrawerSection, KeyValues, SearchInput, Segmented, Table,
+  Badge, Button, Card, CodeBlock, ConnectSdk, Drawer, DrawerSection, KeyValues, SearchInput, Segmented, Table,
   useDrawer, type Tone,
 } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
-import { allLogs, logsFor, searchLogs, series, services, timestamps, type LogLine, type TimeRange } from '@/data';
+import { allLogs, logVolumeSeries, logsFor, searchLogs, services, timestamps, type LogLine } from '@/data';
 import { can } from '@/data/auth';
 import { ago, clock, compact, dateTime, int } from '@/lib/format';
 import { traceUrl } from './shared';
@@ -51,29 +51,7 @@ function groupPatterns(rows: LogLine[]): Pattern[] {
   return [...map.values()];
 }
 
-// ---------------------------------------------------------------- local mock attrs
-function hashStr(s: string) {
-  let h = 7;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return h;
-}
-
-function lineContext(l: LogLine) {
-  const h = hashStr(l.id);
-  return {
-    spanId: l.traceId ? (h.toString(16) + 'a3f1c2').slice(0, 16) : null,
-    host: `${l.service}-${(h % 9000 + 1000).toString(36)}-${['x7k2p', 'q4m9z', 'b8n3r'][h % 3]}`,
-    env: 'production',
-    version: `v1.${(h % 40) + 10}.${h % 7}`,
-    attrs: {
-      'http.method': ['GET', 'POST', 'PUT'][h % 3],
-      'http.route': ['/v1/orders', '/v1/payments/:id', '/v1/cart', '/v1/users/:id'][h % 4],
-      'user.id': `u_${(h % 99999).toString().padStart(5, '0')}`,
-      'region': ['eu-central-1', 'eu-west-1'][h % 2],
-      'thread': `worker-${h % 16}`,
-    },
-  };
-}
+const attrText = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v));
 
 // ---------------------------------------------------------------- screen
 /** Log search + facets + lines/patterns. With `serviceId` it is scoped to one service (used on service pages). */
@@ -111,9 +89,19 @@ export function LogExplorer({ serviceId }: { serviceId?: string }) {
   const toggle = (l: Level) => setLevels((s) => { const n = new Set(s); n.has(l) ? n.delete(l) : n.add(l); return n; });
   const logServices = services.filter((s) => logs.some((l) => l.service === s.name));
 
-  const seed = serviceId ?? 'all';
-  const scale = serviceId ? Math.max(0.02, logs.length / allLogs.length) : 1;
-  const errShare = logs.filter((l) => l.level === 'error').length / Math.max(1, logs.length);
+  // volume per level from the api (GET /logs/series), same server-side scope as the lines
+  const volume = logVolumeSeries(range, { serviceId, pod: pod || undefined, namespace: namespace || undefined, traceId: traceId || undefined });
+
+  if (logs.length === 0 && !scoped) {
+    return (
+      <Card>
+        <ConnectSdk icon={<ScrollText />} title={serviceId ? 'No logs from this service yet' : 'No logs yet'} setup={!serviceId}>
+          Log lines arrive through the SDK's logging integration (slog, ILogger, console / pino, Python logging, Logback …) and are
+          linked to the trace that wrote them. Search, level and service facets and log patterns show up here.
+        </ConnectSdk>
+      </Card>
+    );
+  }
 
   return (
     <>
@@ -137,9 +125,9 @@ export function LogExplorer({ serviceId }: { serviceId?: string }) {
             </div>
           )}
           <Columns timestamps={ts} height={110} format={(v) => compact(v)} series={[
-            { id: 'info', label: 'info', data: series(`log-info-${seed}`, range, { base: 1800 * scale }), color: 'var(--series-1)' },
-            { id: 'warn', label: 'warn', data: series(`log-warn-${seed}`, range, { base: 160 * scale, noise: 0.3 }), color: 'var(--series-4)' },
-            { id: 'error', label: 'error', data: series(`log-err-${seed}`, range, { base: Math.max(1, (serviceId ? 1800 * errShare : 60) * scale), noise: 0.4, spikeAt: 0.8, spikeMul: serviceId ? 1.5 : 4 }), color: 'var(--series-8)' },
+            { id: 'info', label: 'info', data: volume.info, color: 'var(--series-1)' },
+            { id: 'warn', label: 'warn', data: volume.warn, color: 'var(--series-4)' },
+            { id: 'error', label: 'error', data: volume.error, color: 'var(--series-8)' },
           ]} />
         </div>
       </Card>
@@ -216,11 +204,11 @@ export function LogExplorer({ serviceId }: { serviceId?: string }) {
         </Card>
       </div>
 
-      <LineDrawer line={lineDrawer.item} onClose={lineDrawer.close} ts={ts} range={range}
+      <LineDrawer line={lineDrawer.item} onClose={lineDrawer.close}
         pattern={lineDrawer.item ? patternOf(lineDrawer.item) : null}
         onSurrounding={(l) => { lineDrawer.close(); setQ(''); setSrc(null); if (!serviceId) setSvc(l.service); setLevels(new Set(LEVELS)); setView('lines'); }}
         onPattern={(p) => { lineDrawer.close(); patternDrawer.open(p); }} />
-      <PatternDrawer pattern={patternDrawer.item} onClose={patternDrawer.close} ts={ts} range={range}
+      <PatternDrawer pattern={patternDrawer.item} onClose={patternDrawer.close}
         onLine={(l) => { patternDrawer.close(); lineDrawer.open(l); }}
         onAlert={() => nav('/alerts/new?kind=log_match')} />
     </>
@@ -228,22 +216,13 @@ export function LogExplorer({ serviceId }: { serviceId?: string }) {
 }
 
 // ---------------------------------------------------------------- drawers
-function PatternChart({ p, ts, range, height }: { p: Pattern; ts: number[]; range: TimeRange; height: number }) {
-  return (
-    <TimeSeries timestamps={ts} height={height} format={(v) => compact(v)} area series={[{
-      id: 'n', label: 'Lines', slot: p.level === 'error' ? 8 : 1,
-      data: series(`log-pat-${hashStr(p.id)}`, range, { base: Math.max(1, p.lines.length * 4), noise: 0.4 }),
-    }]} />
-  );
-}
-
-function LineDrawer({ line, pattern, onClose, ts, range, onSurrounding, onPattern }: {
-  line: LogLine | null; pattern: Pattern | null; onClose: () => void; ts: number[]; range: TimeRange;
+function LineDrawer({ line, pattern, onClose, onSurrounding, onPattern }: {
+  line: LogLine | null; pattern: Pattern | null; onClose: () => void;
   onSurrounding: (l: LogLine) => void; onPattern: (p: Pattern) => void;
 }) {
   const nav = useNavigate();
   if (!line) return null;
-  const ctx = lineContext(line);
+  const attrs = Object.entries(line.attrs ?? {}).sort(([a], [b]) => a.localeCompare(b));
   return (
     <Drawer open onClose={onClose} width={680}
       title={<span className="row" style={{ gap: 8 }}><Badge tone={LEVEL_TONE[line.level]}>{line.level}</Badge>{line.service}</span>}
@@ -262,27 +241,24 @@ function LineDrawer({ line, pattern, onClose, ts, range, onSurrounding, onPatter
           ['Service', line.service],
           ...(line.source ? [['Source', <Badge>{line.source}</Badge>] as [string, ReactNode]] : []),
           ['Trace id', line.traceId ? <Link to={traceUrl(line.traceId)} className="mono">{line.traceId}</Link> : <span className="muted">—</span>],
-          ['Span id', ctx.spanId ? <span className="mono">{ctx.spanId}</span> : <span className="muted">—</span>],
-          ['Host', <span className="mono">{ctx.host}</span>],
-          ['Environment', ctx.env],
-          ['Version', <span className="mono">{ctx.version}</span>],
         ]} />
       </DrawerSection>
       <DrawerSection title="Attributes">
-        <KeyValues items={Object.entries(ctx.attrs).map(([k, v]) => [<span className="mono">{k}</span>, <span className="mono">{v}</span>])} />
+        {attrs.length === 0
+          ? <p className="muted">No attributes on this line.</p>
+          : <KeyValues items={attrs.map(([k, v]) => [<span className="mono">{k}</span>, <span className="mono" style={{ overflowWrap: 'anywhere' }}>{attrText(v)}</span>])} />}
       </DrawerSection>
       {pattern && (
         <DrawerSection title="Same pattern" aside={<a href="#" onClick={(e) => { e.preventDefault(); onPattern(pattern); }}>{int(pattern.lines.length)} lines · open pattern</a>}>
-          <div className="mono muted" style={{ fontSize: 'var(--text-xs)', marginBottom: 8, overflowWrap: 'anywhere' }}>{pattern.pattern}</div>
-          <PatternChart p={pattern} ts={ts} range={range} height={120} />
+          <div className="mono muted" style={{ fontSize: 'var(--text-xs)', overflowWrap: 'anywhere' }}>{pattern.pattern}</div>
         </DrawerSection>
       )}
     </Drawer>
   );
 }
 
-function PatternDrawer({ pattern, onClose, ts, range, onLine, onAlert }: {
-  pattern: Pattern | null; onClose: () => void; ts: number[]; range: TimeRange; onLine: (l: LogLine) => void; onAlert: () => void;
+function PatternDrawer({ pattern, onClose, onLine, onAlert }: {
+  pattern: Pattern | null; onClose: () => void; onLine: (l: LogLine) => void; onAlert: () => void;
 }) {
   if (!pattern) return null;
   const recent = [...pattern.lines].sort((a, b) => b.ts - a.ts);
@@ -293,9 +269,6 @@ function PatternDrawer({ pattern, onClose, ts, range, onLine, onAlert }: {
       actions={can('write') && <Button size="sm" icon={<Bell size={14} />} onClick={onAlert}>Alert on pattern</Button>}>
       <DrawerSection title="Pattern" aside="variable parts masked">
         <CodeBlock>{pattern.pattern}</CodeBlock>
-      </DrawerSection>
-      <DrawerSection title="Occurrences">
-        <PatternChart p={pattern} ts={ts} range={range} height={180} />
       </DrawerSection>
       <DrawerSection title="Recent lines" aside={recent.length > 20 ? `latest 20 of ${recent.length}` : undefined}>
         <Card flush>

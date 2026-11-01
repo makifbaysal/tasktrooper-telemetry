@@ -7,6 +7,7 @@ import { Link } from 'react-router';
 import { AlertOctagon, AlertTriangle, CheckCircle2, CircleDashed, Clock, Radar, Server, XCircle } from 'lucide-react';
 import { Badge, Card, CopyCode, EmptyState, Meter, StatusBadge, type Tone } from '@/components/ui';
 import { POD_CRITICAL_REASONS, services, type InfraStatus, type K8sEvent, type K8sPod } from '@/data';
+import { projectDsn, useAuth } from '@/data/auth';
 import { ago } from '@/lib/format';
 
 // ---------------------------------------------------------------- formatting
@@ -110,23 +111,24 @@ export function EventList({ events, empty = 'No warning events in this range.' }
 }
 
 // ---------------------------------------------------------------- empty state
-const HELM = `helm install trooper-agent deploy/helm/trooper-agent \\
+const HELM = (dsn: string) => `helm install trooper-agent deploy/helm/trooper-agent \\
   --namespace trooper --create-namespace \\
   --set clusterName=<cluster-name> \\
-  --set dsn=<ingest-dsn>
+  --set dsn=${dsn}
 # optional: auto-instrument services without an SDK (eBPF)
 #   --set ebpf.enabled=true`;
-const DOCKER = `docker run -d --name trooper-agent --restart unless-stopped \\
+const DOCKER = (dsn: string) => `docker run -d --name trooper-agent --restart unless-stopped \\
   --pid host --network host \\
   -v /proc:/host/proc:ro \\
   -v /var/run/docker.sock:/var/run/docker.sock:ro \\
   -e TT_AGENT_MODES=host \\
   -e TT_AGENT_PROCFS=/host/proc \\
-  -e TT_DSN=<ingest-dsn> \\
+  -e TT_DSN=${dsn} \\
   ghcr.io/tasktrooper/trooper-agent:latest`;
 
 /** No host or cluster has reported yet: how to install trooper-agent. */
 export function AgentSetup({ focus = 'both' }: { focus?: 'hosts' | 'k8s' | 'both' }) {
+  const dsn = projectDsn(useAuth().project?.id);
   return (
     <Card>
       <EmptyState icon={<Server />} title={focus === 'k8s' ? 'No Kubernetes cluster is reporting yet' : 'No host is reporting yet'}>
@@ -134,12 +136,12 @@ export function AgentSetup({ focus = 'both' }: { focus?: 'hosts' | 'k8s' | 'both
         (cluster objects and Warning events); on a VM it runs as a single container.
       </EmptyState>
       <div className="stack" style={{ maxWidth: 'calc(var(--space-12) * 16)', margin: '0 auto' }}>
-        {focus !== 'hosts' && <><div className="eyebrow">Kubernetes · Helm</div><CopyCode>{HELM}</CopyCode></>}
-        {focus !== 'k8s' && <><div className="eyebrow">VM or bare-metal host · Docker</div><CopyCode>{DOCKER}</CopyCode></>}
+        {focus !== 'hosts' && <><div className="eyebrow">Kubernetes · Helm</div><CopyCode>{HELM(dsn)}</CopyCode></>}
+        {focus !== 'k8s' && <><div className="eyebrow">VM or bare-metal host · Docker</div><CopyCode>{DOCKER(dsn)}</CopyCode></>}
         <p className="muted" style={{ margin: 0, fontSize: 'var(--text-sm)' }}>
           eBPF is optional: <span className="mono">--set ebpf.enabled=true</span> adds an OpenTelemetry eBPF Instrumentation DaemonSet that traces
-          HTTP, gRPC and SQL calls of services without an SDK — they show up under Services with an “eBPF” badge. The DSN is an ingest key
-          from Settings &amp; SDK.
+          HTTP, gRPC and SQL calls of services without an SDK — they show up under Services with an “eBPF” badge. Replace <span className="mono">&lt;ingest-key&gt;</span> with an
+          ingest key from <Link to="/settings?tab=keys">Settings → API keys</Link>.
         </p>
       </div>
     </Card>

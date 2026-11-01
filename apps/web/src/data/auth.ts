@@ -1,25 +1,22 @@
 /**
- * Identity, org/project selection, roles and the admin lists of Settings (ADR-016, .ai/contracts.md §15).
+ * Identity, org/project selection, roles and the admin lists of Settings (ADR-016, ADR-028, .ai/contracts.md §11 + §15).
  *
- * Api mode: boot calls `GET /auth/config` + `GET /me` with cookies. Modes:
- * - `session`: the api is session-capable and /me answered → cookie + `X-Trooper-Project` on every request.
- * - `key`: `/auth/config` is missing (older api, 404 / CORS) or `VITE_API_KEY` is set → Bearer key, no login screen.
- * - `mock`: VITE_DATA=mock — a fixed user with two orgs (owner in one, viewer in the other) to preview roles.
+ * Boot calls `GET /auth/config` + `GET /me` with the `tt_session` cookie; every later request carries the cookie and
+ * `X-Trooper-Project`. Outcomes: `ready` (a project is selected), `login` (401 → Login screen), `onboarding`
+ * (signed in but no org yet → create org + first project, `POST /orgs`).
  */
 import { useSyncExternalStore } from 'react';
-import { API_URL, ApiError, authInit, configureTransport, hasKeyOverride, invalidate, hydrate, isApi, mutate, notifyData, qs, remote, seg } from './remote';
-import { NOW } from './mock';
+import { API_URL, ApiError, authInit, configureTransport, invalidate, hydrate, mutate, qs, remote, seg } from './remote';
 
 export type Role = 'owner' | 'admin' | 'member' | 'viewer';
-export interface Project { id: string; name: string }
+export interface Project { id: string; name: string; slug?: string }
 export interface Org { id: string; name: string; role: Role; projects: Project[] }
 export interface User { id: string; email: string; name?: string; avatarUrl?: string }
 export interface Me { user: User; orgs: Org[]; currentProjectId?: string }
 export interface AuthConfig { oidc: boolean; devLogin: boolean }
-export type AuthMode = 'mock' | 'key' | 'session';
 
-interface State { mode: AuthMode; config?: AuthConfig; me?: Me; projectId?: string; expired: boolean }
-let state: State = { mode: isApi ? 'key' : 'mock', expired: false };
+interface State { config?: AuthConfig; me?: Me; projectId?: string; expired: boolean }
+let state: State = { expired: false };
 let version = 0;
 const listeners = new Set<() => void>();
 function set(patch: Partial<State>) {
@@ -36,24 +33,11 @@ function writeProject(id: string) {
   try { localStorage.setItem(PROJECT_KEY, id); } catch { /* storage unavailable */ }
 }
 
-// ---------------------------------------------------------------- mock identity
-
-const MOCK_ME: Me = {
-  user: { id: 'u-ada', email: 'ada@shop.com', name: 'Ada Yılmaz' },
-  orgs: [
-    { id: 'org-shopco', name: 'Shopco', role: 'owner', projects: [{ id: 'shop-platform', name: 'shop-platform' }, { id: 'shop-staging', name: 'shop-staging' }] },
-    { id: 'org-acme', name: 'Acme Labs', role: 'viewer', projects: [{ id: 'acme-web', name: 'acme-web' }] },
-  ],
-  currentProjectId: 'shop-platform',
-};
-
 function pickProject(me: Me): string | undefined {
   const all = me.orgs.flatMap((o) => o.projects.map((p) => p.id));
   const stored = readProject();
   return stored && all.includes(stored) ? stored : me.currentProjectId && all.includes(me.currentProjectId) ? me.currentProjectId : all[0];
 }
-
-if (!isApi) state = { ...state, me: MOCK_ME, projectId: pickProject(MOCK_ME) };
 
 // ---------------------------------------------------------------- boot
 
@@ -74,7 +58,7 @@ function mapMe(r: RawMe): Me {
 }
 
 async function raw<T>(path: string, init?: RequestInit): Promise<{ status: number; body?: T }> {
-  const res = await fetch(`${API_URL}/api/v1${path}`, authInit(init, { cookies: true }));
+  const res = await fetch(`${API_URL}/api/v1${path}`, authInit(init));
   let body: T | undefined;
   try { const t = await res.text(); body = t ? (JSON.parse(t) as T) : undefined; } catch { /* not json */ }
   return { status: res.status, body };
@@ -82,46 +66,34 @@ async function raw<T>(path: string, init?: RequestInit): Promise<{ status: numbe
 
 function applyTransport() {
   configureTransport({
-    session: state.mode === 'session', projectId: state.projectId,
+    projectId: state.projectId,
     // a session that expires mid-use sends the app back to the login screen
-    onUnauthorized: () => { if (!state.expired) set({ expired: true }); },
+    onUnauthorized: () => { if (!state.expired && state.me) set({ expired: true }); },
   });
 }
 
+export type BootStep = 'ready' | 'login' | 'onboarding';
+
 /**
- * Api mode boot step. `ready` → hydrate and render the app; `login` → show the Login screen.
- * Never throws: an api without the auth endpoints degrades to api-key mode.
+ * Boot step. `ready` → hydrate and render the app; `login` → Login screen; `onboarding` → create the first org.
+ * Throws when the api cannot be reached (network / CORS / 5xx) so the boot screen can offer a retry.
  */
-export async function initAuth(): Promise<'ready' | 'login'> {
-  if (!isApi) return 'ready';
-  let config: AuthConfig | undefined;
-  try {
-    const r = await raw<Partial<AuthConfig>>('/auth/config');
-    if (r.status === 200 && r.body) config = { oidc: !!r.body.oidc, devLogin: !!r.body.devLogin };
-  } catch { /* network / CORS without credentials support → older api */ }
+export async function initAuth(): Promise<BootStep> {
+  const c = await raw<Partial<AuthConfig>>('/auth/config');
+  if (c.status !== 200 || !c.body) throw new ApiError(c.status, `GET /auth/config returned ${c.status}`, '/auth/config');
+  const config: AuthConfig = { oidc: !!c.body.oidc, devLogin: !!c.body.devLogin };
 
-  if (!config) {
-    set({ mode: 'key', config: undefined, me: undefined, projectId: undefined, expired: false });
-    applyTransport();
-    return 'ready';
+  const r = await raw<RawMe>('/me');
+  if (r.status === 401) {
+    set({ config, me: undefined, projectId: undefined, expired: false });
+    return 'login';
   }
-
-  try {
-    const r = await raw<RawMe>('/me');
-    if (r.status === 200 && r.body) {
-      const me = mapMe(r.body);
-      set({ mode: hasKeyOverride ? 'key' : 'session', config, me, projectId: pickProject(me), expired: false });
-      applyTransport();
-      return 'ready';
-    }
-    if (r.status === 401 && !hasKeyOverride) {
-      set({ mode: 'session', config, me: undefined, expired: false });
-      return 'login';
-    }
-  } catch { /* fall through to key mode */ }
-  set({ mode: 'key', config, me: undefined, projectId: undefined, expired: false });
+  if (r.status !== 200 || !r.body) throw new ApiError(r.status, `GET /me returned ${r.status}`, '/me');
+  const me = mapMe(r.body);
+  set({ config, me, projectId: pickProject(me), expired: false });
   applyTransport();
-  return 'ready';
+  // contracts §11: an org-less user gets `orgs: []` + `currentProjectId: null` → create the first org
+  return me.orgs.length === 0 || !state.projectId ? 'onboarding' : 'ready';
 }
 
 /** Where the "Continue with SSO" button goes; the api redirects back here after the callback. */
@@ -136,9 +108,7 @@ export async function devLogin(email: string): Promise<void> {
 }
 
 export async function logout(): Promise<void> {
-  if (state.mode === 'session') {
-    try { await raw('/auth/logout', { method: 'POST' }); } catch { /* cookie may already be gone */ }
-  }
+  try { await raw('/auth/logout', { method: 'POST' }); } catch { /* cookie may already be gone */ }
   window.location.reload();
 }
 
@@ -147,19 +117,88 @@ export async function switchProject(id: string): Promise<void> {
   if (id === state.projectId) return;
   writeProject(id);
   set({ projectId: id });
-  if (!isApi) { notifyData(); return; }
   applyTransport();
   invalidate();
   await hydrate().catch((e: unknown) => console.warn('[auth] refresh after project switch failed', e));
+}
+
+// ---------------------------------------------------------------- onboarding (contracts §11)
+
+export interface CreatedOrg {
+  org: { id: string; name: string; role: Role };
+  project: Project;
+  ingestKey: { id: string; prefix: string; key: string };
+  /** full DSN including the secret ingest key — shown once */
+  dsn: string;
+}
+interface RawCreatedOrg {
+  org?: { id: string | number; name: string; role?: string } | null;
+  project?: { id: string | number; name: string; slug?: string | null } | null;
+  ingestKey?: { id: string | number; prefix?: string | null; key?: string | null } | null;
+  dsn?: string | null;
+}
+
+/**
+ * Create an org + its first project (`POST /orgs`); the caller becomes owner. The response carries the ingest key and
+ * DSN exactly once. Selects the new project and remembers the DSN *without* the key for setup snippets.
+ */
+export async function createOrg(name: string, projectName: string): Promise<CreatedOrg> {
+  const r = await raw<RawCreatedOrg & { error?: string; message?: string }>('/orgs', {
+    method: 'POST', body: JSON.stringify({ name, project: { name: projectName } }),
+  });
+  if (r.status >= 300 || !r.body?.org || !r.body.project) {
+    const why = r.status === 409 ? 'You have reached the maximum number of organizations for your account.'
+      : r.status === 403 ? 'Organizations can only be created by a signed-in user (not with an api key).'
+      : r.body?.error ?? r.body?.message ?? `Could not create the organization (${r.status})`;
+    throw new ApiError(r.status, why, '/orgs');
+  }
+  const b = r.body;
+  const out: CreatedOrg = {
+    org: { id: String(b.org!.id), name: b.org!.name, role: role(b.org!.role ?? 'owner') },
+    project: { id: String(b.project!.id), name: b.project!.name, slug: b.project!.slug ?? undefined },
+    ingestKey: { id: String(b.ingestKey?.id ?? ''), prefix: b.ingestKey?.prefix ?? '', key: b.ingestKey?.key ?? '' },
+    dsn: b.dsn ?? '',
+  };
+  if (out.dsn) rememberDsn(out.project.id, out.ingestKey.key ? out.dsn.replace(out.ingestKey.key, KEY_PLACEHOLDER) : out.dsn);
+  const org: Org = { ...out.org, projects: [out.project] };
+  const me: Me = state.me ? { ...state.me, orgs: [...state.me.orgs.filter((o) => o.id !== org.id), org] } : { user: { id: '', email: '' }, orgs: [org] };
+  writeProject(out.project.id);
+  set({ me, projectId: out.project.id });
+  applyTransport();
+  return out;
+}
+
+// ---------------------------------------------------------------- DSN for setup snippets
+
+export const KEY_PLACEHOLDER = '<ingest-key>';
+const DSN_KEY = (projectId: string) => `trooper-dsn:${projectId}`;
+const INGEST_URL: string = (import.meta.env.VITE_INGEST_URL as string | undefined) ?? 'http://localhost:4318';
+function rememberDsn(projectId: string, dsnWithoutKey: string) {
+  try { localStorage.setItem(DSN_KEY(projectId), dsnWithoutKey); } catch { /* storage unavailable */ }
+}
+/**
+ * DSN of the current project with the secret replaced by `<ingest-key>` (keys are shown only once, ADR-016):
+ * the one returned at onboarding in this browser, else `VITE_INGEST_URL` (default http://localhost:4318) + project id.
+ */
+export function projectDsn(projectId = state.projectId): string {
+  const id = projectId ?? '<project-id>';
+  try { const s = localStorage.getItem(DSN_KEY(id)); if (s) return s; } catch { /* storage unavailable */ }
+  try {
+    const u = new URL(INGEST_URL);
+    return `${u.protocol}//${KEY_PLACEHOLDER}@${u.host}${u.pathname.replace(/\/$/, '')}/${id}`;
+  } catch {
+    return `https://${KEY_PLACEHOLDER}@ingest.example.com/${id}`;
+  }
 }
 
 // ---------------------------------------------------------------- reading the state
 
 function subscribe(l: () => void) { listeners.add(l); return () => { listeners.delete(l); }; }
 const snapshot = () => version;
+/** Non-React subscription to login / project switch (e.g. RUM `identify` in lib/telemetry.ts). */
+export const onAuthChange = subscribe;
 
 export interface AuthView {
-  mode: AuthMode;
   config?: AuthConfig;
   me?: Me;
   org?: Org;
@@ -171,7 +210,7 @@ export interface AuthView {
 export function authState(): AuthView {
   const org = state.me?.orgs.find((o) => o.projects.some((p) => p.id === state.projectId)) ?? state.me?.orgs[0];
   const project = org?.projects.find((p) => p.id === state.projectId) ?? org?.projects[0];
-  return { mode: state.mode, config: state.config, me: state.me, org, project, role: org?.role, expired: state.expired };
+  return { config: state.config, me: state.me, org, project, role: org?.role, expired: state.expired };
 }
 /** Re-render on login / project switch. */
 export function useAuth(): AuthView {
@@ -181,7 +220,7 @@ export function useAuth(): AuthView {
 
 /**
  * Role check (ADR-016): viewer = read only; member writes monitors/incidents/tests; admin+ manages members,
- * keys and integrations. Without a known user (api-key mode) the key decides — the api enforces it.
+ * keys and integrations. The api enforces the same rules.
  */
 export type Action = 'write' | 'manage';
 export function can(action: Action): boolean {
@@ -203,30 +242,18 @@ const mapMember = (m: RawMember): Member => ({
   joinedAt: toMs(m.joinedAt ?? m.createdAt), lastSeenAt: toMs(m.lastSeenAt), pending: m.pending || undefined,
 });
 
-const DAY = 86400_000;
-const mockMembers: Member[] = [
-  { userId: 'u-ada', email: 'ada@shop.com', name: 'Ada Yılmaz', role: 'owner', joinedAt: NOW - 140 * DAY, lastSeenAt: NOW - 60_000 },
-  { userId: 'u-mert', email: 'mert@shop.com', name: 'Mert Kaya', role: 'admin', joinedAt: NOW - 120 * DAY, lastSeenAt: NOW - 2 * 3600_000 },
-  { userId: 'u-deniz', email: 'deniz@shop.com', name: 'Deniz Arslan', role: 'member', joinedAt: NOW - 64 * DAY, lastSeenAt: NOW - DAY },
-  { userId: 'u-selin', email: 'selin@shop.com', name: 'Selin Demir', role: 'viewer', joinedAt: NOW - 9 * DAY, lastSeenAt: NOW - 5 * DAY },
-  { userId: 'u-inv', email: 'oncall@contractor.io', role: 'member', joinedAt: NOW - 2 * DAY, pending: true },
-];
 
 export function membersOf(orgId: string | undefined): Member[] {
-  if (!isApi) return mockMembers;
   if (!orgId) return [];
   return remote(`/orgs/${seg(orgId)}/members`, [], (r: RawMember[] | null) => (r ?? []).map(mapMember));
 }
 export async function inviteMember(orgId: string, email: string, r: Role): Promise<void> {
-  if (!isApi) { mockMembers.push({ userId: `u-${Date.now()}`, email, role: r, joinedAt: Date.now(), pending: true }); audit('member.invite', email); return; }
   await mutate('POST', `/orgs/${seg(orgId)}/members`, { email, role: r }, [`/orgs/${seg(orgId)}/members`, '/audit-log']);
 }
 export async function setMemberRole(orgId: string, userId: string, r: Role): Promise<void> {
-  if (!isApi) { const m = mockMembers.find((x) => x.userId === userId); if (m) { m.role = r; audit('member.role', `${m.email} → ${r}`); } return; }
   await mutate('PATCH', `/orgs/${seg(orgId)}/members/${seg(userId)}`, { role: r }, [`/orgs/${seg(orgId)}/members`, '/audit-log']);
 }
 export async function removeMember(orgId: string, userId: string): Promise<void> {
-  if (!isApi) { const i = mockMembers.findIndex((x) => x.userId === userId); if (i >= 0) { audit('member.remove', mockMembers[i].email); mockMembers.splice(i, 1); } return; }
   await mutate('DELETE', `/orgs/${seg(orgId)}/members/${seg(userId)}`, undefined, [`/orgs/${seg(orgId)}/members`, '/audit-log']);
 }
 
@@ -247,32 +274,16 @@ const mapKey = (k: RawKey): ApiKeyRow => ({
   lastUsedAt: toMs(k.lastUsedAt), revokedAt: toMs(k.revokedAt),
 });
 
-const mockKeys: ApiKeyRow[] = [
-  { id: 'k1', name: 'Browser ingest', scope: 'ingest', prefix: 'pk_live_3f9a', origins: ['shop.com', '*.shop.com'], createdAt: NOW - 140 * DAY, createdBy: 'mert@shop.com', lastUsedAt: NOW - 2_000 },
-  { id: 'k2', name: 'Backend ingest', scope: 'ingest', prefix: 'sk_ing_91c0', origins: [], createdAt: NOW - 140 * DAY, createdBy: 'mert@shop.com', lastUsedAt: NOW - 1_000 },
-  { id: 'k3', name: 'CI / Terraform', scope: 'api', prefix: 'sk_api_77ab', origins: [], createdAt: NOW - 41 * DAY, createdBy: 'deniz@shop.com', lastUsedAt: NOW - 3 * DAY },
-  { id: 'k4', name: 'Old staging key', scope: 'api', prefix: 'sk_api_0c12', origins: [], createdAt: NOW - 200 * DAY, createdBy: 'ada@shop.com', lastUsedAt: NOW - 90 * DAY, revokedAt: NOW - 60 * DAY },
-];
 
 export function apiKeys(): ApiKeyRow[] {
-  if (!isApi) return mockKeys;
   return remote('/api-keys', [], (r: RawKey[] | null) => (r ?? []).map(mapKey));
 }
 /** Creates a key; the response carries the full secret exactly once. */
 export async function createApiKey(name: string, scope: KeyScope, origins: string[] = []): Promise<{ row: ApiKeyRow; secret: string }> {
-  if (!isApi) {
-    const rnd = Array.from(crypto.getRandomValues(new Uint8Array(20)), (b) => b.toString(16).padStart(2, '0')).join('');
-    const secret = `${scope === 'ingest' ? 'sk_ing' : 'sk_api'}_${rnd}`;
-    const row: ApiKeyRow = { id: `k${Date.now()}`, name, scope, prefix: secret.slice(0, 11), origins, createdAt: Date.now(), createdBy: MOCK_ME.user.email };
-    mockKeys.unshift(row);
-    audit('api_key.create', name);
-    return { row, secret };
-  }
   const out = await mutate<RawKey & { key?: string; secret?: string; token?: string }>('POST', '/api-keys', { name, kind: scope, scope, allowedOrigins: origins }, ['/api-keys', '/audit-log']);
   return { row: mapKey(out), secret: out.key ?? out.secret ?? out.token ?? '' };
 }
 export async function revokeApiKey(id: string): Promise<void> {
-  if (!isApi) { const k = mockKeys.find((x) => x.id === id); if (k) { k.revokedAt = Date.now(); audit('api_key.revoke', k.name); } return; }
   await mutate('DELETE', `/api-keys/${seg(id)}`, undefined, ['/api-keys', '/audit-log']);
 }
 
@@ -288,22 +299,8 @@ const mapAudit = (a: RawAudit): AuditEntry => ({
   actor: a.actor ?? a.userEmail ?? a.user ?? (a.apiKeyName || a.apiKey ? `key · ${a.apiKeyName ?? a.apiKey}` : 'system'),
 });
 
-const mockAudit: AuditEntry[] = [
-  { id: 'a1', at: NOW - 12 * 60_000, actor: 'mert@shop.com', action: 'monitor.update', target: 'Charges error rate' },
-  { id: 'a2', at: NOW - 3 * 3600_000, actor: 'key · CI / Terraform', action: 'monitor.create', target: 'Checkout LCP' },
-  { id: 'a3', at: NOW - 26 * 3600_000, actor: 'deniz@shop.com', action: 'incident.ack', target: 'payments-api error rate' },
-  { id: 'a4', at: NOW - 2 * DAY, actor: 'ada@shop.com', action: 'member.invite', target: 'oncall@contractor.io' },
-  { id: 'a5', at: NOW - 9 * DAY, actor: 'ada@shop.com', action: 'member.invite', target: 'selin@shop.com' },
-  { id: 'a6', at: NOW - 12 * DAY, actor: 'mert@shop.com', action: 'integration.create', target: 'Vercel · shop-team' },
-  { id: 'a7', at: NOW - 60 * DAY, actor: 'ada@shop.com', action: 'api_key.revoke', target: 'Old staging key' },
-];
-function audit(action: string, target: string) {
-  mockAudit.unshift({ id: `a${Date.now()}`, at: Date.now(), actor: MOCK_ME.user.email, action, target });
-  notifyData();
-}
 
 export function auditLog(limit = 200): AuditEntry[] {
-  if (!isApi) return mockAudit.slice(0, limit);
   return remote(`/audit-log${qs({ limit })}`, [], (r: RawAudit[] | { entries?: RawAudit[] } | null) =>
     (Array.isArray(r) ? r : r?.entries ?? []).map(mapAudit));
 }

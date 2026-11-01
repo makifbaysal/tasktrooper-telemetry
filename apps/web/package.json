@@ -4,13 +4,17 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "typecheck": "tsc -b",
+    "sdk:build": "pnpm --filter \"@trooper/web^...\" build",
+    "dev": "pnpm sdk:build && vite",
+    "build": "pnpm sdk:build && tsc -b && vite build",
+    "typecheck": "pnpm sdk:build && tsc -b",
     "preview": "vite preview"
   },
   "dependencies": {
     "@rrweb/replay": "2.2.0",
+    "@trooper/browser": "workspace:*",
+    "@trooper/react": "workspace:*",
+    "@trooper/replay": "workspace:*",
     "lucide-react": "^1.61.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

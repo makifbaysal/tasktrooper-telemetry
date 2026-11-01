@@ -1,7 +1,7 @@
-// Screens import data only from here. Mock or api mode: see ./remote.ts (ADR-013).
+// Screens import data only from here. Api data + remote cache: see ./remote.ts (ADR-013, ADR-028).
 export * from './remote';
 export * from './types';
-export * from './mock';
+export * from './apm';
 export * from './graph';
 export * from './kpi';
 export * from './frontend';

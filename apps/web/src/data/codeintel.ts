@@ -1,11 +1,11 @@
 /**
  * Code intelligence data (ADR-014, .ai/contracts.md §13, §16): connected repositories, the code inventory and
- * monitor suggestions. The lists are the arrays exported from ./mock (other screens read them too); in api mode
- * they are filled from `GET /repos`, `/inventory`, `/suggestions?state=proposed`. Missing endpoints (404) leave
+ * monitor suggestions. The lists are the arrays exported from ./apm (other screens read them too); they are
+ * filled from `GET /repos`, `/inventory`, `/suggestions?state=proposed`. Missing endpoints (404) leave
  * them empty — screens show empty states instead of failing.
  */
-import { NOW, inventory, monitors, repos, services, suggestions } from './mock';
-import { API_URL, ApiError, api, invalidate, isApi, registerHydrator } from './remote';
+import { inventory, repos, suggestions } from './apm';
+import { API_URL, ApiError, api, invalidate, registerHydrator } from './remote';
 import type { Criticality, InventoryItem, Monitor, Repo, Suggestion } from './types';
 
 // ---------------------------------------------------------------- types
@@ -76,7 +76,7 @@ export interface ConnectRepoInput {
 // ---------------------------------------------------------------- availability
 
 /** false when the api has no code-intelligence endpoints yet */
-export let codeIntelAvailable = !isApi;
+export let codeIntelAvailable = false;
 const notify = () => invalidate('\u0000');
 
 // ---------------------------------------------------------------- mapping
@@ -195,11 +195,11 @@ async function loadAll() {
   }
 }
 
-if (isApi) registerHydrator(loadAll);
+registerHydrator(loadAll);
 
-/** Refresh repos / inventory / suggestions now (api) and re-render. */
+/** Refresh repos / inventory / suggestions now and re-render. */
 export async function refreshCodeIntel() {
-  if (isApi) await loadAll();
+  await loadAll();
   notify();
 }
 
@@ -208,15 +208,11 @@ export async function refreshCodeIntel() {
 export interface GithubInstallation { id: string; account: string; installationId: number }
 export interface GithubRepoOption { fullName: string; defaultBranch: string; private: boolean; language?: string; added: boolean }
 
-const MOCK_INSTALLATION: GithubInstallation = { id: 'int-github', account: 'shopco', installationId: 51234567 };
-let mockInstalled = true;
-
 /** Full-page redirect target that starts the GitHub App installation. */
 export const githubInstallUrl = () => `${API_URL}/api/v1/integrations/github/install`;
 
 /** GitHub App installations of this project (integrations with provider=github). */
 export async function githubInstallations(): Promise<GithubInstallation[]> {
-  if (!isApi) return mockInstalled ? [MOCK_INSTALLATION] : [];
   try {
     const raw = await api<{ id: string | number; provider: string; name?: string; config?: { installationId?: number | string; account?: string } | null }[] | null>('/integrations');
     return (raw ?? []).filter((i) => i.provider === 'github').map((i) => ({
@@ -228,94 +224,21 @@ export async function githubInstallations(): Promise<GithubInstallation[]> {
   }
 }
 
-/** Mock only: pretend the GitHub App was just installed (the real flow is a redirect). */
-export function mockInstallGithub(): GithubInstallation { mockInstalled = true; return MOCK_INSTALLATION; }
-
-const MOCK_GH_REPOS: Omit<GithubRepoOption, 'added'>[] = [
-  { fullName: 'shopco/orders-service', defaultBranch: 'main', private: true, language: 'TypeScript' },
-  { fullName: 'shopco/payments', defaultBranch: 'main', private: true, language: 'Go' },
-  { fullName: 'shopco/storefront', defaultBranch: 'main', private: true, language: 'TypeScript' },
-  { fullName: 'shopco/catalog-api', defaultBranch: 'main', private: true, language: 'Kotlin' },
-  { fullName: 'shopco/auth', defaultBranch: 'main', private: true, language: 'Go' },
-  { fullName: 'shopco/email-worker', defaultBranch: 'main', private: true, language: 'Python' },
-  { fullName: 'shopco/mobile-app', defaultBranch: 'develop', private: true, language: 'Swift' },
-  { fullName: 'shopco/infra', defaultBranch: 'main', private: true, language: 'HCL' },
-  { fullName: 'shopco/design-tokens', defaultBranch: 'main', private: false, language: 'CSS' },
-];
-
 /** Repos the installation can read: `GET /integrations/github/{id}/repos?q=`. */
 export async function githubRepos(integrationId: string, q = ''): Promise<GithubRepoOption[]> {
   const added = (name: string) => repos.some((r) => r.name.toLowerCase() === name.toLowerCase());
-  if (!isApi) {
-    await new Promise((r) => setTimeout(r, 250));
-    const needle = q.trim().toLowerCase();
-    return MOCK_GH_REPOS.filter((r) => !needle || r.fullName.toLowerCase().includes(needle)).map((r) => ({ ...r, added: added(r.fullName) }));
-  }
   const raw = await api<Partial<GithubRepoOption>[] | null>(`/integrations/github/${encodeURIComponent(integrationId)}/repos${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''}`);
   return (raw ?? []).map((r) => ({
     fullName: r.fullName ?? '', defaultBranch: r.defaultBranch ?? 'main', private: !!r.private, language: r.language, added: !!r.added || added(r.fullName ?? ''),
   }));
 }
 
-// ---------------------------------------------------------------- mock enrichment
+// ---------------------------------------------------------------- rows with optional api fields
 
 /** Repos, inventory rows and suggestions with their optional api fields. */
 export const repoList = () => repos as unknown as RepoInfo[];
 export const inventoryRows = () => inventory as InventoryRow[];
 export const suggestionRows = () => suggestions as SuggestionRow[];
-
-const MOCK_SUMMARY: Record<string, { summary: string; failureModes: FailureMode[] }> = {
-  critical: {
-    summary: 'Writes order or payment state inside one database transaction and calls an external provider on the same path.',
-    failureModes: [
-      { title: 'Provider timeout leaves the charge in an unknown state', impact: 'Customer charged without an order', mitigation: 'Idempotency key + reconcile job' },
-      { title: 'Transaction rollback after a successful external call', impact: 'Inconsistent stock / refund', mitigation: 'Outbox pattern' },
-    ],
-  },
-  important: {
-    summary: 'Part of a user-facing flow; failures are retried by the caller or degrade gracefully.',
-    failureModes: [{ title: 'Slow downstream response under load', impact: 'Page waits on the request', mitigation: 'Timeout + cached fallback' }],
-  },
-  low: {
-    summary: 'Read-only or internal path without lasting side effects.',
-    failureModes: [],
-  },
-};
-
-if (!isApi) {
-  const rows = inventory as InventoryRow[];
-  for (const r of rows) {
-    const m = MOCK_SUMMARY[r.criticality];
-    r.summary ??= m.summary;
-    r.failureModes ??= m.failureModes;
-    r.dead ??= !r.observed;
-  }
-  rows.push(
-    { id: 'inv-s1', kind: 'endpoint', key: 'GET /v0/orders/legacy', service: 'orders-api', file: '', line: 0, criticality: 'important', observed: true, monitored: false, shadow: true, rpm: 14,
-      summary: 'Requests arrive for a route no connected repository declares — an old client, a proxy rewrite, or a service whose repo is not connected.' },
-    { id: 'inv-s2', kind: 'endpoint', key: 'POST /internal/cache/flush', service: 'catalog-api', file: '', line: 0, criticality: 'low', observed: true, monitored: false, shadow: true, rpm: 2 },
-  );
-  const rp = repoList();
-  rp.forEach((r) => { r.provider = 'github'; r.url = `https://github.com/${r.name}`; r.installationId = MOCK_INSTALLATION.installationId; r.webhookActive = true; });
-  const pay = rp.find((r) => r.id === 'rp2');
-  const ord = rp.find((r) => r.id === 'rp1');
-  if (ord) ord.llm = { status: 'quota_exceeded', reason: 'user_limit', credits: 212.4, skipped: 18 };
-  if (pay) { pay.status = 'analyzing'; pay.pendingPaths = ['internal/refunds/handler.go', 'internal/webhooks/stripe.go']; }
-  rp.push(
-    { id: 'rp4', name: 'shopco/legacy-admin', branch: 'master', sha: '1f0e9d2', analyzedAt: NOW - 6 * 86400_000, services: [], language: 'PHP', status: 'disconnected', provider: 'github',
-      url: 'https://github.com/shopco/legacy-admin', installationId: MOCK_INSTALLATION.installationId, error: 'Removed from the GitHub App installation — re-add it on GitHub to resume analysis.' },
-    { id: 'rp5', name: 'shopco/email-worker', branch: 'main', sha: '77ab310', analyzedAt: NOW - 3 * 3600_000, services: ['email-worker'], language: 'Python', status: 'error', provider: 'github',
-      url: 'https://github.com/shopco/email-worker', installationId: MOCK_INSTALLATION.installationId, webhookActive: true, error: 'Analysis failed: worker/tasks/__init__.py could not be parsed (SyntaxError at line 41).' },
-    // self-managed GitLab, connected with a token; the push webhook has not delivered yet
-    { id: 'rp6', name: 'shopco/platform/pricing-engine', branch: 'main', sha: '3be41c2', analyzedAt: NOW - 26 * 3600_000, services: [], language: 'Kotlin', status: 'ready', provider: 'gitlab',
-      baseUrl: 'https://gitlab.shopco.dev', url: 'https://gitlab.shopco.dev/shopco/platform/pricing-engine', webhookActive: false },
-  );
-  // first analysis of the storefront finishes while the page is open
-  const sf = rp.find((r) => r.id === 'rp3');
-  if (sf) setTimeout(() => { sf.status = 'ready'; sf.analyzedAt = Date.now(); notify(); }, 15000);
-  // the push is analyzed incrementally
-  setTimeout(() => { if (pay) { pay.status = 'ready'; pay.pendingPaths = undefined; pay.analyzedAt = Date.now(); pay.sha = '9c41aa0'; notify(); } }, 8000);
-}
 
 // ---------------------------------------------------------------- links
 
@@ -339,82 +262,30 @@ export function codeRefLink(s: Pick<Suggestion, 'codeRef' | 'target'>): string |
 
 // ---------------------------------------------------------------- mutations
 
-const mockTimers = new Set<ReturnType<typeof setTimeout>>();
-function finishAnalysisSoon(r: RepoInfo, ms = 4000) {
-  const t = setTimeout(() => {
-    mockTimers.delete(t);
-    r.status = 'ready';
-    r.error = undefined;
-    r.analyzedAt = Date.now();
-    r.sha ||= Math.random().toString(16).slice(2, 9);
-    notify();
-  }, ms);
-  mockTimers.add(t);
-}
-
 /** Connect a repository; analysis starts right away. */
 export async function connectRepo(input: ConnectRepoInput): Promise<RepoInfo> {
-  if (isApi) {
-    const raw = await api<RawRepo>('/repos', { method: 'POST', body: JSON.stringify(input) });
-    await refreshCodeIntel();
-    return raw ? mapRepo(raw) : repoList()[0];
-  }
-  const name = input.fullName.trim().replace(/^\/+|\/+$/g, '');
-  const nameErr = fullNameError(input.provider, name);
-  if (nameErr) throw new Error(nameErr);
-  if (input.baseUrl && input.provider !== 'gitlab') throw new Error('A base URL only applies to GitLab');
-  const urlErr = baseUrlError(input.baseUrl ?? '');
-  if (urlErr) throw new Error(`Base URL: ${urlErr}`);
-  if (repos.some((r) => r.name === name)) throw new Error(`${name} is already connected`);
-  if (input.provider === 'github' && !input.token && !input.installationId) throw new Error('Add a GitHub token or the GitHub App installation id');
-  const lang = MOCK_GH_REPOS.find((x) => x.fullName === name)?.language;
-  const svc = services.find((s) => name.toLowerCase().includes(s.id.split('-')[0]));
-  const r: RepoInfo = {
-    id: `rp${Date.now().toString(36)}`, name, branch: input.defaultBranch || 'main', sha: '', analyzedAt: 0,
-    services: svc ? [svc.name] : [], language: lang ?? '—', status: 'analyzing', provider: input.provider,
-    url: input.provider === 'local' ? undefined : `${repoHost(input.provider, input.baseUrl)}/${name}`, localPath: input.localPath,
-    baseUrl: input.baseUrl?.trim().replace(/\/+$/, '') || undefined,
-    installationId: input.installationId, webhookActive: !!input.installationId,
-    webhook: input.provider !== 'local' && !input.installationId ? mockWebhook(input.provider) : undefined,
-  };
-  repoList().push(r);
-  notify();
-  finishAnalysisSoon(r);
-  return r;
+  const raw = await api<RawRepo>('/repos', { method: 'POST', body: JSON.stringify(input) });
+  await refreshCodeIntel();
+  return raw ? mapRepo(raw) : repoList()[0];
 }
 
-const mockSecret = () => Array.from(crypto.getRandomValues(new Uint8Array(24)), (b) => b.toString(16).padStart(2, '0')).join('');
-const mockWebhook = (provider: RepoProvider): RepoWebhook => ({ url: `http://localhost:8096/v1/webhooks/${provider}`, secret: mockSecret() });
 
 /** Issue a new webhook secret for a GitLab / Bitbucket / App-less GitHub repository (`POST /repos/{id}/webhook-secret`). */
 export async function rotateWebhookSecret(id: string): Promise<RepoWebhook> {
-  if (isApi) {
-    const raw = await api<RawRepo>(`/repos/${encodeURIComponent(id)}/webhook-secret`, { method: 'POST' });
-    await refreshCodeIntel();
-    if (!raw?.webhook) throw new Error('The api did not return a webhook secret');
-    return raw.webhook;
-  }
-  const r = repoList().find((x) => x.id === id);
-  if (!r || r.provider === 'local' || r.installationId) throw new Error('This repository is notified by the GitHub App');
-  r.webhookActive = false;
-  notify();
-  return mockWebhook(r.provider ?? 'github');
+  const raw = await api<RawRepo>(`/repos/${encodeURIComponent(id)}/webhook-secret`, { method: 'POST' });
+  await refreshCodeIntel();
+  if (!raw?.webhook) throw new Error('The api did not return a webhook secret');
+  return raw.webhook;
 }
 
 export async function deleteRepo(id: string) {
-  if (isApi) { await api(`/repos/${encodeURIComponent(id)}`, { method: 'DELETE' }); await refreshCodeIntel(); return; }
-  const k = repos.findIndex((r) => r.id === id);
-  if (k >= 0) repos.splice(k, 1);
-  notify();
+  await api(`/repos/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  await refreshCodeIntel();
 }
 
 export async function analyzeRepo(id: string) {
-  if (isApi) { await api(`/repos/${encodeURIComponent(id)}/analyze`, { method: 'POST' }); await refreshCodeIntel(); return; }
-  const r = repoList().find((x) => x.id === id);
-  if (!r) return;
-  r.status = 'analyzing';
-  notify();
-  finishAnalysisSoon(r, 3000);
+  await api(`/repos/${encodeURIComponent(id)}/analyze`, { method: 'POST' });
+  await refreshCodeIntel();
 }
 
 /** Suggestions accepted in this session (they leave the proposed list), with the monitor each created. */
@@ -423,34 +294,17 @@ export const acceptedSuggestions = new Map<string, { suggestion: SuggestionRow; 
 /** Accept → a monitor is created (source=suggestion). Returns the new monitor. */
 export async function acceptSuggestion(id: string): Promise<Pick<Monitor, 'id' | 'name' | 'target'>> {
   const s = suggestions.find((x) => x.id === id);
-  if (isApi) {
-    const out = await api<{ id?: string | number; monitorId?: string | number; monitor?: { id: string | number; name?: string } } | null>(
-      `/suggestions/${encodeURIComponent(id)}/accept`, { method: 'POST' });
-    const monId = String(out?.monitorId ?? out?.monitor?.id ?? out?.id ?? '');
-    const mon = { id: monId, name: out?.monitor?.name ?? s?.title ?? 'Monitor', target: s?.target ?? '' };
-    if (s) acceptedSuggestions.set(id, { suggestion: s, monitor: mon });
-    await refreshCodeIntel();
-    invalidate('/monitors');
-    return mon;
-  }
-  if (!s) throw new Error('Suggestion not found');
-  const m: Monitor = {
-    id: `m${Date.now().toString(36)}`, name: s.title, kind: s.kind, target: s.target, condition: s.condition,
-    severity: s.criticality === 'critical' ? 'critical' : 'warning', state: 'ok', source: 'code', lastChange: Date.now(), channels: [],
-  };
-  monitors.push(m);
-  acceptedSuggestions.set(id, { suggestion: s, monitor: m });
-  suggestions.splice(suggestions.indexOf(s), 1);
-  const key = s.target.split(' · ')[1];
-  const inv = inventory.find((i) => key && i.key === key);
-  if (inv) inv.monitored = true;
-  notify();
-  return m;
+  const out = await api<{ id?: string | number; monitorId?: string | number; monitor?: { id: string | number; name?: string } } | null>(
+    `/suggestions/${encodeURIComponent(id)}/accept`, { method: 'POST' });
+  const monId = String(out?.monitorId ?? out?.monitor?.id ?? out?.id ?? '');
+  const mon = { id: monId, name: out?.monitor?.name ?? s?.title ?? 'Monitor', target: s?.target ?? '' };
+  if (s) acceptedSuggestions.set(id, { suggestion: s, monitor: mon });
+  await refreshCodeIntel();
+  invalidate('/monitors');
+  return mon;
 }
 
 export async function rejectSuggestion(id: string) {
-  if (isApi) { await api(`/suggestions/${encodeURIComponent(id)}/reject`, { method: 'POST' }); await refreshCodeIntel(); return; }
-  const k = suggestions.findIndex((x) => x.id === id);
-  if (k >= 0) suggestions.splice(k, 1);
-  notify();
+  await api(`/suggestions/${encodeURIComponent(id)}/reject`, { method: 'POST' });
+  await refreshCodeIntel();
 }

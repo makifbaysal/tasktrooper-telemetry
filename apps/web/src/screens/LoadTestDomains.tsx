@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { CircleDashed, Globe2, Plus, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react';
 import { Badge, Button, Card, CopyCode, EmptyState, Field, Input, PageHeader, Section, StatusBadge } from '@/components/ui';
-import { isApi, useData } from '@/data';
+import { useData } from '@/data';
 import { addDomain, deleteDomain, domains, domainsAvailable, verifyDomain, type LoadTestDomain } from '@/data/loadtest';
 import { ago } from '@/lib/format';
 
@@ -30,7 +30,7 @@ export function LoadTestDomains() {
       <PageHeader title="Domains" crumbs={[{ label: 'Load tests', to: '/load-tests' }, { label: 'Domains' }]}
         subtitle="Load tests only run against hosts this project has verified. localhost and 127.0.0.1 are always allowed in development." />
 
-      {isApi && !domainsAvailable ? (
+      {!domainsAvailable ? (
         <Card>
           <EmptyState icon={<Globe2 size={20} />} title="Domain verification is not available yet">
             This api server has no <span className="mono">/loadtests/domains</span> endpoint yet. Runs against localhost still work.

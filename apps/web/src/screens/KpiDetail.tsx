@@ -95,9 +95,11 @@ export function KpiDetail() {
           {k.metric && (
             <MetricCard label={k.metric.label} value={fmt(k.metric.current)} curr={k.metric.current} prev={k.metric.baseline} upIsGood={false}
               hint={k.threshold ? `good ≤ ${k.threshold.metric === 'LCP' || k.metric.unit === 'ms' ? ms(k.threshold.value) : k.threshold.value}` : `usually ${fmt(k.metric.baseline)}`}>
-              <TimeSeries timestamps={ts} height={90} format={fmt}
-                threshold={k.threshold && k.metric.unit === 'ms' ? { value: k.threshold.value, label: ms(k.threshold.value) } : undefined}
-                series={[{ id: 'm', label: k.metric.label, slot: 1, data: kpiMetricSeries(k, range) }]} />
+              {kpiMetricSeries(k, range).length > 0 && (
+                <TimeSeries timestamps={ts} height={90} format={fmt}
+                  threshold={k.threshold && k.metric.unit === 'ms' ? { value: k.threshold.value, label: ms(k.threshold.value) } : undefined}
+                  series={[{ id: 'm', label: k.metric.label, slot: 1, data: kpiMetricSeries(k, range) }]} />
+              )}
             </MetricCard>
           )}
         </div>

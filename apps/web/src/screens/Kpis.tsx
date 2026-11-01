@@ -2,7 +2,7 @@ import { useData } from '@/data/remote';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { ArrowRight, ChevronRight, Code2, Globe, Plus, Route, Server, Smartphone, Sparkles, Target } from 'lucide-react';
-import { Badge, Button, Card, EmptyState, Meter, PageHeader, SearchInput, Section, Select, StatusBadge, Table } from '@/components/ui';
+import { Badge, Button, Card, ConnectSdk, EmptyState, Meter, PageHeader, SearchInput, Section, Select, StatusBadge, Table } from '@/components/ui';
 import { kpiSeries, kpiTree, kpiUnit, kpis, services, type Kpi, type RcaResult, type TimeRange } from '@/data';
 import { findRootCause } from '@/lib/rca';
 
@@ -174,10 +174,7 @@ export function KpiRiskGrid({ list, showTarget }: { list: Kpi[]; showTarget?: bo
 /** Every KPI defined on one service or app — the service page's KPIs tab — plus KPIs suggested from its code. */
 export function ServiceKpis({ serviceId }: { serviceId: string }) {
   const nav = useNavigate();
-  const [dismissed, setDismissed] = useState<Record<string, boolean>>({});
-  const name = services.find((s) => s.id === serviceId)?.name ?? serviceId;
   const list = kpis.filter((k) => k.target.serviceId === serviceId);
-  const sugs = SUGGESTED.filter((x) => x.target.split(' · ')[0] === name && !dismissed[x.id]);
   const create = () => nav(`/kpis/new?app=${serviceId}`);
   return (
     <div className="stack">
@@ -194,33 +191,9 @@ export function ServiceKpis({ serviceId }: { serviceId: string }) {
           <KpiTable rows={list} hideTarget />
         </Card>
       )}
-      {sugs.length > 0 && (
-        <Card flush title={<span className="row" style={{ gap: 6 }}><Sparkles size={14} color="var(--accent-text)" aria-hidden />Suggested from code</span>}
-          subtitle="critical flows in this repository without a KPI">
-          <div className="list">
-            {sugs.map((x) => (
-              <div key={x.id} className="list__row">
-                <div className="list__main">
-                  <span className="list__title">{x.name} <span className="muted mono" style={{ fontWeight: 400, fontSize: 'var(--text-xs)' }}>{x.target.split(' · ')[1]}</span></span>
-                  <span className="list__meta">{x.why}</span>
-                </div>
-                <Button size="sm" variant="ghost" onClick={() => setDismissed({ ...dismissed, [x.id]: true })}>Dismiss</Button>
-                <Button size="sm" onClick={() => nav(`/kpis/new?${x.q}&name=${encodeURIComponent(x.name)}`)}>Review &amp; add</Button>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
     </div>
   );
 }
-
-// ---------------------------------------------------------------- code suggestions
-const SUGGESTED = [
-  { id: 'search-page', name: 'Product search answers fast', target: 'shop-web · /search', why: 'Search is the second most visited page and feeds 31% of add-to-cart events.', q: 'kind=page&app=shop-web&page=search' },
-  { id: 'login', name: 'Login succeeds', target: 'auth-api · POST /v1/sessions', why: 'Every checkout needs a session; failures here block all purchases.', q: 'kind=endpoint&service=auth-api' },
-  { id: 'mobile-start', name: 'Shop app opens fast', target: 'shop-mobile · Cold start', why: 'Cold start p75 grew 12% over the last 3 releases.', q: 'kind=app_start&app=shop-mobile' },
-];
 
 
 // ---------------------------------------------------------------- all KPIs (sidebar)
@@ -245,12 +218,27 @@ export function Kpis() {
             options={[{ value: 'all', label: 'All apps & services' }, ...targets.map((t) => ({ value: t, label: services.find((s) => s.id === t)?.name ?? t }))]} />
           <div style={{ width: 220 }}><SearchInput placeholder="Search KPIs" value={q} onChange={(e) => setQ(e.target.value)} /></div>
         </>} />
+      {kpis.length === 0 ? (
+        <Card>
+          {services.length === 0 ? (
+            <ConnectSdk icon={<Target />} title="No KPIs yet">
+              KPIs are objectives on what users experience — a page loads fast, checkout succeeds. Connect an SDK first, then create a
+              KPI from a service&apos;s or app&apos;s KPIs tab.
+            </ConnectSdk>
+          ) : (
+            <EmptyState icon={<Target />} title="No KPIs yet">
+              Open a service or app and create one from its KPIs tab — alerts then fire on error-budget burn.
+            </EmptyState>
+          )}
+        </Card>
+      ) : <>
       <Section title="At risk" subtitle={atRisk.length ? `${atRisk.length} burning error budget` : 'Nothing at risk'}>
         {atRisk.length ? <KpiRiskGrid list={atRisk} showTarget /> : <Card><EmptyState icon={<Target />} title="All on track" /></Card>}
       </Section>
       <Section title="On track" subtitle={`${onTrack.length} KPI${onTrack.length === 1 ? '' : 's'}`}>
         <Card flush><KpiTable rows={onTrack} /></Card>
       </Section>
+      </>}
     </>
   );
 }

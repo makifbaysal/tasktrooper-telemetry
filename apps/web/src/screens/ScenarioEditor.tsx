@@ -1,16 +1,16 @@
 import { useData } from '@/data/remote';
 import { useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
-import { AlertTriangle, Check, ChevronDown, ChevronRight, Loader2, Play, Plus, ShieldCheck, Sparkles, Timer, Trash2, User } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, ChevronRight, Play, Plus, ShieldCheck, Sparkles, Timer, Trash2, User } from 'lucide-react';
 import { TimeSeries } from '@/components/charts';
 import {
   Badge, Button, Callout, Card, CodeBlock, EmptyState, Field, Input, PageHeader, Section, Segmented, Select, Textarea,
 } from '@/components/ui';
-import { RunBlocked, approveScenario, checkTarget, limitProblems, scenarioState, startRunChecked } from '@/data/loadtest';
+import { RunBlocked, approveScenario, checkTarget, scenarioState, startRunChecked } from '@/data/loadtest';
 import { endpointsFor, scenarios, services, type Endpoint } from '@/data';
 import { compact, duration, ms, pct } from '@/lib/format';
 import {
-  DEFAULT_GATE, LEVEL_PRESETS, REGIONS, SPEC, aiRequestSpec, blankRequestSpec, levelsOf, levelsToStages, saveScenario,
+  DEFAULT_GATE, LEVEL_PRESETS, REGIONS, SPEC, blankRequestSpec, levelsOf, levelsToStages, saveScenario,
   type Level, type LoadMode, type Progression, type RequestSpec, type ScenarioDraft,
 } from '@/lib/loadtest';
 import { MethodBadge } from '@/components/ui';
@@ -44,11 +44,10 @@ function initialState(id: string | undefined, fromTraffic: boolean, serviceParam
   if (sc) {
     const spec = SPEC[sc.id];
     const eps = spec.services.flatMap((x) => endpointsFor(x));
-    // seeded scenarios carry request data like any saved one; generated ones keep their production source
+    // steps saved without request data start from an empty template
     const fallback = (k: string) => {
-      const e = eps.find((x) => keyOf(x) === k) ?? eps[0];
-      const ai = aiRequestSpec(e);
-      return sc.source === 'generated' ? ai : { ...ai, source: undefined };
+      const e = eps.find((x) => keyOf(x) === k);
+      return e ? blankRequestSpec(e) : { params: '', headers: '', body: '', pools: [] };
     };
     const pctW = spec.weights ? Object.fromEntries(Object.entries(spec.weights).map(([k, v]) => [k, Math.round(v * 1000) / 10])) : productionMix(eps, spec.steps);
     const p95Th = spec.thresholds.find((t) => t.includes('duration'));
@@ -69,15 +68,15 @@ function initialState(id: string | undefined, fromTraffic: boolean, serviceParam
     const prodRps = eps.filter((e) => steps.includes(keyOf(e))).reduce((a, e) => a + e.rpm, 0) / 60;
     const maxP95 = Math.max(...eps.filter((e) => steps.includes(keyOf(e))).map((e) => e.p95));
     return {
-      name: `${services.find((s) => s.id === service)?.name ?? service} production mix 2×`, target: 'https://staging.shop.com', services: [service], regions: ['eu-central'], source: 'generated',
+      name: `${services.find((s) => s.id === service)?.name ?? service} production mix`, target: '', services: [service], regions: ['eu-central'], source: 'generated',
       mode: 'rps', levels: LEVEL_PRESETS['Step 1× → 2× → 3×'](Math.round(prodRps * 3)), steps, weights: productionMix(eps, steps),
-      requests: Object.fromEntries(eps.filter((e) => steps.includes(keyOf(e))).map((e) => [keyOf(e), aiRequestSpec(e)])),
-      thinkTime: 1, p95: String(Math.ceil((maxP95 * 1.5) / 10) * 10), err: '1', progression: 'ai', gate: { ...DEFAULT_GATE },
+      requests: Object.fromEntries(eps.filter((e) => steps.includes(keyOf(e))).map((e) => [keyOf(e), blankRequestSpec(e)])),
+      thinkTime: 1, p95: String(Math.ceil((maxP95 * 1.5) / 10) * 10), err: '1', progression: 'auto', gate: { ...DEFAULT_GATE },
     };
   }
   return {
-    name: '', target: 'https://staging.shop.com', services: [service], regions: ['eu-central'], source: 'manual',
-    mode: 'vus', levels: LEVEL_PRESETS['Ramp & hold'](100), steps: [], weights: {}, requests: {}, thinkTime: 1, p95: '', err: '1', progression: 'ai', gate: { ...DEFAULT_GATE },
+    name: '', target: '', services: [service], regions: ['eu-central'], source: 'manual',
+    mode: 'vus', levels: LEVEL_PRESETS['Ramp & hold'](100), steps: [], weights: {}, requests: {}, thinkTime: 1, p95: '', err: '1', progression: 'auto', gate: { ...DEFAULT_GATE },
   };
 }
 
@@ -89,7 +88,6 @@ export function ScenarioEditor() {
   const editing = scenarioId ? scenarios.find((s) => s.id === scenarioId) : undefined;
   const [st, setSt] = useState<State>(() => initialState(scenarioId, params.get('from') === 'traffic', params.get('service')));
   const [open, setOpen] = useState<Record<string, boolean>>({});
-  const [busy, setBusy] = useState<Record<string, boolean>>({});
   const set = (patch: Partial<State>) => setSt((s) => ({ ...s, ...patch }));
 
   const eps = useMemo(() => st.services.flatMap((x) => endpointsFor(x)).sort((a, b) => b.rpm - a.rpm), [st.services]);
@@ -127,15 +125,6 @@ export function ScenarioEditor() {
   };
   const setLevel = (i: number, patch: Partial<Level>) => set({ levels: st.levels.map((l, k) => (k === i ? { ...l, ...patch } : l)) });
   const setReq = (k: string, patch: Partial<RequestSpec>) => set({ requests: { ...st.requests, [k]: { ...st.requests[k], ...patch } } });
-  const generate = (list: Endpoint[]) => {
-    const ids = Object.fromEntries(list.map((e) => [keyOf(e), true]));
-    setBusy((b) => ({ ...b, ...ids }));
-    setOpen((o) => ({ ...o, ...ids }));
-    setTimeout(() => {
-      setSt((s) => ({ ...s, requests: { ...s.requests, ...Object.fromEntries(list.map((e) => [keyOf(e), aiRequestSpec(e)])) } }));
-      setBusy((b) => Object.fromEntries(Object.entries(b).filter(([k]) => !ids[k])));
-    }, 900);
-  };
   const draft = (): ScenarioDraft => ({
     ...st, name: st.name.trim(),
     weights: Object.fromEntries(st.steps.map((k) => [k, (st.weights[k] ?? 0) / (weightSum || 1)])),
@@ -145,9 +134,7 @@ export function ScenarioEditor() {
   const back = params.get('service') ? `/services/${params.get('service')}?tab=loadtests` : '/load-tests';
   const isDraft = !!editing && scenarioState(editing.id) === 'draft';
   const target = checkTarget(st.target);
-  const peakVusPlanned = st.mode === 'rps' ? Math.max(1, Math.ceil(peak * (0.2 + st.thinkTime))) : peak;
-  const limits = limitProblems(peakVusPlanned, total);
-  const runnable = target.ok && limits.length === 0 && !isDraft;
+  const runnable = target.ok && !isDraft;
   const [starting, setStarting] = useState(false);
   const loc = useLocation();
   const [runErr, setRunErr] = useState<RunBlocked | null>(() => {
@@ -222,13 +209,13 @@ export function ScenarioEditor() {
     <>
       <PageHeader title={editing ? `Edit ${editing.name}` : params.get('from') === 'traffic' ? 'Generate scenario from traffic' : 'New scenario'}
         crumbs={[params.get('service') ? { label: services.find((s) => s.id === params.get('service'))?.name ?? 'Service', to: back } : { label: 'Load tests', to: '/load-tests' }, { label: editing ? editing.name : 'New scenario' }]}
-        subtitle={params.get('from') === 'traffic' && !editing ? 'Steps, mix, levels and request data were derived from the last 7 days of production traffic — review and adjust' : 'Load levels, traffic mix per endpoint and what each request carries'}
+        subtitle={params.get('from') === 'traffic' && !editing ? 'Steps, mix and levels were derived from the production traffic of the last hour — add request data, then review and adjust' : 'Load levels, traffic mix per endpoint and what each request carries'}
         actions={<>
           <Button onClick={() => nav(back)}>Cancel</Button>
           <Button disabled={!valid} onClick={() => void save(false)}>{editing ? 'Save' : 'Create scenario'}</Button>
           {isDraft
             ? <Button variant="primary" icon={<Check size={14} />} disabled={!valid} onClick={() => void saveApprove()}>Save & approve</Button>
-            : <Button variant="primary" icon={<Play size={14} />} disabled={!valid || !runnable || starting} title={!target.ok ? target.reason : limits[0]}
+            : <Button variant="primary" icon={<Play size={14} />} disabled={!valid || !runnable || starting} title={!target.ok ? target.reason : undefined}
                 onClick={() => void save(true)}>{starting ? 'Starting…' : editing ? 'Save & run' : 'Create & run'}</Button>}
         </>} />
 
@@ -241,11 +228,6 @@ export function ScenarioEditor() {
         <Callout icon={<AlertTriangle size={16} aria-hidden />}>
           <strong>Saved, but the run did not start.</strong> <span className="secondary">{runErr.message}</span>
           {runErr.kind === 'domain' && <> <Link to="/load-tests/domains">Verify domain →</Link></>}
-        </Callout>
-      )}
-      {limits.length > 0 && (
-        <Callout icon={<AlertTriangle size={16} aria-hidden />}>
-          <strong>Over your plan limits.</strong> <span className="secondary">{limits.join(' ')}</span>
         </Callout>
       )}
 
@@ -404,7 +386,6 @@ export function ScenarioEditor() {
                         </span>
                       : <span className="muted">—</span>}</td>
                     <td>{!on ? <span className="muted">—</span>
-                      : busy[k] ? <span className="row muted" style={{ gap: 6, fontSize: 'var(--text-sm)' }}><Loader2 size={12} className="spin" />Generating…</span>
                       : req?.source ? <Badge tone="accent" icon={<Sparkles />}>From production</Badge>
                       : missingData.includes(e) ? <Badge tone="warning">Needs values</Badge> : <Badge>Manual</Badge>}</td>
                   </tr>
@@ -424,8 +405,7 @@ export function ScenarioEditor() {
       </Section>
 
       {/* 4 · request data */}
-      <Section title="Request data" subtitle={<>What each request carries. Values can use <span className="mono">{'{{pool.order_ids}}'}</span>, <span className="mono">{'{{weighted a:70 b:30}}'}</span>, <span className="mono">{'{{int 1-3}}'}</span> or a previous step's response <span className="mono">{'{{prev "POST /v1/orders" .id}}'}</span></>}
-        actions={<Button size="sm" variant="primary" icon={<Sparkles size={14} />} disabled={!chosen.length || chosen.every((e) => busy[keyOf(e)])} onClick={() => generate(chosen)}>Generate all from production</Button>}>
+      <Section title="Request data" subtitle={<>What each request carries. Values can use <span className="mono">{'{{pool.order_ids}}'}</span>, <span className="mono">{'{{weighted a:70 b:30}}'}</span>, <span className="mono">{'{{int 1-3}}'}</span> or a previous step's response <span className="mono">{'{{prev "POST /v1/orders" .id}}'}</span></>}>
         {chosen.length === 0 && <Card><EmptyState icon={<Plus />} title="No endpoints yet">Pick endpoints in the traffic mix above.</EmptyState></Card>}
         <div className="stack" style={{ gap: 'var(--space-3)' }}>
           {chosen.map((e) => {
@@ -439,14 +419,9 @@ export function ScenarioEditor() {
                   <MethodBadge method={e.method} /><span className="mono">{e.route}</span>
                   <span className="muted" style={{ fontSize: 'var(--text-sm)' }}>{st.weights[k] ?? 0}% of requests</span>
                   <span className="spacer" />
-                  {busy[k]
-                    ? <span className="row muted" style={{ gap: 6, fontSize: 'var(--text-sm)' }}><Loader2 size={12} className="spin" />Reading {compact(Math.round(e.rpm * 60 * 24 * 7 * 0.01))} sampled production requests…</span>
-                    : r?.source
-                      ? <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>From {compact(r.source.samples)} production requests · {r.source.window}</span>
-                      : missingData.includes(e) ? <Badge tone="warning">Needs values</Badge> : null}
-                  <Button size="sm" icon={<Sparkles size={12} />} disabled={busy[k]} onClick={(ev) => { ev.stopPropagation(); generate([e]); }}>
-                    {r?.source ? 'Regenerate' : 'Generate from production'}
-                  </Button>
+                  {r?.source
+                    ? <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>From {compact(r.source.samples)} production requests · {r.source.window}</span>
+                    : missingData.includes(e) ? <Badge tone="warning">Needs values</Badge> : null}
                 </div>
                 {expanded && r && (
                   <div className="stack" style={{ gap: 'var(--space-3)', padding: '0 var(--space-4) var(--space-4)', borderTop: '1px solid var(--border)', paddingTop: 'var(--space-3)' }}>
