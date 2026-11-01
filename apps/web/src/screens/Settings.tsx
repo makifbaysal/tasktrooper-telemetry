@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
-import { CheckCircle2, ChevronRight, Hash, KeyRound, Lock, MessageSquare, Plug, Send, ShieldAlert, Trash2, Unplug, UserPlus } from 'lucide-react';
+import { CheckCircle2, ChevronRight, Hash, KeyRound, Lock, MessageSquare, Plug, RefreshCw, Send, ShieldAlert, Trash2, Unplug, UserPlus } from 'lucide-react';
 import {
   Avatar, Badge, Button, Callout, Card, CopyCode, Drawer, DrawerSection, EmptyState, Field, Input, KeyValues, PageHeader,
   SdkQuickstart, SearchInput, Section, Select, StatusBadge, Table, Tabs, useDrawer,
@@ -10,7 +10,7 @@ import {
   apiKeys, auditLog, can, createApiKey, denied, inviteMember, membersOf, projectDsn, removeMember, revokeApiKey, setMemberRole, useAuth,
   type ApiKeyRow, type AuditEntry, type KeyScope, type Member, type Role,
 } from '@/data/auth';
-import { connectSlack, disconnectSlack, slackChannels, slackWorkspace, testSlack, type SlackChannel } from '@/data/slack';
+import { connectSlack, disconnectSlack, refreshSlackChannels, slackChannels, slackWorkspace, testSlack, type SlackChannel } from '@/data/slack';
 import { IntegrationStatusBadge, ProviderMark } from './Integrations';
 import { MemberAiCell, UsageTab } from './Usage';
 import { ago, dateTime } from '@/lib/format';
@@ -104,6 +104,11 @@ function SlackCard() {
   const channels = ws ? slackChannels('') : [];
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const refresh = async () => {
+    setBusy(true); setError(undefined);
+    try { await refreshSlackChannels(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    setBusy(false);
+  };
   const disconnect = async () => {
     if (!window.confirm(`Disconnect the ${ws?.teamName} Slack workspace? Monitors targeting its channels stop notifying until it is reconnected.`)) return;
     setBusy(true); setError(undefined);
@@ -115,7 +120,10 @@ function SlackCard() {
       <Card title={<span className="row" style={{ gap: 'var(--space-2)' }}><MessageSquare size={16} aria-hidden />{ws ? ws.teamName : 'Slack workspace'}{ws && <StatusBadge status="ok" label="Connected" />}</span>}
         subtitle={ws ? `${ws.connectedAt ? `Connected ${ago(ws.connectedAt)} · ` : ''}${channels.length} channel${channels.length === 1 ? '' : 's'} visible to the bot` : 'Install the TaskTrooper Slack App — no webhook URLs to copy.'}
         actions={ws
-          ? manage && <Button size="sm" variant="ghost" icon={<Unplug size={12} />} disabled={busy} onClick={() => void disconnect()}>Disconnect</Button>
+          ? <span className="row" style={{ gap: 'var(--space-1)' }}>
+            <Button size="sm" variant="ghost" icon={<RefreshCw size={12} />} disabled={busy} title="New channels show up within 5 minutes; this reads them now" onClick={() => void refresh()}>Refresh channels</Button>
+            {manage && <Button size="sm" variant="ghost" icon={<Unplug size={12} />} disabled={busy} onClick={() => void disconnect()}>Disconnect</Button>}
+          </span>
           : <Button size="sm" variant="primary" icon={<MessageSquare size={12} />} disabled={!manage} title={manage ? undefined : denied('manage')} onClick={() => { setError(undefined); connectSlack().catch((e: unknown) => setError(e instanceof Error ? e.message : String(e))); }}>Connect Slack</Button>}>
         {ws ? (
           <div className="stack" style={{ gap: 'var(--space-3)' }}>

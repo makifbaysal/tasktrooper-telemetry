@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Hash, Lock, Plus, X } from 'lucide-react';
 import { useData } from '@/data';
-import { connectSlack, parseTarget, slackChannels, slackTarget, slackWorkspace, type SlackChannel } from '@/data/slack';
+import { connectSlack, parseTarget, refreshSlackChannels, slackChannels, slackTarget, slackWorkspace, type SlackChannel } from '@/data/slack';
 
 /**
  * Notification targets of a monitor (ADR-017): Slack channels picked from the connected workspace
@@ -62,7 +62,7 @@ export function NotifyPicker({ value, onChange, disabled }: { value: string[]; o
       </div>
       {!ws ? (
         <span className="field__hint">{slackErr ?? <>Slack isn’t connected — <a href="#" onClick={(e) => { e.preventDefault(); connectSlack().catch((x: unknown) => setSlackErr(x instanceof Error ? x.message : String(x))); }}>Connect Slack</a> to pick channels from a list.</>}</span>
-      ) : ws ? <span className="field__hint">Slack workspace {ws.teamName}</span> : null}
+      ) : ws ? <span className="field__hint">Slack workspace {ws.teamName} · Channel missing? <a href="#" onClick={(e) => { e.preventDefault(); refreshSlackChannels().catch((x: unknown) => setSlackErr(x instanceof Error ? x.message : String(x))); }}>Refresh the list</a> (private channels need the bot invited first).{slackErr ? ` ${slackErr}` : ''}</span> : null}
     </div>
   );
 }
