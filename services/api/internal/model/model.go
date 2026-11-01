@@ -43,6 +43,9 @@ type Service struct {
 	// Source: sdk, or ebpf when every span of the service comes from eBPF instrumentation (OBI; contracts §20).
 	Source string    `json:"source"`
 	Spark  []float64 `json:"spark,omitempty"` // rpm per bucket of the requested range
+	// LastSeen is the unix ms of the latest telemetry of the service in the window (entry traffic, any span or SDK
+	// metric incl. the heartbeat, contracts §4); 0 / absent when only registered in Postgres.
+	LastSeen int64 `json:"lastSeen,omitempty"`
 }
 
 type Subscription struct {
