@@ -177,3 +177,14 @@ uv venv .venv && uv pip install --python .venv/bin/python -e '.[dev,django]'
 `tests/test_live.py` sends a FastAPI request (caller baggage, DB child), an LLM span and CPU/wall profiles to
 `TROOPER_E2E_DSN` (default dev DSN) and checks `spans`, `llm_1m` and `profile_stacks` in ClickHouse
 (`TROOPER_E2E_CLICKHOUSE`, default `http://localhost:8123`); its rows are deleted afterwards.
+
+## Releasing
+
+Published to [PyPI](https://pypi.org/project/tasktrooper/) by `.github/workflows/release-python.yml`:
+
+1. Bump `src/tasktrooper/_version.py` (the single version source) and `CHANGELOG.md`.
+2. Tag and push: `git tag python-v0.1.0 && git push origin python-v0.1.0`.
+
+The workflow checks that the tag equals `_version.py`, runs the tests, builds the sdist + wheel (`python -m build`,
+`twine check`) and uploads them with PyPI trusted publishing (OIDC, environment `pypi`; no token). Local dry run:
+`python -m build && twine check dist/*`.
