@@ -69,6 +69,7 @@
 .svcmap__tip strong { font-size: var(--text-md); }
 .svcmap__tip-kind, .svcmap__tip-hint { color: var(--field-ink-muted); }
 .svcmap__tip-inc { color: var(--field-ink); font-weight: var(--weight-medium); }
+.svcmap__tip-why { color: var(--field-ink-secondary); text-wrap: pretty; }
 
 /* problems: a horizontally scrolling row of cards; click opens the node's details and centres the map on it */
 .svcmap__problems { margin-bottom: var(--space-6); }

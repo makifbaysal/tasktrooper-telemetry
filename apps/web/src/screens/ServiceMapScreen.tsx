@@ -38,7 +38,14 @@ const iconOf = (n: MapNode): Icon => (n.tier === 'external' ? Cloud : n.tier ===
   : ICONS[n.kind] ?? Server);
 
 /** Generic callers detected from user agents read better as groups. */
-const CALLER_NAMES: Record<string, string> = { web: 'Browsers', mobile: 'Mobile apps', probe: 'Probes' };
+const CALLER_NAMES: Record<string, string> = { web: 'Browsers (direct)', mobile: 'Mobile apps (direct)', probe: 'Probes' };
+/** Why a synthetic caller exists: traffic whose sender has no SDK trace context, classified by user-agent. */
+const CALLER_HINTS: Record<string, string> = {
+  web: 'Browser requests without a TaskTrooper trace header: page navigations straight to the api (sign-in, OAuth returns such as Slack or GitHub), CORS preflights, or a web app without the browser SDK.',
+  mobile: 'Mobile requests without a TaskTrooper trace header: an app without the mobile SDK, or calls made outside it.',
+  probe: 'Health checks from load balancers and Kubernetes (kube-probe, ELB).',
+};
+const callerHint = (n: MapNode) => (n.tier === 'client' && !isService(n) ? CALLER_HINTS[n.id] : undefined);
 const KIND_LABEL: Record<string, string> = {
   http: 'HTTP service', worker: 'Worker', consumer: 'Consumer', web: 'Web app', mobile: 'Mobile app', service: 'Service',
   db: 'Database', cache: 'Cache', queue: 'Queue', ai: 'AI model', partner: 'Partner', webhook: 'Webhook', probe: 'Probe',
@@ -450,6 +457,7 @@ export function ServiceMapScreen({ serviceId }: { serviceId?: string } = {}) {
             <div className="svcmap__tip" role="status" style={tipAt(hovered.x, hovered.y + H / 2)}>
               <strong>{hovered.label}</strong>
               <span className="svcmap__tip-kind">{kindLabel(hovered.n)}</span>
+              {callerHint(hovered.n) && <span className="svcmap__tip-why">{callerHint(hovered.n)}</span>}
               <span>{compact(hovered.rpm)}/min · {pct(hovered.n.errorRate)} errors{hovered.n.p95 > 0 ? ` · p95 ${ms(hovered.n.p95)}` : ''}</span>
               {hovered.n.incident && <span className="svcmap__tip-inc">{hovered.n.incident.title}</span>}
               <span className="svcmap__tip-hint">Click for details</span>
@@ -491,6 +499,7 @@ function NodePanel({ n, map, current, onClose }: { n: MapNode; map: { nodes: Map
         <div>
           <h2>{displayName(n)}</h2>
           <p>{kindLabel(n)}</p>
+          {callerHint(n) && <p>{callerHint(n)}</p>}
         </div>
         <Button size="sm" variant="ghost" iconOnly icon={<X size={14} />} onClick={onClose} aria-label="Close details" />
       </header>
