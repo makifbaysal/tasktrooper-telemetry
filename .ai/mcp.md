@@ -19,7 +19,7 @@ sunucusu. `services/api`'yi (`openapi.yaml`) sarar; ClickHouse/Postgres'e **doku
 | Env | Zorunlu | Anlam |
 |---|---|---|
 | `TT_API_URL` | ✓ | API base (default `http://localhost:8080`) — collector ile aynı ad |
-| `TT_API_KEY` | ✓ | Proje kapsamli api key (dev: `tt_dev_api_key`) |
+| `TT_API_KEY` | ✓ | Proje kapsamli api key (seed key yok, ADR-028: dashboard Team → API keys veya `POST /api/v1/api-keys`) |
 | `TT_ORG_ID`, `TT_PROJECT_ID` | | Startup'ta `GET /me` ile doğrulanır; eşleşmezse sunucu **başlamaz** (yanlış anahtarla yanlış projeye okuma). API key auth'ta tenant anahtardan gelir, istek başlığından değil |
 | `TT_LOG_LEVEL` | | `logx` (JSON slog) |
 
@@ -119,7 +119,7 @@ verisi (`/inventory`, `/suggestions` — bkz. aşağıdaki örtüşme notu).
    dair `hint` eklenir. Listelerde `limit` clamp edilir: trace ≤ 100 (default 20), log ≤ 200 (default 50),
    incident ≤ 100 (default 20); log'lar `nextBefore` cursor'ı ile sayfalanır.
 4. **PII:** MCP ek veri toplamaz; header/body toplayan tool yok. Dönen log mesajı ve trace attribute
-   değerleri `internal/redact` ile maskelenir (e-posta, IPv4/IPv6, `tt_api_`/`tt_ingest_`/`tt_dev_` ile
+   değerleri `internal/redact` ile maskelenir (e-posta, IPv4/IPv6, `tt_api_`/`tt_ingest_`/`tt_dev_` (eski dev key'leri) ile
    başlayan anahtarlar — tool adları (`tt_list_*`) kasıtlı olarak match edilmez — `Authorization: Bearer`
    değeri, 16 haneli kart benzeri sayı). `q` filtresi ve header'lar log'a yazılmaz. Maskeler dashboard'daki
    SDK maskeleme değerleriyle **çakışmaz**: API'nin toplamadığı veriyi MCP de toplamaz, sadece gelen
@@ -133,7 +133,9 @@ verisi (`/inventory`, `/suggestions` — bkz. aşağıdaki örtüşme notu).
 ## Bağlanma
 
 Binary: `cd services/mcp && go install ./cmd/tt-mcp` (`$(go env GOPATH)/bin` PATH'te olmalı; değilse aşağıdaki
-`command`'a mutlak yol yazılır). API ayakta olmalı (`make demo` veya compose `--profile app`): `tt-mcp`
+`command`'a mutlak yol yazılır). API ayakta olmalı (compose `--profile app` veya servisleri lokal çalıştır) ve bir proje + api key bulunmalı: onboarding
+(UI'da "org + proje oluştur", contracts §11) veya `api bootstrap --org <ad> --project <ad> --owner <email>`, ardından
+dashboard Team → API keys. Platformun kendi verisi için `make self` (ADR-027/028). `tt-mcp`
 startup'ta `GET /me` çağırır, API yoksa başlamaz.
 
 **OpenCode** (`~/.config/opencode/opencode.json` veya proje `opencode.json`):
@@ -146,9 +148,9 @@ startup'ta `GET /me` çağırır, API yoksa başlamaz.
       "command": ["tt-mcp"],
       "environment": {
         "TT_API_URL": "http://localhost:8080",
-        "TT_API_KEY": "tt_dev_api_key",
-        "TT_ORG_ID": "1",
-        "TT_PROJECT_ID": "1"
+        "TT_API_KEY": "<api-key>",
+        "TT_ORG_ID": "<org-id>",
+        "TT_PROJECT_ID": "<project-id>"
       },
       "enabled": true
     }
@@ -160,8 +162,8 @@ startup'ta `GET /me` çağırır, API yoksa başlamaz.
 
 ```bash
 claude mcp add tasktrooper \
-  -e TT_API_URL=http://localhost:8080 -e TT_API_KEY=tt_dev_api_key \
-  -e TT_ORG_ID=1 -e TT_PROJECT_ID=1 \
+  -e TT_API_URL=http://localhost:8080 -e TT_API_KEY=<api-key> \
+  -e TT_ORG_ID=<org-id> -e TT_PROJECT_ID=<project-id> \
   -- tt-mcp
 ```
 
@@ -174,9 +176,9 @@ veya proje kökünde `.mcp.json`:
       "command": "tt-mcp",
       "env": {
         "TT_API_URL": "http://localhost:8080",
-        "TT_API_KEY": "tt_dev_api_key",
-        "TT_ORG_ID": "1",
-        "TT_PROJECT_ID": "1"
+        "TT_API_KEY": "<api-key>",
+        "TT_ORG_ID": "<org-id>",
+        "TT_PROJECT_ID": "<project-id>"
       }
     }
   }

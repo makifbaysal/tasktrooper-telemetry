@@ -49,7 +49,7 @@ CI (`.github/workflows/ci.yml`) runs the same gates as `make check`; the Go modu
 | `make check` | gofmt, `go vet`, all Go unit tests, web typecheck + build, JS SDK build + vitest, actionlint |
 | `make build` / `make test` | Go modules only |
 | `make infra` / `make migrate` | local ClickHouse, Postgres, Redpanda, Redis + schemas |
-| `make demo` | live demo data (`tools/demo/README.md`) |
+| `make self` | the platform's own telemetry: `api bootstrap` of the TaskTrooper project + trooper-agent (no seed/demo data, ADR-028; other projects via onboarding or `api bootstrap`) |
 | `make e2e-ingest` | local-only ingest e2e (not in CI) |
 
 ## Finishing

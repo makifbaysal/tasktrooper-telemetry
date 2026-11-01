@@ -127,7 +127,7 @@ RED metrikleri span'lardan gelir (OTel/Vercel trace drain); bulut metriklerinden
 - Detay/seri fonksiyonları `remote(path, fallback)` kullanır: cache'te varsa döner, yoksa isteği başlatır ve boş/sıfır
   fallback döner; cevap gelince veri versiyonu artar ve `useApp()`/`useData()` kullanan ekranlar yeniden render olur.
 - Mutasyonlar (`addDatabase`, `addLagMonitor`, ack/resolve …) api'ye POST eder, sonra ilgili cache'i geçersiz kılar.
-**Sonuç:** Ekran kodu değişmez; mock mod geliştirme/demo için korunur. Yükleme sırasında grafikler kısa süre sıfır görünür
+**Sonuç:** Ekran kodu değişmez; ~~mock mod geliştirme/demo için korunur~~ (ADR-028 ile kaldırıldı). Yükleme sırasında grafikler kısa süre sıfır görünür
 (kabul edildi; kritik ekranlarda `remoteStatus()` ile ince yükleme çubuğu).
 
 ## ADR-014 — Code intelligence servisi (`services/codeintel`)
@@ -181,7 +181,7 @@ gösterir. Bitbucket push payload'ı dosya listelemediği için her push `{*}` k
   gelen isteklerde proje `X-Trooper-Project` header'ından (yoksa kullanıcının ilk projesi).
 - Roller org seviyesinde: `owner | admin | member | viewer`. viewer sadece GET; admin+ üye/anahtar/entegrasyon yönetir.
 - OIDC yapılandırılmamışsa (`TT_OIDC_ISSUER` boş) **dev login**: `POST /auth/dev-login {email}` sadece `TT_AUTH_DEV=true`
-  iken; UI bu durumda e-posta ile giriş gösterir. Mevcut `VITE_API_KEY` akışı dev için çalışmaya devam eder.
+  iken; UI bu durumda e-posta ile giriş gösterir. ~~Mevcut `VITE_API_KEY` akışı dev için çalışmaya devam eder~~ (ADR-028 ile kaldırıldı).
 - `audit_log` tablosu: kim, ne zaman, hangi mutasyon.
 **Sonuç:** SAML/SCIM sonraki iş. API key'ler proje kapsamlı kalır.
 
@@ -372,9 +372,55 @@ ve workflow lint doğrulanmalı; modül listesi iki yerde tutulamaz.
   koşar — CI sözleşmesi = Makefile hedefleri.
 - PR CI unit-only'dir; integration/e2e (`make e2e-ingest`) local'dedir ve ertelenmiştir, CI'ya girmez.
 - Imaj build'leri ci.yml'de değil, `.github/workflows/docker.yml`'dedir (release/registry akışı). Matris
-  `services/*/Dockerfile`'dan türetilir (context `services/`, `GOWORK=off`; `CMD` arg'lı Dockerfile'lar binary başına
+  `services/*/Dockerfile`'dan türetilir (context repo kökü — ADR-027 ile; önceden `services/` —, `GOWORK=off`; `CMD` arg'lı Dockerfile'lar binary başına
   satır). PR: build + Trivy (CRITICAL, ignore-unfixed), push yok. `main`: `ghcr.io/<owner>/<repo>/<image>:{sha,main}`'e
   push; `packages: write` yalnız bu job'da. Deploy adımı yok.
 - Imajlar `TT_ENV` set etmez; production ortamı `TT_ENV=production` + gerçek `TT_SECRETS_KEY` vermek zorunda, aksi halde
   servis açılmaz (fail-closed, contracts §10).
 **Sonuç:** `go.work`'e modül eklemek CI'ı otomatik genişletir; matrix senkron derdi yok.
+
+## ADR-027 — Self-observability: platform kendi SDK'larıyla kendini izler (dogfooding)
+**Bağlam:** architecture.md "tüm servisler kendi SDK'mızla enstrümante edilir" diyordu ama servisler yalnızca Prometheus
+`/metrics` veriyordu. Platformun kendi trace/log/profil/LLM verisini kendi dashboard'unda görmek hem ürün doğrulaması hem
+operasyon için gerekli.
+**Karar:**
+- Platform verisi **ayrı bir projeye** gider (`TaskTrooper` / `tasktrooper`, `make self` → `api bootstrap`, ADR-028). Müşteri verisiyle karışmaz; production'da operatör kendi self projesinin DSN'ini verir.
+- Her Go servisi `main`'de `trooper.Start` çağırır (`github.com/tasktrooper/telemetry-go`, `replace` ile `sdks/go`).
+  DSN yoksa (default) hiçbir şey export edilmez — davranış bugünküyle aynı. Enstrümantasyon: HTTP (chi / net/http), pgx,
+  go-redis, franz-go, slog → OTel logs, Go runtime metrikleri, opsiyonel profiling (`TROOPER_PROFILING`), codeintel'in
+  Anthropic çağrıları `llm` transport'u ile (GenAI span; içerik kaydı kapalı). Prometheus `/metrics` aynen kalır.
+- Servis adları sabit: `tt-ingest-gw`, `tt-ingest-writer`, `tt-api`, `tt-alert-engine`, `tt-notifier`, `tt-trooper-cloud`,
+  `tt-symbolicator`, `tt-codeintel`, `tt-loadtest-ctl`, `tt-loadtest-runner`, `tt-mcp`, `tt-trooper-agent`; dashboard RUM
+  app'i `tt-web` (`@trooper/browser` + `@trooper/react` + `@trooper/replay`, `VITE_TROOPER_DSN` yoksa kapalı).
+- **Geri besleme döngüsü yasak:** ingest-gw ve ingest-writer, `TT_SELF_PROJECT_ID` projesine ait istek/kayıtlar için span
+  ve log üretmez (sayaçlar/Prometheus devam eder). Aksi halde self trafiği kendi span'larını ingest edip sonsuz döngü kurar.
+  SDK exporter'ının kendi HTTP çağrıları zaten enstrümante değildir; servisler outbound HTTP client'larını sararken
+  ingest uçlarına giden istekleri hariç tutar.
+- Platform altyapısı (Postgres, ClickHouse, Redpanda, Redis) `trooper-agent` ile self projesine raporlanır
+  (`deploy/self/agent.yaml`, `make self`).
+- Docker build context'i `services/` yerine repo köküdür (Dockerfile'lar `sdks/go`'yu da kopyalar); ADR-026'daki
+  "context `services/`" bu ADR ile güncellenir.
+**Sonuç:** Platform kendi dashboard'unda "TaskTrooper" projesi olarak görünür; SDK'daki bir regresyon ilk önce bizde görülür.
+Self proje kotası/sampling'i ayrı ayarlanabilir. Detay: contracts.md §27.
+
+## ADR-028 — Dummy / seed veri yok: platform yalnızca gerçek veriyle çalışır
+**Bağlam:** Dashboard default olarak mock veriyle açılıyordu (`VITE_DATA=mock`), `tools/demo` sahte servis/RUM trafiği ve
+monitor/KPI/load test seed'i üretiyordu (api `source: "code"`'u reddettiği için seed zaten kırıktı), Postgres'e dev seed
+(`002_seed.sql`: Acme org, Shop projesi, `tt_dev_*` key'leri) uygulanıyordu. Sahte veri gerçek hataları gizliyor, iki kod yolunu
+(mock + api) bakımda tutmayı gerektiriyordu. ADR-027 ile platform kendi gerçek verisini üretebiliyor.
+**Karar:**
+- `tools/demo` ve `make demo*` kaldırılır. `apps/web` mock modu kaldırılır: `VITE_DATA` yok, tüm `src/data/*` yalnızca api'den
+  okur; veri yoksa ekranlar empty state + kurulum yönergesi (SDK snippet'i) gösterir. ADR-013'ün senkron fonksiyon + uzak cache
+  yapısı kalır, mock dalları silinir.
+- Postgres dev seed'leri (`002_seed.sql`, `014_self_project.sql`) kaldırılır. Kurulum gerçek akışla yapılır:
+  - **Onboarding:** giriş yapan (OIDC veya `TT_AUTH_DEV=true` dev login) ve hiç org'u olmayan kullanıcı UI'da "org + ilk proje
+    oluştur" adımına düşer → `POST /api/v1/orgs {name, project}` (kullanıcı owner olur) → ingest key bir kez gösterilir + SDK
+    kurulum snippet'leri.
+  - **Bootstrap komutu:** `api bootstrap --org <ad> --project <ad> --owner <email> [--ingest-key-out file]` — idempotent; org,
+    proje, owner üyeliği ve bir ingest key oluşturur, DSN'i yazdırır. Self-observability projesi (ADR-027) ve CI/otomasyon için.
+    `make self` bunu kullanır; `TT_SELF_PROJECT_ID` bu komutun verdiği proje id'sidir (sabit `2` değil).
+- Testler kendi fixture'larını kurar (org/proje/key'i test içinde oluşturur); hiçbir test seed'e dayanmaz. SDK örnek/README'lerindeki
+  DSN'ler yer tutucu (`<ingest-key>`) olur.
+- `VITE_API_KEY` dev kısayolu kalkar; dashboard yalnızca oturum cookie'si ile çalışır.
+**Sonuç:** İlk açılışta dashboard boştur; veri, SDK bağlanınca (veya `make self` ile platformun kendisi) gelir. ADR-013'teki "mock mod
+korunur" maddesi ve contracts §11'deki `VITE_DATA` bu ADR ile geçersizdir.
