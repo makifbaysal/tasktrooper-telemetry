@@ -2,7 +2,8 @@
 
 Sends spans (FastAPI request with caller baggage + DB-like child), an LLM span and a CPU profile with route sections
 from a fresh interpreter, then polls ClickHouse ``spans``, ``profile_stacks`` and ``llm_1m``. Rows are deleted
-afterwards. Env: ``TROOPER_E2E_DSN`` (default ``http://tt_dev_ingest_key@localhost:4318/1``), ``TROOPER_E2E_CLICKHOUSE``
+afterwards. Env: ``TROOPER_E2E_DSN`` (required, e.g. the DSN from
+onboarding or ``api bootstrap``; skipped when unset), ``TROOPER_E2E_CLICKHOUSE``
 (default ``http://localhost:8123``, user/password ``trooper``).
 """
 
@@ -21,7 +22,7 @@ from .conftest import run_py
 
 pytestmark = pytest.mark.live
 
-DSN = os.environ.get("TROOPER_E2E_DSN", "http://tt_dev_ingest_key@localhost:4318/1")
+DSN = os.environ.get("TROOPER_E2E_DSN", "")  # no seeded key exists (ADR-028)
 CH = os.environ.get("TROOPER_E2E_CLICKHOUSE", "http://localhost:8123")
 CH_AUTH = {"user": os.environ.get("TROOPER_E2E_CLICKHOUSE_USER", "trooper"), "password": os.environ.get("TROOPER_E2E_CLICKHOUSE_PASSWORD", "trooper")}
 
@@ -93,6 +94,8 @@ print("errors", tasktrooper.internal_error_count())
 
 @pytest.fixture(scope="module")
 def live_service():
+    if not DSN:
+        pytest.skip("TROOPER_E2E_DSN not set (http://<ingest-key>@localhost:4318/<project-id>)")
     d = parse_dsn(DSN)
     if not _reachable(d.endpoint + "/healthz"):
         pytest.skip(f"ingest-gw not reachable at {d.endpoint}")

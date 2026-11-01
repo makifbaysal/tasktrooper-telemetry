@@ -2,7 +2,7 @@ using TaskTrooper.Telemetry;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// DSN from TROOPER_DSN or appsettings "TaskTrooper:Dsn"; local stack: http://tt_dev_ingest_key@localhost:4318/1
+// DSN from TROOPER_DSN or appsettings "TaskTrooper:Dsn"; local stack: http://<ingest-key>@localhost:4318/<project-id> (onboarding or `api bootstrap`)
 builder.Services
     .AddTaskTrooper(o => o.ServiceName = "orders-api")
     .AddAspNetCore();

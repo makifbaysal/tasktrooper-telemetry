@@ -183,7 +183,7 @@ Order (later wins): environment variables → `TaskTrooper` config section (`app
 
 | Option | Env | Default | Notes |
 |---|---|---|---|
-| `Dsn` | `TROOPER_DSN` | — | `https://<key>@<host>[:port]/<project>`. Without it nothing is exported (instrumentation still runs). Local: `http://tt_dev_ingest_key@localhost:4318/1` |
+| `Dsn` | `TROOPER_DSN` | — | `https://<key>@<host>[:port]/<project>`. Without it nothing is exported (instrumentation still runs). Local: `http://<ingest-key>@localhost:4318/<project-id>` (onboarding or `api bootstrap`) |
 | `ServiceName` | `TROOPER_SERVICE`, `OTEL_SERVICE_NAME` | app name | `service.name` |
 | `ServiceVersion` | `TROOPER_VERSION` | entry assembly informational version | `service.version` (deploy marker) |
 | `Environment` | `TROOPER_ENVIRONMENT` | host environment, lower-case | `deployment.environment.name` |

@@ -7,7 +7,7 @@ import TaskTrooperReplay
 struct TrooperSampleApp: App {
     init() {
         var config = TrooperConfig(
-            dsn: "http://tt_dev_ingest_key@localhost:4318/1",
+            dsn: ProcessInfo.processInfo.environment["TROOPER_DSN"] ?? "", // scheme env: http://<ingest-key>@localhost:4318/<project-id>
             app: "sample-ios",
             version: "1.0.0",
             environment: "development",

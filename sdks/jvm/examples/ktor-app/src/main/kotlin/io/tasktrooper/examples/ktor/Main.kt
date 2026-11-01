@@ -20,7 +20,7 @@ import io.tasktrooper.telemetry.ktor.TaskTrooperClient
 fun main() {
     embeddedServer(Netty, port = 8080) {
         install(TaskTrooper) {
-            dsn = System.getenv("TROOPER_DSN") ?: "http://tt_dev_ingest_key@localhost:4318/1"
+            dsn = System.getenv("TROOPER_DSN") // http://<ingest-key>@localhost:4318/<project-id>; unset = nothing exported
             service = "users-api"
             environment = "dev"
         }
