@@ -1,7 +1,7 @@
 //go:build integration
 
 // End-to-end: loadtest-ctl (in process, local executor) spawns real loadtest-runner subprocesses against an
-// httptest target and a fake ingest-gw. Needs the compose Postgres (make infra && make migrate). Project 9501.
+// httptest target and a fake ingest-gw. Needs the compose Postgres (make infra && make migrate). Project 9502 (ctl integration uses 9501; packages run in parallel).
 //
 //	cd services/loadtest && GOWORK=off go test -tags integration -count=1 -v ./e2e/
 package e2e
@@ -31,7 +31,7 @@ import (
 	"github.com/tasktrooper/telemetry/services/loadtest/internal/store"
 )
 
-const project = 9501
+const project = 9502
 
 type target struct {
 	srv     *httptest.Server

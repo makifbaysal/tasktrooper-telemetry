@@ -15,10 +15,14 @@ import (
 	"github.com/tasktrooper/telemetry/services/pkg/logx"
 
 	"github.com/tasktrooper/telemetry/services/loadtest/internal/runner"
+	"github.com/tasktrooper/telemetry/services/loadtest/internal/selftel"
 	"github.com/tasktrooper/telemetry/services/loadtest/internal/store"
 )
 
 var version = "dev"
+
+// service is the fixed self-observability service name (ADR-027; TROOPER_SERVICE overrides).
+const service = "tt-loadtest-runner"
 
 func main() {
 	if err := run(); err != nil {
@@ -32,6 +36,12 @@ func run() error {
 	log := logx.New("loadtest-runner", common.LogLevel)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// self-observability (ADR-027): TROOPER_* from loadtest-ctl; no-op without TROOPER_DSN. Separate from the
+	// run's own OTLP metrics (TT_DSN / TT_LOADTEST_INGEST_URL, internal/otlpx), which go to the customer project.
+	flush := selftel.Start(ctx, service, version, log)
+	defer flush()
+	log = selftel.Logger(log, service)
+	ctx = selftel.FromEnv(ctx, nil) // join the ctl claim span's trace (TRACEPARENT)
 	id := int64(config.Int("TT_LOADTEST_RUN_ID", 0))
 	if id <= 0 {
 		return fmt.Errorf("TT_LOADTEST_RUN_ID is required")

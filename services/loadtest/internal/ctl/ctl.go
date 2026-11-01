@@ -11,7 +11,11 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/tasktrooper/telemetry/services/loadtest/internal/obs"
+	"github.com/tasktrooper/telemetry/services/loadtest/internal/selftel"
 	"github.com/tasktrooper/telemetry/services/loadtest/internal/spec"
 	"github.com/tasktrooper/telemetry/services/loadtest/internal/store"
 )
@@ -29,6 +33,8 @@ type Config struct {
 	MaxConcurrent  int           // runs at once (default 4)
 	// Projects restricts the controller to these projects (TT_LOADTEST_PROJECTS); empty = all.
 	Projects []int64
+	// Executor is the executor kind (local | k8s), a span attribute only.
+	Executor string
 }
 
 // Controller is loadtest-ctl.
@@ -55,6 +61,7 @@ type activeRun struct {
 	deadline   time.Time
 	hardStop   time.Time
 	lastStatus time.Time
+	trace      trace.SpanContext // claim span: later lifecycle spans and the runners join its trace (ADR-027)
 }
 
 // New builds a controller.
@@ -154,6 +161,7 @@ func (c *Controller) shutdown() {
 
 // ClaimOnce claims and starts at most one queued run. It reports whether a run was claimed.
 func (c *Controller) ClaimOnce(ctx context.Context) (bool, error) {
+	t0 := time.Now() // the claim span starts here but is only created when a run was claimed (no idle-poll spans)
 	var plan *spec.Plan
 	run, adm, err := c.st.ClaimNext(ctx, c.cfg.Instance, c.cfg.Projects, func(r store.Run) store.Admission {
 		in := AdmitInput{Regions: c.cfg.DefaultRegions}
@@ -173,7 +181,12 @@ func (c *Controller) ClaimOnce(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	ctx, span := selftel.StartIn(ctx, trace.SpanContext{}, "loadtest.claim", trace.WithTimestamp(t0), trace.WithAttributes(
+		attribute.Int64("tt.project_id", run.ProjectID), attribute.Int64("tt.loadtest.run_id", run.ID),
+		attribute.String("tt.loadtest.executor", c.cfg.Executor)))
+	defer span.End()
 	if adm.Reject != "" {
+		span.SetAttributes(attribute.Bool("tt.loadtest.rejected", true))
 		c.metrics.Add("tt_loadtest_runs_rejected_total", 1)
 		c.log.Info("run rejected", "run", run.ID, "reason", adm.Reject)
 		return true, nil
@@ -183,7 +196,9 @@ func (c *Controller) ClaimOnce(ctx context.Context) (bool, error) {
 	if plan.Script != "" && dur == 0 {
 		dur = c.cfg.Limits.MaxDuration
 	}
-	a := &activeRun{run: run, plan: plan, handles: map[string]Handle{}, exitedAt: map[string]time.Time{}}
+	span.SetAttributes(attribute.Int("tt.loadtest.regions", len(adm.Shards)), attribute.String("tt.loadtest.mode", plan.Mode),
+		attribute.Int("tt.loadtest.peak_vus", plan.PeakVUs()), attribute.Float64("tt.loadtest.duration_s", dur.Seconds()))
+	a := &activeRun{run: run, plan: plan, handles: map[string]Handle{}, exitedAt: map[string]time.Time{}, trace: span.SpanContext()}
 	a.deadline = time.Now().Add(dur + c.cfg.StartSlack + 30*time.Second)
 	a.hardStop = a.deadline.Add(time.Minute)
 	c.mu.Lock()
@@ -195,9 +210,10 @@ func (c *Controller) ClaimOnce(ctx context.Context) (bool, error) {
 	}
 	for _, sh := range adm.Shards {
 		h, err := c.exec.Start(ctx, Job{RunID: run.ID, ProjectID: run.ProjectID, Region: sh.Region, Share: sh.Share, VUCap: vuCap,
-			Deadline: dur + c.cfg.StartSlack + time.Minute})
+			Deadline: dur + c.cfg.StartSlack + time.Minute, Trace: selftel.TraceEnv(ctx)})
 		if err != nil {
-			c.log.Error("start runner", "run", run.ID, "region", sh.Region, "err", err)
+			span.AddEvent("runner start failed", trace.WithAttributes(attribute.String("tt.loadtest.region", sh.Region)))
+			c.log.ErrorContext(ctx, "start runner", "run", run.ID, "region", sh.Region, "err", err)
 			_ = c.st.FailShard(ctx, run.ID, sh.Region, "runner did not start: "+err.Error())
 			continue
 		}
@@ -252,8 +268,10 @@ func (c *Controller) supervise(ctx context.Context, a *activeRun) error {
 		return nil
 	}
 	if (abort || state == "aborted") && !a.stopping {
-		c.log.Info("abort requested", "run", id)
-		c.stopAll(ctx, a)
+		c.abortSpan(ctx, a, "user", func(ctx context.Context) {
+			c.log.InfoContext(ctx, "abort requested", "run", id)
+			c.stopAll(ctx, a)
+		})
 	}
 	shards, err := c.st.Shards(ctx, id)
 	if err != nil {
@@ -265,8 +283,12 @@ func (c *Controller) supervise(ctx context.Context, a *activeRun) error {
 		if sh.State == "aborted" && sh.AbortReason != "" && sh.AbortReason != "stopped" && sh.AbortReason != "stopped by user" && !abort {
 			a.ctlAbort = true
 			userAbort = false
-			_ = c.st.RequestAbort(ctx, id)
-			c.stopAll(ctx, a)
+			if !a.stopping {
+				c.abortSpan(ctx, a, "gate", func(ctx context.Context) {
+					_ = c.st.RequestAbort(ctx, id)
+					c.stopAll(ctx, a)
+				})
+			}
 			break
 		}
 	}
@@ -296,10 +318,12 @@ func (c *Controller) supervise(ctx context.Context, a *activeRun) error {
 		}
 	}
 	if now.After(a.deadline) && !a.stopping {
-		c.log.Warn("run over deadline, stopping", "run", id)
-		a.ctlAbort = true
-		_ = c.st.RequestAbort(ctx, id)
-		c.stopAll(ctx, a)
+		c.abortSpan(ctx, a, "deadline", func(ctx context.Context) {
+			c.log.WarnContext(ctx, "run over deadline, stopping", "run", id)
+			a.ctlAbort = true
+			_ = c.st.RequestAbort(ctx, id)
+			c.stopAll(ctx, a)
+		})
 	}
 	if now.After(a.hardStop) {
 		for _, sh := range shards {
@@ -321,7 +345,13 @@ func (c *Controller) supervise(ctx context.Context, a *activeRun) error {
 		if f.State != "error" {
 			passed = &f.Passed
 		}
-		if err := c.st.FinishRun(ctx, id, f.State, f.Summary, passed, f.Error, f.VUMinutes); err != nil {
+		fctx, span := selftel.StartIn(ctx, a.trace, "loadtest.finish", trace.WithAttributes(
+			attribute.Int64("tt.project_id", a.run.ProjectID), attribute.Int64("tt.loadtest.run_id", id),
+			attribute.String("tt.loadtest.state", f.State), attribute.Int64("tt.loadtest.requests", f.Summary.Requests),
+			attribute.Float64("tt.loadtest.error_rate", f.Summary.ErrorRate), attribute.Float64("tt.loadtest.vu_minutes", f.VUMinutes)))
+		err := c.st.FinishRun(fctx, id, f.State, f.Summary, passed, f.Error, f.VUMinutes)
+		selftel.End(span, err)
+		if err != nil {
 			return err
 		}
 		c.metrics.Add("tt_loadtest_runs_finished_total", 1, "state", f.State)
@@ -337,6 +367,15 @@ func (c *Controller) supervise(ctx context.Context, a *activeRun) error {
 		return c.st.UpdateLive(ctx, id, r.Live, r.Summary)
 	}
 	return nil
+}
+
+// abortSpan runs an abort step in a loadtest.abort span of the run's trace.
+func (c *Controller) abortSpan(ctx context.Context, a *activeRun, reason string, fn func(context.Context)) {
+	ctx, span := selftel.StartIn(ctx, a.trace, "loadtest.abort", trace.WithAttributes(
+		attribute.Int64("tt.project_id", a.run.ProjectID), attribute.Int64("tt.loadtest.run_id", a.run.ID),
+		attribute.String("tt.loadtest.abort_reason", reason)))
+	defer span.End()
+	fn(ctx)
 }
 
 func (c *Controller) drop(id int64) {
@@ -369,11 +408,18 @@ func (c *Controller) VerifyDomains(ctx context.Context) {
 	if c.verifier == nil {
 		return
 	}
+	t0 := time.Now()
 	list, err := c.st.PendingVerifications(ctx, c.cfg.Projects)
 	if err != nil {
 		c.log.Error("pending verifications", "err", err)
 		return
 	}
+	if len(list) == 0 {
+		return // no span for idle ticks
+	}
+	ctx, span := selftel.StartIn(ctx, trace.SpanContext{}, "loadtest.verify_domains", trace.WithTimestamp(t0),
+		trace.WithAttributes(attribute.Int("tt.loadtest.domains", len(list))))
+	defer span.End()
 	for _, d := range list {
 		cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		method, err := c.verifier.Check(cctx, d.Host, d.Token)

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strconv"
 	"syscall"
 	"time"
@@ -18,10 +19,14 @@ import (
 
 	"github.com/tasktrooper/telemetry/services/loadtest/internal/ctl"
 	"github.com/tasktrooper/telemetry/services/loadtest/internal/obs"
+	"github.com/tasktrooper/telemetry/services/loadtest/internal/selftel"
 	"github.com/tasktrooper/telemetry/services/loadtest/internal/store"
 )
 
 var version = "dev"
+
+// service is the fixed self-observability service name (ADR-027; TROOPER_SERVICE overrides).
+const service = "tt-loadtest-ctl"
 
 func main() {
 	if err := run(); err != nil {
@@ -35,6 +40,10 @@ func run() error {
 	log := logx.New("loadtest-ctl", common.LogLevel)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// self-observability (ADR-027): no-op without TROOPER_DSN
+	flush := selftel.Start(ctx, service, version, log)
+	defer flush()
+	log = selftel.Logger(log, service)
 
 	host, _ := os.Hostname()
 	limits := ctl.Limits{
@@ -53,13 +62,18 @@ func run() error {
 		"TT_LOADTEST_MAX_DURATION": limits.MaxDuration.String(),
 		"TT_LOADTEST_TICK":         os.Getenv("TT_LOADTEST_TICK"),
 	}
+	// runners self-report too (their spans join the ctl run trace via TRACEPARENT); empty without TROOPER_DSN
+	for k, v := range selftel.RunnerEnv(nil) {
+		runnerEnv[k] = v
+	}
 	for k, v := range runnerEnv {
 		if v == "" {
 			delete(runnerEnv, k)
 		}
 	}
 	var ex ctl.Executor
-	switch kind := config.String("TT_LOADTEST_EXECUTOR", "local"); kind {
+	kind := config.String("TT_LOADTEST_EXECUTOR", "local")
+	switch kind {
 	case "local":
 		bin, err := ctl.FindRunner(os.Getenv("TT_LOADTEST_RUNNER_BIN"))
 		if err != nil {
@@ -67,10 +81,10 @@ func run() error {
 		}
 		ex = &ctl.LocalExecutor{Bin: bin, Env: runnerEnv}
 	case "k8s":
-		// secrets (TT_POSTGRES_URL, TT_INTERNAL_TOKEN) come from TT_LOADTEST_K8S_SECRET, never as plain env
+		// secrets (TT_POSTGRES_URL, TT_INTERNAL_TOKEN, TT_DSN, TROOPER_DSN) come from TT_LOADTEST_K8S_SECRET, never as plain env
 		plain := map[string]string{}
 		for k, v := range runnerEnv {
-			if k != "TT_POSTGRES_URL" && k != "TT_INTERNAL_TOKEN" && k != "TT_DSN" {
+			if k != "TT_POSTGRES_URL" && k != "TT_INTERNAL_TOKEN" && k != "TT_DSN" && !slices.Contains(selftel.SecretEnv, k) {
 				plain[k] = v
 			}
 		}
@@ -103,6 +117,7 @@ func run() error {
 		VerifyEvery:    config.Duration("TT_LOADTEST_VERIFY_INTERVAL", 10*time.Second),
 		MaxConcurrent:  config.Int("TT_LOADTEST_MAX_CONCURRENT", 4),
 		Projects:       projects(),
+		Executor:       kind,
 	}, st, ex, ctl.NewVerifier(), log, reg)
 
 	mux := http.NewServeMux()

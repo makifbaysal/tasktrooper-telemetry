@@ -82,9 +82,42 @@ Every request carries `traceparent` (new per request), `baggage: tt.svc=loadtest
 | `TT_INTERNAL_TOKEN` | — | internal ingest credential (`x-trooper-internal` + `x-trooper-project`, contracts §16); else the key in `TT_DSN` |
 | `TT_LOADTEST_TICK` | `5s` | runner live/OTLP interval |
 | `TT_LOADTEST_K6_BIN` | `k6` | script mode |
-| `TT_LOADTEST_K8S_IMAGE` (required), `_NAMESPACE` (pod's), `_API` (`https://kubernetes.default.svc`), `_SERVICE_ACCOUNT`, `_SECRET` (envFrom: `TT_POSTGRES_URL`, `TT_INTERNAL_TOKEN`), `_REGION_LABEL` (nodeSelector key), `_CPU` (`500m`), `_MEMORY` (`512Mi`) | | k8s executor (in-cluster SA token; needs `create/get/delete` on `batch/jobs`) |
+| `TT_LOADTEST_K8S_IMAGE` (required), `_NAMESPACE` (pod's), `_API` (`https://kubernetes.default.svc`), `_SERVICE_ACCOUNT`, `_SECRET` (envFrom: `TT_POSTGRES_URL`, `TT_INTERNAL_TOKEN`, `TT_DSN`, `TROOPER_DSN`), `_REGION_LABEL` (nodeSelector key), `_CPU` (`500m`), `_MEMORY` (`512Mi`) | | k8s executor (in-cluster SA token; needs `create/get/delete` on `batch/jobs`) |
 
-Runner-only (set by ctl): `TT_LOADTEST_RUN_ID`, `TT_LOADTEST_REGION`, `TT_LOADTEST_SHARE`, `TT_LOADTEST_VU_CAP`.
+Runner-only (set by ctl): `TT_LOADTEST_RUN_ID`, `TT_LOADTEST_REGION`, `TT_LOADTEST_SHARE`, `TT_LOADTEST_VU_CAP`,
+`TRACEPARENT` / `TRACESTATE` (self-observability, below).
+
+## Self-observability (ADR-027, contracts §27)
+
+Both binaries report to the platform's own project with the Go SDK (`internal/selftel`). Off unless `TROOPER_DSN` is set —
+then nothing changes. This is separate from the run's OTLP metrics (`TT_DSN` / `TT_LOADTEST_INGEST_URL`, `internal/otlpx`),
+which go to the customer's project through their own exporter and never use the self SDK providers.
+
+| Variable | Default | |
+|---|---|---|
+| `TROOPER_DSN` | — | self project ingest DSN (dev: the DSN `make self` prints, `http://<ingest-key>@localhost:4318/<self-project-id>`) |
+| `TROOPER_SERVICE` | `tt-loadtest-ctl` / `tt-loadtest-runner` | override (not passed to runners) |
+| `TROOPER_ENV` | `TT_ENV`, else `development` | |
+| `TROOPER_VERSION`, `TROOPER_SAMPLE_RATE`, `TROOPER_PROFILING` (+ `_TYPES`, `_PERIOD`, `_CPU_DURATION`), `TROOPER_DEBUG` | SDK defaults | |
+
+loadtest-ctl passes these to every runner (`TROOPER_ENV` resolved; `TROOPER_SERVICE` never). With the k8s executor
+`TROOPER_DSN` contains the ingest key, so like `TT_DSN` it is **not** put in the plain Job env: add it to the
+`TT_LOADTEST_K8S_SECRET` secret.
+
+What is traced (one trace per run):
+
+- ctl `loadtest.claim` (root, only when a run was claimed — idle polls produce no spans): admission result, regions, mode,
+  peak VUs, duration, executor; `tt.project_id`, `tt.loadtest.run_id`. Its W3C context goes to each runner as `TRACEPARENT`.
+- ctl `loadtest.abort` (reason `user` | `gate` | `deadline`) and `loadtest.finish` (state, requests, error rate, VU-minutes)
+  in the same trace; `loadtest.verify_domains` (root) only when verifications are pending.
+- runner `loadtest.run` (child of the claim span): region, share, VU cap, mode, result state / requests / errors / abort
+  reason; one `loadtest.stage` child per scheduled stage (reconstructed from the plan, truncated by an abort).
+- Postgres (`pgx`, sanitized SQL) only under these spans; the per-second abort poll and per-tick shard updates are untraced.
+- slog → OTel logs (local JSON output unchanged).
+
+**Never per request:** the generated target requests are not instrumented (no span, no SDK transport, no global
+propagator); they keep their own random `traceparent` / `baggage: tt.svc=loadtest:<run>`. The K8s API client is not
+instrumented either (its 2 s status polls would only add root spans).
 
 ## Run / test
 
@@ -98,6 +131,6 @@ GOWORK=off go test -tags integration -count=1 ./...         # + live Postgres (m
 ```
 
 The e2e (`e2e/`) builds `loadtest-runner`, runs the controller with the local executor against an httptest target and a fake
-ingest-gw (project 9501, cleaned up) and checks passed / user abort / gate abort / rejected target.
+ingest-gw (project 9502, cleaned up) and checks passed / user abort / gate abort / rejected target.
 
-Docker: `docker build -f services/loadtest/Dockerfile -t tasktrooper/loadtest services/` (both binaries; no k6 in the image).
+Docker: `docker build -f services/loadtest/Dockerfile -t tasktrooper/loadtest .` (repo root) (both binaries; no k6 in the image).

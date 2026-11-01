@@ -22,16 +22,25 @@ type Job struct {
 	VUCap     int
 	// Deadline bounds the runner (k8s activeDeadlineSeconds).
 	Deadline time.Duration
+	// Trace is the W3C trace context of the ctl run span (TRACEPARENT/TRACESTATE, ADR-027); empty when self
+	// telemetry is off.
+	Trace map[string]string
 }
 
 // Env returns the runner environment specific to the job (contracts §14 runner config).
 func (j Job) Env() map[string]string {
-	return map[string]string{
+	env := map[string]string{
 		"TT_LOADTEST_RUN_ID": strconv.FormatInt(j.RunID, 10),
 		"TT_LOADTEST_REGION": j.Region,
 		"TT_LOADTEST_SHARE":  strconv.FormatFloat(j.Share, 'f', -1, 64),
 		"TT_LOADTEST_VU_CAP": strconv.Itoa(j.VUCap),
 	}
+	for k, v := range j.Trace {
+		if v != "" {
+			env[k] = v
+		}
+	}
+	return env
 }
 
 // Executor starts runners.

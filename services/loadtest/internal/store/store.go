@@ -12,6 +12,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/tasktrooper/telemetry/services/loadtest/internal/selftel"
 )
 
 // Store wraps a pool.
@@ -24,6 +26,7 @@ func Open(ctx context.Context, url string) (*Store, error) {
 		return nil, err
 	}
 	cfg.MaxConns = 8
+	cfg.ConnConfig.Tracer = selftel.PGTracer() // spans only under a recording parent (ADR-027)
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, err
