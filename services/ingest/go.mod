@@ -14,10 +14,10 @@ require (
 	github.com/oschwald/maxminddb-golang/v2 v2.8.0
 	github.com/prometheus/client_golang v1.24.1
 	github.com/redis/go-redis/v9 v9.23.0
-	github.com/tasktrooper/telemetry-go v0.0.0
-	github.com/tasktrooper/telemetry-go/integrations/goredis v0.0.0
-	github.com/tasktrooper/telemetry-go/integrations/pgx v0.0.0
-	github.com/tasktrooper/telemetry-go/integrations/slog v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/goredis v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog v0.0.0
 	github.com/tasktrooper/telemetry/services/pkg v0.0.0
 	github.com/twmb/franz-go v1.22.2
 	github.com/twmb/franz-go/pkg/kmsg v1.15.0
@@ -94,8 +94,8 @@ require (
 replace github.com/tasktrooper/telemetry/services/pkg => ../pkg
 
 replace (
-	github.com/tasktrooper/telemetry-go => ../../sdks/go
-	github.com/tasktrooper/telemetry-go/integrations/goredis => ../../sdks/go/integrations/goredis
-	github.com/tasktrooper/telemetry-go/integrations/pgx => ../../sdks/go/integrations/pgx
-	github.com/tasktrooper/telemetry-go/integrations/slog => ../../sdks/go/integrations/slog
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go => ../../sdks/go
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/goredis => ../../sdks/go/integrations/goredis
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx => ../../sdks/go/integrations/pgx
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog => ../../sdks/go/integrations/slog
 )

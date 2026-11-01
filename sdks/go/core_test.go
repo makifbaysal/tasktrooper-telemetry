@@ -13,8 +13,8 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
-	trooper "github.com/tasktrooper/telemetry-go"
-	"github.com/tasktrooper/telemetry-go/troopertest"
+	trooper "github.com/makifbaysal/tasktrooper-telemetry/sdks/go"
+	"github.com/makifbaysal/tasktrooper-telemetry/sdks/go/troopertest"
 )
 
 func TestParseDSN(t *testing.T) {

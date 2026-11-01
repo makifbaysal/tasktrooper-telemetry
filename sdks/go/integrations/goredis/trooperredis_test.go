@@ -11,9 +11,9 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
-	trooper "github.com/tasktrooper/telemetry-go"
-	trooperredis "github.com/tasktrooper/telemetry-go/integrations/goredis"
-	"github.com/tasktrooper/telemetry-go/troopertest"
+	trooper "github.com/makifbaysal/tasktrooper-telemetry/sdks/go"
+	trooperredis "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/goredis"
+	"github.com/makifbaysal/tasktrooper-telemetry/sdks/go/troopertest"
 )
 
 func TestInstrument(t *testing.T) {

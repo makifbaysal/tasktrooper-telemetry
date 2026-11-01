@@ -5,7 +5,7 @@ import (
 
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/tasktrooper/telemetry-go/troopertest"
+	"github.com/makifbaysal/tasktrooper-telemetry/sdks/go/troopertest"
 )
 
 // Self telemetry (ADR-027): API routes get a server span with the chi route template and the tenant as span

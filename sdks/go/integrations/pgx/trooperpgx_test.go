@@ -11,9 +11,9 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 
-	trooper "github.com/tasktrooper/telemetry-go"
-	trooperpgx "github.com/tasktrooper/telemetry-go/integrations/pgx"
-	"github.com/tasktrooper/telemetry-go/troopertest"
+	trooper "github.com/makifbaysal/tasktrooper-telemetry/sdks/go"
+	trooperpgx "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx"
+	"github.com/makifbaysal/tasktrooper-telemetry/sdks/go/troopertest"
 )
 
 func TestTracerSanitizes(t *testing.T) {

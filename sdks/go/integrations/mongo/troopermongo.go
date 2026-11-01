@@ -15,7 +15,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-const scopeName = "github.com/tasktrooper/telemetry-go/integrations/mongo"
+const scopeName = "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/mongo"
 
 type config struct {
 	tp          trace.TracerProvider

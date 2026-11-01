@@ -8,7 +8,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 
-	"github.com/tasktrooper/telemetry-go/internal/sdkerr"
+	"github.com/makifbaysal/tasktrooper-telemetry/sdks/go/internal/sdkerr"
 )
 
 func httpStatusAttr(code int) attribute.KeyValue {

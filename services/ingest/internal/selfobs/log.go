@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 
-	trooperslog "github.com/tasktrooper/telemetry-go/integrations/slog"
+	trooperslog "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog"
 )
 
 // LogHandler wraps the service's local handler: records go to local as before and also to OTel logs (via

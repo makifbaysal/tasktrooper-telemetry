@@ -9,11 +9,11 @@ require (
 	github.com/aws/smithy-go v1.28.6
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/redis/go-redis/v9 v9.23.0
-	github.com/tasktrooper/telemetry-go v0.0.0
-	github.com/tasktrooper/telemetry-go/integrations/goredis v0.0.0-00010101000000-000000000000
-	github.com/tasktrooper/telemetry-go/integrations/nethttp v0.0.0-00010101000000-000000000000
-	github.com/tasktrooper/telemetry-go/integrations/pgx v0.0.0-00010101000000-000000000000
-	github.com/tasktrooper/telemetry-go/integrations/slog v0.0.0-00010101000000-000000000000
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/goredis v0.0.0-00010101000000-000000000000
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/nethttp v0.0.0-00010101000000-000000000000
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx v0.0.0-00010101000000-000000000000
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog v0.0.0-00010101000000-000000000000
 	github.com/tasktrooper/telemetry/services/pkg v0.0.0
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
@@ -69,9 +69,9 @@ require (
 replace github.com/tasktrooper/telemetry/services/pkg => ../pkg
 
 replace (
-	github.com/tasktrooper/telemetry-go => ../../sdks/go
-	github.com/tasktrooper/telemetry-go/integrations/goredis => ../../sdks/go/integrations/goredis
-	github.com/tasktrooper/telemetry-go/integrations/nethttp => ../../sdks/go/integrations/nethttp
-	github.com/tasktrooper/telemetry-go/integrations/pgx => ../../sdks/go/integrations/pgx
-	github.com/tasktrooper/telemetry-go/integrations/slog => ../../sdks/go/integrations/slog
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go => ../../sdks/go
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/goredis => ../../sdks/go/integrations/goredis
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/nethttp => ../../sdks/go/integrations/nethttp
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx => ../../sdks/go/integrations/pgx
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog => ../../sdks/go/integrations/slog
 )

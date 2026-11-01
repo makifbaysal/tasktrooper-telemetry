@@ -1,8 +1,8 @@
-module github.com/tasktrooper/telemetry-go/integrations/chi
+module github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/chi
 
 go 1.26.3
 
-require github.com/tasktrooper/telemetry-go/integrations/nethttp v0.0.0
+require github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/nethttp v0.1.0
 
 require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
@@ -13,7 +13,7 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.31.0 // indirect
-	github.com/tasktrooper/telemetry-go v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go v0.1.0
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.72.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/runtime v0.72.0 // indirect
@@ -39,6 +39,6 @@ require (
 )
 
 replace (
-	github.com/tasktrooper/telemetry-go => ../..
-	github.com/tasktrooper/telemetry-go/integrations/nethttp => ../nethttp
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go => ../..
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/nethttp => ../nethttp
 )

@@ -13,7 +13,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	trooperzap "github.com/tasktrooper/telemetry-go/integrations/zap"
+	trooperzap "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/zap"
 )
 
 type memExporter struct {

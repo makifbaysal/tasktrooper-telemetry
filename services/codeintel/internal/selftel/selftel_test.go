@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/tasktrooper/telemetry-go/troopertest"
+	"github.com/makifbaysal/tasktrooper-telemetry/sdks/go/troopertest"
 	"go.opentelemetry.io/otel/trace"
 )
 

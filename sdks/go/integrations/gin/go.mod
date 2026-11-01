@@ -1,10 +1,10 @@
-module github.com/tasktrooper/telemetry-go/integrations/gin
+module github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/gin
 
 go 1.26.3
 
 require (
 	github.com/gin-gonic/gin v1.12.0
-	github.com/tasktrooper/telemetry-go v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go v0.1.0
 	go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin v0.72.0
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
@@ -63,4 +63,4 @@ require (
 	google.golang.org/protobuf v1.36.12 // indirect
 )
 
-replace github.com/tasktrooper/telemetry-go => ../..
+replace github.com/makifbaysal/tasktrooper-telemetry/sdks/go => ../..

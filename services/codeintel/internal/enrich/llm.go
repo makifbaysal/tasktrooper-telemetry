@@ -11,7 +11,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/tasktrooper/telemetry-go/llm"
+	"github.com/makifbaysal/tasktrooper-telemetry/sdks/go/llm"
 
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/model"
 )

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/tasktrooper/telemetry-go/internal/sdkerr"
+	"github.com/makifbaysal/tasktrooper-telemetry/sdks/go/internal/sdkerr"
 )
 
 // API dialects understood by the transport.

@@ -9,7 +9,7 @@ import (
 	"github.com/XSAM/otelsql"
 	"go.opentelemetry.io/otel/attribute"
 
-	trooper "github.com/tasktrooper/telemetry-go"
+	trooper "github.com/makifbaysal/tasktrooper-telemetry/sdks/go"
 )
 
 type config struct {

@@ -1,14 +1,14 @@
-module github.com/tasktrooper/telemetry-go/examples
+module github.com/makifbaysal/tasktrooper-telemetry/sdks/go/examples
 
 go 1.26.3
 
 require (
 	github.com/gin-gonic/gin v1.12.0
-	github.com/tasktrooper/telemetry-go v0.0.0
-	github.com/tasktrooper/telemetry-go/integrations/franzgo v0.0.0
-	github.com/tasktrooper/telemetry-go/integrations/gin v0.0.0
-	github.com/tasktrooper/telemetry-go/integrations/nethttp v0.0.0
-	github.com/tasktrooper/telemetry-go/integrations/slog v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go v0.1.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/franzgo v0.1.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/gin v0.1.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/nethttp v0.1.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog v0.1.0
 	github.com/twmb/franz-go v1.22.2
 )
 
@@ -75,9 +75,9 @@ require (
 )
 
 replace (
-	github.com/tasktrooper/telemetry-go => ../
-	github.com/tasktrooper/telemetry-go/integrations/franzgo => ../integrations/franzgo
-	github.com/tasktrooper/telemetry-go/integrations/gin => ../integrations/gin
-	github.com/tasktrooper/telemetry-go/integrations/nethttp => ../integrations/nethttp
-	github.com/tasktrooper/telemetry-go/integrations/slog => ../integrations/slog
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go => ../
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/franzgo => ../integrations/franzgo
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/gin => ../integrations/gin
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/nethttp => ../integrations/nethttp
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog => ../integrations/slog
 )

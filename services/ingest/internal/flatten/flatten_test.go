@@ -442,7 +442,7 @@ func TestRumMapping(t *testing.T) {
 	ts := recv.Add(-2 * time.Second).UnixMilli()
 	batch := &rumpb.RumBatch{
 		Resource: &rumpb.Resource{App: "shop-web", Version: "3.1.0", Environment: "prod", Platform: rumpb.Platform_PLATFORM_WEB,
-			Sdk: &rumpb.Sdk{Name: "@trooper/browser", Version: "0.1.0"}},
+			Sdk: &rumpb.Sdk{Name: "@tasktrooper/browser", Version: "0.1.0"}},
 		Events: []*rumpb.RumEvent{
 			{Type: rumpb.EventType_VIEW_START, TsMs: ts, SessionId: "s", ViewId: "v", AnonymousId: "a", User: &rumpb.User{Id: "u1", Traits: map[string]string{"plan": "pro"}},
 				Payload: &rumpb.RumEvent_View{View: &rumpb.ViewPayload{Url: "https://shop.test/products/123?utm=x", LoadingTimeMs: 900, IsInitial: true}}},
@@ -464,7 +464,7 @@ func TestRumMapping(t *testing.T) {
 	}
 	v := rows[0]
 	if v.Type != "view_start" || v.DurationMs != 900 || v.ViewName != "/products/:id" || v.App != "shop-web" || v.Platform != "web" ||
-		v.UserID != "u1" || v.Attrs["user.plan"] != "pro" || v.Attrs["view.url"] != "https://shop.test/products/123?utm" || v.Attrs["sdk.name"] != "@trooper/browser" {
+		v.UserID != "u1" || v.Attrs["user.plan"] != "pro" || v.Attrs["view.url"] != "https://shop.test/products/123?utm" || v.Attrs["sdk.name"] != "@tasktrooper/browser" {
 		t.Errorf("view_start: %+v", v)
 	}
 	if v.Browser != "Chrome 128.0" || v.OS != "macOS 10.15" || v.DeviceType != "desktop" {

@@ -182,7 +182,7 @@ so resends are idempotent). Gauges carry `trooper.faas.id` = slug and `faas.name
 
 8 queries per function (+1 with a stream trigger): CloudWatch bills `GetMetricData` per metric requested, so 100
 functions ≈ 800 metrics/min. Cold starts are not in CloudWatch: they come from spans (`faas.coldstart=true`) — use
-`@trooper/node` `wrapLambda` or the OTel/ADOT Lambda layer (`.ai/sdk.md` § Serverless).
+`@tasktrooper/node` `wrapLambda` or the OTel/ADOT Lambda layer (`.ai/sdk.md` § Serverless).
 
 ## Google Cloud
 

@@ -13,7 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	trooperhttp "github.com/tasktrooper/telemetry-go/integrations/nethttp"
+	trooperhttp "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/nethttp"
 )
 
 // Option configures Middleware (same options as trooperhttp: WithPanicPolicy, WithOtelHTTPOptions).

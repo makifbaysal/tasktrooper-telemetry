@@ -6,9 +6,9 @@ require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.49.0
 	github.com/exaring/otelpgx v0.13.0
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/tasktrooper/telemetry-go v0.0.0
-	github.com/tasktrooper/telemetry-go/integrations/pgx v0.0.0
-	github.com/tasktrooper/telemetry-go/integrations/slog v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog v0.0.0
 	github.com/tasktrooper/telemetry/services/pkg v0.0.0
 	github.com/twmb/franz-go v1.22.2
 	go.opentelemetry.io/otel v1.47.0
@@ -61,7 +61,7 @@ require (
 replace github.com/tasktrooper/telemetry/services/pkg => ../pkg
 
 replace (
-	github.com/tasktrooper/telemetry-go => ../../sdks/go
-	github.com/tasktrooper/telemetry-go/integrations/pgx => ../../sdks/go/integrations/pgx
-	github.com/tasktrooper/telemetry-go/integrations/slog => ../../sdks/go/integrations/slog
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go => ../../sdks/go
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx => ../../sdks/go/integrations/pgx
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog => ../../sdks/go/integrations/slog
 )

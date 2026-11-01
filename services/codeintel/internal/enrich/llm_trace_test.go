@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/tasktrooper/telemetry-go/llm"
-	"github.com/tasktrooper/telemetry-go/troopertest"
+	"github.com/makifbaysal/tasktrooper-telemetry/sdks/go/llm"
+	"github.com/makifbaysal/tasktrooper-telemetry/sdks/go/troopertest"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/model"

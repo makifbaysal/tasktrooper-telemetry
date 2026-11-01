@@ -56,10 +56,10 @@ require (
 	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/standard-webhooks/standard-webhooks/libraries v0.0.1 // indirect
-	github.com/tasktrooper/telemetry-go v0.0.0
-	github.com/tasktrooper/telemetry-go/integrations/nethttp v0.0.0
-	github.com/tasktrooper/telemetry-go/integrations/pgx v0.0.0
-	github.com/tasktrooper/telemetry-go/integrations/slog v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/nethttp v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog v0.0.0
 	github.com/tasktrooper/telemetry/services/pkg v0.0.0
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
@@ -77,10 +77,10 @@ require (
 
 replace github.com/tasktrooper/telemetry/services/pkg => ../pkg
 
-replace github.com/tasktrooper/telemetry-go => ../../sdks/go
+replace github.com/makifbaysal/tasktrooper-telemetry/sdks/go => ../../sdks/go
 
-replace github.com/tasktrooper/telemetry-go/integrations/nethttp => ../../sdks/go/integrations/nethttp
+replace github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/nethttp => ../../sdks/go/integrations/nethttp
 
-replace github.com/tasktrooper/telemetry-go/integrations/pgx => ../../sdks/go/integrations/pgx
+replace github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx => ../../sdks/go/integrations/pgx
 
-replace github.com/tasktrooper/telemetry-go/integrations/slog => ../../sdks/go/integrations/slog
+replace github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog => ../../sdks/go/integrations/slog

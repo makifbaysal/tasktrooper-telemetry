@@ -4,9 +4,9 @@ go 1.26.3
 
 require (
 	github.com/modelcontextprotocol/go-sdk v1.7.0
-	github.com/tasktrooper/telemetry-go v0.0.0
-	github.com/tasktrooper/telemetry-go/integrations/nethttp v0.0.0-00010101000000-000000000000
-	github.com/tasktrooper/telemetry-go/integrations/slog v0.0.0-00010101000000-000000000000
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/nethttp v0.0.0-00010101000000-000000000000
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog v0.0.0-00010101000000-000000000000
 	github.com/tasktrooper/telemetry/services/pkg v0.0.0
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
@@ -53,7 +53,7 @@ require (
 replace github.com/tasktrooper/telemetry/services/pkg => ../pkg
 
 replace (
-	github.com/tasktrooper/telemetry-go => ../../sdks/go
-	github.com/tasktrooper/telemetry-go/integrations/nethttp => ../../sdks/go/integrations/nethttp
-	github.com/tasktrooper/telemetry-go/integrations/slog => ../../sdks/go/integrations/slog
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go => ../../sdks/go
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/nethttp => ../../sdks/go/integrations/nethttp
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog => ../../sdks/go/integrations/slog
 )

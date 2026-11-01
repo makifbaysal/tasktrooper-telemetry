@@ -19,7 +19,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"go.opentelemetry.io/otel/trace"
 
-	trooper "github.com/tasktrooper/telemetry-go"
+	trooper "github.com/makifbaysal/tasktrooper-telemetry/sdks/go"
 )
 
 type config struct {

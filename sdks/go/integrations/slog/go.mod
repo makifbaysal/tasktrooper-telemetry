@@ -1,4 +1,4 @@
-module github.com/tasktrooper/telemetry-go/integrations/slog
+module github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog
 
 go 1.26.3
 
@@ -21,4 +21,4 @@ require (
 	golang.org/x/sys v0.49.0 // indirect
 )
 
-replace github.com/tasktrooper/telemetry-go => ../..
+replace github.com/makifbaysal/tasktrooper-telemetry/sdks/go => ../..
