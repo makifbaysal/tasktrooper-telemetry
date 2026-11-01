@@ -202,7 +202,17 @@ static int tt_phdr_cb(struct dl_phdr_info *info, size_t size, void *arg) {
     if (hi <= lo) return 0;
     char id[TT_BUILD_ID_HEX];
     tt_build_id(info, id);
-    tt_table_add(t, lo, hi, info->dlpi_addr, info->dlpi_name, id);
+    /* glibc/bionic report the main executable with an empty name; resolve it so frames in it are attributable. */
+    const char *name = info->dlpi_name;
+    char exe[256];
+    if (!name || !name[0]) {
+        ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
+        if (n > 0) {
+            exe[n] = 0;
+            name = exe;
+        }
+    }
+    tt_table_add(t, lo, hi, info->dlpi_addr, name, id);
     return 0;
 }
 

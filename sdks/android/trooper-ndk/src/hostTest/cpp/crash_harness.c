@@ -162,11 +162,14 @@ static void run_case(const char *dir, const test_case *tc) {
     CHECK(with_module > 0, "%s: no frame mapped to a module", tc->name);
     CHECK(strstr(r, "\nmodule ") != NULL, "%s: no module lines", tc->name);
     /* The harness binary itself is linked with a build id (LC_UUID on macOS). */
-    char *m = strstr(r, "crash_harness");
-    CHECK(m != NULL, "%s: harness module not listed", tc->name);
-    if (m) {
-        char *ls = m;
-        while (ls > r && ls[-1] != '\n') ls--;
+    char *ls = NULL;
+    for (char *l = strstr(r, "\nmodule "); l && !ls; l = strstr(l + 1, "\nmodule ")) {
+        char *eol = strchr(l + 1, '\n');
+        char *hit = strstr(l + 1, "crash_harness");
+        if (hit && (!eol || hit < eol)) ls = l + 1;
+    }
+    CHECK(ls != NULL, "%s: harness module not listed", tc->name);
+    if (ls) {
         int idx;
         char id[80];
         CHECK(sscanf(ls, "module %d %79s", &idx, id) == 2 && strlen(id) >= 32, "%s: harness build id missing", tc->name);
