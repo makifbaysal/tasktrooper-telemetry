@@ -27,8 +27,8 @@ coverage/
 .idea/
 .vscode/
 *.log
-tools/demo/.run/
 *.test
 *.prof
 local.properties
 /tools/trooper-cli/trooper-cli
+/deploy/self/.run/

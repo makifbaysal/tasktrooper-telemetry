@@ -35,11 +35,12 @@ check: ## one-shot health check — same gates as .github/workflows/ci.yml
 	if [ -n "$$bad" ]; then echo "services/ needs gofmt:"; echo "$$bad"; (cd services && gofmt -d $$bad); exit 1; fi
 	@for m in $(MODULES); do [ -d services/$$m ] || continue; echo "vet services/$$m"; (cd services/$$m && go vet ./...) || exit 1; done
 	@$(MAKE) test
-	@echo "web: install, typecheck, build"
 	@pnpm install --frozen-lockfile
-	@cd apps/web && pnpm exec tsc -b && pnpm exec vite build
-	@echo "js sdk: build, vitest"
+	@echo "js sdk: build (apps/web links the built packages, ADR-027)"
 	@pnpm -r --filter "./sdks/js/packages/**" build
+	@echo "web: typecheck, build"
+	@cd apps/web && pnpm exec tsc -b && pnpm exec vite build
+	@echo "js sdk: vitest"
 	@pnpm -r --filter "./sdks/js/packages/**" test
 	@go run github.com/rhysd/actionlint/cmd/actionlint@latest .github/workflows/*.yml
 	@echo "check OK"
@@ -56,11 +57,40 @@ e2e-ingest: ## ingest end-to-end test against the running infra
 bench-ingest: ## ingest hot-path benchmarks
 	cd services/ingest && go test -run '^$$' -bench . -benchmem ./internal/...
 
-.PHONY: demo demo-seed
-DEMO_ARGS ?=
+# ---------------------------------------------------------------- self-observability (ADR-027, contracts §27)
+.PHONY: self self-down
+SELF_OWNER ?= $(shell git config user.email)
+SELF_RUN := deploy/self/.run
+SELF_PID := $(SELF_RUN)/trooper-agent.pid
 
-demo: ## live demo world (tools/demo): platform services if not running + seed + run until Ctrl-C (DEMO_ARGS="--rps 40 --keep")
-	cd tools/demo && GOWORK=off go build -o .run/demo ./cmd/demo && cd ../.. && tools/demo/.run/demo up $(DEMO_ARGS)
+self: ## self-observability: `api bootstrap` the TaskTrooper project (SELF_OWNER=<email>), (re)start trooper-agent on the compose infra, print the env for services + web
+	@test -n "$(SELF_OWNER)" || { echo "set SELF_OWNER=<email> (owner of the TaskTrooper self project)"; exit 1; }
+	@mkdir -p $(SELF_RUN)/bin $(SELF_RUN)/logs
+	@cd services/api && GOWORK=off go run ./cmd/api bootstrap --org TaskTrooper --project tasktrooper --owner '$(SELF_OWNER)' \
+		--ingest-key-out ../../$(SELF_RUN)/ingest-key --json > ../../$(SELF_RUN)/bootstrap.json
+	@cd services/collector && GOWORK=off go build -o ../../$(SELF_RUN)/bin/trooper-agent ./cmd/trooper-agent
+	@$(MAKE) --no-print-directory self-down > /dev/null
+	@set -e; \
+	dsn=$$(sed -E 's/.*"dsn":"([^"]*)".*/\1/' $(SELF_RUN)/bootstrap.json); \
+	project=$$(sed -E 's/.*"projectId":([0-9]+).*/\1/' $(SELF_RUN)/bootstrap.json); \
+	case "$$dsn" in http*) ;; *) echo "api bootstrap returned no dsn:"; cat $(SELF_RUN)/bootstrap.json; exit 1;; esac; \
+	TT_SELF_PG_PASSWORD=$${TT_SELF_PG_PASSWORD:-trooper} TROOPER_DSN="$$dsn" nohup $(SELF_RUN)/bin/trooper-agent \
+		--config deploy/self/agent.yaml --agent-modes db,host --dsn "$$dsn" \
+		> $(SELF_RUN)/logs/trooper-agent.log 2>&1 & echo $$! > $(SELF_PID); \
+	sleep 1; kill -0 $$(cat $(SELF_PID)) 2>/dev/null || { echo "trooper-agent exited:"; tail -20 $(SELF_RUN)/logs/trooper-agent.log; exit 1; }; \
+	echo "trooper-agent running (pid $$(cat $(SELF_PID)), log $(SELF_RUN)/logs/trooper-agent.log) → project $$project"; \
+	curl -fsS -o /dev/null --max-time 2 http://localhost:4318/healthz 2>/dev/null || echo "note: ingest-gw is not up on :4318 yet (make run-gw); the agent retries"; \
+	echo ""; \
+	echo "# platform Go services (ingest-gw, ingest-writer, api, …):"; \
+	echo "export TROOPER_DSN=$$dsn"; \
+	echo "export TT_SELF_PROJECT_ID=$$project"; \
+	echo "# dashboard (shell before pnpm dev, or without export in apps/web/.env.local):"; \
+	echo "export VITE_TROOPER_DSN=$$dsn"
 
-demo-seed: ## ttdemo containers + schemas + topics + api metadata (idempotent; needs the api on :8080)
-	cd tools/demo && GOWORK=off go build -o .run/demo ./cmd/demo && cd ../.. && tools/demo/.run/demo seed $(DEMO_ARGS)
+self-down: ## stop the self-observability trooper-agent started by `make self`
+	@if [ -f $(SELF_PID) ] && kill -0 $$(cat $(SELF_PID)) 2>/dev/null; then \
+		pid=$$(cat $(SELF_PID)); kill $$pid; \
+		for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 $$pid 2>/dev/null || break; sleep 1; done; \
+		kill -0 $$pid 2>/dev/null && kill -9 $$pid; echo "trooper-agent stopped (pid $$pid)"; \
+	else echo "trooper-agent not running"; fi
+	@rm -f $(SELF_PID)

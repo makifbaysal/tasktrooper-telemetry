@@ -46,12 +46,3 @@ CREATE INDEX IF NOT EXISTS audit_log_org_at ON audit_log (org_id, at DESC);
 
 -- Load test domain verification request (POST /loadtests/domains/{id}/verify); loadtest-ctl re-checks the domain.
 ALTER TABLE IF EXISTS loadtest_domains ADD COLUMN IF NOT EXISTS verify_requested_at timestamptz;
-
--- Dev seed: dev@tasktrooper.local owns org 1 (dev login with TT_AUTH_DEV=true). Never run in production.
-INSERT INTO users (email, name) SELECT 'dev@tasktrooper.local', 'Dev User'
-WHERE EXISTS (SELECT 1 FROM orgs WHERE id = 1)
-ON CONFLICT (email) DO NOTHING;
-INSERT INTO memberships (org_id, user_id, role)
-SELECT 1, u.id, 'owner' FROM users u WHERE u.email = 'dev@tasktrooper.local' AND EXISTS (SELECT 1 FROM orgs WHERE id = 1)
-ON CONFLICT (org_id, user_id) DO NOTHING;
-SELECT setval(pg_get_serial_sequence('users', 'id'), GREATEST((SELECT max(id) FROM users), 1));
