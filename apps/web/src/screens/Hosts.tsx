@@ -4,7 +4,7 @@ import { ChevronRight } from 'lucide-react';
 import { Sparkline } from '@/components/charts';
 import { Card, PageHeader, SearchInput, Section, Select, Table } from '@/components/ui';
 import { hosts, k8sClusters, noAgentData, useData, type Host } from '@/data';
-import { AgentSetup, INFRA_RANK, InfraStatusBadge, UsageCell, bytes, bytesRate, lastSeenText } from './k8sShared';
+import { AgentSetup, INFRA_RANK, InfraStatusBadge, UsageCell, bytes, bytesRate, hostMemoryTotal, lastSeenText } from './k8sShared';
 
 const NO_CLUSTER = '__none';
 
@@ -77,7 +77,7 @@ export function Hosts() {
               { key: 'name', header: 'Host', sortValue: (x) => x.id, render: (x) => (
                 <div style={{ minWidth: 0, maxWidth: 'calc(var(--space-12) * 6)' }}>
                   <div className="truncate" style={{ fontWeight: 'var(--weight-medium)' }} title={x.id}>{x.id}</div>
-                  <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>{x.os} · {x.arch} · {x.cpuCores} cores · {bytes(x.memoryBytes, 0)}</div>
+                  <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>{x.os} · {x.arch} · {x.cpuCores} cores{hostMemoryTotal(x) > 0 ? ` · ${bytes(hostMemoryTotal(x), 0)}` : ''}</div>
                 </div>) },
               { key: 'status', header: 'Status', sortValue: (x) => INFRA_RANK[x.status], render: (x) => <InfraStatusBadge status={x.status} /> },
               { key: 'cpu', header: 'CPU', sortValue: (x) => x.cpu, render: (x) => (

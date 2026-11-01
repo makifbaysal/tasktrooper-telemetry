@@ -5,7 +5,7 @@ import { Badge, Card, EmptyState, MetricCard, PageHeader, Section, StatTile, Tab
 import { useApp } from '@/components/layout/context';
 import { hostDetails, k8sPods, timestamps, useData, type HostProcess, type InfraContainer } from '@/data';
 import { int, pct } from '@/lib/format';
-import { InfraStatusBadge, LimitCell, ServiceLink, UsageCell, bytes, bytesRate, cores, lastSeenText, uptime } from './k8sShared';
+import { InfraStatusBadge, LimitCell, ServiceLink, UsageCell, bytes, bytesRate, cores, hostMemoryTotal, lastSeenText, uptime } from './k8sShared';
 
 export function HostDetail() {
   useData();
@@ -29,7 +29,7 @@ export function HostDetail() {
         crumbs={[{ label: 'Hosts', to: '/infrastructure/hosts' }, { label: host.id }]}
         subtitle={<span className="row" style={{ gap: 'var(--space-3)', flexWrap: 'wrap' }}>
           <InfraStatusBadge status={host.status} />
-          <span className="secondary">{host.os} · {host.arch} · {host.cpuCores} cores · {bytes(host.memoryBytes, 0)}</span>
+          <span className="secondary">{host.os} · {host.arch} · {host.cpuCores} cores{hostMemoryTotal(host) > 0 ? ` · ${bytes(hostMemoryTotal(host), 0)}` : ''}</span>
           <span className="muted">up {uptime(host.uptimeS)} · {lastSeenText(host.lastSeen)}</span>
           {host.cluster
             ? <Link to={`/infrastructure/kubernetes/${encodeURIComponent(host.cluster)}?tab=nodes`}>{host.cluster} · node</Link>
@@ -42,7 +42,7 @@ export function HostDetail() {
             <TimeSeries timestamps={ts} height={150} yMax={1} format={(v) => pct(v, 0)} threshold={{ value: 0.9, label: '90%' }}
               series={[{ id: 'cpu', label: 'CPU', slot: 1, data: host.cpuSeries }]} />
           </MetricCard>
-          <MetricCard label="Memory" value={pct(host.memory, 0)} hint={`${bytes(host.memory * host.memoryBytes)} of ${bytes(host.memoryBytes, 0)}`}>
+          <MetricCard label="Memory" value={pct(host.memory, 0)} hint={`${bytes(host.memoryBytes)} of ${bytes(hostMemoryTotal(host), 0)}`}>
             <TimeSeries timestamps={ts} height={150} yMax={1} format={(v) => pct(v, 0)}
               series={[{ id: 'memory', label: 'Memory', slot: 2, data: host.memorySeries }]} />
           </MetricCard>

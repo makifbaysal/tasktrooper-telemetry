@@ -39,10 +39,13 @@ services:
   web:
     image: caddy:2.10.0
     restart: unless-stopped
+    # folder mount + --watch: a checkout that rewrites the Caddyfile is picked up without recreating the container (a
+    # single-file bind mount would keep the old inode)
+    command: ["caddy", "run", "--config", "/etc/caddy/demo/Caddyfile", "--adapter", "caddyfile", "--watch"]
     ports: ["127.0.0.1:8081:80"]
     volumes:
       - ${TT_DEMO_WEB_DIR:-../apps/web/dist}:/srv:ro
-      - ./demo/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./demo:/etc/caddy/demo:ro
 
   # the platform's own infra → self project: Postgres, Redis, Redpanda (db) and the Docker VM + containers (host)
   trooper-agent:
