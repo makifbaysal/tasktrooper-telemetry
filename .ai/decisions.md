@@ -496,5 +496,9 @@ yok. Elde bir Mac mini (Apple Silicon, 16 GB) ve Docker Desktop var. Ev ağında
   → dashboard build (checkout dışına, `~/trooper-demo/web`) → servisler `up -d --build` → health check.
 - Repo public: self-hosted runner'a fork PR'ı ulaşmasın diye "Require approval for all external contributors" zorunlu;
   başka hiçbir workflow `trooper-demo` label'ını kullanmaz.
+- Self-observability (ADR-027): environment değişkeni `DEMO_SELF_OWNER` (Google giriş e-postası) doluysa her deploy
+  `api bootstrap` ile TaskTrooper / tasktrooper projesini açar; ingest key makinede kalır (`~/trooper-demo/self`), log'da
+  maskelenir. Go servisleri `ingest-gw:4318` üzerinden, dashboard RUM'u public ingest host'u üzerinden, `trooper-agent`
+  container'ı (`deploy/demo/agent.yaml`, modlar `db,host`) Postgres/Redis/Redpanda ve container metriklerini gönderir.
 **Sonuç:** Kurulum ve adımlar `deploy/demo/README.md`. Makine kapanınca demo da kapanır (uptime garantisi yok); yedek ve
 kısa retention ayrı iş. Production'a geçişte ADR-030 host'ları ve ayrı altyapı geçerli olur.

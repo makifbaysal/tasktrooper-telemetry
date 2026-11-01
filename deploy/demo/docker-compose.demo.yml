@@ -1,9 +1,12 @@
 # Demo deployment on a single machine behind Cloudflare Tunnel (ADR-031, deploy/demo/README.md).
 # Layered on the local stack:
 #   docker compose -f deploy/docker-compose.yml -f deploy/demo/docker-compose.demo.yml --profile app up -d --build \
-#     ingest-gw ingest-writer api alert-engine notifier web
+#     ingest-gw ingest-writer api alert-engine notifier web trooper-agent
 # Values come from deploy/.env (the deploy-demo workflow writes it from the DEMO_ENV secret). Relative paths resolve against deploy/.
+# Self-observability (ADR-027): deploy.sh bootstraps the self project and exports TROOPER_SELF_DSN / TT_SELF_PROJECT_ID;
+# empty = the services export nothing and trooper-agent is not started.
 x-restart: &restart { restart: unless-stopped }
+x-self-env: &self_env { TROOPER_ENV: demo }
 
 services:
   clickhouse: *restart
@@ -11,14 +14,15 @@ services:
   redpanda: *restart
   redis: *restart
   s3: *restart
-  ingest-gw: *restart
-  ingest-writer: *restart
-  alert-engine: *restart
-  notifier: *restart
+  ingest-gw: { restart: unless-stopped, environment: *self_env }
+  ingest-writer: { restart: unless-stopped, environment: *self_env }
+  alert-engine: { restart: unless-stopped, environment: *self_env }
+  notifier: { restart: unless-stopped, environment: *self_env }
 
   api:
     restart: unless-stopped
     environment:
+      TROOPER_ENV: demo
       # public site: never the dev login
       TT_AUTH_DEV: "false"
       TT_COOKIE_SECURE: "true"
@@ -34,3 +38,25 @@ services:
     volumes:
       - ${TT_DEMO_WEB_DIR:-../apps/web/dist}:/srv:ro
       - ./demo/Caddyfile:/etc/caddy/Caddyfile:ro
+
+  # the platform's own infra → self project: Postgres, Redis, Redpanda (db) and the Docker VM + containers (host)
+  trooper-agent:
+    profiles: [self]
+    build: { context: .., dockerfile: services/collector/Dockerfile }
+    restart: unless-stopped
+    user: "0"
+    pid: host
+    command: ["--config", "/etc/trooper/agent.yaml"]
+    environment:
+      TT_AGENT_MODES: db,host
+      TT_DSN: ${TROOPER_SELF_DSN:-}
+      TROOPER_DSN: ${TROOPER_SELF_DSN:-}
+      TROOPER_ENV: demo
+      TT_SELF_PG_PASSWORD: trooper
+    volumes:
+      - ./demo/agent.yaml:/etc/trooper/agent.yaml:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on: [postgres, redis, redpanda, ingest-gw]

@@ -1,0 +1,38 @@
+# trooper-agent config for the demo machine (ADR-027, ADR-031). Same targets as deploy/self/agent.yaml, but the agent runs
+# as the `trooper-agent` container of deploy/demo/docker-compose.demo.yml, so targets use compose service names.
+# Modes db,host: `host` reports the Docker VM and every container through the Docker Engine API.
+interval: 15s
+timeout: 10s
+
+databases:
+  - id: tt-postgres
+    name: trooper
+    engine: postgres
+    host: postgres
+    port: 5432
+    user: trooper
+    database: trooper
+    tls: disable
+    collector: agent
+    credentialsRef: env:TT_SELF_PG_PASSWORD
+    node: tasktrooper-postgres-1
+    slowQueryMs: 500
+
+  - id: tt-redis
+    name: tt-redis
+    engine: redis
+    dsn: redis://redis:6379/0
+    collector: agent
+    node: tasktrooper-redis-1
+
+brokerClusters:
+  - id: tt-redpanda
+    name: tt-redpanda
+    kind: kafka
+    endpoint: redpanda:9092
+    auth: { mechanism: none }
+    collector: agent
+    topicFilter: '^tt\.'
+    groupFilter: '^tt-'
+    nodes:
+      - { name: redpanda-0, brokerId: 0, metricsUrl: "http://redpanda:9644/public_metrics" }
