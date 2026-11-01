@@ -18,6 +18,11 @@ export function bytes(n: number, digits = 1): string {
   const v = n / 1024 ** i;
   return `${v >= 100 || i === 0 ? Math.round(v) : v.toFixed(digits)} ${u[i]}`;
 }
+
+/** Installed memory of a host: the agent sends used bytes (`trooper.host.memory_bytes`) and the used ratio, not the total. */
+export function hostMemoryTotal(h: { memory: number; memoryBytes: number }): number {
+  return h.memory > 0 ? h.memoryBytes / h.memory : 0;
+}
 export const bytesRate = (n: number) => `${bytes(n)}/s`;
 export function cores(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return '0';
