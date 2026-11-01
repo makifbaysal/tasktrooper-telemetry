@@ -1,0 +1,12 @@
+# Cloudflare Tunnel routes for the demo machine (ADR-031). Copy to ~/.cloudflared/config.yml and fill in the tunnel id.
+# Hostnames are one level under the zone: Cloudflare's free Universal SSL does not cover api.telemetry.tasktrooper.ai.
+tunnel: <TUNNEL_ID>
+credentials-file: /Users/<user>/.cloudflared/<TUNNEL_ID>.json
+ingress:
+  - hostname: telemetry.tasktrooper.ai
+    service: http://localhost:8081
+  - hostname: telemetry-api.tasktrooper.ai
+    service: http://localhost:8080
+  - hostname: telemetry-ingest.tasktrooper.ai
+    service: http://localhost:4318
+  - service: http_status:404

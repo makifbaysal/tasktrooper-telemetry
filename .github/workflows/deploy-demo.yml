@@ -1,0 +1,41 @@
+# Demo deploy (ADR-031): manual button, main only, runs on the self-hosted runner of the demo machine (label
+# trooper-demo). Secrets live in the "demo" environment: DEMO_ENV = full contents of deploy/.env.
+# The repo is public: keep "Require approval for all external contributors" on (Settings → Actions → General) so no
+# fork pull request can reach the self-hosted runner. Setup: deploy/demo/README.md.
+name: deploy-demo
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-demo
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, macOS, ARM64, trooper-demo]
+    environment: demo
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Write deploy/.env
+        env:
+          DEMO_ENV: ${{ secrets.DEMO_ENV }}
+        run: |
+          test -n "$DEMO_ENV" || { echo "::error::DEMO_ENV secret is empty"; exit 1; }
+          umask 077
+          printf '%s\n' "$DEMO_ENV" > deploy/.env
+
+      - name: Deploy
+        run: deploy/demo/deploy.sh
+
+      - name: Remove deploy/.env
+        if: always()
+        run: rm -f deploy/.env

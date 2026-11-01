@@ -73,6 +73,7 @@ pnpm typecheck
 
 Backend: `docker compose -f deploy/docker-compose.yml up -d` (altyapı), `make migrate`, `make build`, `make test`. Seed veri yok
 (ADR-028): ilk girişte dashboard onboarding'i ya da `api bootstrap` ile org/proje/key açılır; platformun kendi verisi için `make self`. Detay: `services/*/README.md`, `sdks/*/README.md`.
+Demo dağıtımı (tek Mac, self-hosted runner, Cloudflare Tunnel): Actions → `deploy-demo` → Run workflow; kurulum `deploy/demo/README.md` (ADR-031).
 
 Tam kontrol (CI ile birebir aynı kapılar): `make check` → gofmt, `go vet`, tüm Go modül birim testleri, web typecheck + build, JS SDK build + vitest, workflow lint.
 
@@ -110,5 +111,6 @@ Tam kontrol (CI ile birebir aynı kapılar): `make check` → gofmt, `go vet`, t
 - [x] Paket yayınlama: npm, PyPI, Maven Central, NuGet, pub.dev, CocoaPods/SwiftPM, Go — ADR-029
 - [x] Service map (`/service-map`, `GET /service-map`): tüm client/servis/bağımlılık grafiği, sorunlar vurgulu, hover + detay paneli, zoom/pan; servis detayında Map sekmesi (servisin komşuluğu)
 - [x] Public site (`telemetry.tasktrooper.ai`): landing (animasyonlu servis haritası), `/docs` (SDK kurulumları, MCP server, agent skill'leri), ayrı `/login`; sign-up yok
+- [x] Demo deploy: `deploy-demo` workflow (manuel, main) → Mac mini self-hosted runner, Cloudflare Tunnel, Google OIDC — ADR-031
 
 Sıradaki işler: [`.ai/roadmap.md`](.ai/roadmap.md).
