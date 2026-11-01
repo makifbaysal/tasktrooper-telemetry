@@ -2,6 +2,7 @@
   <PropertyGroup>
     <TargetFrameworks>$(LibraryTargetFrameworks)</TargetFrameworks>
     <Description>TaskTrooper Telemetry for ASP.NET Core: server spans with trooper.route (normalized route template), caller and exception capture.</Description>
+    <PackageTags>$(PackageTags);aspnetcore;asp.net</PackageTags>
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />

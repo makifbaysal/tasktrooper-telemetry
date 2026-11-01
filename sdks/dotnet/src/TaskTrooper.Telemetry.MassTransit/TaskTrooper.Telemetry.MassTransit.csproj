@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFrameworks>$(LibraryTargetFrameworks)</TargetFrameworks>
-    <Description>TaskTrooper Telemetry integration for MassTransit.</Description>
+    <Description>TaskTrooper Telemetry for MassTransit: maps MassTransit diagnostics to TaskTrooper consumer conventions (trooper.process). No MassTransit package dependency.</Description>
+    <PackageTags>$(PackageTags);masstransit;messaging</PackageTags>
   </PropertyGroup>
   <ItemGroup>
 
