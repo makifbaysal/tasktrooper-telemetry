@@ -37,7 +37,7 @@ budgets), and root-cause analysis walks the call tree to answer "your code or a 
 
 - Delivered as SaaS at telemetry.tasktrooper.ai (landing, docs and the dashboard on one host); customers only add an SDK and a DSN. (The repo also runs fully locally for
   development: docker compose infra + Go services + Vite dashboard.)
-- Part of the TaskTrooper product family; the dashboard follows the TaskTrooper app theme (`.ai/design-system.md` § Tema kaynağı).
+- Part of the TaskTrooper product family; the dashboard follows the TaskTrooper app theme (`.ai/design-system.md` § Theme source).
 - SDKs are published for Go, JVM, Android, .NET, Python, JS (browser, React, Vue, Angular, React Native, Node), Flutter
   and iOS (ADR-029). Users reach the dashboard from Slack alert messages, GitHub PR/push flows and direct navigation.
 - Sign-in: OIDC (company account), dev e-mail login only in development. First sign-in without an org lands in onboarding
@@ -48,7 +48,7 @@ budgets), and root-cause analysis walks the call tree to answer "your code or a 
 - Screens: Overview, Services (backend, worker, web and mobile apps are all services), Service / Endpoint / Process
   detail (KPIs, alerts and logs live under their owning service), KPI detail, Load tests, Code insights, Infrastructure
   (databases, message queues), Integrations, session replay, profiling, AI/LLM monitoring.
-- "One place" rule: each list and "New …" action exists in exactly one place (`.ai/product.md` § Tek yer kuralı).
+- "One place" rule: each list and "New …" action exists in exactly one place (`.ai/product.md` § One place rule).
 - Workers/consumers have processes, not endpoints; lag and alerts bind to the process.
 - No mock, seed or demo data (ADR-028): every screen reads the real API; empty states carry setup guidance.
 - Multi-tenant: every view is scoped to org + project.

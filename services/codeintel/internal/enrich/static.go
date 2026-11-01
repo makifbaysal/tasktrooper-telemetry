@@ -1,6 +1,6 @@
 // Package enrich assigns criticality to inventory items: deterministic static rules always, and an optional
 // Claude pass (structured JSON) that adds business domain, summary, failure modes, monitor templates and a
-// load test hint. alerting.md § Kod-farkındalıklı otomatik alert.
+// load test hint. alerting.md § Code-aware automatic alerts.
 package enrich
 
 import (

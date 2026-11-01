@@ -1,29 +1,29 @@
-# .ai — Proje bilgi tabanı
+# .ai — Project knowledge base
 
-Agent'lar ve geliştiriciler için kaynak doküman seti. Giriş noktası: [`../AGENTS.md`](../AGENTS.md).
+Source document set for agents and developers. Entry point: [`../AGENTS.md`](../AGENTS.md).
 
-## Okuma sırası
+## Reading order
 
-1. [product.md](product.md) — ne yapıyoruz, kim için
-2. [architecture.md](architecture.md) — nasıl yapıyoruz
-3. Konuya göre: [sdk.md](sdk.md), [data-model.md](data-model.md), [alerting.md](alerting.md), [code-intelligence.md](code-intelligence.md), [load-testing.md](load-testing.md), [mcp.md](mcp.md) (+ Agent Skills: [`../skills/`](../skills/), kurulum mcp.md § Agent Skills)
-4. UI işi: [design-system.md](design-system.md)
-5. Neden böyle: [decisions.md](decisions.md) · Sırada ne var: [roadmap.md](roadmap.md)
+1. [product.md](product.md) — what we build, and for whom
+2. [architecture.md](architecture.md) — how we build it
+3. By topic: [sdk.md](sdk.md), [data-model.md](data-model.md), [alerting.md](alerting.md), [code-intelligence.md](code-intelligence.md), [load-testing.md](load-testing.md), [mcp.md](mcp.md) (+ Agent Skills: [`../skills/`](../skills/), setup in mcp.md § Agent Skills)
+4. UI work: [design-system.md](design-system.md)
+5. Why it is this way: [decisions.md](decisions.md) · What's next: [roadmap.md](roadmap.md)
 
-## Sözlük
+## Glossary
 
-| Terim | Anlam |
+| Term | Meaning |
 |---|---|
-| **Org** | Müşteri şirket (tenant). Faturalama ve kullanıcı sınırı. |
-| **Project** | Org altında bir ürün/sistem. API key'ler proje bazlıdır. |
-| **Service** | SDK'nın raporladığı tek bir deploy birimi (`service.name`). Tipi: `http`, `worker`, `consumer`, `web`, `mobile`. |
-| **Environment** | `production`, `staging` vb. (`deployment.environment`). |
-| **Endpoint / Operation** | HTTP route template (`GET /orders/:id`), gRPC metodu veya consumer topic+handler. |
-| **RED** | Rate (throughput), Errors (error rate), Duration (latency). Backend için temel metrik seti. |
-| **RUM** | Real User Monitoring. Gerçek kullanıcı oturumları, sayfa görüntülemeleri, Web Vitals. |
-| **View** | Frontend'de sayfa (web) veya ekran (mobil). |
-| **Session** | Bir kullanıcının kesintisiz kullanım periyodu (30 dk inaktivite → yeni session). |
-| **Inventory** | Kod analizinden çıkan endpoint/consumer/view/dış bağımlılık listesi. |
-| **Monitor** | Bir alert kuralı. Kaynak: `manual`, `suggested` (kod analizi), `template`. |
-| **Incident** | Tetiklenmiş ve henüz kapanmamış alert durumu. |
-| **Load test run** | Bir senaryonun belirli bir hedefe karşı tek koşusu. |
+| **Org** | Customer company (tenant). Billing and user boundary. |
+| **Project** | A product/system under an org. API keys are per project. |
+| **Service** | A single deploy unit reported by the SDK (`service.name`). Type: `http`, `worker`, `consumer`, `web`, `mobile`. |
+| **Environment** | `production`, `staging` etc. (`deployment.environment`). |
+| **Endpoint / Operation** | HTTP route template (`GET /orders/:id`), gRPC method, or consumer topic+handler. |
+| **RED** | Rate (throughput), Errors (error rate), Duration (latency). The core metric set for backends. |
+| **RUM** | Real User Monitoring. Real user sessions, page views, Web Vitals. |
+| **View** | A page (web) or screen (mobile) in the frontend. |
+| **Session** | A user's uninterrupted usage period (30 min inactivity → new session). |
+| **Inventory** | The endpoint/consumer/view/external dependency list produced by code analysis. |
+| **Monitor** | An alert rule. Source: `manual`, `suggested` (code analysis), `template`. |
+| **Incident** | An alert state that has fired and is not yet closed. |
+| **Load test run** | A single run of a scenario against a given target. |

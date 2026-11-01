@@ -5,7 +5,7 @@ web and mobile apps; the platform visualises them, alerts on them and runs load 
 code to propose alerts and load-test scenarios.
 
 - **Start here:** [`AGENTS.md`](AGENTS.md) — repo map, stack, working rules (for humans and agents).
-- **Design docs:** [`.ai/`](.ai/README.md) (Turkish, technical terms in English).
+- **Design docs:** [`.ai/`](.ai/README.md) (English).
 - **Local stack:** `make infra migrate`, then the services (`docker compose -f deploy/docker-compose.yml --profile app up -d --build`).
   There is no seed or demo data (ADR-028): sign in on the dashboard (`cd apps/web && pnpm dev`, dev login), create an
   org + project in onboarding and connect an SDK. `make self` makes the platform report its own telemetry (ADR-027).
@@ -79,7 +79,7 @@ OpenCode (`~/.config/opencode/opencode.json` or a project `opencode.json`):
 }
 ```
 
-A project `.mcp.json` variant is in [`.ai/mcp.md` § Bağlanma](.ai/mcp.md#bağlanma).
+A project `.mcp.json` variant is in [`.ai/mcp.md` § Connecting (manual)](.ai/mcp.md#connecting-manual).
 
 **5. Skills.** Nothing to install when the agent runs in this repo: the committed `.claude/skills -> ../skills` symlink
 is read by Claude Code and by OpenCode. Check with `claude -p "list skills starting with trooper-"`. Checkouts without

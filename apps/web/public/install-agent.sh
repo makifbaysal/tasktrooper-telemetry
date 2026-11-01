@@ -9,7 +9,7 @@
 # .tasktrooper/mcp.env in the project, git-ignored); tool configs only reference the tt-mcp binary.
 #
 # Non-interactive: --tools claude,cursor|all  --scope global|project  --project-dir DIR  --api-url URL  --write|--read-only
-# --yes; the key comes from $TT_API_KEY. Docs: https://telemetry.tasktrooper.ai/docs#install  (.ai/mcp.md § Kurulum)
+# --yes; the key comes from $TT_API_KEY. Docs: https://telemetry.tasktrooper.ai/docs#install  (.ai/mcp.md § Install)
 set -euo pipefail
 
 REPO="makifbaysal/tasktrooper-telemetry"

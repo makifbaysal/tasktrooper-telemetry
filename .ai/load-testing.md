@@ -1,114 +1,114 @@
 # Load testing
 
-## Hedef
+## Goal
 
-Platform içinden load test tanımla, koştur, sonucu **aynı ekranda** hedef servisin gerçek telemetrisi (CPU, p95, error rate, DB span'ları) ile gör.
+Define and run load tests from inside the platform, and see the result **on the same screen** together with the target service's real telemetry (CPU, p95, error rate, DB spans).
 
-## Bileşenler (ADR-015, contracts §14 — `services/loadtest`)
+## Components (ADR-015, contracts §14 — `services/loadtest`)
 
-- **`loadtest-ctl`** (:8097, `/healthz`, `/metrics`): api'nin `queued` bıraktığı run'ları `FOR UPDATE SKIP LOCKED` ile alır,
-  kabul kontrolü yapar (doğrulanmış domain, plan limitleri, aylık VU-dakika), bölge başına bir runner başlatır, runner'ların
-  shard satırlarını birleştirip `loadtest_runs.live` / `summary`'ye yazar, abort'u ve yetim run'ları yönetir, domain doğrulamasını yapar.
-  Senaryo CRUD'u ve run kuyruğa alma api'dedir.
-- **`loadtest-runner`**: kendi Go yük motorumuz (k6 gömülü **değil**, ADR-015). Bir run'ın bir bölge shard'ını koşturur,
-  her tick'te (5 sn) `loadtest_run_shards` satırını günceller ve OTLP metrik yollar. Script senaryolarında PATH'teki `k6`'yı çağırır.
-- **Executor**: `TT_LOADTEST_EXECUTOR=local` → alt süreç; `k8s` → bölge başına `batch/v1` Job (client-go yok, in-cluster SA token
-  ile düz REST; `TT_LOADTEST_K8S_REGION_LABEL` ile nodeSelector, secret'lar `envFrom` ile).
-- **Korelasyon**: runner her isteğe yeni `traceparent`, `baggage: tt.svc=loadtest:<run_id>`, `x-trooper-loadtest-run: <run_id>`,
-  `user-agent: TaskTrooper-LoadTest/1` ekler → hedef serviste SDK'lar bunu `trooper.caller` olarak yazar; UI test trafiğini ayırır.
+- **`loadtest-ctl`** (:8097, `/healthz`, `/metrics`): picks up runs left `queued` by the api with `FOR UPDATE SKIP LOCKED`,
+  runs admission checks (verified domain, plan limits, monthly VU-minutes), starts one runner per region, merges the runners'
+  shard rows and writes them to `loadtest_runs.live` / `summary`, handles abort and orphan runs, and performs domain verification.
+  Scenario CRUD and run enqueueing live in the api.
+- **`loadtest-runner`**: our own Go load engine (k6 is **not** embedded, ADR-015). Runs one region shard of a run,
+  updates the `loadtest_run_shards` row on every tick (5 s) and sends OTLP metrics. For script scenarios it calls `k6` from PATH.
+- **Executor**: `TT_LOADTEST_EXECUTOR=local` → child process; `k8s` → one `batch/v1` Job per region (no client-go, plain REST with the
+  in-cluster SA token; nodeSelector via `TT_LOADTEST_K8S_REGION_LABEL`, secrets via `envFrom`).
+- **Correlation**: the runner adds a new `traceparent`, `baggage: tt.svc=loadtest:<run_id>`, `x-trooper-loadtest-run: <run_id>`,
+  `user-agent: TaskTrooper-LoadTest/1` to every request → SDKs in the target service record this as `trooper.caller`; the UI separates test traffic.
 
-## Akış
+## Flow
 
 ```
 api  POST /loadtests/scenarios/{id}/runs → loadtest_runs(state=queued)
-ctl  claim (SKIP LOCKED) → kabul → state=running, started_at=now(), shard'lar (pending), VU-dakika rezerve
-     └─ executor: bölge başına runner (share = 1/bölge sayısı; TT_LOADTEST_MAX_VUS bölgelere bölünür)
-run  shard running → her tick: shard.live + kümülatif stats (birleştirilebilir log-bucket histogram) + OTLP
-ctl  2 sn'de bir shard'ları birleştir → loadtest_runs.live + çalışırken summary
-     abort_requested_at (veya api'nin doğrudan state=aborted yazması) → runner'ları durdur (runner da satırı 1 sn'de bir okur)
-     bir bölgede gate abort → diğer bölgeler de durdurulur; sonuçsuz çıkan runner / deadline → shard error
-     tüm shard'lar bitti → final summary, thresholds_passed, state passed|failed|aborted|error, kullanım gerçek değere düzeltilir
+ctl  claim (SKIP LOCKED) → admission → state=running, started_at=now(), shards (pending), VU-minutes reserved
+     └─ executor: one runner per region (share = 1/number of regions; TT_LOADTEST_MAX_VUS is split across regions)
+run  shard running → every tick: shard.live + cumulative stats (mergeable log-bucket histogram) + OTLP
+ctl  merge shards every 2 s → loadtest_runs.live + summary while running
+     abort_requested_at (or the api writing state=aborted directly) → stop runners (the runner also reads the row every 1 s)
+     gate abort in one region → other regions are stopped too; runner exiting without a result / deadline → shard error
+     all shards done → final summary, thresholds_passed, state passed|failed|aborted|error, usage corrected to the real value
 ```
 
-Yeniden başlatma: aynı `TT_LOADTEST_INSTANCE` ile açılan ctl, kendi `running` run'larını `error` ("loadtest-ctl restarted…")
-yapar ve `abort_requested_at` koyar (runner'lar kendiliğinden durur). Başka instance'ların 3 dk güncellenmeyen run'ları da `error` olur.
+Restart: a ctl started with the same `TT_LOADTEST_INSTANCE` marks its own `running` runs as `error` ("loadtest-ctl restarted…")
+and sets `abort_requested_at` (runners stop on their own). Runs of other instances not updated for 3 min also become `error`.
 
-## Şema (`deploy/postgres/006_loadtest.sql`)
+## Schema (`deploy/postgres/006_loadtest.sql`)
 
-- `loadtest_runs` + `region` (virgüllü bölge listesi), `live`, `abort_requested_at`, `error`, `created_at`, `requested_by`,
-  `claimed_by`, `vu_minutes` (claim'de rezerve, bitince gerçek).
+- `loadtest_runs` + `region` (comma-separated region list), `live`, `abort_requested_at`, `error`, `created_at`, `requested_by`,
+  `claimed_by`, `vu_minutes` (reserved at claim, real value when done).
 - `loadtest_domains (id, project_id, host, token, verified_at, method dns|http, created_at, verify_requested_at, last_checked_at, last_error)`.
 - `loadtest_usage (project_id, month, vu_minutes)`.
 - `loadtest_run_shards (run_id, region, share, state pending|running|done|aborted|error, live, stats, summary, error, abort_reason, …)`.
 
-## Senaryo formatı
+## Scenario format
 
-Runner, UI `ScenarioEditor`'ın kaydettiği spec'i (`apps/web/src/lib/loadtest.ts` `saveScenario`) **olduğu gibi** koşturur;
-contracts §14'teki alternatif şekiller de kabul edilir:
+The runner runs the spec saved by the UI `ScenarioEditor` (`apps/web/src/lib/loadtest.ts` `saveScenario`) **as is**;
+the alternative shapes in contracts §14 are also accepted:
 
-| Alan | Anlam |
+| Field | Meaning |
 |---|---|
-| `target`, `regions` | Base URL; bölge listesi (yoksa `TT_LOADTEST_REGIONS`, o da yoksa tek `local` shard) |
-| `mode` | `vus` = kapalı model (VU'lar stage hedeflerini izler), `rps` = açık model (arrival rate, önceden ayrılmış VU havuzu; boş VU yoksa `dropped`) |
-| `levels [{name, ramp, hold, target}]` | Yük profili; ramp 0 = sıçrama. Yoksa `levels [{durationS, target}]` veya `stages [{duration, target}]`. Hedefler arası lineer, 0'dan başlar |
-| `steps ["METHOD /route"]`, `weights` | Ağırlıklar oran veya yüzde (normalize edilir). `flow: "sequential"` → her iterasyonda tüm adımlar sırayla (ağırlık yoksa default); aksi halde iterasyon başına ağırlıklı tek adım |
-| `requests[key]` | `params` (`ad: değer` satırları → `:ad` path segmenti ya da query), `headers` (satır veya obje), `body` (JSON şablon metni) veya `json`, `checks` (`"status == 201"`, `"latency < 300ms"`; default status < 400), `pools [{name, values}]` |
-| `thinkTime` | Saniye; kapalı modelde her istekten sonra |
-| `pools {ad: [değerler]}`, `session {ad: şablon}` | Şablon verisi; havuz satırı obje olabilir (`{{pool.users.email}}`) |
-| `thresholds` | `["http_req_failed rate < 1%", "http_req_duration p(95) < 500 ms"]` (p(99), avg, max, med da) veya `{p95Ms, p99Ms, errorRate}` |
-| `gate` | `abortErrorRate`, `abortP95Ms`, `minRequests` (default 20) → 5 sn'lik pencerede aşılırsa otomatik abort |
-| `maxVus`, `timeoutS`, `script` | rps havuzu; istek timeout'u (30 sn); ham k6 JS |
+| `target`, `regions` | Base URL; region list (if missing `TT_LOADTEST_REGIONS`, if that is missing too a single `local` shard) |
+| `mode` | `vus` = closed model (VUs follow stage targets), `rps` = open model (arrival rate, pre-allocated VU pool; `dropped` if no free VU) |
+| `levels [{name, ramp, hold, target}]` | Load profile; ramp 0 = jump. Otherwise `levels [{durationS, target}]` or `stages [{duration, target}]`. Linear between targets, starts from 0 |
+| `steps ["METHOD /route"]`, `weights` | Weights are ratios or percentages (normalized). `flow: "sequential"` → all steps in order on every iteration (default if no weights); otherwise one weighted step per iteration |
+| `requests[key]` | `params` (`name: value` lines → `:name` path segment or query), `headers` (lines or object), `body` (JSON template text) or `json`, `checks` (`"status == 201"`, `"latency < 300ms"`; default status < 400), `pools [{name, values}]` |
+| `thinkTime` | Seconds; after each request in the closed model |
+| `pools {name: [values]}`, `session {name: template}` | Template data; a pool row can be an object (`{{pool.users.email}}`) |
+| `thresholds` | `["http_req_failed rate < 1%", "http_req_duration p(95) < 500 ms"]` (also p(99), avg, max, med) or `{p95Ms, p99Ms, errorRate}` |
+| `gate` | `abortErrorRate`, `abortP95Ms`, `minRequests` (default 20) → automatic abort if exceeded in a 5 s window |
+| `maxVus`, `timeoutS`, `script` | rps pool; request timeout (30 s); raw k6 JS |
 
-Şablonlar: `{{int a-b}}`, `{{uuid}}`, `{{pool.<ad>[.<alan>]}}` (aynı istekte aynı satır; `random.<ad>` eşanlamlı),
-`{{weighted a:70 b:30}}`, `{{prev "KEY" .alan.0.alt}}` (aynı VU'da KEY adımının son JSON cevabı; sequential akışta iterasyon başında
-sıfırlanır), `{{session.<ad>}}`, `{{optional 12% <ifade>}}` (alınmazsa JSON anahtarı düşer), `{{faker.words N|sentence|name|email|number}}`.
-Tam olarak tek şablondan oluşan JSON string değeri tipini korur (sayı sayı kalır). Bilinmeyen şablon / boş havuz → yer tutucu değer +
+Templates: `{{int a-b}}`, `{{uuid}}`, `{{pool.<name>[.<field>]}}` (same row within the same request; `random.<name>` is a synonym),
+`{{weighted a:70 b:30}}`, `{{prev "KEY" .field.0.sub}}` (the last JSON response of step KEY in the same VU; reset at the start of each iteration
+in the sequential flow), `{{session.<name>}}`, `{{optional 12% <expr>}}` (if not taken, the JSON key is dropped), `{{faker.words N|sentence|name|email|number}}`.
+A JSON string value consisting of exactly one template keeps its type (a number stays a number). Unknown template / empty pool → placeholder value +
 `summary.warnings`.
 
-Script modu: `spec.script` varsa runner `k6 run --summary-export` çalıştırır ve JSON özetini `summary`'ye çevirir (exit 99 = eşik ihlali);
-`k6` yoksa run `error: "k6 not installed"`. Script senaryosunda da `target` zorunlu ve doğrulanmış olmalı (k6 başka host'a gitmekten
-teknik olarak engellenemez — bilinen açık).
+Script mode: if `spec.script` exists, the runner runs `k6 run --summary-export` and converts the JSON summary into `summary` (exit 99 = threshold violation);
+if `k6` is missing the run gets `error: "k6 not installed"`. In script scenarios `target` is also required and must be verified (k6 cannot
+technically be prevented from going to another host — known gap).
 
-## Çıktı
+## Output
 
-- `live` = `{ts, vus, rps, p95, errorRate, progress}` (progress 0..1; çok bölgede vus/rps toplanır, p95 en kötü bölge).
-- Final `summary`: `progress, rps, p95, errorRate, vus` (tepe), `thresholds [{name, passed, value}]`, `p50, p99, avgMs, maxMs,
+- `live` = `{ts, vus, rps, p95, errorRate, progress}` (progress 0..1; with multiple regions vus/rps are summed, p95 is the worst region).
+- Final `summary`: `progress, rps, p95, errorRate, vus` (peak), `thresholds [{name, passed, value}]`, `p50, p99, avgMs, maxMs,
   requests, errors, durationS, vuMinutes, dropped`, `steps [{key, count, errors, errorRate, rps, p50, p95, p99, avgMs}]`,
-  `statusCodes {"200": n, "error": n}` (`error` = transport hatası), `checks`, `abortReason`, `warnings`, `regions` (çok bölgede).
-  Çalışırken `summary` = `progress, rps, p95, errorRate, vus, thresholds, requests, errors` (api'nin run modeli bunları okur).
-- Hata oranı = transport hatası **veya** başarısız check (check yoksa status ≥ 400).
-- OTLP (delta, her tick): `trooper.loadtest.requests`, `.errors` (sum), `.duration_ms` (histogram, sınırlar 5…10000 ms),
-  `.vus` (gauge); resource `service.name=loadtest`, nokta attr'ları `trooper.loadtest.run`, `.step`, `.region`.
-  Kimlik: `TT_INTERNAL_TOKEN` → `x-trooper-internal` + `x-trooper-project`; yoksa `TT_DSN` içindeki key.
+  `statusCodes {"200": n, "error": n}` (`error` = transport error), `checks`, `abortReason`, `warnings`, `regions` (with multiple regions).
+  While running `summary` = `progress, rps, p95, errorRate, vus, thresholds, requests, errors` (the api's run model reads these).
+- Error rate = transport error **or** failed check (status ≥ 400 if there are no checks).
+- OTLP (delta, every tick): `trooper.loadtest.requests`, `.errors` (sum), `.duration_ms` (histogram, bounds 5…10000 ms),
+  `.vus` (gauge); resource `service.name=loadtest`, point attrs `trooper.loadtest.run`, `.step`, `.region`.
+  Identity: `TT_INTERNAL_TOKEN` → `x-trooper-internal` + `x-trooper-project`; otherwise the key in `TT_DSN`.
 
-## Senaryo üretimi
+## Scenario generation
 
-- **Envanterden:** codeintel'in çıkardığı endpoint'ler + `loadtest_hint` (payload şeması) → seçilen endpoint'ler için taslak.
-- **Gerçek trafikten:** son 7 günün route dağılımı ve RUM akışları (sayfa geçiş olasılıkları) → gerçekçi trafik karışımı. "Production trafiğinin 3 katı" gibi hedefler.
-- Üretilen senaryo her zaman `draft`; kullanıcı onayı olmadan koşmaz.
-- **Agent (MCP, ADR-032):** `tt_create_loadtest_scenario` kullanıcı onayıyla `source=agent`, `state=ready` senaryo yazar (`gate`
-  yoksa `abortErrorRate 0.5`, `abortP95Ms 10000` eklenir); `tt_run_loadtest` ayrı onayla koşturur, `tt_stop_loadtest` onaysız
-  durdurur. Tipik kullanım: alert eşiği seçmek için yeterli trafiği olmayan endpoint'lere kısa bir baz yük (`skills/trooper-alerts`).
+- **From inventory:** endpoints extracted by codeintel + `loadtest_hint` (payload schema) → a draft for the selected endpoints.
+- **From real traffic:** route distribution of the last 7 days and RUM flows (page transition probabilities) → a realistic traffic mix. Targets like "3× production traffic".
+- A generated scenario is always `draft`; it does not run without user approval.
+- **Agent (MCP, ADR-032):** `tt_create_loadtest_scenario` writes a `source=agent`, `state=ready` scenario with user approval (if there is no `gate`,
+  `abortErrorRate 0.5`, `abortP95Ms 10000` are added); `tt_run_loadtest` runs it with a separate approval, `tt_stop_loadtest` stops it without
+  approval. Typical use: a short baseline load for endpoints without enough traffic to pick an alert threshold (`skills/trooper-alerts`).
 
-## Güvenlik
+## Security
 
-- Hedef domain doğrulaması zorunlu: DNS TXT `trooper-verify=<token>` (host üzerinde) veya `https://<host>/.well-known/trooper-verify`
-  gövdesi = token (başka host'a redirect izlenmez). api `POST /loadtests/domains/{id}/verify` → `verify_requested_at`; ctl worker'ı
-  (10 sn) kontrol eder, `verified_at` + `method` ya da `last_error` yazar; DNS yayılması için istekten sonra 15 dk boyunca dakikada bir tekrar dener.
-- Eşleşme: tam host, ya da **DNS ile** doğrulanmış domain'in alt alan adı. `TT_LOADTEST_ALLOW_LOCAL=true` iken `localhost`,
-  `*.localhost`, loopback IP'ler muaf (dev).
-- Limitler: `TT_LOADTEST_MAX_VUS` (rps modunda UI tahmini `ceil(rate × (0.2 + think))`; runner'da sert VU tavanı),
-  `TT_LOADTEST_MAX_DURATION`, `TT_LOADTEST_MONTHLY_VU_MINUTES` (proje + UTC ay). Red → `state=error`, `error` kullanıcıya dönük mesaj.
-- Acil durdurma: `abort_requested_at`; otomatik abort: `gate.abortErrorRate` / `gate.abortP95Ms`.
+- Target domain verification is mandatory: DNS TXT `trooper-verify=<token>` (on the host) or `https://<host>/.well-known/trooper-verify`
+  body = token (redirects to another host are not followed). api `POST /loadtests/domains/{id}/verify` → `verify_requested_at`; the ctl worker
+  (10 s) checks it and writes `verified_at` + `method` or `last_error`; for DNS propagation it retries every minute for 15 min after the request.
+- Match: exact host, or a subdomain of a domain verified **via DNS**. With `TT_LOADTEST_ALLOW_LOCAL=true`, `localhost`,
+  `*.localhost`, loopback IPs are exempt (dev).
+- Limits: `TT_LOADTEST_MAX_VUS` (in rps mode the UI estimate is `ceil(rate × (0.2 + think))`; hard VU cap in the runner),
+  `TT_LOADTEST_MAX_DURATION`, `TT_LOADTEST_MONTHLY_VU_MINUTES` (project + UTC month). Rejection → `state=error`, `error` is a user-facing message.
+- Emergency stop: `abort_requested_at`; automatic abort: `gate.abortErrorRate` / `gate.abortP95Ms`.
 
 ## Run UI
 
-Canlı: VU sayısı, RPS, p95, error rate (runner tarafı) + hedef servisin RED ve kaynak metrikleri (SDK tarafı), aynı zaman ekseninde ama **ayrı grafiklerde** (dual-axis yasak). Bitince: eşik sonuçları, en yavaş endpoint'ler, önceki run ile karşılaştırma.
+Live: VU count, RPS, p95, error rate (runner side) + the target service's RED and resource metrics (SDK side), on the same time axis but in **separate charts** (dual-axis is forbidden). When done: threshold results, slowest endpoints, comparison with the previous run.
 
-## Açık işler
+## Open items
 
-- UI `progression: manual|ai` ve `gate.latencyX/cpu` (hedef servis telemetrisine bakan AI gate) runner'da uygulanmıyor; run timer ile (`auto`) ilerler.
-- UI pool'ları sadece `{name, detail}` taşıyor; gerçek değerler `spec.pools` / `requests[k].pools[].values` ile verilmeli, yoksa sentetik değer.
-- `{{session.*}}` için login akışı yok; `spec.session` şablonları VU başına bir kez üretilir.
-- UI run state'leri `error`'u bilmiyor (api/UI tarafı).
-- Bölge ağırlıkları (`eu-central: 70`) yok; yük bölgelere eşit bölünür. Local executor'da bölgeler aynı makinede ayrı süreçlerdir.
+- UI `progression: manual|ai` and `gate.latencyX/cpu` (AI gate that looks at target service telemetry) are not implemented in the runner; the run advances by timer (`auto`).
+- UI pools only carry `{name, detail}`; real values must be given via `spec.pools` / `requests[k].pools[].values`, otherwise synthetic values.
+- No login flow for `{{session.*}}`; `spec.session` templates are generated once per VU.
+- UI run states do not know about `error` (api/UI side).
+- No region weights (`eu-central: 70`); load is split equally across regions. In the local executor, regions are separate processes on the same machine.

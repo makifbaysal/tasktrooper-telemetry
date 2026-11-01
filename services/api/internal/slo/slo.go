@@ -1,4 +1,4 @@
-// Package slo has the KPI (SLO) arithmetic: good ratio, burn rate, error budget, status (see .ai/alerting.md § KPI'lar).
+// Package slo has the KPI (SLO) arithmetic: good ratio, burn rate, error budget, status (see .ai/alerting.md § KPIs).
 package slo
 
 import "math"

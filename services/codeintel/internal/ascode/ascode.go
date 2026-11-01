@@ -1,4 +1,4 @@
-// Package ascode reads alert-as-code monitors from `.trooper/monitors/*.yaml` (alerting.md § Kural şeması) and
+// Package ascode reads alert-as-code monitors from `.trooper/monitors/*.yaml` (alerting.md § Rule schema) and
 // translates them to the monitors columns the api writes (services/api/internal/store/alerting.go normalizeMonitor):
 // target {service, endpoint, process, view, env}, query (kind specific), condition {op, threshold, forMin, window,
 // minRequests, renotifyMin}, severity, channels, status.

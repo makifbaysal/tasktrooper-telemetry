@@ -1,7 +1,7 @@
 /**
  * Call-graph snapshots for root cause analysis, built from real span aggregates (ADR-013): /endpoints/{e}/calls
  * (fan-out), endpoint + dependency series (now vs. before) and endpoint callers (which downstream endpoint an HTTP
- * dependency lands on). The alert engine runs the same analysis server-side (see .ai/alerting.md § Kök neden analizi).
+ * dependency lands on). The alert engine runs the same analysis server-side (see .ai/alerting.md § Root cause analysis).
  *
  * Values per node: errors → failure ratio, latency → avg ms per request. "current" = the last ~10 minutes of the hour,
  * "baseline" = the rest of the hour; while series load both equal the summary value (nothing "moved").

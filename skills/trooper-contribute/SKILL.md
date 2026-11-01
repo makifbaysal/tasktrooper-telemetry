@@ -12,7 +12,7 @@ section rather than relying on this summary.
 ## Before writing code
 
 1. **Docs first** (AGENTS.md rule 1). New service, table, SDK API, alert type or tool → update the matching
-   `.ai/*.md` first (doc map in AGENTS.md § Doküman haritası), in the same PR. Typical pairs:
+   `.ai/*.md` first (doc map in AGENTS.md § Doc map), in the same PR. Typical pairs:
    - schema / table / retention → `.ai/data-model.md` + `deploy/clickhouse|postgres/*.sql`
    - API endpoint → `services/api/openapi.yaml` + `.ai/contracts.md` § 8
    - port, Kafka topic, `trooper.*` attribute, env var → `.ai/contracts.md`
@@ -20,22 +20,22 @@ section rather than relying on this summary.
    - architectural decision → new ADR in `.ai/decisions.md`
 2. **Ownership** (`.ai/contracts.md` § 1): each module has one owner; do not edit another module's
    `go.mod`. Keep `services/pkg` additions small and note them in contracts § 1.
-3. Docs in `.ai/` are Turkish (technical terms English); code, identifiers and commits are English (rule 10).
+3. Everything is English: code, identifiers, commits and `.ai/` docs (rule 10). Each sub-app also has its own `.ai/coding-standards.md` and `.ai/testing.md`.
 
 ## Invariants to keep
 
 - **Multi-tenancy** (rule 7, `.ai/architecture.md` § Multi-tenancy): every query filters by `org_id` +
   `project_id`. No query without a tenant filter in the API/query layer.
-- **Cardinality** (rule 4, `.ai/data-model.md` § Kardinalite kuralları): no user id, request id or raw URL
+- **Cardinality** (rule 4, `.ai/data-model.md` § Cardinality rules): no user id, request id or raw URL
   in metric labels; routes are templates (`/users/:id`).
-- **PII** (rule 6, `.ai/sdk.md` § İlkeler): SDKs do not collect headers/body/query params by default;
+- **PII** (rule 6, `.ai/sdk.md` § Principles): SDKs do not collect headers/body/query params by default;
   masking happens in the SDK.
-- **SDKs never break the host** (rule 5, `.ai/sdk.md` § İlkeler): swallow all SDK errors into internal
+- **SDKs never break the host** (rule 5, `.ai/sdk.md` § Principles): swallow all SDK errors into internal
   metrics; network calls async + batched + backoff.
 - **Web UI** (rules 2–3, `.ai/design-system.md`): no raw hex, px spacing or inline fonts — use tokens from
   `apps/web/src/styles/tokens.css`; new components go in `apps/web/src/components/ui/` and get listed in
   design-system.md. Charts: single y-axis, categorical colors `--series-1..8` in order, `--status-*` only for
-  status and always with icon + label (design-system.md § Data viz kuralları).
+  status and always with icon + label (design-system.md § Data viz rules).
 - **LLM model ids** come from config, never hard-coded (AGENTS.md § Stack).
 - **Tests** (rule 8): Go table-driven; ingest hot path needs benchmarks (`make bench-ingest`).
 
