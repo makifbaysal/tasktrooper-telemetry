@@ -68,6 +68,12 @@ subprojects {
                 }
             }
         }
+        // Central rejects POM dependencies without a version; BOM-managed ones (Compose BOM) get the resolved version.
+        extensions.configure<PublishingExtension> {
+            publications.withType<MavenPublication>().configureEach {
+                versionMapping { allVariants { fromResolutionOf("releaseRuntimeClasspath") } }
+            }
+        }
     }
 }
 
