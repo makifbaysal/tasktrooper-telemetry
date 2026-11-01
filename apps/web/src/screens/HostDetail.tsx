@@ -5,6 +5,8 @@ import { Badge, Card, EmptyState, MetricCard, PageHeader, Section, StatTile, Tab
 import { useApp } from '@/components/layout/context';
 import { hostDetails, k8sPods, timestamps, useData, type HostProcess, type InfraContainer } from '@/data';
 import { int, pct } from '@/lib/format';
+import { AlertsBody } from './Alerts';
+import { hostAlertScope } from './infraAlerts';
 import { InfraStatusBadge, LimitCell, ServiceLink, UsageCell, bytes, bytesRate, cores, hostMemoryTotal, lastSeenText, uptime } from './k8sShared';
 
 export function HostDetail() {
@@ -92,6 +94,8 @@ export function HostDetail() {
           </MetricCard>
         </Section>
       )}
+
+      <AlertsBody scope={hostAlertScope(host)} />
 
       <Section title="Services on this host" subtitle="from container labels (tasktrooper.io/service, app.kubernetes.io/name, app)">
         <Card>

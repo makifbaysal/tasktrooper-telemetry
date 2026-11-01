@@ -150,7 +150,10 @@ export function AlertEditor() {
   const svcName = services.find((s) => s.id === svcParam)?.name ?? svcParam ?? '';
   const back = `/services/${svcParam}?tab=alerts`;
   // llm links carry the telemetry service name, which is not always a known service id
-  const goBack = () => (svcParam && services.some((s) => s.id === svcParam) ? nav(back) : nav(-1));
+  // infra pages (host, database, cluster) pass ?back= — an in-app path only
+  const backParam = params.get('back');
+  const backPath = backParam && backParam.startsWith('/') && !backParam.startsWith('//') ? backParam : null;
+  const goBack = () => (backPath ? nav(backPath) : svcParam && services.some((s) => s.id === svcParam) ? nav(back) : nav(-1));
 
   const q = editing?.query ?? {};
   const initMetric = (editing?.apiKind === 'latency' ? 'p95' : (q.metric as Metric | undefined)) ?? 'error_rate';
@@ -179,12 +182,13 @@ export function AlertEditor() {
   const [errScope, setErrScope] = useState<string>(kind === 'error_new' && editing && !editing.targetSpec?.service ? '*' : svcParam ?? '*');
   // infra
   const qf = (q.filter ?? {}) as Record<string, unknown>;
-  const [entity, setEntity] = useState<InfraEntity>(isInfraEntity(q.entity) ? q.entity : 'host');
-  const [infraMetric, setInfraMetric] = useState<InfraMetric>((INFRA_METRICS[isInfraEntity(q.entity) ? q.entity : 'host'] as string[]).includes(str(q.metric)) ? q.metric as InfraMetric : 'cpu');
+  const initEntity: InfraEntity = isInfraEntity(q.entity) ? q.entity : isInfraEntity(params.get('entity')) ? params.get('entity') as InfraEntity : 'host';
+  const [entity, setEntity] = useState<InfraEntity>(initEntity);
+  const [infraMetric, setInfraMetric] = useState<InfraMetric>((INFRA_METRICS[initEntity] as string[]).includes(str(q.metric)) ? q.metric as InfraMetric : INFRA_METRICS[initEntity][0]);
   const [agg, setAgg] = useState<'max' | 'avg'>(q.agg === 'avg' ? 'avg' : 'max');
-  const [fCluster, setFCluster] = useState(str(qf.cluster));
+  const [fCluster, setFCluster] = useState(str(qf.cluster) || (editing ? '' : params.get('cluster') ?? ''));
   const [fNamespace, setFNamespace] = useState(str(qf.namespace));
-  const [fHost, setFHost] = useState(str(qf.host));
+  const [fHost, setFHost] = useState(str(qf.host) || (editing ? '' : params.get('host') ?? ''));
   const [fWorkload, setFWorkload] = useState(str(qf.workload));
   const [fService, setFService] = useState(str(qf.service) || (kind === 'infra' ? svcParam ?? '' : ''));
   const [fDatabase, setFDatabase] = useState(str(qf.database) || params.get('database') || '');

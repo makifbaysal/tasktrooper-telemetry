@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import {
   Bell, BellOff, Bot, Check, CheckCircle2, ChevronRight, CircleDashed, Code2, ExternalLink, FileCode2, Lock, Pencil, Plus, Send, Sparkles, Target, Trash2, Wrench, X,
 } from 'lucide-react';
@@ -225,18 +225,31 @@ export function OpenIncidents({ serviceId, endpointRef }: { serviceId: string; e
 }
 
 /** Monitors + code suggestions + history; open incidents sit at the top of the page (OpenIncidents). With `serviceId` everything is scoped to that service. */
-export function AlertsBody({ serviceId, endpointRef }: { serviceId?: string; endpointRef?: string }) {
+/** Alerts of something that is not a service (a host, database or Kubernetes cluster): which monitors belong to it and where "New monitor" goes. */
+export interface AlertScope {
+  /** shown in the empty state: "No monitors on <label> yet" */
+  label: string;
+  match: (m: ApiMonitor) => boolean;
+  /** editor link, prefilled for this item */
+  newHref: string;
+  /** already inside an "Alerts" tab: no section title */
+  inTab?: boolean;
+}
+
+export function AlertsBody({ serviceId, endpointRef, scope }: { serviceId?: string; endpointRef?: string; scope?: AlertScope }) {
   useInfra();
   const nav = useNavigate();
   const [params, setParams] = useSearchParams();
   // on a service page the outer tab lives in ?tab=, so the inner one uses ?atab=
-  const key = serviceId ? 'atab' : 'tab';
+  const loc = useLocation();
+  const key = serviceId || scope ? 'atab' : 'tab';
   const raw = params.get(key) as Tab | null;
-  const tab: Tab = raw === 'suggested' || raw === 'history' || raw === 'maintenance' ? raw : 'monitors';
+  const tab: Tab = (raw === 'suggested' || raw === 'maintenance') && !scope ? raw : raw === 'history' ? raw : 'monitors';
   const setTab = (t: Tab) => setParams((p) => { const n = new URLSearchParams(p); if (t === 'monitors') n.delete(key); else n.set(key, t); return n; }, { replace: true });
   const svc = serviceId ? services.find((s) => s.id === serviceId) : undefined;
   const onEndpoint = (target: string) => target.split(' · ')[1] === endpointRef;
   const mine = (m: Monitor) => {
+    if (scope) return scope.match(m as ApiMonitor);
     if (serviceId && monitorServiceId(m) !== serviceId) return false;
     if (!endpointRef) return true;
     const kpi = m.kind === 'kpi_burn' ? kpiOfMonitor(m) : undefined;
@@ -246,7 +259,7 @@ export function AlertsBody({ serviceId, endpointRef }: { serviceId?: string; end
   const scopedSuggestions = suggestions.filter((s) => (!svc || s.target.split(' · ')[0].replace(/ logs$/, '') === svc.name) && (!endpointRef || onEndpoint(s.target)));
   const scopedHistory = pastIncidents.filter((h) => {
     const m = monitors.find((x) => x.id === h.monitorId);
-    return endpointRef ? !!m && mine(m) : !serviceId || serviceIdOf(h.service) === serviceId || (!!m && mine(m));
+    return endpointRef || scope ? !!m && mine(m) : !serviceId || serviceIdOf(h.service) === serviceId || (!!m && mine(m));
   });
 
   const { ack, resolve, stateOf } = useAcks();
@@ -257,6 +270,7 @@ export function AlertsBody({ serviceId, endpointRef }: { serviceId?: string; end
   const pending = scopedSuggestions.filter((s) => !decided[s.id]);
 
   const incDrawer = useDrawer<Incident>();
+  const newHref = scope ? scope.newHref : `/alerts/new${serviceId ? `?service=${serviceId}${endpointRef ? `&endpoint=${encodeURIComponent(endpointRef)}` : ''}` : ''}`;
   const monDrawer = useDrawer<Monitor>();
   const sugDrawer = useDrawer<Suggestion>();
 
@@ -264,21 +278,21 @@ export function AlertsBody({ serviceId, endpointRef }: { serviceId?: string; end
   return (
     <>
       {/* 2 · configuration */}
-      <Section actions={serviceId && can('write') ? <>
-          <Button size="sm" variant="primary" icon={<Plus size={14} />} onClick={() => nav(`/alerts/new?service=${serviceId}${endpointRef ? `&endpoint=${encodeURIComponent(endpointRef)}` : ''}`)}>New monitor</Button>
+      <Section title={scope && !scope.inTab ? 'Alerts' : undefined} actions={(serviceId || scope) && can('write') ? <>
+          <Button size="sm" variant="primary" icon={<Plus size={14} />} onClick={() => nav(newHref)}>New monitor</Button>
         </> : undefined}>
         <Tabs value={tab} onChange={setTab} tabs={[
           { id: 'monitors', label: <>Monitors <Badge>{scopedMonitors.length}</Badge></> },
-          { id: 'suggested', label: <><Sparkles size={14} color="var(--accent)" />Suggested from code <Badge tone="accent">{pending.length}</Badge></> },
+          ...(scope ? [] : [{ id: 'suggested' as const, label: <><Sparkles size={14} color="var(--accent)" />Suggested from code <Badge tone="accent">{pending.length}</Badge></> }]),
           { id: 'history', label: <>History <Badge>{scopedHistory.length}</Badge></> },
-          { id: 'maintenance', label: <>Maintenance <Badge tone={scopedWindows.some(activeWindow) ? 'warning' : undefined}>{scopedWindows.length}</Badge></> },
+          ...(scope ? [] : [{ id: 'maintenance' as const, label: <>Maintenance <Badge tone={scopedWindows.some(activeWindow) ? 'warning' : undefined}>{scopedWindows.length}</Badge></> }]),
         ]} />
 
         {tab === 'monitors' && scopedMonitors.length === 0 && (
           <Card>
-            <EmptyState icon={<Bell />} title={`No monitors on ${endpointRef ?? svc?.name ?? 'this project'} yet`}
-              action={can('write') ? <Button variant="primary" icon={<Plus size={14} />} onClick={() => nav(`/alerts/new${serviceId ? `?service=${serviceId}${endpointRef ? `&endpoint=${encodeURIComponent(endpointRef)}` : ''}` : ''}`)}>Create a monitor</Button> : undefined}>
-              {pending.length > 0
+            <EmptyState icon={<Bell />} title={`No monitors on ${scope?.label ?? endpointRef ?? svc?.name ?? 'this project'} yet`}
+              action={can('write') ? <Button variant="primary" icon={<Plus size={14} />} onClick={() => nav(newHref)}>Create a monitor</Button> : undefined}>
+              {scope ? 'Alert on memory, disk, CPU and more. Pick a template or set your own threshold, then choose where it notifies (Slack, email, webhook).' : pending.length > 0
                 ? <><span>{pending.length} suggested from code are waiting. </span><a href="#" onClick={(e) => { e.preventDefault(); setTab('suggested'); }}>Review suggestions</a></>
                 : 'Create one, or define a KPI so alerts fire on what users feel.'}
             </EmptyState>
@@ -368,7 +382,7 @@ export function AlertsBody({ serviceId, endpointRef }: { serviceId?: string; end
         <MonitorDrawer monitor={monitors.find((x) => x.id === monDrawer.item!.id) ?? monDrawer.item} muted={isMuted(monDrawer.item)} onClose={monDrawer.close}
           onMute={() => toggleMute(monDrawer.item!)}
           onDelete={() => { void deleteMonitor(monDrawer.item!); monDrawer.close(); }}
-          onEdit={() => nav(`/alerts/new?kind=${monDrawer.item!.kind}${serviceId ? `&service=${serviceId}` : ''}&edit=${monDrawer.item!.id}`)} />
+          onEdit={() => nav(`/alerts/new?kind=${monDrawer.item!.kind}${serviceId ? `&service=${serviceId}` : ''}&edit=${monDrawer.item!.id}${scope ? `&back=${encodeURIComponent(loc.pathname + loc.search)}` : ''}`)} />
       )}
       {sugDrawer.item && (
         <SuggestionDrawer s={sugDrawer.item} onClose={sugDrawer.close} onEdit={() => nav(`/alerts/new?kind=${sugDrawer.item!.kind}`)}

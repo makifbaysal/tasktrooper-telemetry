@@ -22,7 +22,9 @@ One SDK family + one platform:
 ### One place rule
 
 The same item (list, "New …" button) exists in exactly one place in the interface. KPIs, alerts and logs live in the tabs of
-the service that owns them; "New KPI" only in the KPIs tab, "New monitor" only in the Alerts tab. Overview shows a cross-service
+the service that owns them; "New KPI" only in the KPIs tab, "New monitor" only in the Alerts tab. Infra alerts (kind `infra`) live under
+the item they watch: the Alerts section of a host or database page and the Alerts tab of a Kubernetes cluster. A rule without
+that item's filter (e.g. "every host") applies to all of them and is listed on each. Overview shows a cross-service
 summary (open incidents, golden signals, service table); the aggregated view of KPIs is only at `/kpis`.
 
 ### Frontend = service

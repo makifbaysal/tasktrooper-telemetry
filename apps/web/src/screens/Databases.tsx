@@ -14,6 +14,8 @@ import {
 import { ago, compact, int, ms, pct } from '@/lib/format';
 import { addDatabase, defaultPort, testConnection, useInfra } from '@/lib/infra';
 import { LINE_SLOTS } from './shared';
+import { AlertsBody } from './Alerts';
+import { databaseAlertScope } from './infraAlerts';
 import { IntegrationSourceBadge, IntegrationStatusBadge, ProviderMark } from './Integrations';
 
 const meterTone = (v: number) => (v >= 0.85 ? 'critical' : v >= 0.7 ? 'warning' : undefined);
@@ -226,6 +228,8 @@ export function DatabaseDetail() {
           <StatTile label="Collected by" value={<span style={{ fontSize: 'var(--text-md)' }}>{COLLECTOR_LABEL[db.collector]}</span>} />
         </div>
       </Section>
+
+      <AlertsBody scope={databaseAlertScope(db)} />
 
       <Section title="Nodes" subtitle={db.host}>
         <Card flush>
