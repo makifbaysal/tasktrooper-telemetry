@@ -190,6 +190,7 @@ func (s *Seeder) clusters(ctx context.Context) (int, error) {
 }
 
 // ---------------------------------------------------------------- monitors (mock.ts monitors; m9–m11 are KPI rules)
+// The api reserves source "code" for monitors synced from .trooper/monitors/*.yaml, so the mock's code monitors seed as manual.
 
 func (s *Seeder) monitors(ctx context.Context) (int, error) {
 	have, err := s.names(ctx, "/monitors")
@@ -200,13 +201,13 @@ func (s *Seeder) monitors(ctx context.Context) (int, error) {
 	cond := func(op string, th, forMin float64) m { return m{"op": op, "threshold": th, "forMin": forMin} }
 	defs := []m{
 		{"name": "Charges error rate", "kind": "metric_threshold", "target": m{"service": "payments-api", "endpoint": "POST /v1/charges"},
-			"query": m{"metric": "error_rate"}, "condition": m{"op": ">", "threshold": 0.02, "forMin": 5, "minRequests": 10}, "severity": "critical", "source": "code",
+			"query": m{"metric": "error_rate"}, "condition": m{"op": ">", "threshold": 0.02, "forMin": 5, "minRequests": 10}, "severity": "critical", "source": "manual",
 			"channels": []string{"#payments-alerts", "PagerDuty"}},
 		{"name": "Charges p95 latency", "kind": "latency", "target": m{"service": "payments-api", "endpoint": "POST /v1/charges"},
-			"query": m{"percentile": "p95"}, "condition": cond(">", 600, 10), "severity": "warning", "source": "code", "channels": []string{"#payments-alerts"}},
+			"query": m{"percentile": "p95"}, "condition": cond(">", 600, 10), "severity": "warning", "source": "manual", "channels": []string{"#payments-alerts"}},
 		{"name": "order-created-handler lag", "kind": "consumer_lag", "target": m{"service": "order-events-consumer", "process": "order-created-handler"},
 			"queue":     m{"clusterId": "kafka-main", "group": world.GroupFulfilment, "topic": "orders.created", "metric": "lag", "threshold": 10000, "forMin": 5},
-			"condition": cond(">", 10000, 5), "severity": "warning", "source": "code", "channels": []string{"#orders-oncall"}},
+			"condition": cond(">", 10000, 5), "severity": "warning", "source": "manual", "channels": []string{"#orders-oncall"}},
 		{"name": "reco-trainer drains every run", "kind": "consumer_lag", "target": m{},
 			"queue":     m{"clusterId": "kafka-main", "group": world.GroupRecoTrainer, "topic": "reco.events", "metric": "not_drained", "threshold": 2, "forMin": 0},
 			"condition": cond(">", 2, 0), "severity": "warning", "source": "manual", "channels": []string{"#data-platform"}},
@@ -217,14 +218,14 @@ func (s *Seeder) monitors(ctx context.Context) (int, error) {
 			"query": m{"metric": "error_rate"}, "condition": m{"op": ">", "threshold": 0.01, "forMin": 5, "minRequests": 10}, "severity": "critical", "source": "manual",
 			"channels": []string{"#orders-oncall", "PagerDuty"}},
 		{"name": "Payment provider timeouts", "kind": "log_match", "target": m{"service": "payments-api"},
-			"query": m{"contains": "provider timeout", "window": "5m"}, "condition": cond(">", 20, 0), "severity": "critical", "source": "code", "channels": []string{"#payments-alerts"}},
+			"query": m{"contains": "provider timeout", "window": "5m"}, "condition": cond(">", 20, 0), "severity": "critical", "source": "manual", "channels": []string{"#payments-alerts"}},
 		{"name": "Checkout LCP", "kind": "rum_vital", "target": m{"service": "shop-web", "view": "/checkout"},
 			"query": m{"app": "shop-web", "view": "/checkout", "vital": "LCP", "percentile": "p75"}, "condition": cond(">", 2500, 15), "severity": "warning", "source": "template",
 			"channels": []string{"#web-team"}},
 		{"name": "Catalog throughput drop", "kind": "throughput_change", "target": m{"service": "catalog-api"},
 			"query": m{"direction": "drop", "baselineOffset": "168h"}, "condition": cond(">", 0.5, 15), "severity": "warning", "source": "manual", "channels": []string{"#platform"}},
 		{"name": "Nightly invoice job", "kind": "job_missed", "target": m{"service": "email-worker", "process": "invoice-batch"},
-			"query": m{"schedule": "0 2 * * *", "graceHours": 26}, "condition": cond(">", 26, 0), "severity": "warning", "source": "code", "status": "muted", "channels": []string{"#billing"}},
+			"query": m{"schedule": "0 2 * * *", "graceHours": 26}, "condition": cond(">", 26, 0), "severity": "warning", "source": "manual", "status": "muted", "channels": []string{"#billing"}},
 		{"name": "Reco DB slow queries", "kind": "latency", "target": m{"service": "recommendation-api", "endpoint": "GET /v1/recommendations"},
 			"query": m{"percentile": "p95"}, "condition": cond(">", 800, 5), "severity": "critical", "source": "manual", "channels": []string{"#platform"}},
 	}
