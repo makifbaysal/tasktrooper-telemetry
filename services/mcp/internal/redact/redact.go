@@ -19,7 +19,7 @@ var (
 	// Bearer token values, whether or not the "Authorization:" key is present.
 	bearerRe = regexp.MustCompile(`(?i)\bBearer\s+[A-Za-z0-9._~+/-]+=*`)
 	// TaskTrooper api/ingest keys: "tt_" + kind ("api"|"ingest") + "_" + a
-	// 40-char base64url token (store.CreateAPIKey); the dev seed uses
+	// 40-char base64url token (store.CreateAPIKey); legacy dev keys used
 	// tt_dev_api_key / tt_dev_ingest_key. Anchored on the kind so tool names
 	// like tt_list_services are left alone.
 	ttKeyRe = regexp.MustCompile(`\btt_(?:api|ingest|dev)_[A-Za-z0-9_-]+\b`)

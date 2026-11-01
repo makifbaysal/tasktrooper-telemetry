@@ -33,7 +33,7 @@ func Load() (Config, error) {
 		APIKey: config.String("TT_API_KEY", ""),
 	}
 	if c.APIKey == "" {
-		return Config{}, fmt.Errorf("TT_API_KEY is required (dev: tt_dev_api_key)")
+		return Config{}, fmt.Errorf("TT_API_KEY is required (a project api key: Settings → API keys)")
 	}
 	if u, err := url.ParseRequestURI(c.APIURL); err != nil || u.Host == "" {
 		return Config{}, fmt.Errorf("TT_API_URL is not a valid URL")
