@@ -3,7 +3,7 @@
  * Targets are stored as `slack:<channel_id>#<channel_name>`; other targets (pagerduty:, email:, webhook URLs,
  * legacy `#channel` / `slack:https://hooks…`) stay free text.
  */
-import { API_URL, ApiError, api, mutate, qs, remote } from './remote';
+import { API_URL, ApiError, api, invalidate, mutate, qs, remote } from './remote';
 
 export interface SlackWorkspace { teamId: string; teamName: string; connectedAt?: number }
 export interface SlackChannel { id: string; name: string; isPrivate: boolean; isMember: boolean }
@@ -63,6 +63,12 @@ export function slackChannels(q: string): SlackChannel[] {
   const needle = q.trim().replace(/^#/, '').toLowerCase();
   return remote(`/integrations/slack/channels${qs({ q: needle })}`, [], (raw: SlackChannel[] | { channels?: SlackChannel[] } | null) =>
     (Array.isArray(raw) ? raw : raw?.channels ?? []).map(mapChannel));
+}
+
+/** Re-reads channels from Slack (skips the api's 5 min cache): new channels, or private ones the bot was just invited to. */
+export async function refreshSlackChannels(): Promise<void> {
+  await api(`/integrations/slack/channels${qs({ refresh: 'true' })}`);
+  invalidate('/integrations/slack/channels');
 }
 
 // ---------------------------------------------------------------- targets
