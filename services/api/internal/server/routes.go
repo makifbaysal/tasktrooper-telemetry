@@ -102,6 +102,10 @@ func (s *Server) routes(r chi.Router) {
 		}
 		s.reply(w, r, v, err)
 	}))
+	r.Get("/service-map", s.withQ(func(w http.ResponseWriter, r *http.Request, q store.Q) {
+		v, err := s.Store.ServiceMap(r.Context(), q)
+		s.reply(w, r, v, err)
+	}))
 	r.Route("/services/{service}", func(r chi.Router) {
 		r.Get("/", s.withQ(func(w http.ResponseWriter, r *http.Request, q store.Q) {
 			v, err := s.Store.GetService(r.Context(), q, param(r, "service"))

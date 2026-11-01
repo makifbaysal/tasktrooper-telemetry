@@ -1185,3 +1185,48 @@ type InventoryItem struct {
 	// Analysis is the LLM interpretation (failure_modes, loadtest_hint) when present.
 	Analysis json.RawMessage `json:"analysis,omitempty"`
 }
+
+// ---------------------------------------------------------------- service map
+
+// ServiceMap is the whole-system graph for one project and window: client apps, services and their dependencies
+// (db, cache, queue, external http, ai) with the traffic between them.
+type ServiceMap struct {
+	Nodes []MapNode `json:"nodes"`
+	Edges []MapEdge `json:"edges"`
+}
+
+type MapNode struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Tier: client (web/mobile apps, partners) | service | data (db, cache, queue, ai) | external (uninstrumented http).
+	Tier string `json:"tier"`
+	// Kind: the service type (http | worker | consumer | web | mobile), the dependency kind (db | cache | queue | http | ai)
+	// or the caller kind (partner | webhook | probe).
+	Kind string `json:"kind"`
+	// System is the dependency's system (postgres, redis, kafka, …); empty for services.
+	System    string       `json:"system,omitempty"`
+	Status    Health       `json:"status"`
+	Rpm       float64      `json:"rpm"`
+	ErrorRate float64      `json:"errorRate"`
+	P95       float64      `json:"p95"`
+	Incident  *MapIncident `json:"incident,omitempty"`
+}
+
+// MapIncident is the most severe open incident of a service (and how many are open).
+type MapIncident struct {
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Severity string `json:"severity"`
+	State    string `json:"state"`
+	Open     int    `json:"open"`
+}
+
+type MapEdge struct {
+	ID          string  `json:"id"`
+	From        string  `json:"from"`
+	To          string  `json:"to"`
+	CallsPerMin float64 `json:"callsPerMin"`
+	ErrorRate   float64 `json:"errorRate"`
+	P95         float64 `json:"p95"`
+	Status      Health  `json:"status"`
+}

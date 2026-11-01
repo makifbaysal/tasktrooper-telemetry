@@ -255,6 +255,8 @@ api key ile), DB'ye doğrudan bağlanmaz.
 Cevap şekilleri `apps/web/src/data/types.ts` (+ `infra.ts`) ile birebir; UI'da api eşlemesi sadece `src/data/*`
 fonksiyonlarındadır. Auth: `Authorization: Bearer <api key>` (dev) — OIDC session sonra.
 
+`GET /service-map?range=&env=` tüm sistem grafiğini döner: `nodes` (`tier` client|service|data|external, `kind`, `system`, `status`, rpm/errorRate/p95, en ağır açık `incident`) + `edges` (from→to, callsPerMin, errorRate, p95, `status` hata oranından: ≥%1 warning, ≥%5 critical). Gelen kenarlar `callers_1m`'den (callee görüşü), bağımlılıklar `edges_1m`'den; `child_service`'i telemetri gönderen bir servise çözülen http çağrısı servis→servis kenarıdır, çözülmeyen `peer.service` dış (`external`) node olur. Dependency node id'si `dep:<system> · <name>`.
+
 ## 9. RUM
 
 `proto/rum/v1/rum.proto`. JSON'da alan adları proto'daki snake_case adlarıdır (`protojson` `UseProtoNames`); int64'ler sayı
