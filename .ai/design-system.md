@@ -1,7 +1,7 @@
 # Design system
 
 Kaynak: `apps/web/src/styles/tokens.css` (token'lar), `apps/web/src/components/ui` (komponentler), `apps/web/src/components/charts` (grafikler).
-Canlı showcase: dashboard'da **`/design-system`** sayfası.
+Canlı showcase: dashboard'da **`/design-system`** sayfası (sidebar'da link yok, URL ile açılır).
 Görsel sistemin tasarım kaydı (Impeccable): [`apps/web/DESIGN.md`](../apps/web/DESIGN.md) + `apps/web/.impeccable/design.json`; ürün bağlamı [`apps/web/PRODUCT.md`](../apps/web/PRODUCT.md). Çelişkide `tokens.css` ve bu dosya esastır, DESIGN.md aynı PR'da güncellenir.
 
 **Tema kaynağı: TaskTrooper.** Renkler, tipografi, radius ve kalıplar TaskTrooper uygulamasının temasını izler

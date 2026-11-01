@@ -33,6 +33,15 @@
 .sidebar__link svg { flex: none; }
 .sidebar__count { margin-left: auto; }
 .sidebar__footer { margin-top: auto; padding-top: var(--space-4); }
+.sidebar__account {
+  display: flex; align-items: center; gap: var(--space-2); width: 100%; margin-top: var(--space-2); padding: var(--space-2);
+  border: 0; border-top: 1px solid var(--divider); border-radius: 0; background: none; color: var(--text-primary);
+  font: inherit; font-size: var(--text-md); text-align: left; cursor: pointer;
+}
+.sidebar__account:hover, .sidebar__account[aria-expanded='true'] { background: var(--bg-hover); border-radius: var(--radius-sm); }
+.sidebar__account:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.sidebar__account-text { display: flex; flex-direction: column; min-width: 0; flex: 1; line-height: var(--lh-sm); }
+.sidebar__account-text > .muted { font-size: var(--text-xs); }
 
 .topbar {
   position: sticky; top: 0; z-index: 10; height: var(--topbar-h);
@@ -358,3 +367,4 @@
 .onboarding__card { width: min(calc(var(--space-12) * 14), 100%); }
 .onboarding__steps { display: flex; gap: var(--space-2); color: var(--text-muted); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.06em; }
 .onboarding__steps [aria-current='step'] { color: var(--text-primary); font-weight: var(--weight-semibold); }
+.table__empty { padding: var(--space-6) var(--space-4); text-align: center; color: var(--text-muted); font-size: var(--text-sm); }

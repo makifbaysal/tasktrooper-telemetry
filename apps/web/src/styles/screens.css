@@ -33,8 +33,12 @@
 .incidents-filterbar__search { width: calc(var(--space-12) * 4); }
 .incidents-workspace__feed { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
 .incidents-maintenance { border-top: 1px solid var(--divider); padding-top: var(--space-4); }
-.incidents-maintenance summary { cursor: pointer; font-weight: var(--weight-semibold); }
-.incidents-maintenance summary span { margin-left: var(--space-2); color: var(--text-muted); font-size: var(--text-sm); font-weight: var(--weight-regular); }
+.incidents-maintenance summary { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0; cursor: pointer; font-weight: var(--weight-semibold); list-style: none; }
+.incidents-maintenance summary::-webkit-details-marker { display: none; }
+.incidents-maintenance summary span { color: var(--text-muted); font-size: var(--text-sm); font-weight: var(--weight-regular); }
+.incidents-maintenance summary:hover .incidents-maintenance__chevron { color: var(--text-primary); }
+.incidents-maintenance__chevron { flex: none; color: var(--text-muted); }
+.incidents-maintenance[open] .incidents-maintenance__chevron { transform: rotate(90deg); }
 .incidents-maintenance[open] > :not(summary) { margin-top: var(--space-4); }
 
 /* Services: rows that need attention */

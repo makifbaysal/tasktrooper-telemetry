@@ -37,7 +37,7 @@ export function Table<T>({ columns, rows, rowKey, onRowClick, defaultSort, empty
   const sorted = useMemo(() => sortRows(rows).flatMap((r) => [{ r, child: false }, ...sortRows(childRows?.(r) ?? []).map((c) => ({ r: c, child: true }))]),
     [rows, sortRows, childRows]);
 
-  if (rows.length === 0 && empty) return <>{empty}</>;
+  if (rows.length === 0 && empty) return typeof empty === 'string' ? <div className="table__empty">{empty}</div> : <>{empty}</>;
 
   return (
     <div className="table-wrap">

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import {
-  AlertOctagon, BookOpen, BotMessageSquare, Boxes, Server, Building2, ChevronsUpDown, Code2, Database, Gauge, KeyRound, LayoutDashboard, LogOut, Moon, Waypoints,
+  AlertOctagon, BotMessageSquare, Boxes, Server, Building2, ChevronsUpDown, Code2, Database, Gauge, KeyRound, LayoutDashboard, LogOut, Moon, Waypoints,
   Layers, Plug, Search, Settings, Sparkles, SquareFunction, Sun, SunMoon, Target, UserRound, Users, Zap, type LucideIcon,
 } from 'lucide-react';
 import { Avatar, Badge, Menu, MenuDivider, MenuItem, MenuLabel, Segmented, Select } from '@/components/ui';
@@ -67,8 +67,8 @@ export function AppShell() {
         <div className="sidebar__footer">
           <NavLink to="/settings" end className="sidebar__link"><Settings size={16} aria-hidden />Settings &amp; SDK</NavLink>
           <NavLink to="/settings/integrations" className="sidebar__link"><Plug size={16} aria-hidden />Integrations<IntegrationErrors /></NavLink>
-          <NavLink to="/design-system" className="sidebar__link"><BookOpen size={16} aria-hidden />Design system</NavLink>
         </div>
+        <UserMenu />
       </aside>
 
       <div className="main">
@@ -85,7 +85,6 @@ export function AppShell() {
             <ThemeIcon size={16} />
           </button>
           <button className="btn btn--ghost btn--icon" aria-label="What's new"><Zap size={16} /></button>
-          <UserMenu />
         </header>
         <main className="content">
           <AiQuotaBanner />
@@ -211,9 +210,14 @@ function UserMenu() {
   const nav = useNavigate();
   const name = me ? me.user.name ?? me.user.email : 'API key';
   return (
-    <Menu label="Account" align="end" trigger={({ open, toggle }) => (
-      <button className="btn btn--ghost user-trigger" aria-haspopup="menu" aria-expanded={open} aria-label={`Account: ${name}`} onClick={toggle}>
+    <Menu label="Account" placement="above" block trigger={({ open, toggle }) => (
+      <button className="sidebar__account" aria-haspopup="menu" aria-expanded={open} aria-label={`Account: ${name}`} onClick={toggle}>
         {me ? <Avatar name={name} src={me.user.avatarUrl} /> : <span className="avatar avatar--md"><KeyRound size={14} /></span>}
+        <span className="sidebar__account-text">
+          <span className="truncate">{name}</span>
+          {me?.user.email && me.user.email !== name && <span className="truncate muted">{me.user.email}</span>}
+        </span>
+        <ChevronsUpDown size={14} aria-hidden className="muted" />
       </button>
     )}>
       {(close) => (

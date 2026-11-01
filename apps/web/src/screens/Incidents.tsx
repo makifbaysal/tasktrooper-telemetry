@@ -1,7 +1,7 @@
 import { useData } from '@/data/remote';
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
-import { BellPlus, CheckCircle2, Siren } from 'lucide-react';
+import { BellPlus, CheckCircle2, ChevronRight, Siren } from 'lucide-react';
 import {
   Badge, Button, Card, ConnectSdk, EmptyState, SearchInput, Section, Select, StatusBadge, Table,
 } from '@/components/ui';
@@ -119,7 +119,7 @@ export function Incidents() {
       </Section>
 
       <details className="incidents-maintenance" id="maintenance-windows">
-        <summary>Maintenance windows <span>Schedule planned work or review existing windows</span></summary>
+        <summary><ChevronRight size={16} className="incidents-maintenance__chevron" aria-hidden />Maintenance windows <span>Schedule planned work or review existing windows</span></summary>
         <MaintenanceWindows />
       </details>
 
