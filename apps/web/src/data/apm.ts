@@ -76,7 +76,7 @@ export function timestamps(range: TimeRange): number[] {
   return axis(range);
 }
 const zeros = (range: TimeRange) => new Array<number>(RANGE_POINTS[range].points).fill(0);
-const H1 = A.rangeQs('1h');
+const H1 = () => A.rangeQs('1h');
 
 /** "svc" or "svc-endpointId" (the key screens use for series) → ids. Service ids may contain dashes. */
 function parseKey(key: string): { serviceId: string; endpointId?: string } {
@@ -90,7 +90,7 @@ const scopePath = (k: { serviceId: string; endpointId?: string }) => (k.endpoint
 export function endpointsFor(serviceId: string): Endpoint[] {
   const svc = services.find((s) => s.id === serviceId);
   if (svc && (svc.type === 'web' || svc.type === 'mobile')) return [];
-  return A.list(`${A.svcPath(serviceId)}/endpoints${H1}`, A.mapEndpoints);
+  return A.list(`${A.svcPath(serviceId)}/endpoints${H1()}`, A.mapEndpoints);
 }
 
 // ---------- RED series ----------
@@ -125,19 +125,19 @@ export function redSeries(range: TimeRange, serviceId?: string, endpointId?: str
 
 // ---------- dependencies, calls, time breakdown ----------
 export function dependenciesFor(serviceId: string): Dependency[] {
-  return A.list(`${A.svcPath(serviceId)}/dependencies${H1}`, A.mapDependencies);
+  return A.list(`${A.svcPath(serviceId)}/dependencies${H1()}`, A.mapDependencies);
 }
 export function endpointCalls(ep: Endpoint): EndpointCall[] {
-  return A.list(`${A.epPath(ep.serviceId, ep.id)}/calls${H1}`, A.mapCalls);
+  return A.list(`${A.epPath(ep.serviceId, ep.id)}/calls${H1()}`, A.mapCalls);
 }
 /** While loading / without spans: the known average, nothing attributed to a category yet. */
 const loadingBreakdown = (avg: number): TimeBreakdown => ({ avgMs: avg, parts: { app: 0, db: 0, cache: 0, http: 0, queue: 0, ai: 0 } });
 export function endpointBreakdown(ep: Endpoint): TimeBreakdown {
-  return remote(`${A.epPath(ep.serviceId, ep.id)}/breakdown${H1}`, loadingBreakdown(ep.p50), A.mapBreakdown);
+  return remote(`${A.epPath(ep.serviceId, ep.id)}/breakdown${H1()}`, loadingBreakdown(ep.p50), A.mapBreakdown);
 }
 export function serviceBreakdown(serviceId: string): TimeBreakdown {
   const s = services.find((x) => x.id === serviceId);
-  return remote(`${A.svcPath(serviceId)}/breakdown${H1}`, loadingBreakdown((s?.p95 ?? 0) * 0.5), A.mapBreakdown);
+  return remote(`${A.svcPath(serviceId)}/breakdown${H1()}`, loadingBreakdown((s?.p95 ?? 0) * 0.5), A.mapBreakdown);
 }
 /** `key` = service id or `${serviceId}-${endpointId}`. `b` / `critical` are kept for call-site compatibility. */
 export function breakdownSeries(key: string, _b: TimeBreakdown, range: TimeRange, _critical: boolean): Record<TimeCategory, number[]> {
@@ -161,12 +161,12 @@ export function depLatencySeries(d: Dependency, range: TimeRange, stat: 'avg' | 
 const strip = (r: A.CallerRow): CallerTraffic => ({ caller: r.caller, rpm: r.rpm, share: r.share, errorRate: r.errorRate, p95: r.p95 });
 
 export function endpointCallers(ep: Endpoint): CallerTraffic[] {
-  return A.list(`${A.epPath(ep.serviceId, ep.id)}/callers${H1}`, A.mapCallers(CALLERS)).map(strip);
+  return A.list(`${A.epPath(ep.serviceId, ep.id)}/callers${H1()}`, A.mapCallers(CALLERS)).map(strip);
 }
 
 export function serviceCallers(serviceId: string): (CallerTraffic & { topEndpoint: Endpoint })[] {
   const eps = endpointsFor(serviceId);
-  const rows = A.list(`${A.svcPath(serviceId)}/callers${H1}`, A.mapCallers(CALLERS));
+  const rows = A.list(`${A.svcPath(serviceId)}/callers${H1()}`, A.mapCallers(CALLERS));
   // the api has no service-level sources for consumers (only per process) → sum the processes' sources
   if (rows.length === 0 && eps.some((e) => e.sub)) return aggregateCallers(eps, endpointCallers);
   const placeholder: Endpoint = { id: '', serviceId, method: '', route: '', rpm: 0, errorRate: 0, p50: 0, p95: 0, p99: 0, monitored: false, criticality: 'low' };
@@ -211,4 +211,7 @@ export function podTraces(pod: { name: string; namespace: string; service: strin
 }
 
 // ---------- list hydration ----------
-registerHydrator(() => hydrateList(services, `/services${H1}`, A.mapServices));
+registerHydrator(() => hydrateList(services, `/services${H1()}`, A.mapServices));
+/** Deployment environments the project reported (`GET /environments`), for the topbar env picker. */
+export const environments: string[] = [];
+registerHydrator(() => hydrateList(environments, '/environments', (raw: string[] | null) => raw ?? []));

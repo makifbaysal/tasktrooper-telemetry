@@ -47,6 +47,7 @@ type Store interface {
 	SetErrorStatus(ctx context.Context, fingerprint, status string) error
 	GetError(ctx context.Context, q store.Q, fingerprint string) (*model.ErrorDetail, error)
 	ListDeploys(ctx context.Context, q store.Q, f store.DeployFilter) ([]model.DeployMarker, error)
+	ListEnvironments(ctx context.Context) ([]string, error)
 	// logs
 	SearchLogs(ctx context.Context, q store.Q, f store.LogFilter) (model.LogPage, error)
 	LogSeries(ctx context.Context, q store.Q, f store.LogFilter) (model.SeriesSet, error)

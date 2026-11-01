@@ -1,0 +1,92 @@
+/* Motion layer (DESIGN.md § Motion). Decorative motion is driven by data-* attributes that motion.ts only sets
+   when motion is allowed; the OS "reduce motion" setting and the account menu's "Reduce motion" both switch it
+   off below. Durations and easing come from tokens.css. */
+
+/* Sidebar collapse (topbar toggle) */
+.shell { transition: grid-template-columns var(--dur-slow) var(--ease); }
+@media (min-width: 901px) {
+  .shell--sidebar-collapsed { grid-template-columns: minmax(0, 1fr); }
+  .shell--sidebar-collapsed .sidebar { display: none; }
+}
+/* Narrow screens: drawer slides in over a fading scrim */
+@media (max-width: 900px) {
+  .sidebar { transition: transform var(--dur-slow) var(--ease), visibility 0s linear var(--dur-slow); }
+  .shell--drawer-open .sidebar { transition: transform var(--dur-slow) var(--ease), visibility 0s; }
+  .sidebar-scrim { animation: fade-in var(--dur-med) var(--ease); }
+}
+.sidebar-toggle { flex: none; }
+.sidebar-toggle:active { transform: scale(0.94); }
+
+/* Interactive cards lift on hover */
+.card--interactive { transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-med) var(--ease), transform var(--dur-med) var(--ease); }
+.card--interactive:hover { transform: translateY(-1px); }
+
+/* Card entrance: once, as the card scrolls into view */
+.content .card[data-reveal] {
+  transition: opacity var(--dur-reveal) var(--ease), transform var(--dur-reveal) var(--ease),
+    box-shadow var(--dur-med) var(--ease), border-color var(--dur-med) var(--ease);
+}
+.content .card[data-reveal='pending'] { opacity: 0; transform: translateY(var(--reveal-shift)) scale(0.985); }
+.content .card[data-reveal='pending'][data-reveal-from='above'] { transform: translateY(calc(var(--reveal-shift) * -1)) scale(0.985); }
+.content .card[data-reveal='visible'] { opacity: 1; transform: none; transition-delay: var(--reveal-delay, 0ms); }
+
+/* Ambient: cards on screen breathe slightly (staggered via --ambient-offset); hover stops it */
+.content .card[data-in-view='true'] { animation: card-ambient var(--dur-ambient) ease-in-out infinite; animation-delay: var(--ambient-offset, 0s); }
+.content .card--interactive:hover { animation: none; }
+@keyframes card-ambient {
+  0%, 100% { box-shadow: var(--shadow-sm); border-color: var(--border); }
+  50% { box-shadow: var(--shadow-md); border-color: color-mix(in oklch, var(--border) 80%, var(--accent)); }
+}
+
+/* Liquid cursor: follows the pointer and morphs onto the hovered control (the system cursor stays visible) */
+.liquid-cursor {
+  position: fixed; inset: 0 auto auto 0; z-index: 1000; pointer-events: none;
+  width: 18px; height: 18px; opacity: 0; border: 1px solid var(--accent-text); border-radius: var(--radius-full);
+  background: var(--accent-soft);
+  transition: opacity var(--dur-med) var(--ease), border-radius var(--dur-slow) var(--ease),
+    background-color var(--dur-slow) var(--ease), border-color var(--dur-slow) var(--ease);
+  will-change: transform, width, height;
+}
+.liquid-cursor[data-idle='true'] { transition-duration: 850ms, var(--dur-slow), var(--dur-slow), var(--dur-slow); }
+.liquid-cursor[data-morphed='true'] {
+  background: color-mix(in oklch, color-mix(in oklch, var(--accent) 75%, var(--liquid-color, var(--accent))) 28%, transparent);
+  border-color: color-mix(in oklch, var(--accent-text) 75%, var(--liquid-color, var(--accent-text)));
+}
+.liquid-cursor[data-moving='true']:not([data-morphed='true']) { animation: liquid-blob 760ms ease-in-out infinite alternate; }
+.liquid-cursor[data-clicking='true'] { background: color-mix(in oklch, var(--accent) 34%, transparent); border-color: var(--accent-text); }
+.liquid-cursor::after {
+  content: ''; position: absolute; top: 50%; left: 50%; width: 18px; height: 18px;
+  border-radius: var(--radius-full); background: color-mix(in oklch, var(--accent) 44%, transparent);
+  opacity: 0; transform: translate(-50%, -50%) scale(1); pointer-events: none;
+}
+.liquid-cursor[data-clicking='true']::after { animation: liquid-click 520ms var(--ease) both; }
+@keyframes liquid-click {
+  0% { opacity: 0.25; transform: translate(-50%, -50%) scale(0.8); border-radius: 50%; }
+  30% { opacity: 0.8; transform: translate(-50%, -50%) scale(2.2, 1.7); border-radius: 58% 42% 54% 46% / 43% 57% 45% 55%; }
+  55% { opacity: 0.65; transform: translate(-50%, -50%) scale(1.55, 1.9); border-radius: 44% 56% 46% 54% / 57% 43% 55% 45%; }
+  76% { opacity: 0.4; transform: translate(-50%, -50%) scale(1.3, 1.15); border-radius: 52% 48% 57% 43% / 46% 54% 48% 52%; }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1); border-radius: 50%; }
+}
+@keyframes liquid-blob {
+  from { border-radius: 54% 46% 57% 43% / 46% 58% 42% 54%; }
+  to { border-radius: 42% 58% 45% 55% / 57% 43% 60% 40%; }
+}
+
+/* Reduced motion: OS setting or the account menu toggle */
+@media (prefers-reduced-motion: reduce) {
+  .shell, .sidebar, .card--interactive, .content .card[data-reveal] { transition: none; }
+  .sidebar-scrim { animation: none; }
+  .card--interactive:hover, .sidebar-toggle:active, .sidebar__link:active { transform: none; }
+  .content .card { animation: none !important; opacity: 1 !important; transform: none !important; }
+  .liquid-cursor { display: none; }
+}
+:root[data-motion='reduced'] .shell,
+:root[data-motion='reduced'] .sidebar,
+:root[data-motion='reduced'] .card--interactive,
+:root[data-motion='reduced'] .content .card[data-reveal] { transition: none; }
+:root[data-motion='reduced'] .card--interactive:hover,
+:root[data-motion='reduced'] .sidebar-toggle:active,
+:root[data-motion='reduced'] .sidebar__link:active { transform: none; }
+:root[data-motion='reduced'] .content .card { animation: none !important; opacity: 1 !important; transform: none !important; }
+:root[data-motion='reduced'] .liquid-cursor { display: none; }
+:root[data-motion='reduced'] .sidebar-scrim { animation: none; }

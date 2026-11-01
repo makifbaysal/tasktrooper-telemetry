@@ -1,3 +1,4 @@
+/** Pointer follower that morphs onto the hovered control. Rendered only when motion is allowed (see motion.ts). */
 import { useEffect, useRef } from 'react';
 
 const SIZE = 18;

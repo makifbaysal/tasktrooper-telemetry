@@ -137,12 +137,12 @@ export function Integrations() {
           {PROVIDERS.map((p) => {
             const n = integrations.filter((i) => i.provider === p).length;
             return (
-              <Card key={p} title={<span className="row" style={{ gap: 'var(--space-2)' }}><ProviderMark provider={p} size="sm" />{PROVIDER_LABEL[p]}</span>}
+              <Card key={p} className="provider-card" title={<span className="row" style={{ gap: 'var(--space-2)' }}><ProviderMark provider={p} size="sm" />{PROVIDER_LABEL[p]}</span>}
                 subtitle={n ? `${n} connected` : 'Not connected'}>
-                <ul className="secondary" style={{ margin: '0 0 var(--space-3)', paddingLeft: 'var(--space-4)', fontSize: 'var(--text-sm)', display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+                <ul className="provider-card__caps">
                   {PROVIDER_CAPABILITIES[p].map((c) => <li key={c}>{c}</li>)}
                 </ul>
-                <Button size="sm" variant={n ? 'secondary' : 'primary'} icon={<Plug size={14} />} onClick={() => setConnect({ provider: p })}>{n ? 'Connect another' : 'Connect'}</Button>
+                <Button size="sm" variant="secondary" icon={<Plug size={14} />} onClick={() => setConnect({ provider: p })}>{n ? 'Connect another' : 'Connect'}</Button>
               </Card>
             );
           })}

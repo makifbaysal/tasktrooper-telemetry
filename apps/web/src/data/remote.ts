@@ -165,8 +165,24 @@ export function startPolling() {
 }
 
 // ── helpers ──
+// ── environment filter ──
+// read at import so the first hydrate (before React mounts) is already scoped
+let envFilter = (() => { try { return localStorage.getItem('trooper-env') ?? ''; } catch { return ''; } })();
+export const getEnvFilter = () => envFilter;
+/**
+ * Global deployment environment (topbar picker). Every telemetry query (one with a `range` param) gets `env`
+ * unless it sets its own. Changing it drops the cache and re-hydrates so lists and series refetch.
+ */
+export function setEnvFilter(env: string) {
+  if (env === envFilter) return;
+  envFilter = env;
+  cache.clear();
+  void hydrate().catch(() => undefined);
+}
+
 /** Query string from defined params. */
 export function qs(params: Record<string, string | number | undefined | null>): string {
+  if ('range' in params && !('env' in params) && envFilter) params = { ...params, env: envFilter };
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') p.set(k, String(v));
   const s = p.toString();

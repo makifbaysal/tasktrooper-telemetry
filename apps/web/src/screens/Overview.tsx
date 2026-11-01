@@ -83,8 +83,7 @@ export function Overview() {
     <>
       <header className="overview-heading" aria-labelledby="overview-title">
         <div className="overview-heading__copy">
-          <span className="overview-heading__eyebrow">TaskTrooper · {env}</span>
-          <h1 id="overview-title">Production overview</h1>
+          <h1 id="overview-title">{env ? `${env[0].toUpperCase()}${env.slice(1)} overview` : 'Overview'}</h1>
           <p>{services.length ? `${backend.length} backend services monitored over the last ${range}. Start with the active incidents.` : 'Waiting for the first data from an SDK.'}</p>
         </div>
         <Button icon={<Sparkles size={14} />} onClick={() => setAskOpen(true)}>Ask telemetry</Button>

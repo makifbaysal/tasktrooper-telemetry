@@ -455,6 +455,17 @@ paths:
         '404': { $ref: '#/components/responses/E404' }
         '401': { $ref: '#/components/responses/E401' }
         '500': { $ref: '#/components/responses/E500' }
+  /api/v1/environments:
+    get:
+      tags: [APM]
+      operationId: getEnvironments
+      summary: 'Deployment environments the project has reported (distinct deploys.env), sorted; feeds the dashboard env picker'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { type: string } } } }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
   /api/v1/deploys:
     get:
       tags: [APM]

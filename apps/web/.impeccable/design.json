@@ -1,0 +1,300 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-01T14:30:00Z",
+  "title": "Design System: TaskTrooper Telemetry",
+  "extensions": {
+    "colorMeta": {
+      "trooper-navy": {
+        "role": "primary",
+        "displayName": "Trooper Navy",
+        "canonical": "oklch(0.264 0.079 268.5)",
+        "tonalRamp": [
+          "oklch(0.18 0.06 268.5)",
+          "oklch(0.264 0.079 268.5)",
+          "oklch(0.32 0.09 268.5)",
+          "oklch(0.455 0.118 265)",
+          "oklch(0.58 0.11 265)",
+          "oklch(0.7 0.08 265)",
+          "oklch(0.82 0.05 265)",
+          "oklch(0.94 0.02 265)"
+        ]
+      },
+      "brand-mark": {
+        "role": "primary",
+        "displayName": "Brand Mark Navy",
+        "canonical": "#15214b"
+      },
+      "signal-amber": {
+        "role": "secondary",
+        "displayName": "Signal Amber",
+        "canonical": "oklch(0.818 0.112 72.9)",
+        "tonalRamp": [
+          "oklch(0.35 0.07 72.9)",
+          "oklch(0.47 0.09 72.9)",
+          "oklch(0.6 0.11 72.9)",
+          "oklch(0.72 0.12 72.9)",
+          "oklch(0.818 0.112 72.9)",
+          "oklch(0.87 0.08 72.9)",
+          "oklch(0.92 0.05 72.9)",
+          "oklch(0.96 0.02 72.9)"
+        ]
+      },
+      "cold-slate-page": {
+        "role": "neutral",
+        "displayName": "Cold Slate",
+        "canonical": "oklch(0.962 0.007 265)",
+        "tonalRamp": [
+          "oklch(0.13 0.015 265)",
+          "oklch(0.17 0.015 265)",
+          "oklch(0.28 0.015 265)",
+          "oklch(0.5 0.02 265)",
+          "oklch(0.82 0.015 265)",
+          "oklch(0.895 0.012 265)",
+          "oklch(0.945 0.01 265)",
+          "oklch(0.99 0.003 265)"
+        ]
+      },
+      "status-good": {
+        "role": "status",
+        "displayName": "Status Good"
+      },
+      "status-warning": {
+        "role": "status",
+        "displayName": "Status Warning"
+      },
+      "status-serious": {
+        "role": "status",
+        "displayName": "Status Serious"
+      },
+      "status-critical": {
+        "role": "status",
+        "displayName": "Status Critical"
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Stat and metric values; one 44px hero number per page at most."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Page title (h1)."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Section and card titles."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Default text, table cells, metric labels."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Secondary text and meta."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Uppercase table headers, section labels, badges, chart ticks."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Routes, logs, code, trace ids, path chips."
+      }
+    },
+    "shadows": [
+      {
+        "name": "shadow-sm",
+        "value": "0 1px 2px 0 rgb(0 0 0 / 0.06), 0 1px 3px 0 rgb(0 0 0 / 0.08)",
+        "purpose": "Raised: cards at rest, selected segmented item."
+      },
+      {
+        "name": "shadow-md",
+        "value": "0 4px 16px -4px rgb(0 0 0 / 0.12), 0 1px 3px 0 rgb(0 0 0 / 0.06)",
+        "purpose": "Floating: tooltips, hovered interactive cards."
+      },
+      {
+        "name": "shadow-lg",
+        "value": "0 8px 24px -4px rgb(0 0 0 / 0.18), 0 2px 8px -2px rgb(0 0 0 / 0.12)",
+        "purpose": "Overlay: menus, popovers, drawers."
+      },
+      {
+        "name": "focus-ring",
+        "value": "0 0 0 2px var(--bg-page), 0 0 0 4px oklch(0.455 0.118 265 / 0.55)",
+        "purpose": "Keyboard focus on any interactive element."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease",
+        "value": "cubic-bezier(0.2, 0, 0, 1)",
+        "purpose": "All state transitions."
+      },
+      {
+        "name": "dur-fast",
+        "value": "120ms",
+        "purpose": "Hover, press, colour changes."
+      },
+      {
+        "name": "dur-med",
+        "value": "200ms",
+        "purpose": "Open/close of menus and drawers."
+      },
+      {
+        "name": "dur-slow",
+        "value": "320ms",
+        "purpose": "Sidebar collapse, cursor morph."
+      },
+      {
+        "name": "dur-reveal",
+        "value": "520ms",
+        "purpose": "Card entrance as it scrolls into view."
+      },
+      {
+        "name": "dur-ambient",
+        "value": "6.5s",
+        "purpose": "One cycle of the idle card pulse."
+      },
+      {
+        "name": "reveal-shift",
+        "value": "18px",
+        "purpose": "Card entrance travel."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "nav-drawer",
+        "value": "900px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single filled action on a page.",
+      "html": "<button class=\"ds-btn ds-btn-primary\">Create monitor</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; gap: var(--space-2); height: var(--control-h-md); padding: 0 var(--space-4); border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--bg-page); color: var(--text-primary); font: var(--weight-medium) var(--text-md)/var(--lh-md) var(--font-sans); cursor: pointer; transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease); } .ds-btn:active { transform: scale(0.98); } .ds-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); } .ds-btn-primary { background: var(--accent); border-color: var(--accent); color: var(--text-inverse); } .ds-btn-primary:hover { background: var(--accent-hover); }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Default button: neutral fill with a hairline border.",
+      "html": "<button class=\"ds-btn2\">Export</button>",
+      "css": ".ds-btn2 { display: inline-flex; align-items: center; height: var(--control-h-md); padding: 0 var(--space-4); border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--bg-page); color: var(--text-primary); font: var(--weight-medium) var(--text-md)/var(--lh-md) var(--font-sans); cursor: pointer; transition: background var(--dur-fast) var(--ease); } .ds-btn2:hover { background: var(--bg-active); } .ds-btn2:active { transform: scale(0.98); } .ds-btn2:focus-visible { outline: none; box-shadow: var(--focus-ring); }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Low-emphasis action inside cards and toolbars.",
+      "html": "<button class=\"ds-btn-ghost\">View all</button>",
+      "css": ".ds-btn-ghost { height: var(--control-h-md); padding: 0 var(--space-4); border-radius: var(--radius-md); border: 1px solid transparent; background: transparent; color: var(--text-secondary); font: var(--weight-medium) var(--text-md)/var(--lh-md) var(--font-sans); cursor: pointer; transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease); } .ds-btn-ghost:hover { color: var(--text-primary); background: var(--bg-hover); } .ds-btn-ghost:focus-visible { outline: none; box-shadow: var(--focus-ring); }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Raised field with navy focus halo.",
+      "html": "<input class=\"ds-input\" placeholder=\"Search services\" />",
+      "css": ".ds-input { height: var(--control-h-md); padding: 0 var(--space-3); border-radius: var(--radius-md); border: 1px solid var(--border-strong); background: var(--bg-raised); color: var(--text-primary); font: var(--text-md)/var(--lh-md) var(--font-sans); transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease); } .ds-input::placeholder { color: var(--text-muted); } .ds-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }"
+    },
+    {
+      "name": "Status Badge",
+      "kind": "chip",
+      "refersTo": "badge-critical",
+      "description": "Status is always icon + label in its tone.",
+      "html": "<span class=\"ds-status ds-status-critical\"><svg viewBox=\"0 0 24 24\" width=\"12\" height=\"12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 8v4M12 16h.01\"/></svg>Critical</span> <span class=\"ds-status ds-status-good\"><svg viewBox=\"0 0 24 24\" width=\"12\" height=\"12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M20 6 9 17l-5-5\"/></svg>OK</span>",
+      "css": ".ds-status { display: inline-flex; align-items: center; gap: var(--space-1); height: 22px; padding: 0 10px; border-radius: var(--radius-full); font: var(--weight-medium) var(--text-xs)/var(--lh-xs) var(--font-sans); } .ds-status-critical { background: var(--status-critical-soft); color: var(--status-critical-text); } .ds-status-good { background: var(--status-good-soft); color: var(--status-good-text); }"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Surface for a section; flush variant for tables.",
+      "html": "<div class=\"ds-card\"><div class=\"ds-card-head\"><strong>Throughput</strong><span>requests / min</span></div><div class=\"ds-card-body\">1,284 rpm</div></div>",
+      "css": ".ds-card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); font: var(--text-md)/var(--lh-md) var(--font-sans); color: var(--text-primary); max-width: 320px; } .ds-card-head { display: flex; gap: var(--space-2); align-items: baseline; padding: var(--space-4) var(--space-4) var(--space-3); } .ds-card-head span { color: var(--text-muted); font-size: var(--text-sm); } .ds-card-body { padding: 0 var(--space-4) var(--space-4); font-size: var(--text-2xl); line-height: var(--lh-2xl); font-weight: var(--weight-semibold); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }"
+    },
+    {
+      "name": "Segmented Control",
+      "kind": "nav",
+      "refersTo": "segmented",
+      "description": "Filters and time ranges.",
+      "html": "<div class=\"ds-seg\"><button aria-pressed=\"false\">15m</button><button aria-pressed=\"true\">1h</button><button aria-pressed=\"false\">24h</button></div>",
+      "css": ".ds-seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--radius-md); background: var(--bg-sunken); } .ds-seg button { height: calc(var(--control-h-md) - 6px); padding: 0 var(--space-3); border: 0; background: none; border-radius: var(--radius-sm); color: var(--text-secondary); font: var(--weight-medium) var(--text-sm)/var(--lh-sm) var(--font-sans); cursor: pointer; } .ds-seg button:hover { color: var(--text-primary); } .ds-seg button[aria-pressed='true'] { background: var(--bg-page); color: var(--text-primary); box-shadow: var(--shadow-sm); } .ds-seg button:focus-visible { outline: none; box-shadow: var(--focus-ring); }"
+    },
+    {
+      "name": "Sidebar Nav Item",
+      "kind": "nav",
+      "refersTo": "nav-item-active",
+      "description": "Icon + label row; current page fills with the active tone.",
+      "html": "<nav class=\"ds-nav\"><a href=\"#\">Overview</a><a href=\"#\" aria-current=\"page\">Services</a><a href=\"#\">Incidents</a></nav>",
+      "css": ".ds-nav { display: flex; flex-direction: column; gap: 2px; width: 220px; padding: var(--space-2); background: var(--bg-sidebar); } .ds-nav a { display: flex; align-items: center; height: 32px; padding: 0 var(--space-3); border-radius: var(--radius-md); color: var(--text-secondary); font: var(--weight-medium) var(--text-md)/var(--lh-md) var(--font-sans); text-decoration: none; transition: background var(--dur-fast) var(--ease); } .ds-nav a:hover { background: var(--bg-hover); color: var(--text-primary); } .ds-nav a[aria-current='page'] { background: var(--bg-active); color: var(--text-primary); } .ds-nav a:focus-visible { outline: none; box-shadow: var(--focus-ring); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Incident Console",
+    "overview": "The dashboard is the desk a backend developer sits down at when something is wrong. The chrome — sidebar, topbar, cards, controls — is a quiet frame of cold slate neutrals and one navy voice; everything loud on screen is either data (charts in a fixed categorical order) or status (always an icon with a label). Nothing decorates. If a pixel is coloured, it is measuring something or saying something is broken.\n\nDensity is high but legible: 14px body on a 4px grid, tight tables, 16px between cards. Hierarchy comes from weight and size steps, not from colour or ornament. The system follows the TaskTrooper app theme so the product family reads as one; light and dark are equal citizens, with dark built from its own chosen steps rather than an inversion.\n\nMotion is a quiet layer on top of state: cards settle in as they scroll into view and breathe faintly while on screen, a liquid cursor follows the pointer and morphs onto controls, and every interaction answers in 120–320ms. All of it is decorative, so all of it switches off with the OS reduce-motion setting or the account menu's Reduce motion.",
+    "keyCharacteristics": [
+      "Cold slate neutrals (hue 265), one navy primary, warm amber only for selection and highlight.",
+      "Colour is reserved for data and status; status is never colour alone.",
+      "Inter for interface, JetBrains Mono for routes, logs, trace ids and code.",
+      "Tabular numbers everywhere a value is compared.",
+      "Flat-by-default surfaces with a single light card shadow; depth grows only for popovers and drawers."
+    ],
+    "rules": [
+      {
+        "name": "The Measuring-or-Broken Rule",
+        "body": "Colour appears only when it encodes data or status. Chrome stays slate and navy.",
+        "section": "colors"
+      },
+      {
+        "name": "The Icon-Plus-Label Rule",
+        "body": "A status colour never stands alone: every status renders through StatusBadge (icon + word).",
+        "section": "colors"
+      },
+      {
+        "name": "The Fixed Order Rule",
+        "body": "Categorical series are assigned series-1..8 in order; status colours are never reused as series or as diff colours.",
+        "section": "colors"
+      },
+      {
+        "name": "The Tabular Rule",
+        "body": "Every number that sits next to another number uses tabular-nums; large values tighten to -0.02em.",
+        "section": "typography"
+      },
+      {
+        "name": "The Mono-Means-Machine Rule",
+        "body": "Monospace is only for text the user would copy or match against code.",
+        "section": "typography"
+      },
+      {
+        "name": "The Opt-Out Motion Rule",
+        "body": "Decorative motion lives only in styles/motion.css + components/layout/motion.ts and runs from data-* attributes set when motion is allowed: card reveal, ambient card pulse, liquid cursor, sidebar collapse. prefers-reduced-motion or :root[data-motion='reduced'] turns all of it off; state transitions stay within 120–200ms on --ease.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Alarm Rail Rule",
+        "body": "A card in an alarm state gets a 4px left status rail (critical or warning) instead of a coloured fill.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do reference tokens from src/styles/tokens.css for every colour, size, space and radius.",
+      "Do render status through StatusBadge (icon + label) and alarm cards through the 4px status rail.",
+      "Do assign chart series series-1..8 in order and keep one y-axis per chart.",
+      "Do use JetBrains Mono for routes, logs, trace ids and code; tabular numbers for compared values.",
+      "Do keep exactly one primary (navy) button per page.",
+      "Do build dark theme from its own token steps; check both themes."
+    ],
+    "donts": [
+      "Don't write raw hex, raw px font sizes or ad-hoc spacing in components.",
+      "Don't use status colours for decoration, series or diffs, or colour as the only status signal.",
+      "Don't use dual y-axes.",
+      "Don't add decorative motion outside motion.css / motion.ts, or any motion that ignores the reduce-motion switches.",
+      "Don't introduce a second accent hue for chrome (violet primary, green \"signal\" nav): the chrome voice is Trooper Navy.",
+      "Don't use provider brand colours or logos for third-party identity; use the neutral ProviderMark."
+    ]
+  }
+}
