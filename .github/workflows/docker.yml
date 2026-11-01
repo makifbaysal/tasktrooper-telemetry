@@ -8,7 +8,6 @@ on:
   pull_request:
     paths:
       - "services/**"
-      - "sdks/go/**"
       - "deploy/**"
       - ".dockerignore"
       - ".github/workflows/docker.yml"
@@ -23,8 +22,8 @@ concurrency:
 
 jobs:
   # Derived from services/*/Dockerfile, so a new service with a Dockerfile is picked up automatically.
-  # Every Dockerfile builds from the repo root (ADR-027: services/pkg + sdks/go are copied for the go.mod replaces;
-  # .dockerignore allow-lists services/ and sdks/go/) with GOWORK=off. Dockerfiles that take ARG CMD (alerting,
+  # Every Dockerfile builds from the repo root (ADR-027: services/pkg is copied for the go.mod replace, the Go SDK comes from proxy.golang.org;
+  # .dockerignore allow-lists services/) with GOWORK=off. Dockerfiles that take ARG CMD (alerting,
   # ingest) build one image per services/<svc>/cmd/* binary, named like the docker-compose services.
   # services/collector/Dockerfile.windows (HostProcess image) is not included.
   matrix:

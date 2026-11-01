@@ -36,7 +36,7 @@ check: ## one-shot health check — same gates as .github/workflows/ci.yml
 	@for m in $(MODULES); do [ -d services/$$m ] || continue; echo "vet services/$$m"; (cd services/$$m && go vet ./...) || exit 1; done
 	@$(MAKE) test
 	@pnpm install --frozen-lockfile
-	@echo "js sdk: build (apps/web links the built packages, ADR-027)"
+	@echo "js sdk: build"
 	@pnpm -r --filter "./sdks/js/packages/**" build
 	@echo "web: typecheck, build"
 	@cd apps/web && pnpm exec tsc -b && pnpm exec vite build

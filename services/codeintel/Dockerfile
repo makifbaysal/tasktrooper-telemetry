@@ -1,10 +1,9 @@
-# Build context: repo root (ADR-027; the codeintel module depends on ../pkg and ../../sdks/go)
+# Build context: repo root (ADR-027; the codeintel module depends on ../pkg; the Go SDK comes from proxy.golang.org)
 #   docker build -f services/codeintel/Dockerfile -t codeintel .
 FROM golang:1.26-alpine AS build
 WORKDIR /src
 ENV GOWORK=off CGO_ENABLED=0
 COPY services/pkg/ services/pkg/
-COPY sdks/go/ sdks/go/
 COPY services/codeintel/go.mod services/codeintel/go.sum services/codeintel/
 RUN cd services/codeintel && go mod download
 COPY services/codeintel/ services/codeintel/

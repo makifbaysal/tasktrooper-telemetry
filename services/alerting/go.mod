@@ -7,8 +7,8 @@ require (
 	github.com/exaring/otelpgx v0.13.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/makifbaysal/tasktrooper-telemetry/sdks/go v0.1.0
-	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx v0.0.0
-	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx v0.1.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog v0.1.0
 	github.com/tasktrooper/telemetry/services/pkg v0.0.0
 	github.com/twmb/franz-go v1.22.2
 	go.opentelemetry.io/otel v1.47.0
@@ -59,9 +59,3 @@ require (
 )
 
 replace github.com/tasktrooper/telemetry/services/pkg => ../pkg
-
-replace (
-	github.com/makifbaysal/tasktrooper-telemetry/sdks/go => ../../sdks/go
-	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx => ../../sdks/go/integrations/pgx
-	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog => ../../sdks/go/integrations/slog
-)

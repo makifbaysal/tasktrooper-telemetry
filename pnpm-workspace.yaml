@@ -4,3 +4,5 @@ packages:
 allowBuilds:
   esbuild: true
   protobufjs: false
+minimumReleaseAgeExclude:
+  - '@tasktrooper/*' # our own SDKs: usable right after release (ADR-029)

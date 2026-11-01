@@ -14,14 +14,14 @@ importers:
         specifier: 2.2.0
         version: 2.2.0
       '@tasktrooper/browser':
-        specifier: workspace:*
-        version: link:../../sdks/js/packages/browser
+        specifier: ^0.1.0
+        version: 0.1.0
       '@tasktrooper/react':
-        specifier: workspace:*
-        version: link:../../sdks/js/packages/react
+        specifier: ^0.1.0
+        version: 0.1.0(@tanstack/react-router@1.170.46(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(next@16.4.3(@opentelemetry/api@1.10.0)(@types/node@26.6.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(react-router@7.18.4(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(react@19.3.1)
       '@tasktrooper/replay':
-        specifier: workspace:*
-        version: link:../../sdks/js/packages/replay
+        specifier: ^0.1.0
+        version: 0.1.0(@tasktrooper/browser@0.1.0)
       lucide-react:
         specifier: ^1.61.0
         version: 1.61.0(@types/react@19.3.0)(react@19.3.1)
@@ -1579,6 +1579,32 @@ packages:
 
   '@tanstack/store@0.11.2':
     resolution: {integrity: sha512-sJ4mjol8uQsHV0gOJzzjwXfh2Fwm+Sz0+8deqiTm4jGbMdjzNSW+xZCFm0kUa870uhd8yi+DpKnZb5Kc4apa0Q==}
+
+  '@tasktrooper/browser@0.1.0':
+    resolution: {integrity: sha512-FczNWX7EOF15JHFGdKzZBqaFvExB7AMIKffFCNEt/EaQ8mK6uMak9FjWzr5NN3V87qvs8KKhbio7yQUbeW9VwA==}
+
+  '@tasktrooper/core@0.1.0':
+    resolution: {integrity: sha512-dz3HI4QDYH0jt54n4PvRSykU0EO9m98C3UR0uSwpRbLBIAZabKADQj1BjvgVinv1SMFYqAHW5vNYKEXiDDfviQ==}
+
+  '@tasktrooper/react@0.1.0':
+    resolution: {integrity: sha512-2fG5ayyyT84POWiHEGNu+CtuuptXiHNIjMVtrBeksEnp81QYHn78EVJhI3wwqDZC9JhhCCNkTFy4x+10QKdGqA==}
+    peerDependencies:
+      '@tanstack/react-router': '>=1'
+      next: '>=13.4'
+      react: '>=18'
+      react-router: '>=6.4'
+    peerDependenciesMeta:
+      '@tanstack/react-router':
+        optional: true
+      next:
+        optional: true
+      react-router:
+        optional: true
+
+  '@tasktrooper/replay@0.1.0':
+    resolution: {integrity: sha512-jYTvsnsLlvHfeq2JrFQ8nbTevbHvKbSu8ZHGTD3+OeH6+pmg/hdjDSxdK47uSjj8eZj2UvfvK+RR0Dgwt/Pesg==}
+    peerDependencies:
+      '@tasktrooper/browser': ^0.1.0
 
   '@testing-library/dom@10.4.2':
     resolution: {integrity: sha512-yzr2S9HyAIdhz2/6qHgbs665Q7PKVcDF05vsOlHPxG1mo36gKVesdYVeDLnXgfjJ03CrKRk08knc6+E/9m8v2Q==}
@@ -4427,6 +4453,28 @@ snapshots:
       seroval-plugins: 1.7.2(seroval@1.7.2)
 
   '@tanstack/store@0.11.2': {}
+
+  '@tasktrooper/browser@0.1.0':
+    dependencies:
+      '@tasktrooper/core': 0.1.0
+      web-vitals: 6.2.3
+
+  '@tasktrooper/core@0.1.0': {}
+
+  '@tasktrooper/react@0.1.0(@tanstack/react-router@1.170.46(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(next@16.4.3(@opentelemetry/api@1.10.0)(@types/node@26.6.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(react-router@7.18.4(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(react@19.3.1)':
+    dependencies:
+      '@tasktrooper/browser': 0.1.0
+      '@tasktrooper/core': 0.1.0
+      react: 19.3.1
+    optionalDependencies:
+      '@tanstack/react-router': 1.170.46(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      next: 16.4.3(@opentelemetry/api@1.10.0)(@types/node@26.6.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      react-router: 7.18.4(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+
+  '@tasktrooper/replay@0.1.0(@tasktrooper/browser@0.1.0)':
+    dependencies:
+      '@rrweb/record': 2.2.0
+      '@tasktrooper/browser': 0.1.0
 
   '@testing-library/dom@10.4.2':
     dependencies:

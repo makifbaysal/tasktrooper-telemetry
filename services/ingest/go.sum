@@ -74,6 +74,14 @@ github.com/klauspost/cpuid/v2 v2.4.0 h1:S6Hrbc7+ywsr0r+RLapfGBHfyefhCTwEh3A0tV91
 github.com/klauspost/cpuid/v2 v2.4.0/go.mod h1:19jmZ9mjzoF//ddRSUsv0zfBTJWh3QJh9FNxZTMrGxU=
 github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0SNc=
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
+github.com/makifbaysal/tasktrooper-telemetry/sdks/go v0.1.0 h1:dmgDnNXSrOuW8uRKgETDdzmHOvKEcJ08lKFw6wr1ECA=
+github.com/makifbaysal/tasktrooper-telemetry/sdks/go v0.1.0/go.mod h1:ZMiq5nD8h5fHboS8TC75v/KvtGnhxPEbDhXv4XvXong=
+github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/goredis v0.1.0 h1:DG4X8g0YlwI6MKGb4sm9WZZtjJDHyuU5FZgJ5ivmGaE=
+github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/goredis v0.1.0/go.mod h1:lwpx8z9TEYcaHKZoSin0KTlcio9qvvxgBbYNLyXuv10=
+github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx v0.1.0 h1:blUYwzuPzIB20ExTOJ74/H2/0UObAhr1CAcy7Qj+fbw=
+github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx v0.1.0/go.mod h1:P5l3qLcrj0yKif/f1TFjoPaJINVsK16ehWzM/pmcHZ0=
+github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog v0.1.0 h1:BjjIT+4bXs7/Xq+x8wm7cLB5j+1IL38w9yj/1mdxKcQ=
+github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog v0.1.0/go.mod h1:epxEQmLXSxYtDt3moUeMPDDXTJ4Rv1sN5Mj16vQQJow=
 github.com/maxmind/mmdbwriter v1.2.0 h1:hyvDopImmgvle3aR8AaddxXnT0iQH2KWJX3vNfkwzYM=
 github.com/maxmind/mmdbwriter v1.2.0/go.mod h1:EQmKHhk2y9DRVvyNxwCLKC5FrkXZLx4snc5OlLY5XLE=
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 h1:C3w9PqII01/Oq1c1nUAm88MOHcQC9l5mIlSMApZMrHA=

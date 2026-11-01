@@ -58,6 +58,16 @@ github.com/jackc/puddle/v2 v2.2.2 h1:PR8nw+E/1w0GLuRFSmiioY6UooMp6KJv0/61nB7icHo
 github.com/jackc/puddle/v2 v2.2.2/go.mod h1:vriiEXHvEE654aYKXXjOvZM39qJ0q+azkZFrfEOc3H4=
 github.com/klauspost/cpuid/v2 v2.4.0 h1:S6Hrbc7+ywsr0r+RLapfGBHfyefhCTwEh3A0tV913Dw=
 github.com/klauspost/cpuid/v2 v2.4.0/go.mod h1:19jmZ9mjzoF//ddRSUsv0zfBTJWh3QJh9FNxZTMrGxU=
+github.com/makifbaysal/tasktrooper-telemetry/sdks/go v0.1.0 h1:dmgDnNXSrOuW8uRKgETDdzmHOvKEcJ08lKFw6wr1ECA=
+github.com/makifbaysal/tasktrooper-telemetry/sdks/go v0.1.0/go.mod h1:ZMiq5nD8h5fHboS8TC75v/KvtGnhxPEbDhXv4XvXong=
+github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/goredis v0.1.0 h1:DG4X8g0YlwI6MKGb4sm9WZZtjJDHyuU5FZgJ5ivmGaE=
+github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/goredis v0.1.0/go.mod h1:lwpx8z9TEYcaHKZoSin0KTlcio9qvvxgBbYNLyXuv10=
+github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/nethttp v0.1.0 h1:hrF5TbE8FNECMxRtMp1ortqh5BfUIsyV5rgXfT3VpaU=
+github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/nethttp v0.1.0/go.mod h1:1vshVip9UDkj+Q83JgsmlnrD8EKhcu+HlnUKMpcWKcw=
+github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx v0.1.0 h1:blUYwzuPzIB20ExTOJ74/H2/0UObAhr1CAcy7Qj+fbw=
+github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx v0.1.0/go.mod h1:P5l3qLcrj0yKif/f1TFjoPaJINVsK16ehWzM/pmcHZ0=
+github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog v0.1.0 h1:BjjIT+4bXs7/Xq+x8wm7cLB5j+1IL38w9yj/1mdxKcQ=
+github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog v0.1.0/go.mod h1:epxEQmLXSxYtDt3moUeMPDDXTJ4Rv1sN5Mj16vQQJow=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/redis/go-redis/extra/rediscmd/v9 v9.23.0 h1:YOQCtePRR/cBrxtZB5u2ueYei3zGJm1n0KB2tvth0k0=
 github.com/redis/go-redis/extra/rediscmd/v9 v9.23.0/go.mod h1:BzBb5fEjIwijUn8VVkXfQUwFTGyk2vGIVU19zv2GhsM=

@@ -67,8 +67,8 @@ require (
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/makifbaysal/tasktrooper-telemetry/sdks/go v0.1.0
-	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/nethttp v0.0.0
-	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog v0.0.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/nethttp v0.1.0
+	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog v0.1.0
 	github.com/pierrec/lz4/v4 v4.1.33 // indirect
 	github.com/power-devops/perfstat v0.0.0-20260805114148-88456608a4f6 // indirect
 	github.com/tklauser/go-sysconf v0.4.0 // indirect
@@ -92,9 +92,3 @@ require (
 )
 
 replace github.com/tasktrooper/telemetry/services/pkg => ../pkg
-
-replace github.com/makifbaysal/tasktrooper-telemetry/sdks/go => ../../sdks/go
-
-replace github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog => ../../sdks/go/integrations/slog
-
-replace github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/nethttp => ../../sdks/go/integrations/nethttp
