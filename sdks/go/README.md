@@ -63,7 +63,11 @@ Explicit fields win; then explicitly set `OTEL_*` variables; then `TROOPER_*` (c
   `exporter.traces|metrics|logs|profiles`, `processor`, `capture`, `resolver`, `profiler`, `profiler.cpu`, `llm`), lost items in `trooper.sdk.dropped`; see also
   `trooper.DroppedBatches()` / `trooper.SDKErrors()`.
 - **Resource:** `service.name/version`, `deployment.environment.name`, `telemetry.distro.name=trooper-go`, `telemetry.sdk.*`,
+  `service.instance.id` (random UUID per process start; `OTEL_RESOURCE_ATTRIBUTES` / `ResourceAttributes` override it),
   host, OS, container id, process pid/executable/runtime (no command line or owner — they may contain secrets).
+- **Heartbeat:** with metrics enabled, the gauge `trooper.sdk.heartbeat` (value 1, meter `TaskTrooper.Telemetry`, no
+  attributes) is exported every `MetricInterval`, the first time ~5 s after `Start` — the service shows up in the dashboard
+  ("SDK connected, no traffic yet") before its first request. `DisableMetrics` turns it off.
 - **Sampling:** `ParentBased(TraceIDRatioBased(SampleRate))`. Root spans write the rate into W3C tracestate as
   `tt=r:<rate>`. Entry spans (server/consumer spans without a local parent) carry `trooper.sample_rate` — taken from the
   upstream `tt=r:` when the parent is remote (that rate decided the trace), else the configured rate — so the writer can
@@ -89,7 +93,29 @@ ctx, span := trooper.StartConsumer(ctx, carrier, trooper.Message{...})   // cust
 err := trooper.ProcessMessage(ctx, carrier, msg, trooper.PanicRepanic, fn)
 ctx, span := trooper.StartProducer(ctx, carrier, trooper.Message{...})
 trooper.SetAttempt(carrier, n)          // tt-attempt header when re-publishing to a retry topic
+ctx, span := trooper.StartJob(ctx, "billing.sync", opts...)   // background job run (see below); end with EndSpan
+err := trooper.RunJob(ctx, "billing.sync", trooper.PanicRepanic, fn)
 trooper.NewSampler(rate), trooper.NewSpanProcessor(rate), trooper.NewPropagator(service) // bring-your-own TracerProvider
+```
+
+**Background jobs** (a scheduler tick, a poll that found work, a batch) are *job entries* (contracts §4): a consumer-kind
+entry span named after the job with `trooper.process` = `trooper.entry.route` = name and `trooper.entry.method=JOB`, no
+`messaging.*` attributes. The backend counts them like a consumer process (throughput, errors, duration, `job_missed`
+monitors) without showing a queue, and lists the service as a `worker`. A local span in `ctx` is not used as the parent
+(the job starts a new trace with a link to it); a remote parent (e.g. a `TRACEPARENT` handed over by another service) is
+kept. Keep names low-cardinality (ids go in attributes) and start a job only when the run does work — an idle poll should
+produce no span, otherwise the throughput is just the poll rate:
+
+```go
+for range ticker.C {
+	batch, _ := claim(ctx) // untraced poll
+	if len(batch) == 0 {
+		continue
+	}
+	_ = trooper.RunJob(ctx, "invoice.send", trooper.PanicRecover, func(ctx context.Context) error {
+		return send(ctx, batch) // DB / HTTP spans become children of the job
+	}, trace.WithAttributes(attribute.Int("invoice.count", len(batch))))
+}
 ```
 
 Panics: middlewares record the panic (exception event, status Error) and by default **re-panic** so the framework's own
