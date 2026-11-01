@@ -25,15 +25,15 @@ make infra migrate                      # repo root
 make run-writer & make run-gw &         # ingest pipeline
 cd services/integrations
 TT_INTERNAL_TOKEN=dev-internal GOWORK=off go run ./cmd/trooper-cloud     # ingest-gw needs the same TT_INTERNAL_TOKEN
-TT_CLOUD_INGEST_KEYS=1:tt_dev_ingest_key GOWORK=off go run ./cmd/trooper-cloud   # legacy: per-project ingest keys
+TT_CLOUD_INGEST_KEYS=<project-id>:<ingest-key> GOWORK=off go run ./cmd/trooper-cloud   # legacy: per-project ingest keys
 GOWORK=off go run ./cmd/trooper-cloud --once 12   # discovery + one metrics step for integration 12, then exit
-docker build -f services/integrations/Dockerfile -t trooper-cloud services/   # from the repo root
+docker build -f services/integrations/Dockerfile -t trooper-cloud .   # from the repo root
 ```
 
 | Env | Default | |
 |---|---|---|
 | `TT_POSTGRES_URL` | `postgres://trooper:trooper@localhost:5432/trooper?sslmode=disable` | integrations, secrets, discovered rows |
-| `TT_DSN` | `http://tt_dev_ingest_key@localhost:4318/1` | ingest-gw URL; its key is used for its own project |
+| `TT_DSN` | `http://localhost:4318` | ingest-gw URL; a key in it (`http://<ingest-key>@host/<project-id>`) is used for that project |
 | `TT_INTERNAL_TOKEN` | — | internal service credential shared with ingest-gw; when set, metrics go to any integration project with `x-trooper-internal` + `x-trooper-project` (see *Auth* below) |
 | `TT_CLOUD_INGEST_KEYS` | — | `projectId:ingestKey,...` — fallback key per project (used when `TT_INTERNAL_TOKEN` is unset or ingest-gw answers 401 to it), and for Vercel `createDrain` |
 | `TT_SECRETS_KEY` | dev key + warning | base64 32-byte AES key for `secret:<id>` refs (`services/pkg/secrets`) |
@@ -360,6 +360,24 @@ custom metrics). Query statistics come from trooper-agent's direct mode (`pg_sta
   signature secret stored behind `config.drainSecretRef`; or let trooper-cloud create it via `POST /v1/drains`
   with `createDrain: true` (needs `TT_PUBLIC_INGEST_URL` and the project in `TT_CLOUD_INGEST_KEYS`). Best effort:
   Vercel's drain API body may change; manual creation is the reference path.
+
+## Self telemetry (ADR-027)
+
+`internal/selftel` (contracts §27), service `tt-trooper-cloud`. Not to be confused with `TT_DSN` (where the collected
+cloud metrics go): self telemetry is enabled only by `TROOPER_DSN`.
+
+| Env | Default | |
+|---|---|---|
+| `TROOPER_DSN` | unset | self project ingest DSN (dev: the DSN `make self` prints, `http://<ingest-key>@localhost:4318/<self-project-id>`); unset = nothing is started, behaviour unchanged |
+| `TROOPER_SERVICE` | `tt-trooper-cloud` | service name override |
+| `TROOPER_ENV` | `TT_ENV`, else `development` | |
+| `TROOPER_VERSION` | `-X main.version` build value | deploy marker |
+| `TROOPER_SAMPLE_RATE`, `TROOPER_PROFILING`, `TROOPER_DEBUG` | SDK defaults | see `sdks/go/README.md` |
+
+Traced: one root span per step (`discover <provider>`, `collect <provider>`, attributes `tt.project_id`,
+`tt.integration.id`, `cloud.provider`) with the provider API calls (AWS SDK, Azure, GCP, Neon, Vercel via `httpx`) and
+pgx statements as children; slog → OTel logs. The OTLP metrics sent to ingest-gw (`internal/otlp`) are **not** traced
+(feedback loop).
 
 ## Tests
 

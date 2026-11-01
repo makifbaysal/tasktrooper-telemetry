@@ -22,11 +22,7 @@ func TestSyncFunctions(t *testing.T) {
 	s := open(t)
 	ctx := context.Background()
 	const project = 9701
-	_, _ = s.DB.Exec(ctx, `DELETE FROM projects WHERE id = $1`, project)
-	if _, err := s.DB.Exec(ctx, `INSERT INTO projects (id, org_id, name, slug) VALUES ($1, 1, 'faas-it', 'faas-it-9701')`, project); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _, _ = s.DB.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, project) })
+	fixtureProject(t, s, project, "faas-it")
 	in := model.Integration{ProjectID: project, Provider: "azure", Name: "it-azure"}
 	if err := s.DB.QueryRow(ctx, `INSERT INTO integrations (project_id, provider, name, config) VALUES ($1, 'azure', $2, '{}') RETURNING id`,
 		project, in.Name).Scan(&in.ID); err != nil {
@@ -105,11 +101,7 @@ func TestServerlessRunOnce(t *testing.T) {
 	s := open(t)
 	ctx := context.Background()
 	const project = 9701
-	_, _ = s.DB.Exec(ctx, `DELETE FROM projects WHERE id = $1`, project)
-	if _, err := s.DB.Exec(ctx, `INSERT INTO projects (id, org_id, name, slug) VALUES ($1, 1, 'faas-it', 'faas-it-9701')`, project); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _, _ = s.DB.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, project) })
+	fixtureProject(t, s, project, "faas-it")
 	ts := time.Now().UTC().Truncate(time.Minute).Add(-time.Minute)
 	awsFake := fakes.NewAWS(t, ts, func(name string, d map[string]string) (float64, bool) { return 7, d["FunctionName"] != "" })
 	defer awsFake.Close()
@@ -178,11 +170,7 @@ func TestAzureAppInsightsRows(t *testing.T) {
 	s := open(t)
 	ctx := context.Background()
 	const project = 9711
-	_, _ = s.DB.Exec(ctx, `DELETE FROM projects WHERE id = $1`, project)
-	if _, err := s.DB.Exec(ctx, `INSERT INTO projects (id, org_id, name, slug) VALUES ($1, 1, 'faas-ai-it', 'faas-ai-it-9711')`, project); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _, _ = s.DB.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, project) })
+	fixtureProject(t, s, project, "faas-ai-it")
 	ts := time.Now().UTC().Truncate(time.Minute).Add(-time.Minute)
 	azFake := fakes.NewAzure(t, ts)
 	defer azFake.Close()
