@@ -103,6 +103,12 @@ func TestDescribeCondition(t *testing.T) {
 	if got := DescribeCondition("latency", "p95", model.MonitorCondition{Threshold: 600, ForMin: 10}); got != "p95 > 600 ms for 10m" {
 		t.Error(got)
 	}
+	if got := DescribeCondition("metric_threshold", "error_rate", model.MonitorCondition{Op: ">", Threshold: 0.05, Window: "5m"}); got != "error rate over 5m > 5%" {
+		t.Error(got)
+	}
+	if got := DescribeCondition("latency", "", model.MonitorCondition{Op: ">", Threshold: 800, Window: float64(10), ForMin: 5}); got != "p95 over 10m > 800 ms for 5m" {
+		t.Error(got)
+	}
 }
 
 func TestDescribeLLMCondition(t *testing.T) {

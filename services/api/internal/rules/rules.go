@@ -240,11 +240,27 @@ func DescribeCondition(kind string, metric string, c model.MonitorCondition) str
 	case what == "":
 		what = strings.ReplaceAll(kind, "_", " ")
 	}
+	if w := windowString(c.Window); w != "" { // "error rate over 5m > 2%"
+		what += " over " + w
+	}
 	s := fmt.Sprintf("%s %s %s", what, op, val)
 	if c.ForMin > 0 {
 		s += fmt.Sprintf(" for %sm", trim(c.ForMin))
 	}
 	return s
+}
+
+// windowString renders condition.window ("5m", or minutes as a number); "" when unset.
+func windowString(w any) string {
+	switch v := w.(type) {
+	case string:
+		return v
+	case float64:
+		if v > 0 {
+			return trim(v) + "m"
+		}
+	}
+	return ""
 }
 
 // describeLLM names an llm monitor metric and its threshold: "LLM cost > $20/h", "LLM tokens in 1h > 5M".
