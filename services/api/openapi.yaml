@@ -93,7 +93,7 @@ paths:
     get:
       tags: [APM]
       operationId: getOverviewSeries
-      summary: 'Project-wide RED series (rpm, errorRate, p50/p95/p99, s2xx..s5xx)'
+      summary: 'Project-wide RED series (rpm, errorRate, avg, p50/p95/p99, s2xx..s5xx)'
       parameters:
         - $ref: '#/components/parameters/range'
         - $ref: '#/components/parameters/env'
@@ -2452,6 +2452,24 @@ paths:
         '403': { $ref: '#/components/responses/E403' }
         '500': { $ref: '#/components/responses/E500' }
         '501': { description: Not configured, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /api/v1/integrations/slack/test:
+    post:
+      tags: [ChatOps]
+      operationId: postIntegrationsSlackTest
+      summary: 'Post a test message to one channel (admin+); 502 carries a readable Slack error (bot not invited, token revoked, ...)'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [channel], properties: { channel: { type: string, description: 'Channel id (C… / G…); a leading # is ignored' } } } } }
+      responses:
+        '200':
+          description: Sent
+          content: { application/json: { schema: { type: object, properties: { ok: { type: boolean }, channel: { type: string } } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '409': { description: Slack not connected, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '501': { description: Not configured, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '502': { description: Slack rejected the message, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
   /api/v1/integrations/slack/callback:
     get:
       tags: [ChatOps]

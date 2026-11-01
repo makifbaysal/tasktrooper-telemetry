@@ -3,7 +3,7 @@
  * Targets are stored as `slack:<channel_id>#<channel_name>`; other targets (pagerduty:, email:, webhook URLs,
  * legacy `#channel` / `slack:https://hooks…`) stay free text.
  */
-import { API_URL, mutate, qs, remote } from './remote';
+import { API_URL, ApiError, api, mutate, qs, remote } from './remote';
 
 export interface SlackWorkspace { teamId: string; teamName: string; connectedAt?: number }
 export interface SlackChannel { id: string; name: string; isPrivate: boolean; isMember: boolean }
@@ -28,8 +28,25 @@ export function slackInstallUrl(redirect = window.location.href): string {
   return `${API_URL}/api/v1/integrations/slack/install${qs({ redirect })}`;
 }
 
-export function connectSlack() {
-  window.location.href = slackInstallUrl();
+/**
+ * Ask the api for the Slack authorize URL first, so a server without the Slack App shows a readable message
+ * instead of a raw JSON error page. Rejects with that message.
+ */
+export async function connectSlack(redirect = window.location.href): Promise<void> {
+  try {
+    const { url } = await api<{ url: string }>(`/integrations/slack/install-url${qs({ redirect })}`, { method: 'POST' });
+    window.location.href = url;
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 501) {
+      throw new Error('Slack isn’t set up on this server yet: the operator has to register a Slack App and set TT_SLACK_CLIENT_ID, TT_SLACK_CLIENT_SECRET and TT_SLACK_SIGNING_SECRET on the api.');
+    }
+    throw e;
+  }
+}
+
+/** Posts a test message to one channel; rejects with Slack's reason in plain words (bot not invited, token revoked, ...). */
+export async function testSlack(channelId: string): Promise<void> {
+  await api('/integrations/slack/test', { method: 'POST', body: JSON.stringify({ channel: channelId }) });
 }
 
 export async function disconnectSlack(): Promise<void> {

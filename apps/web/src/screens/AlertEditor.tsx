@@ -28,6 +28,11 @@ const KINDS: { id: Kind; label: string; desc: string; Icon: typeof Activity }[] 
   { id: 'faas', label: 'Serverless function', desc: 'Lambda / Azure Functions errors, throttles, duration', Icon: SquareFunction },
   { id: 'llm', label: 'AI / LLM', desc: 'LLM cost, tokens, errors and latency per model', Icon: BotMessageSquare },
 ];
+const SEVERITY_HINT: Record<string, string> = {
+  critical: 'Needs someone now: user-facing breakage or data loss.',
+  warning: 'Look at it today: degraded, not broken yet.',
+  info: 'For the record: shows in Incidents, rarely worth a page.',
+};
 /** Kinds the editor can save to the api (log_match: YAML only for now; consumer_lag: lag editor). */
 const SAVABLE = new Set<Kind>(['metric_threshold', 'anomaly', 'composite', 'job_missed', 'error_new', 'infra', 'faas', 'llm']);
 
@@ -205,6 +210,7 @@ export function AlertEditor() {
     return '90';
   });
 
+  const [picking, setPicking] = useState(!editing && !params.get('kind'));
   const [yaml, setYaml] = useState(false);
   const [lagOpen, setLagOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -359,6 +365,40 @@ export function AlertEditor() {
 
   const togglePick = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
   const title = managed ? editing!.name : editing ? `Edit ${editing.name}` : 'New monitor';
+  const kindMeta = KINDS.find((k) => k.id === kind)!;
+  // step numbers follow the cards actually rendered for the kind
+  let stepNo = 0;
+  const step = () => ++stepNo;
+  const forLabel = (m: string) => (Number(m) ? `${m} minutes` : 'one check');
+  const summary = summaryOf();
+
+  /** The rule in one plain sentence (right column, above the preview). */
+  function summaryOf(): ReactNode {
+    const b = (s: ReactNode) => <strong>{s}</strong>;
+    const opWord = (lt: boolean) => (lt ? 'below' : 'above');
+    const scope = <>{b(svcLabel)}{ep ? <> · {b(`${ep.method} ${ep.route}`)}</> : ' (all endpoints)'}</>;
+    const metricLabel = METRICS.find((m) => m.value === metric)!.label.toLowerCase();
+    switch (kind) {
+      case 'metric_threshold':
+        return <>Fires when the {b(metricLabel)} of {scope} stays {b(`${opWord(below)} ${metric === 'error_rate' ? `${threshold}%` : `${threshold} ${unitOf(metric)}`}`)} for {b(forLabel(forMin))}. Quiet when there are fewer than {minReq || 0} requests.</>;
+      case 'anomaly':
+        return <>Fires when the {b(metricLabel)} of {scope} moves {b(direction === 'both' ? 'away from' : direction === 'up' ? 'above' : 'below')} its usual level (last {baseline}) by more than {b(`${z}σ`)} for {b(forLabel(forMin))}.</>;
+      case 'composite':
+        return picked.length < 2 ? <>Pick at least two monitors below.</> : <>Fires when {b(compOp === 'and' ? `all ${picked.length}` : `any of ${picked.length}`)} picked monitors are firing{Number(forMin) ? <> for {b(forLabel(forMin))}</> : null}.</>;
+      case 'job_missed':
+        return <>Fires when {b(process || 'the job')} on {b(svcLabel)} hasn’t reported a success for {b(`${every + grace} minutes`)} (expected every {every} min + {grace} min grace).</>;
+      case 'error_new':
+        return <>Fires on the first event of an {b('error never seen before')} in {b(errScope === '*' ? 'any service' : services.find((s) => s.id === errScope)?.name ?? errScope)}.</>;
+      case 'infra':
+        return <>Fires when the {b(`${agg === 'max' ? 'worst' : 'average'} ${INFRA_METRIC_LABEL[infraMetric].toLowerCase()}`)} of {b(`${INFRA_ENTITIES.find((e) => e.value === entity)!.label.toLowerCase()}s`)}{fService ? <> of {b(svcLabel)}</> : null} stays {b(`${opWord(op === '<')} ${ruleLabel}`)} for {b(forLabel(forMin))}.</>;
+      case 'faas':
+        return <>Fires when the {b(FAAS_METRICS.find((m) => m.value === faasMetric)!.label.toLowerCase())} of {b(fnId !== '*' && fn ? fn.name : 'matching functions')} stays {b(`${opWord(op === '<')} ${ruleLabel}`)} for {b(forLabel(forMin))}.</>;
+      case 'llm':
+        return <>Fires when the {b(llmMeta(llmMetric).label.toLowerCase())} of LLM calls{lService ? <> in {b(lService)}</> : null}{lModel ? <> on {b(lModel)}</> : null} over {b(LLM_WINDOWS.find((w) => w.value === llmWindow)?.label ?? llmWindow)} is {b(`${opWord(op === '<')} ${llmThLabel}`)}{Number(forMin) ? <> for {b(forLabel(forMin))}</> : null}.</>;
+      default:
+        return null;
+    }
+  }
 
   return (
     <>
@@ -383,18 +423,28 @@ export function AlertEditor() {
       <fieldset disabled={readOnly} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 420px) minmax(0, 1fr)', gap: 'var(--space-4)', alignItems: 'start' }}>
         <div className="stack">
-          <Card title="1 · Type">
-            <div className="stack" style={{ gap: 'var(--space-1)' }}>
-              {KINDS.map((k) => (
-                <button key={k.id} type="button" onClick={() => setKind(k.id)} className="card card--interactive" aria-pressed={kind === k.id}
-                  style={{ flexDirection: 'row', gap: 'var(--space-3)', padding: 'var(--space-3)', alignItems: 'center', textAlign: 'left', borderColor: kind === k.id ? 'var(--accent)' : undefined, boxShadow: kind === k.id ? '0 0 0 1px var(--accent)' : undefined }}>
-                  <k.Icon size={18} color={kind === k.id ? 'var(--accent)' : 'var(--text-muted)'} />
-                  <div><div style={{ fontWeight: 'var(--weight-medium)' }}>{k.label}</div><div className="muted" style={{ fontSize: 'var(--text-sm)' }}>{k.desc}</div></div>
-                </button>
-              ))}
-            </div>
-          </Card>
+          {picking ? (
+            <Card title={`${step()} · What kind of alert?`} subtitle="Pick what should trigger it. You can change it later.">
+              <div className="kind-grid">
+                {KINDS.map((k) => (
+                  <button key={k.id} type="button" onClick={() => { setKind(k.id); setPicking(false); }} className="kind-tile" aria-pressed={kind === k.id}>
+                    <k.Icon size={18} aria-hidden />
+                    <span className="kind-tile__label">{k.label}</span>
+                    <span className="kind-tile__desc">{k.desc}</span>
+                  </button>
+                ))}
+              </div>
+            </Card>
+          ) : (
+            <Card title={`${step()} · Kind`} actions={!readOnly && !editing && <Button size="sm" onClick={() => setPicking(true)}>Change</Button>}>
+              <div className="row" style={{ gap: 'var(--space-3)' }}>
+                <kindMeta.Icon size={18} color="var(--accent)" aria-hidden />
+                <div><div style={{ fontWeight: 'var(--weight-medium)' }}>{kindMeta.label}</div><div className="muted" style={{ fontSize: 'var(--text-sm)' }}>{kindMeta.desc}</div></div>
+              </div>
+            </Card>
+          )}
 
+          {!picking && <>
           {kind === 'consumer_lag' && (
             <Card title="Consumer lag is defined on the consumer group">
               <p className="secondary" style={{ marginTop: 0 }}>Lag comes from the broker (Kafka, RabbitMQ, SQS, Pub/Sub), per consumer group and topic. The lag alert editor picks the group, offers lag, time behind, oldest message, hot partition, growing-lag and rebalance conditions, and replays the last 24 hours.</p>
@@ -410,19 +460,18 @@ export function AlertEditor() {
           )}
 
           {(kind === 'metric_threshold' || kind === 'anomaly') && (
-            <Card title="2 · Scope">
+            <Card title={`${step()} · What to watch`}>
               <div className="stack" style={{ gap: 'var(--space-3)' }}>
                 <Field label="Service"><Select value={service} onChange={(e) => { setService(e.target.value); setEndpoint('*'); }} options={backend.map((s) => ({ value: s.id, label: s.name }))} /></Field>
                 <Field label="Endpoint"><Select value={ep ? endpoint : '*'} onChange={(e) => setEndpoint(e.target.value)}
                   options={[{ value: '*', label: 'All endpoints' }, ...eps.map((e) => ({ value: `${e.method} ${e.route}`, label: `${e.method} ${e.route}` }))]} /></Field>
                 <Field label="Metric"><Select value={metric} onChange={(e) => { const m = e.target.value as Metric; setMetric(m); setThreshold(m === 'error_rate' ? '2' : m === 'p95' ? '600' : '100'); if (kind === 'anomaly') setDirection(m === 'rpm' ? 'down' : 'up'); }} options={METRICS} /></Field>
-                <Field label="Name"><Input value={name} placeholder={finalName} onChange={(e) => setName(e.target.value)} /></Field>
               </div>
             </Card>
           )}
 
           {kind === 'metric_threshold' && (
-            <Card title="3 · Condition">
+            <Card title={`${step()} · When to alert`}>
               <div className="stack" style={{ gap: 'var(--space-3)' }}>
                 <div className="grid grid-2" style={{ gap: 'var(--space-2)' }}>
                   <Field label={`${below ? 'Below' : 'Above'} (${unitOf(metric)})`}><Input mono value={threshold} onChange={(e) => setThreshold(e.target.value)} inputMode="decimal" /></Field>
@@ -434,7 +483,7 @@ export function AlertEditor() {
           )}
 
           {kind === 'anomaly' && (
-            <Card title="3 · Sensitivity">
+            <Card title={`${step()} · When to alert`}>
               <div className="stack" style={{ gap: 'var(--space-3)' }}>
                 <Field label="Sensitivity" hint="How far from the seasonal baseline, in standard deviations (z), counts as anomalous.">
                   <div className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}>
@@ -457,7 +506,7 @@ export function AlertEditor() {
           )}
 
           {kind === 'composite' && (
-            <Card title="2 · Monitors" subtitle="Fires only on the combination — use it to cut noise from correlated alerts.">
+            <Card title={`${step()} · Which monitors`} subtitle="Fires only on the combination — use it to cut noise from correlated alerts.">
               <div className="stack" style={{ gap: 'var(--space-3)' }}>
                 <Field label="Fire when"><Segmented label="Operator" value={compOp} onChange={setCompOp}
                   options={[{ id: 'and', label: 'All are firing (AND)' }, { id: 'or', label: 'Any is firing (OR)' }]} /></Field>
@@ -474,14 +523,13 @@ export function AlertEditor() {
                   ))}
                   {candidates.length + otherMonitors.length === 0 && <div className="pick-list__row muted">No other monitors yet.</div>}
                 </div>
-                <Field label="Name"><Input value={name} placeholder={finalName} onChange={(e) => setName(e.target.value)} /></Field>
                 <ForField value={forMin} onChange={setForMin} label="Held for" />
               </div>
             </Card>
           )}
 
           {kind === 'job_missed' && (
-            <Card title="2 · Job">
+            <Card title={`${step()} · Which job`}>
               <div className="stack" style={{ gap: 'var(--space-3)' }}>
                 <Field label="Service"><Select value={service} onChange={(e) => { setService(e.target.value); setProcess(''); }} options={backend.map((s) => ({ value: s.id, label: s.name }))} /></Field>
                 <Field label="Process or route" hint="The cron job, worker process or heartbeat route that must report a success.">
@@ -499,25 +547,23 @@ export function AlertEditor() {
                   </Field>
                   <Field label="Grace (min)" hint="Late runs inside the grace don’t alert."><Input mono value={graceMin} onChange={(e) => setGraceMin(e.target.value)} inputMode="numeric" /></Field>
                 </div>
-                <Field label="Name"><Input value={name} placeholder={finalName} onChange={(e) => setName(e.target.value)} /></Field>
               </div>
             </Card>
           )}
 
           {kind === 'error_new' && (
-            <Card title="2 · Scope">
+            <Card title={`${step()} · What to watch`}>
               <div className="stack" style={{ gap: 'var(--space-3)' }}>
                 <Field label="Service" hint="Errors are grouped by fingerprint (type + top frames); the first event of an unseen group alerts.">
                   <Select value={errScope} onChange={(e) => setErrScope(e.target.value)}
                     options={[{ value: '*', label: 'All services' }, ...services.map((s) => ({ value: s.id, label: s.name }))]} />
                 </Field>
-                <Field label="Name"><Input value={name} placeholder={finalName} onChange={(e) => setName(e.target.value)} /></Field>
               </div>
             </Card>
           )}
 
           {kind === 'infra' && (
-            <Card title="2 · Scope" subtitle="The worst matching entity decides; the incident lists the worst five.">
+            <Card title={`${step()} · What to watch`} subtitle="The worst matching entity decides; the incident lists the worst five.">
               <div className="stack" style={{ gap: 'var(--space-3)' }}>
                 {templates.length > 0 && (
                   <Field label="Template" hint={templates.find((t) => t.id === templateId)?.description}>
@@ -544,13 +590,12 @@ export function AlertEditor() {
                     <Field label="Workload"><Input mono value={fWorkload} placeholder="any" onChange={(e) => setFWorkload(e.target.value)} /></Field>
                   </div>
                 )}
-                <Field label="Name"><Input value={name} placeholder={finalName} onChange={(e) => setName(e.target.value)} /></Field>
               </div>
             </Card>
           )}
 
           {kind === 'faas' && (
-            <Card title="2 · Scope">
+            <Card title={`${step()} · What to watch`}>
               <div className="stack" style={{ gap: 'var(--space-3)' }}>
                 {templates.length > 0 && (
                   <Field label="Template" hint={templates.find((t) => t.id === templateId)?.description}>
@@ -569,13 +614,12 @@ export function AlertEditor() {
                   </div>
                 )}
                 <Field label="Metric"><Select value={faasMetric} onChange={(e) => { const m = e.target.value as FaasMetric; setFaasMetric(m); setRelTimeout(false); setRuleTh(m === 'error_rate' ? '5' : isDuration(m) ? String(Math.round((fn?.timeoutS ?? 30) * 800)) : '0'); }} options={FAAS_METRICS} /></Field>
-                <Field label="Name"><Input value={name} placeholder={finalName} onChange={(e) => setName(e.target.value)} /></Field>
               </div>
             </Card>
           )}
 
           {(kind === 'infra' || kind === 'faas') && (
-            <Card title="3 · Condition">
+            <Card title={`${step()} · When to alert`}>
               <div className="stack" style={{ gap: 'var(--space-3)' }}>
                 <div className="grid grid-2" style={{ gap: 'var(--space-2)' }}>
                   <Field label={`Value (${ruleUnit})`}>
@@ -602,7 +646,7 @@ export function AlertEditor() {
           )}
 
           {kind === 'llm' && (
-            <Card title="2 · Scope" subtitle="LLM calls reported as OpenTelemetry GenAI spans. Leave a filter on “Any” to cover everything.">
+            <Card title={`${step()} · What to watch`} subtitle="LLM calls reported as OpenTelemetry GenAI spans. Leave a filter on “Any” to cover everything.">
               <div className="stack" style={{ gap: 'var(--space-3)' }}>
                 {templates.length > 0 && (
                   <Field label="Template" hint={templates.find((t) => t.id === templateId)?.description}>
@@ -630,13 +674,12 @@ export function AlertEditor() {
                   <Select value={llmMetric} onChange={(e) => { const m = e.target.value as LlmMetric; setLlmMetric(m); setLlmTh(LLM_DEFAULT_TH[m]); setLlmWindow(LLM_DEFAULT_WINDOW(m)); }}
                     options={LLM_METRICS.map((m) => ({ value: m.value, label: `${m.label} · ${m.unit}` }))} />
                 </Field>
-                <Field label="Name"><Input value={name} placeholder={finalName} onChange={(e) => setName(e.target.value)} /></Field>
               </div>
             </Card>
           )}
 
           {kind === 'llm' && (
-            <Card title="3 · Condition">
+            <Card title={`${step()} · When to alert`}>
               <div className="stack" style={{ gap: 'var(--space-3)' }}>
                 <Field label={`Value (${llmUnit})`}>
                   <div className="row" style={{ gap: 'var(--space-1)' }}>
@@ -658,18 +701,35 @@ export function AlertEditor() {
           )}
 
           {kind !== 'consumer_lag' && (
-            <Card title={kind === 'metric_threshold' || kind === 'anomaly' || kind === 'infra' || kind === 'faas' || kind === 'llm' ? '4 · Notify' : '3 · Notify'}>
+            <Card title={`${step()} · Name and notify`}>
               <div className="stack" style={{ gap: 'var(--space-3)' }}>
-                <Field label="Severity"><Select value={severity} onChange={(e) => setSeverity(e.target.value)} options={[{ value: 'critical', label: 'Critical' }, { value: 'warning', label: 'Warning' }, { value: 'info', label: 'Info' }]} /></Field>
-                <div className="field"><span className="field__label">Notify</span><NotifyPicker value={channels} onChange={setChannels} disabled={readOnly} /></div>
+                <Field label="Name" hint="Leave empty to use the suggested name."><Input value={name} placeholder={finalName} onChange={(e) => setName(e.target.value)} /></Field>
+                <Field label="Severity" hint={SEVERITY_HINT[severity]}>
+                  <Segmented label="Severity" value={severity} onChange={setSeverity}
+                    options={[{ id: 'critical', label: 'Critical' }, { id: 'warning', label: 'Warning' }, { id: 'info', label: 'Info' }]} />
+                </Field>
+                <div className="field"><span className="field__label">Send to</span><NotifyPicker value={channels} onChange={setChannels} disabled={readOnly} /></div>
                 <Field label="Remind while firing" hint="Notify the channels again until someone acknowledges."><Select value={renotify} onChange={(e) => setRenotify(e.target.value)}
                   options={[{ value: '0', label: 'Only once' }, { value: '30', label: 'Every 30 minutes' }, { value: '60', label: 'Every hour' }, { value: '240', label: 'Every 4 hours' }]} /></Field>
               </div>
             </Card>
           )}
+          </>}
         </div>
 
         <div className="stack" style={{ position: 'sticky', top: 'calc(var(--topbar-h) + var(--space-4))' }}>
+          {picking && <KindGuide />}
+          {!picking && summary && (
+            <Card title="This monitor">
+              <p className="rule-summary">{summary}</p>
+              <p className="rule-summary rule-summary--then">
+                Then it opens a <strong>{severity}</strong> incident and {channels.length
+                  ? <>notifies <strong>{channels.length} channel{channels.length === 1 ? '' : 's'}</strong>{Number(renotify) ? <>, reminding every {Number(renotify) >= 60 ? `${Number(renotify) / 60} h` : `${renotify} min`} until acknowledged</> : null}.</>
+                  : <>notifies <strong>nobody</strong> yet: add a channel in step {stepNo} or it only shows in Incidents.</>}
+              </p>
+            </Card>
+          )}
+          {!picking && <>
           {kind === 'metric_threshold' && <ThresholdPreview body={body!} metric={metric} below={below} thValue={thValue} thLabel={metric === 'error_rate' ? `${threshold}%` : `${threshold} ${unitOf(metric)}`} />}
           {kind === 'anomaly' && <AnomalyPreview body={body!} z={zValue} direction={direction} />}
           {kind === 'composite' && <CompositePreview picked={monitors.filter((m) => picked.includes(m.id))} op={compOp} />}
@@ -680,6 +740,7 @@ export function AlertEditor() {
             format={kind === 'infra' ? (INFRA_RATIO.has(infraMetric) ? (v: number) => pct(v, 0) : (v: number) => compact(v)) : relative ? (v: number) => `${v.toFixed(2)}×` : faasFmt(faasMetric)} />}
           {kind === 'llm' && <RulePreview body={body!} threshold={llmValue} below={op === '<'} thLabel={llmThLabel}
             label={llmMeta(llmMetric).label} format={llmFmt(llmMetric)} cap={llmMetric === 'error_rate' ? 1 : undefined} />}
+          </>}
         </div>
       </div>
       </fieldset>
@@ -687,10 +748,10 @@ export function AlertEditor() {
   );
 }
 
-function ForField({ value, onChange, label = 'For' }: { value: string; onChange: (v: string) => void; label?: string }) {
+function ForField({ value, onChange, label = 'Must last' }: { value: string; onChange: (v: string) => void; label?: string }) {
   return (
     <Field label={label}><Select value={value} onChange={(e) => onChange(e.target.value)}
-      options={[{ value: '0', label: 'Immediately' }, { value: '5', label: '5 minutes' }, { value: '10', label: '10 minutes' }, { value: '15', label: '15 minutes' }]} /></Field>
+      options={[{ value: '0', label: 'No wait, first check' }, { value: '5', label: '5 minutes' }, { value: '10', label: '10 minutes' }, { value: '15', label: '15 minutes' }]} /></Field>
   );
 }
 
@@ -812,5 +873,24 @@ function RulePreview({ body, threshold, below, thLabel, label, format, cap }: {
       <TimeSeries timestamps={ts} height={280} area format={format} threshold={{ value: th, label: thLabel }}
         series={[{ id: 'v', label, slot: 1, data }]} />
     </PreviewCard>
+  );
+}
+
+/** Right column while picking a kind: which kind fits which question. */
+function KindGuide() {
+  const rows: [string, string][] = [
+    ['“Errors went above 2%”, “p95 is over 600 ms”', 'Metric threshold'],
+    ['“Traffic dropped compared to a normal Tuesday”', 'Anomaly'],
+    ['“Something crashed in a way we have never seen”', 'New error'],
+    ['“The nightly invoice job didn’t run”', 'Missed job'],
+    ['“Disk of a host is almost full”', 'Infrastructure'],
+    ['“Alert only when both checkout and payments are failing”', 'Composite'],
+  ];
+  return (
+    <Card title="Which one do I need?">
+      <dl className="kind-guide">
+        {rows.map(([q, k]) => <div key={k}><dt>{q}</dt><dd>{k}</dd></div>)}
+      </dl>
+    </Card>
   );
 }

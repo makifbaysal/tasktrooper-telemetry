@@ -87,3 +87,30 @@
   .services-attention__row { grid-template-columns: auto minmax(0, 1fr) auto; }
   .services-attention__row > span:nth-of-type(2) { grid-column: 2; }
 }
+
+/* ---------- Alert editor: kind picker, rule summary ---------- */
+.kind-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }
+.kind-tile {
+  display: grid; grid-template-columns: auto 1fr; column-gap: var(--space-2); row-gap: var(--space-1); align-items: center;
+  padding: var(--space-3); text-align: left; font: inherit; color: var(--text-primary); cursor: pointer;
+  background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-md);
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.kind-tile svg { color: var(--text-muted); }
+.kind-tile:hover { border-color: var(--border-strong); background: var(--bg-hover); }
+.kind-tile:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.kind-tile[aria-pressed='true'] { border-color: var(--accent); background: var(--accent-soft); }
+.kind-tile[aria-pressed='true'] svg { color: var(--accent); }
+.kind-tile__label { font-weight: var(--weight-medium); }
+.kind-tile__desc { grid-column: 1 / -1; font-size: var(--text-sm); color: var(--text-muted); line-height: 1.4; }
+@media (max-width: 640px) { .kind-grid { grid-template-columns: minmax(0, 1fr); } }
+
+.rule-summary { margin: 0; color: var(--text-secondary); line-height: 1.6; text-wrap: pretty; }
+.rule-summary strong { color: var(--text-primary); font-weight: var(--weight-medium); }
+.rule-summary--then { margin-top: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--divider); }
+
+.kind-guide { margin: 0; display: flex; flex-direction: column; }
+.kind-guide > div { display: flex; justify-content: space-between; gap: var(--space-4); padding: var(--space-2) 0; border-bottom: 1px solid var(--divider); }
+.kind-guide > div:last-child { border-bottom: 0; }
+.kind-guide dt { color: var(--text-secondary); }
+.kind-guide dd { margin: 0; font-weight: var(--weight-medium); white-space: nowrap; }

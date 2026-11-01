@@ -111,13 +111,13 @@ export function endpointErrorSeries(ep: Endpoint, range: TimeRange): number[] {
   return A.pick(A.seriesSet(`${A.epPath(ep.serviceId, ep.id)}/series${A.rangeQs(range)}`, range), 'errorRate', zeros(range).length);
 }
 
-export type RedSeriesId = 'rpm' | 'errorRate' | 'p50' | 'p95' | 'p99' | 's2xx' | 's3xx' | 's4xx' | 's5xx';
+export type RedSeriesId = 'rpm' | 'errorRate' | 'avg' | 'p50' | 'p95' | 'p99' | 's2xx' | 's3xx' | 's4xx' | 's5xx';
 /**
  * Full RED series (traffic, error rate, latency percentiles, status classes) of the project (no args), a service
  * or one endpoint. Consumers' endpoint series also carry `retried` / `dlq` (returned under s4xx / s5xx = 0).
  */
 export function redSeries(range: TimeRange, serviceId?: string, endpointId?: string): Record<RedSeriesId, number[]> {
-  const ids: RedSeriesId[] = ['rpm', 'errorRate', 'p50', 'p95', 'p99', 's2xx', 's3xx', 's4xx', 's5xx'];
+  const ids: RedSeriesId[] = ['rpm', 'errorRate', 'avg', 'p50', 'p95', 'p99', 's2xx', 's3xx', 's4xx', 's5xx'];
   const path = serviceId ? `${scopePath({ serviceId, endpointId })}/series` : '/overview/series';
   const set = A.seriesSet(`${path}${A.rangeQs(range)}`, range);
   return Object.fromEntries(ids.map((id) => [id, A.pick(set, id, zeros(range).length)])) as Record<RedSeriesId, number[]>;

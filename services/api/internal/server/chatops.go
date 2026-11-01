@@ -157,6 +157,7 @@ func (s *Server) chatOpsRoutes(r chi.Router) {
 				writeJSON(w, http.StatusOK, map[string]string{"url": u})
 			}
 		})
+		r.Post("/integrations/slack/test", s.slackTest)
 		r.Delete("/integrations/slack", func(w http.ResponseWriter, r *http.Request) {
 			org := principalOf(r.Context()).OrgID
 			err := s.Store.DeleteSlackInstall(r.Context(), org)
@@ -533,4 +534,60 @@ func (s *Server) slackAction(ctx context.Context, in slackInteraction) string {
 		return "Acknowledged by " + email + "."
 	}
 	return "Muted for 1 hour by " + email + "."
+}
+
+// slackTest posts a test message to one channel (admin+), so a setup can be checked without waiting for an alert.
+func (s *Server) slackTest(w http.ResponseWriter, r *http.Request) {
+	if s.Slack == nil {
+		notConfigured(w, "the Slack App (TT_SLACK_CLIENT_ID)")
+		return
+	}
+	var in struct {
+		Channel string `json:"channel"`
+	}
+	if err := decode(r, &in); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	channel := strings.TrimPrefix(strings.TrimSpace(in.Channel), "#")
+	if channel == "" {
+		s.fail(w, r, store.Invalid("channel is required"))
+		return
+	}
+	inst, err := s.Store.SlackInstallOf(r.Context(), principalOf(r.Context()).OrgID)
+	if errors.Is(err, store.ErrNotFound) {
+		s.fail(w, r, store.Conflict("Slack is not connected: install the Slack App first"))
+		return
+	}
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	text := ":white_check_mark: TaskTrooper test message. Alerts that target this channel will post here."
+	if err := s.Slack.API.PostMessage(r.Context(), inst.Token, channel, text); err != nil {
+		writeJSON(w, http.StatusBadGateway, apiError{Error: slackTestError(err)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": channel})
+}
+
+// slackTestError turns Slack's error codes into a next step for the person testing.
+func slackTestError(err error) string {
+	var ae *slack.APIError
+	if !errors.As(err, &ae) {
+		return "Slack: " + err.Error()
+	}
+	switch ae.Code {
+	case "not_in_channel":
+		return "The bot isn't a member of this private channel: invite it there with /invite and try again."
+	case "channel_not_found":
+		return "Slack can't find this channel: pick one from the list (private channels need the bot invited first)."
+	case "is_archived":
+		return "This channel is archived."
+	case "missing_scope", "invalid_auth", "token_revoked", "account_inactive":
+		return "Slack rejected the bot token (" + ae.Code + "): disconnect and connect Slack again."
+	case "ratelimited":
+		return "Slack is rate limiting the bot: try again in a minute."
+	}
+	return "Slack: " + ae.Code
 }

@@ -37,6 +37,10 @@ jobs:
         env:
           # DSN of the TaskTrooper project created in the dashboard; empty = self-observability off (ADR-027)
           TROOPER_DSN: ${{ secrets.DEMO_TROOPER_DSN }}
+          # Slack App (ADR-017); empty = Slack endpoints answer 501. Setup: deploy/demo/README.md
+          TT_SLACK_CLIENT_ID: ${{ secrets.DEMO_SLACK_CLIENT_ID }}
+          TT_SLACK_CLIENT_SECRET: ${{ secrets.DEMO_SLACK_CLIENT_SECRET }}
+          TT_SLACK_SIGNING_SECRET: ${{ secrets.DEMO_SLACK_SIGNING_SECRET }}
         run: deploy/demo/deploy.sh
 
       - name: Remove deploy/.env

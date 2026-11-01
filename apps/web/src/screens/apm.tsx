@@ -191,19 +191,19 @@ export type Latency = Record<LatencyStat, number>;
 
 /** Fixed order + slot per statistic, so p95 is the same color on every latency chart. */
 export const LATENCY_STATS: { id: LatencyStat; slot: number }[] = [
-  { id: 'p50', slot: 3 },
-  { id: 'avg', slot: 2 },
-  { id: 'p95', slot: 1 },
-  { id: 'p99', slot: 7 },
+  { id: 'p50', slot: 3 }, // aqua
+  { id: 'avg', slot: 2 }, // orange
+  { id: 'p95', slot: 1 }, // blue
+  { id: 'p99', slot: 5 }, // magenta: violet (7) reads as a second blue next to p95
 ];
 
 /**
- * Latency lines (p50 / p95 / p99) of the project (no serviceId), a service or an endpoint from `redSeries`
- * (avg isn't served per bucket).
+ * Latency lines (p50 / avg / p95 / p99) of the project (no serviceId), a service or an endpoint from `redSeries`.
+ * avg is left out when the source has none (web / mobile apps: load time has percentiles only).
  */
 export function latencySeriesFor(range: TimeRange, serviceId?: string, endpointId?: string): Series[] {
   const red = redSeries(range, serviceId, endpointId);
-  return LATENCY_STATS.filter((s) => s.id !== 'avg').map((s) => ({ id: s.id, label: s.id, slot: s.slot, data: red[s.id as 'p50' | 'p95' | 'p99'] }));
+  return LATENCY_STATS.map((s) => ({ id: s.id, label: s.id, slot: s.slot, data: red[s.id] })).filter((s) => s.id !== 'avg' || s.data.some((v) => v > 0));
 }
 
 /** Status-class columns from `redSeries` (s2xx/s3xx/s4xx/s5xx; consumers: processed / retried / failed). */
