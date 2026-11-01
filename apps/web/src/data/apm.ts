@@ -4,7 +4,7 @@
  */
 import type {
   Caller, CallerTraffic, Dependency, Endpoint, EndpointCall, Incident, InventoryItem, LoadTestRun, LoadTestScenario, LogLine, Monitor,
-  RumPage, Repo, Service, Session, Suggestion, TimeBreakdown, TimeCategory, TimeRange,
+  RumPage, Repo, Service, ServiceMap, Session, Suggestion, TimeBreakdown, TimeCategory, TimeRange,
 } from './types';
 import { hydrateList, registerHydrator, remote, seg } from './remote';
 import * as A from './api/apm';
@@ -215,3 +215,12 @@ registerHydrator(() => hydrateList(services, `/services${H1()}`, A.mapServices))
 /** Deployment environments the project reported (`GET /environments`), for the topbar env picker. */
 export const environments: string[] = [];
 registerHydrator(() => hydrateList(environments, '/environments', (raw: string[] | null) => raw ?? []));
+
+// ---------- service map ----------
+/** Whole-system graph for the range (null until the api answers). */
+export function serviceMap(range: TimeRange): ServiceMap | null {
+  return remote<ServiceMap | null>(`/service-map${A.rangeQs(range)}`, null, (raw: ServiceMap | null) => ({
+    nodes: raw?.nodes ?? [],
+    edges: raw?.edges ?? [],
+  }));
+}

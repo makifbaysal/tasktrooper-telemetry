@@ -1,4 +1,5 @@
 import { Navigate, createBrowserRouter, useSearchParams } from 'react-router';
+import { ServiceMapScreen } from '@/screens/ServiceMapScreen';
 import { AppShell } from './components/layout/AppShell';
 import { safeNext } from './publicRouter';
 import { Overview } from './screens/Overview';
@@ -41,6 +42,7 @@ export const router = createBrowserRouter([
     children: [
       { path: '/', element: <Overview /> },
       { path: '/services', element: <Services /> },
+      { path: '/service-map', element: <ServiceMapScreen /> },
       { path: '/services/:serviceId', element: <ServiceDetail /> },
       { path: '/services/:serviceId/endpoints/:endpointId', element: <EndpointDetail /> },
       { path: '/traces/:traceId', element: <TraceDetail /> },

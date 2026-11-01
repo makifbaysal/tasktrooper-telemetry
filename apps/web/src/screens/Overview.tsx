@@ -3,12 +3,12 @@ import { useNavigate } from 'react-router';
 import { Activity, ArrowRight, Sparkles } from 'lucide-react';
 import { TimeSeries } from '@/components/charts';
 import {
-  Badge, Button, Card, ConnectSdk, Drawer, DrawerSection, KeyValues, Select, Meter, MetricCard, Section, StatusBadge, Table, useDrawer,
+  Badge, Button, Card, ConnectSdk, Drawer, DrawerSection, KeyValues, Select, Meter, Section, StatusBadge, Table, useDrawer,
 } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
 import {
-  deployMarkers, endpointsFor, incidents, inventory, kpiSeries, kpis, monitors, redSeries, serviceErrorSeries, services, suggestions, timestamps,
-  type Endpoint, type Incident,
+  DEPLOY_SOURCE_LABEL, deployMarkers, endpointsFor, incidents, inventory, kpiSeries, kpis, monitors, redSeries, serviceErrorSeries, serviceMap,
+  services, timestamps, worst, type Endpoint, type Health, type Incident, type Service, type TimeRange,
 } from '@/data';
 import { ago, compact, ms, pct } from '@/lib/format';
 import { ErrorCell } from './apm';
@@ -32,16 +32,12 @@ export function Overview() {
   const ts = timestamps(range);
   const backend = services.filter((s) => s.type === 'http' || s.type === 'consumer' || s.type === 'worker');
   const rpm = backend.reduce((a, s) => a + s.rpm, 0);
-  const prevRpm = backend.reduce((a, s) => a + s.prevRpm, 0);
   const err = rpm ? backend.reduce((a, s) => a + s.errorRate * s.rpm, 0) / rpm : 0;
-  const prevErr = prevRpm ? backend.reduce((a, s) => a + s.prevErrorRate * s.prevRpm, 0) / prevRpm : 0;
   // project-wide RED series (`/overview/series`)
   const red = redSeries(range);
   // the newest bucket is still filling, so take the last non-empty one
   const lastNonZero = (xs: number[]) => xs.filter((v) => v > 0).at(-1) ?? 0;
   const p95Now = lastNonZero(red.p95);
-  const heroEvents = deployMarkers.filter((d) => d.ts >= ts[0] && d.state !== 'error' && d.state !== 'canceled')
-    .map((d) => ({ ts: d.ts, label: `deploy ${d.service} ${d.version}`, detail: d.commitMessage }));
 
   // One list instead of "slowest" + "most failing": an endpoint shows up once, with the reason it's here.
   const attention: Attention[] = backend
@@ -55,9 +51,6 @@ export function Overview() {
     .sort((a, b) => b.score - a.score)
     .slice(0, 6);
 
-  const critical = inventory.filter((i) => i.criticality === 'critical');
-  const covered = critical.filter((i) => i.monitored).length;
-  const coverage = critical.length ? covered / critical.length : 0;
   const open = incidents.filter((i) => i.state !== 'resolved');
   const ordered = [...backend].sort((a, b) => ['critical', 'warning', 'ok'].indexOf(a.status) - ['critical', 'warning', 'ok'].indexOf(b.status) || b.rpm - a.rpm);
 
@@ -100,39 +93,25 @@ export function Overview() {
 
       <div className="overview-primary">
       {open.length > 0 && (
-        <section className="overview-incidents" aria-label="Open incidents">
-          <div className="overview-incidents__heading">
-            <h2>{open.length} open incidents</h2>
-            <Button size="sm" variant="ghost" onClick={() => nav('/incidents')}>View all <ArrowRight size={14} /></Button>
-          </div>
-          <Card flush><div className="list">
-            {open.slice(0, 3).map((i) => (
+        <Card flush className="overview-incidents" title={`${open.length} open incident${open.length === 1 ? '' : 's'}`} subtitle="Newest first · click for the cause"
+          actions={<Button size="sm" variant="ghost" onClick={() => nav('/incidents')}>View all <ArrowRight size={14} /></Button>}>
+          <div className="list">
+            {open.slice(0, 4).map((i) => (
               <div key={i.id} className="list__row list__row--clickable" onClick={() => inc.open(i)}>
                 <StatusBadge status={i.state === 'acknowledged' ? 'acknowledged' : i.state === 'pending' ? 'pending' : 'firing'} />
                 <div className="list__main"><span className="list__title">{i.title}</span><span className="list__meta">{i.service} · now {i.value}</span></div>
                 <span className="muted">{ago(i.startedAt)}</span>
               </div>
             ))}
-          </div></Card>
-        </section>
+          </div>
+        </Card>
       )}
 
-        <MetricCard className="metric--hero" label="Error rate · all backend services" value={pct(err)} curr={err} prev={prevErr} upIsGood={false}
-          hint={`${compact(rpm * err)} failed requests / min · SLO 1%`}>
-          <TimeSeries timestamps={ts} series={[{ id: 'err', label: 'Error rate', slot: 8, data: red.errorRate }]} area
-            format={(v) => pct(v)} height={180} threshold={{ value: 0.01, label: 'SLO 1%' }}
-            events={heroEvents} />
-        </MetricCard>
+        <HealthPanel range={range} backend={backend} />
       </div>
       <div className="overview-secondary">
-          <MetricCard label="Throughput" value={compact(rpm)} unit="rpm" curr={rpm} prev={prevRpm}>
-            <TimeSeries timestamps={ts} height={72} area format={(v) => compact(v)}
-              series={[{ id: 'rpm', label: 'Throughput', slot: 1, data: red.rpm }]} />
-          </MetricCard>
-          <MetricCard label="Latency · p95 · all endpoints" value={String(Math.round(p95Now))} unit="ms" curr={p95Now} prev={p95Now} upIsGood={false}
-            hint={`p50 ${ms(lastNonZero(red.p50))} · p99 ${ms(lastNonZero(red.p99))}`}>
-            <TimeSeries timestamps={ts} height={72} format={ms} series={[{ id: 'p95', label: 'p95 latency', slot: 1, data: red.p95 }]} />
-          </MetricCard>
+        <RecentDeploys since={ts[0]} />
+        <KpisAtRisk />
       </div>
 
       <Section title="Services" subtitle="unhealthy first · click for details"
@@ -149,7 +128,7 @@ export function Overview() {
       </Section>
 
       <div className="overview-detail">
-        <Card className="span-2" flush title="Endpoints needing attention" subtitle="Failing or slow, worst first · click to open">
+        <Card flush title="Endpoints needing attention" subtitle="Failing or slow, worst first · click to open">
           <Table rows={attention} rowKey={(e) => e.serviceId + e.id} onRowClick={(e) => nav(`/services/${e.serviceId}/endpoints/${e.id}`)} columns={[
             { key: 'ep', header: 'Endpoint', render: (e) => <div style={{ minWidth: 0 }}><div className="truncate" style={{ maxWidth: 280 }}><span className="mono muted">{e.method}</span> {e.route}</div><div className="muted" style={{ fontSize: 'var(--text-xs)' }}>{e.service}</div></div> },
             { key: 'why', header: 'Why', render: (e) => <Badge>{e.reason === 'errors' ? 'Failing' : 'Slow'}</Badge> },
@@ -159,23 +138,6 @@ export function Overview() {
             { key: 'mon', header: 'Monitor', render: (e) => e.monitored ? <Badge tone="good">Active</Badge> : <span className="muted">None</span> },
           ]} />
         </Card>
-        <div className="stack">
-          <Card title={<span className="row"><Sparkles size={14} color="var(--accent)" aria-hidden />Alert coverage</span>} subtitle="Critical code paths with a monitor">
-            {critical.length ? <>
-              <div className="row" style={{ alignItems: 'baseline', marginBottom: 8 }}>
-                <span className="stat__value">{Math.round(coverage * 100)}%</span>
-                <span className="muted">{covered} of {critical.length}</span>
-              </div>
-              <Meter value={coverage} tone={coverage < 0.6 ? 'warning' : undefined} />
-              <Button size="sm" variant="primary" style={{ marginTop: 12 }} onClick={() => nav('/code')}>
-                Review {suggestions.length} suggestions
-              </Button>
-            </> : <>
-              <p className="muted">Connect a repository to see which critical code paths have no monitor.</p>
-              <Button size="sm" variant="primary" style={{ marginTop: 12 }} onClick={() => nav('/code')}>Open code insights</Button>
-            </>}
-          </Card>
-        </div>
       </div>
 
       </>}
@@ -251,5 +213,102 @@ function IncidentDrawer({ incident, onClose }: { incident: Incident; onClose: ()
         <Button size="sm" onClick={() => nav(`/services/${svc?.id ?? ''}?tab=logs`)}>Related logs</Button>
       </div>
     </Drawer>
+  );
+}
+
+const STATUS_ORDER: Health[] = ['critical', 'warning', 'ok'];
+const STATUS_LABEL: Record<Health, string> = { critical: 'Critical', warning: 'Warning', ok: 'Healthy' };
+
+/** What needs a look right now, in counts that lead somewhere: services by health, failing dependencies, KPIs, coverage. */
+function HealthPanel({ range, backend }: { range: TimeRange; backend: Service[] }) {
+  const nav = useNavigate();
+  const map = serviceMap(range);
+  const counts = STATUS_ORDER.map((st) => ({ st, n: backend.filter((s) => s.status === st).length }));
+  const deps = (map?.nodes ?? []).filter((n) => (n.tier === 'data' || n.tier === 'external') && n.status !== 'ok');
+  const atRisk = kpis.filter((k) => k.status !== 'ok');
+  const critical = inventory.filter((i) => i.criticality === 'critical');
+  const covered = critical.filter((i) => i.monitored).length;
+  const lines: { label: string; value: string; status?: Health; to: string }[] = [
+    { label: 'Dependencies with errors', value: map ? String(deps.length) : '…', status: deps.length ? worst(deps.map((d) => d.status)) : undefined, to: '/service-map' },
+    { label: 'KPIs at risk', value: `${atRisk.length} of ${kpis.length}`, status: atRisk.length ? worst(atRisk.map((k) => k.status)) : undefined, to: '/kpis' },
+    { label: 'Critical code paths with a monitor', value: critical.length ? `${covered} of ${critical.length}` : 'No repository', to: '/code' },
+  ];
+  return (
+    <Card className="overview-health" title="System health" subtitle={`${backend.length} backend services · last ${range}`}
+      actions={<Button size="sm" variant="ghost" onClick={() => nav('/service-map')}>Service map <ArrowRight size={14} /></Button>}>
+      <div className="overview-health__bar" role="img" aria-label={counts.map((c) => `${c.n} ${STATUS_LABEL[c.st].toLowerCase()}`).join(', ')}>
+        {counts.filter((c) => c.n > 0).map((c) => <span key={c.st} className={`is-${c.st}`} style={{ flexGrow: c.n }} />)}
+      </div>
+      <div className="overview-health__counts">
+        {counts.map((c) => (
+          <button key={c.st} type="button" className="overview-health__count" onClick={() => nav('/services')}>
+            <span className="overview-health__num">{c.n}</span>
+            <StatusBadge status={c.st} label={STATUS_LABEL[c.st]} />
+          </button>
+        ))}
+      </div>
+      <ul className="overview-health__lines">
+        {lines.map((l) => (
+          <li key={l.label}>
+            <button type="button" onClick={() => nav(l.to)}>
+              <span>{l.label}</span>
+              <span className="overview-health__val">{l.status && <StatusBadge status={l.status} label={STATUS_LABEL[l.status]} />}{l.value}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+/** Deploys in the range with the service's health now: the first thing to check after "what changed?". */
+function RecentDeploys({ since }: { since: number }) {
+  const nav = useNavigate();
+  const list = deployMarkers.filter((d) => d.ts >= since && d.state !== 'canceled').sort((a, b) => b.ts - a.ts).slice(0, 5);
+  return (
+    <Card flush title="Recent deploys" subtitle="With each service's health now">
+      {list.length === 0 ? <p className="muted overview-empty">No deploys in this range.</p> : (
+        <div className="list">
+          {list.map((d) => {
+            const svc = services.find((s) => s.name === d.service || s.id === d.service);
+            return (
+              <div key={`${d.service}-${d.version}-${d.ts}`} className="list__row list__row--clickable" onClick={() => svc && nav(`/services/${svc.id}`)}>
+                {d.state === 'error' ? <StatusBadge status="critical" label="Failed" /> : svc ? <StatusBadge status={svc.status} label={STATUS_LABEL[svc.status]} /> : <Badge>Deploy</Badge>}
+                <div className="list__main">
+                  <span className="list__title"><span className="mono">{d.service}</span> {d.version}</span>
+                  <span className="list__meta truncate">{d.commitMessage ?? DEPLOY_SOURCE_LABEL[d.source]}</span>
+                </div>
+                <span className="muted">{ago(d.ts)}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/** KPIs burning their error budget, worst first. */
+function KpisAtRisk() {
+  const nav = useNavigate();
+  const list = kpis.filter((k) => k.status !== 'ok').sort((a, b) => a.budgetRemaining - b.budgetRemaining).slice(0, 5);
+  return (
+    <Card flush title="KPIs at risk" subtitle="Error budget left and burn rate"
+      actions={<Button size="sm" variant="ghost" onClick={() => nav('/kpis')}>All KPIs <ArrowRight size={14} /></Button>}>
+      {list.length === 0 ? <p className="muted overview-empty">{kpis.length ? `All ${kpis.length} KPIs are on track.` : 'No KPIs yet. Define one on a service.'}</p> : (
+        <div className="list">
+          {list.map((k) => (
+            <div key={k.id} className="list__row list__row--clickable" onClick={() => nav(`/kpis/${k.id}`)}>
+              <StatusBadge status={k.status} label={STATUS_LABEL[k.status]} />
+              <div className="list__main">
+                <span className="list__title">{k.name}</span>
+                <span className="list__meta">{pct(k.budgetRemaining, 0)} budget left · burning {k.burnRate1h.toFixed(1)}× (1h)</span>
+              </div>
+              <Meter value={Math.max(0, k.budgetRemaining)} tone={k.status === 'critical' ? 'critical' : 'warning'} />
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
   );
 }

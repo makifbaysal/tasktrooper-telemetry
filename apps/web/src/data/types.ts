@@ -575,3 +575,13 @@ export interface ServiceInfra {
   containers: InfraContainer[];
   functions: { id: string; name: string; provider: string }[];
 }
+
+// ---------- service map (GET /service-map) ----------
+export type MapTier = 'client' | 'service' | 'data' | 'external';
+export interface MapIncident { id: string; title: string; severity: string; state: string; open: number }
+export interface MapNode {
+  id: string; name: string; tier: MapTier; kind: string; system?: string;
+  status: Health; rpm: number; errorRate: number; p95: number; incident?: MapIncident;
+}
+export interface MapEdge { id: string; from: string; to: string; callsPerMin: number; errorRate: number; p95: number; status: Health }
+export interface ServiceMap { nodes: MapNode[]; edges: MapEdge[] }

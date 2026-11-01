@@ -1,4 +1,5 @@
 import { ServiceLoadTests } from './ServiceLoadTests';
+import { ServiceMapScreen } from './ServiceMapScreen';
 import { ServiceLag } from './ConsumerLag';
 import { useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
@@ -29,8 +30,8 @@ import { AiMonitoringBody } from './AiMonitoring';
 import { serviceHasAi } from '@/data/aimon';
 import { ProfilingTab, compareProfilesUrl, hasProfiles } from './Profiling';
 
-type Tab = 'endpoints' | 'lag' | 'traffic' | 'time' | 'deploys' | 'loadtests' | 'kpis' | 'alerts' | 'logs' | 'infra' | 'ai' | 'profiling';
-const TABS: Tab[] = ['endpoints', 'lag', 'traffic', 'time', 'deploys', 'loadtests', 'kpis', 'alerts', 'logs', 'infra', 'ai', 'profiling'];
+type Tab = 'endpoints' | 'map' | 'lag' | 'traffic' | 'time' | 'deploys' | 'loadtests' | 'kpis' | 'alerts' | 'logs' | 'infra' | 'ai' | 'profiling';
+const TABS: Tab[] = ['endpoints', 'map', 'lag', 'traffic', 'time', 'deploys', 'loadtests', 'kpis', 'alerts', 'logs', 'infra', 'ai', 'profiling'];
 
 /** Color slot = entity's fixed position in its list, not its rank, so it matches across charts. */
 const slotAt = (i: number) => LINE_SLOTS[i % LINE_SLOTS.length];
@@ -86,6 +87,7 @@ export function ServiceDetail() {
       <Section>
         <Tabs value={tab} onChange={setTab} tabs={[
           { id: 'endpoints', label: <>{isConsumer ? 'Processes' : 'Endpoints'} <Badge>{eps.length}</Badge></> },
+          { id: 'map', label: 'Map' },
           ...(groupsOfService(svc.id).length ? [{ id: 'lag' as const, label: <>Lag <LagBadge serviceId={svc.id} /></> }] : []),
           { id: 'traffic', label: 'Traffic flow' },
           { id: 'time', label: 'Time spent' },
@@ -100,6 +102,7 @@ export function ServiceDetail() {
         ]} />
         {tab === 'endpoints' && <EndpointsTab eps={eps} unit={unit} isConsumer={isConsumer} onOpen={(e) => nav(`/services/${svc.id}/endpoints/${e.id}`)} />}
         {tab === 'lag' && <ServiceLag serviceId={svc.id} />}
+        {tab === 'map' && <ServiceMapScreen key={svc.id} serviceId={svc.id} />}
         {tab === 'traffic' && <TrafficTab svc={svc} eps={eps} ts={ts} unit={unit} isConsumer={isConsumer} />}
         {tab === 'profiling' && <ProfilingTab key={svc.id} svc={svc} />}
         {tab === 'time' && <TimeTab svc={svc} eps={eps} ts={ts} critical={critical} onOpen={(e) => nav(`/services/${svc.id}/endpoints/${e.id}?tab=time`)} />}
