@@ -118,7 +118,7 @@ cluster: `service.name=trooper-agent`, `k8s.cluster.name`, `cloud.*`. Event logs
 | `trooper.host.cpu` (0..1) | 1 − Δ(idle+iowait)/Δtotal of `cpu.Times` between scrapes (first scrape: none) |
 | `trooper.host.cpu_cores` | logical CPUs |
 | `trooper.host.memory` / `.memory_bytes` | (total − available) / total, bytes |
-| `trooper.host.disk` (0..1) | fullest local filesystem ≥ 100 MB (`/host/proc/1/mountinfo`; tmpfs, overlay, squashfs, nfs, kubelet/docker/snap mounts skipped; statfs through `TT_AGENT_ROOTFS`) |
+| `trooper.host.disk` (0..1) | fullest local **writable** filesystem ≥ 100 MB (`/host/proc/1/mountinfo`; read-only mounts (`ro`, e.g. the erofs root of Docker Desktop), tmpfs, overlay, squashfs, nfs, Docker Desktop host shares (virtiofs, fakeowner), kubelet/docker/snap mounts skipped; statfs through `TT_AGENT_ROOTFS`) |
 | `trooper.host.disk_read` / `.disk_write` (byte/s) | Δ `diskstats` over whole disks (partitions, loop, ram, dm, md skipped) |
 | `trooper.host.net_in` / `.net_out` (byte/s) | Δ `/host/proc/1/net/dev` (the host's namespace, not the pod's) over physical interfaces (lo, veth, docker, cni, cali, flannel, … skipped) |
 | `trooper.host.load1`, `trooper.host.uptime_s` | `loadavg`, `uptime` |
