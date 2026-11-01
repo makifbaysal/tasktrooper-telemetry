@@ -3,10 +3,10 @@ import { ServiceMapScreen } from './ServiceMapScreen';
 import { ServiceLag } from './ConsumerLag';
 import { useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
-import { Bell, Play, PlugZap } from 'lucide-react';
+import { AlertOctagon, AlertTriangle, Bell, Play, PlugZap } from 'lucide-react';
 import { BreakdownBar, Columns, Flow, Legend, Sparkline, TimeSeries, seriesColor } from '@/components/charts';
 import {
-  Badge, Button, Card, Drawer, DrawerSection, EmptyState, KeyValues, MetricCard, PageHeader, Section, Segmented, StatusBadge, Table, Tabs, useDrawer,
+  Badge, Button, Callout, Card, Drawer, DrawerSection, EmptyState, KeyValues, MetricCard, PageHeader, Section, Segmented, StatusBadge, Table, Tabs, useDrawer,
 } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
 import {
@@ -16,7 +16,7 @@ import {
   type CallerTraffic, type Dependency, type Endpoint, type Service,
 } from '@/data';
 import { ago, compact, dateTime, ms, pct } from '@/lib/format';
-import { CallerDrawer, DependencyDrawer, ErrorCell, NameCell, epLabel, sourceLabel, latencyHint, latencySeriesFor, statusSplitFor } from './apm';
+import { CallerDrawer, DependencyDrawer, ErrorCell, NameCell, epLabel, sourceLabel, latencyHint, latencySeriesFor, statusSplitFor, healthReason } from './apm';
 import { CALLER_KIND_LABEL, CriticalityBadge, DEP_KIND_LABEL, LINE_SLOTS, ServiceType, callerColorFor, categoryOf } from './shared';
 import { RootCauseCard, diagnose } from './rca';
 import { LogExplorer } from './Logs';
@@ -75,13 +75,14 @@ export function ServiceDetail() {
         actions={<>
           <Button icon={<Play size={14} />} onClick={() => nav('/load-tests')}>Load test</Button>
         </>} />
+      <HealthCallout svc={svc} />
 
       <OpenIncidents serviceId={svc.id} />
       {diagnose(svc.id).map((d) => <RootCauseCard key={d.metric} d={d} scope={svc.name} />)}
       <KpisAtRisk serviceId={svc.id} />
 
       {svc.rpm > 0
-        ? <HealthSection svc={svc} ts={ts} unit={unit} isConsumer={isConsumer} critical={critical} />
+        ? <HealthSection svc={svc} ts={ts} unit={unit} isConsumer={isConsumer} />
         : <NoTraffic svc={svc} onLogs={() => setTab('logs')} />}
 
       <Section>
@@ -153,11 +154,12 @@ function LagBadge({ serviceId }: { serviceId: string }) {
  * The golden signals, each shown exactly once. Traffic is the hero: its stacked
  * status columns show volume AND failures; error rate and latency sit beside it.
  */
-function HealthSection({ svc, ts, unit, isConsumer, critical }: { svc: Service; ts: number[]; unit: string; isConsumer: boolean; critical: boolean }) {
+function HealthSection({ svc, ts, unit, isConsumer }: { svc: Service; ts: number[]; unit: string; isConsumer: boolean }) {
   const { range } = useApp();
   const err = serviceErrorSeries(svc.id, range);
   const red = redSeries(range, svc.id);
   const last = (xs: number[]) => xs.filter((v) => v > 0).at(-1) ?? 0;
+  const why = healthReason(svc);
   const lat = { p50: last(red.p50), avg: serviceBreakdown(svc.id).avgMs, p99: last(red.p99) };
   return (
     <div className="grid grid-3">
@@ -168,11 +170,12 @@ function HealthSection({ svc, ts, unit, isConsumer, critical }: { svc: Service; 
       </MetricCard>
       <div className="stack">
         <MetricCard label="Error rate" value={pct(svc.errorRate)} curr={svc.errorRate} prev={svc.prevErrorRate} upIsGood={false}
-          badge={critical ? <StatusBadge status="firing" label="Alert firing" /> : undefined}>
+          badge={why?.on === 'errors' ? <StatusBadge status={why.level} /> : undefined}>
           <TimeSeries timestamps={ts} format={(v) => pct(v)} height={104} area events={deployEvents(svc.id, ts[0])}
             series={[{ id: 'err', label: 'Error rate', slot: 8, data: err }]} />
         </MetricCard>
         <MetricCard label={isConsumer ? 'Processing time · p95' : 'Latency · p95'} value={ms(svc.p95)} curr={svc.p95} prev={svc.prevP95} upIsGood={false}
+          badge={why?.on === 'latency' ? <StatusBadge status={why.level} /> : undefined}
           hint={latencyHint(lat, 'p95')}>
           <TimeSeries timestamps={ts} format={ms} height={140} events={deployEvents(svc.id, ts[0])} series={latencySeriesFor(range, svc.id)} />
         </MetricCard>
@@ -405,3 +408,18 @@ function DeploysTab({ svc }: { svc: Service }) {
   );
 }
 
+
+/** Says why the service is Critical / Warning: the status is computed from this window vs the previous one, not an alert. */
+function HealthCallout({ svc }: { svc: Service }) {
+  const why = healthReason(svc);
+  if (!why) return null;
+  const Icon = why.level === 'critical' ? AlertOctagon : AlertTriangle;
+  return (
+    <Callout icon={<Icon size={16} color={why.level === 'critical' ? 'var(--status-critical)' : 'var(--status-warning)'} aria-hidden />}>
+      <strong>{why.level === 'critical' ? 'Critical' : 'Warning'}:</strong> {why.text}.{' '}
+      <span className="secondary">
+        {why.on === 'incident' ? 'See Incidents for details.' : 'Health is computed from the selected window vs the previous one; it is not an alert and clears on its own when the metric recovers.'}
+      </span>
+    </Callout>
+  );
+}

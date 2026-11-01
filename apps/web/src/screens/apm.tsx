@@ -220,3 +220,26 @@ export function statusSplitFor(range: TimeRange, serviceId: string | undefined, 
 export function latencyHint(l: Partial<Latency>, headline?: LatencyStat) {
   return LATENCY_STATS.filter((s) => s.id !== headline && (l[s.id] ?? 0) > 0).map((s) => `${s.id} ${ms(l[s.id]!)}`).join(' · ');
 }
+
+// ---------------------------------------------------------------- Health reason
+export interface HealthReason { on: 'errors' | 'latency' | 'incident'; level: 'critical' | 'warning'; text: string }
+/**
+ * Why a service / endpoint got its status. Mirrors the api's `store.Health` thresholds (current vs previous window):
+ * the status is computed, not an alert, so the UI names the metric that tripped it instead of "Alert firing".
+ */
+export function healthReason(h: { status: string; errorRate: number; prevErrorRate: number; p95: number; prevP95: number }): HealthReason | undefined {
+  if (h.status !== 'critical' && h.status !== 'warning') return undefined;
+  const times = (a: number, b: number) => `${(a / b).toFixed(a / b >= 10 ? 0 : 1)}×`;
+  const errUp = h.prevErrorRate > 0 ? ` (${times(h.errorRate, h.prevErrorRate)} the previous window)` : '';
+  const p95Up = h.prevP95 > 0 ? `${times(h.p95, h.prevP95)} the previous window` : '';
+  if (h.status === 'critical') {
+    if (h.errorRate >= 0.05) return { on: 'errors', level: 'critical', text: `Error rate ${pct(h.errorRate)} is at or above 5%` };
+    if (h.errorRate >= 0.02 && h.errorRate > 2 * h.prevErrorRate) return { on: 'errors', level: 'critical', text: `Error rate ${pct(h.errorRate)} more than doubled${errUp}` };
+    if (h.prevP95 > 0 && h.p95 > 3 * h.prevP95 && h.p95 > 100) return { on: 'latency', level: 'critical', text: `p95 ${ms(h.p95)} is ${p95Up}` };
+    return { on: 'incident', level: 'critical', text: 'A critical incident is open' };
+  }
+  if (h.errorRate >= 0.01) return { on: 'errors', level: 'warning', text: `Error rate ${pct(h.errorRate)} is at or above 1%` };
+  if (h.errorRate >= 0.005 && h.errorRate > 1.5 * h.prevErrorRate) return { on: 'errors', level: 'warning', text: `Error rate ${pct(h.errorRate)} rose${errUp}` };
+  if (h.prevP95 > 0 && h.p95 > 1.5 * h.prevP95 && h.p95 > 50) return { on: 'latency', level: 'warning', text: `p95 ${ms(h.p95)} is ${p95Up}` };
+  return { on: 'incident', level: 'warning', text: 'An incident is open' };
+}
