@@ -1,0 +1,127 @@
+name: Docker
+
+# Image builds live here, not in ci.yml, so slow builds don't block the fast checks (ADR-026).
+# PRs: build + Trivy scan, no push, no registry login. main: same, then push to GHCR.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "services/**"
+      - "deploy/**"
+      - ".github/workflows/docker.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # never cancel a main publish halfway through the matrix (sha/main tags would diverge across images)
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Derived from services/*/Dockerfile, so a new service with a Dockerfile is picked up automatically.
+  # Every Dockerfile builds from context services/ with GOWORK=off. Dockerfiles that take ARG CMD (alerting,
+  # ingest) build one image per services/<svc>/cmd/* binary, named like the docker-compose services.
+  # services/collector/Dockerfile.windows (HostProcess image) is not included.
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      include: ${{ steps.read.outputs.include }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: read
+        working-directory: services
+        run: |
+          for df in */Dockerfile; do
+            svc=${df%/Dockerfile}
+            if grep -q '^ARG CMD' "$df"; then
+              for c in "$svc"/cmd/*/; do c=${c%/}; c=${c##*/}; jq -n -c --arg s "$svc" --arg i "$c" --arg c "$c" '{service:$s,image:$i,cmd:$c}'; done
+            else
+              jq -n -c --arg s "$svc" '{service:$s,image:$s,cmd:""}'
+            fi
+          done | jq -s -c . > include.json
+          jq . include.json
+          echo "include=$(cat include.json)" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build / ${{ matrix.image }}
+    if: github.event_name == 'pull_request'
+    needs: matrix
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.matrix.outputs.include) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: services
+          file: services/${{ matrix.service }}/Dockerfile
+          build-args: ${{ matrix.cmd && format('CMD={0}', matrix.cmd) || '' }}
+          tags: local/${{ matrix.image }}:${{ github.sha }}
+          load: true
+          push: false
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: local/${{ matrix.image }}:${{ github.sha }}
+          scanners: vuln
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+  publish:
+    name: publish / ${{ matrix.image }}
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: matrix
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.matrix.outputs.include) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: name
+        # GHCR image names must be lowercase; github.repository keeps the owner's casing.
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}/${{ matrix.image }}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # build + load first so the scan gates the push; the push step below is a cache hit
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: services
+          file: services/${{ matrix.service }}/Dockerfile
+          build-args: ${{ matrix.cmd && format('CMD={0}', matrix.cmd) || '' }}
+          tags: ${{ steps.name.outputs.image }}:${{ github.sha }}
+          load: true
+          push: false
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.name.outputs.image }}:${{ github.sha }}
+          scanners: vuln
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: services
+          file: services/${{ matrix.service }}/Dockerfile
+          build-args: ${{ matrix.cmd && format('CMD={0}', matrix.cmd) || '' }}
+          tags: |
+            ${{ steps.name.outputs.image }}:${{ github.sha }}
+            ${{ steps.name.outputs.image }}:main
+          push: true
+          cache-from: type=gha,scope=${{ matrix.image }}
