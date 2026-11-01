@@ -5,7 +5,7 @@
 //
 //	GOWORK=off go test -tags integration -run TestAnalyzeQuota ./internal/analyze/
 //
-// Uses a fresh org + project 9501 + one user (all removed by the test).
+// Uses a fresh org + project 9503 (9501 is loadtest's) + one user (all removed by the test).
 package analyze
 
 import (
@@ -32,7 +32,7 @@ import (
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/store"
 )
 
-const quotaProject = 9501
+const quotaProject = 9503
 
 func TestAnalyzeQuota(t *testing.T) {
 	ctx := context.Background()
@@ -47,7 +47,7 @@ func TestAnalyzeQuota(t *testing.T) {
 			t.Fatalf("%s: %v", sql, err)
 		}
 	}
-	const email = "aiquota-it-9501@example.com"
+	const email = "aiquota-it-9503@example.com"
 	cleanup := func() {
 		bg := context.Background()
 		_, _ = st.DB.Exec(bg, `DELETE FROM orgs WHERE id = (SELECT org_id FROM projects WHERE id = $1)`, quotaProject)
@@ -65,7 +65,7 @@ func TestAnalyzeQuota(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec1(`INSERT INTO memberships (org_id, user_id, role) VALUES ($1, $2, 'member')`, orgID, userID)
-	exec1(`INSERT INTO projects (id, org_id, name, slug) VALUES ($1, $2, 'aiquota-it', 'aiquota-it-9501')`, quotaProject, orgID)
+	exec1(`INSERT INTO projects (id, org_id, name, slug) VALUES ($1, $2, 'aiquota-it', 'aiquota-it-9503')`, quotaProject, orgID)
 
 	repoDir := t.TempDir()
 	copyTree(t, filepath.Join("..", "extract", "testdata", "gorepo"), repoDir)

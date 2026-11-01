@@ -11,9 +11,12 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/analyze"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/model"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/obs"
+	"github.com/tasktrooper/telemetry/services/codeintel/internal/selftel"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/store"
 )
 
@@ -185,6 +188,12 @@ func (r *Runner) analyze(ctx context.Context, repo model.Repo) {
 		return
 	}
 	log := r.Log.With("repo", repo.FullName, "repo_id", repo.ID)
+	// one root span per analysis run (ADR-027): clone, extract, LLM (GenAI spans), Postgres and ClickHouse are children
+	ctx, span := selftel.StartRoot(ctx, "codeintel.analyze", append(selftel.Tenant(repo.OrgID, repo.ProjectID),
+		attribute.Int64("tt.repo.id", repo.ID), attribute.String("tt.repo.provider", repo.Provider),
+		attribute.Bool("tt.analysis.full", !analyze.Incremental(repo, pending)))...)
+	var serr error
+	defer func() { selftel.End(span, serr) }()
 	actx, cancel := context.WithTimeout(ctx, r.Timeout)
 	defer cancel()
 	t0 := time.Now()
@@ -203,7 +212,9 @@ func (r *Runner) analyze(ctx context.Context, repo model.Repo) {
 		if !analyze.Incremental(repo, pending) {
 			restore = []string{store.FullScan}
 		}
-		log.Warn("analysis failed", "err", err, "dur", dur.Round(time.Millisecond))
+		serr = err
+		span.SetAttributes(attribute.String("tt.analysis.result", "error"))
+		log.WarnContext(ctx, "analysis failed", "err", err, "dur", dur.Round(time.Millisecond))
 		r.Metrics.Add("codeintel_analyses_total", 1, "result", "error")
 		r.mu.Lock()
 		r.failed[repo.ID] = failure{at: r.Now(), requested: req}
@@ -216,8 +227,13 @@ func (r *Runner) analyze(ctx context.Context, repo model.Repo) {
 	r.mu.Lock()
 	delete(r.failed, repo.ID)
 	r.mu.Unlock()
+	span.SetAttributes(attribute.String("tt.analysis.result", "ok"), attribute.Bool("tt.analysis.incremental", rep.Incremental),
+		attribute.Int("tt.analysis.items", rep.Items), attribute.Int("tt.analysis.observed", rep.Observed),
+		attribute.Int("tt.analysis.suggestions", rep.Suggestions), attribute.Int("tt.analysis.scenarios", rep.Scenarios),
+		attribute.Int("tt.analysis.llm_items", rep.LLMItems), attribute.String("tt.analysis.llm_status", rep.LLM.Status))
 	if err := r.Store.FinishOK(fctx, repo.ID, started, rep.SHA, rep.Languages, rep.Services, rep.Summary()); err != nil {
-		log.Error("record analysis", "err", err)
+		serr = err
+		log.ErrorContext(ctx, "record analysis", "err", err)
 		return
 	}
 	r.Metrics.Add("codeintel_analyses_total", 1, "result", "ok")

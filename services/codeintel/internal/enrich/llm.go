@@ -11,6 +11,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/tasktrooper/telemetry-go/llm"
 
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/model"
 )
@@ -60,12 +61,18 @@ type LLM struct {
 	Log       *slog.Logger
 }
 
+// llmTransportOptions configure the trooper GenAI transport (tests register their fake API host).
+var llmTransportOptions []llm.Option
+
 // NewLLM returns nil when either the API key or the model is empty (LLM step disabled → static rules only).
+// Requests go through the trooper llm transport (ADR-027, contracts §25): GenAI client spans with model, tokens and
+// cost; prompt/completion content is recorded only with TROOPER_LLM_CAPTURE_CONTENT=true (default off).
 func NewLLM(apiKey, model string, opts ...option.RequestOption) *LLM {
 	if apiKey == "" || model == "" {
 		return nil
 	}
-	opts = append([]option.RequestOption{option.WithAPIKey(apiKey), option.WithMaxRetries(3)}, opts...)
+	opts = append([]option.RequestOption{option.WithAPIKey(apiKey), option.WithMaxRetries(3),
+		option.WithHTTPClient(llm.HTTPClient(nil, llmTransportOptions...))}, opts...)
 	return &LLM{client: anthropic.NewClient(opts...), model: model, BatchSize: 15, MaxChars: 6000, Log: slog.Default()}
 }
 

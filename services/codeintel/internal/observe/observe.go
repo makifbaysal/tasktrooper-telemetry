@@ -6,6 +6,7 @@ package observe
 import (
 	"context"
 	"fmt"
+	"net"
 	"sort"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/model"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/route"
+	"github.com/tasktrooper/telemetry/services/codeintel/internal/selftel"
 )
 
 // Window is the "observed" window; DeadWindow the "no traffic" window.
@@ -72,7 +74,14 @@ func Open(ctx context.Context, url string) (*ClickHouse, error) {
 		_ = c.Close()
 		return nil, err
 	}
-	return &ClickHouse{Conn: c}, nil
+	addr := ""
+	if len(opts.Addr) > 0 {
+		addr = opts.Addr[0]
+		if h, _, err := net.SplitHostPort(addr); err == nil {
+			addr = h
+		}
+	}
+	return &ClickHouse{Conn: selftel.ClickHouse(c, opts.Auth.Database, addr)}, nil
 }
 
 // Traffic runs the matching queries. Every query filters org_id + project_id.
