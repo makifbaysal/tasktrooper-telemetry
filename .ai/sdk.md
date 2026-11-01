@@ -7,6 +7,9 @@
 3. **OpenTelemetry uyumlu.** Backend SDK'ları OTel SDK'yı sarar; kendi exporter + preset'lerimizi ekler. Kullanıcı OTel API'si ile yazdığı custom span'lar da bize gelir.
 4. **Gizlilik default.** Body/header/query toplanmaz; IP sunucuda geo'ya çevrilip atılır; `beforeSend` hook'u ile maskeleme.
 5. **Batch + backoff + offline kuyruk.** Browser'da `sendBeacon` ile sayfa kapanırken flush; mobilde disk kuyruğu.
+6. **Varlık sinyali.** Backend SDK'ları (Go, JVM, .NET, Python, Node) başlar başlamaz trafik olmasa da `trooper.sdk.heartbeat`
+   gauge'unu (1, meter `TaskTrooper.Telemetry`, attribute yok) metrik aralığında gönderir; ilk export ≤ 10 sn (aralık uzunsa
+   ~5 sn sonra tek seferlik, bloklamayan flush). Metrikler kapalı / DSN yoksa gönderilmez. Detay: contracts.md §4.
 
 ## Paketler
 
@@ -81,6 +84,30 @@ producer.send({ topic: 'orders.retry', messages: [{ value, headers: setAttemptHe
 
 Yutulan her SDK hatası `trooper.sdk.errors{component}` (meter `TaskTrooper.Telemetry`) olarak sayılır; export hataları
 `component=exporter.<signal>`.
+
+### Go
+
+```go
+shutdown, _ := trooper.Start(ctx, trooper.Config{Service: "billing-worker"}) // DSN: TROOPER_DSN
+defer shutdown(context.Background())
+
+// Arka plan işi (zamanlayıcı tick'i, iş bulan poll, batch) = job entry (contracts §4):
+// kind consumer, trooper.process = trooper.entry.route = ad, trooper.entry.method = JOB; child span'lar job'a bağlanır.
+err := trooper.RunJob(ctx, "billing.sync", trooper.PanicRepanic, func(ctx context.Context) error { return sync(ctx) })
+
+ctx, span := trooper.StartJob(ctx, "invoice.send", trace.WithAttributes(attribute.Int64("tenant.id", id)))
+defer trooper.EndSpan(span, err)
+```
+
+- Ad düşük kardinaliteli olmalı (tenant/id attribute'ta). Yalnız iş yapılan run'da başlatılır; boş poll span üretmez.
+- ctx'teki yerel span parent yapılmaz (yeni root + link: job her zaman entry'dir); remote parent (ör. `TRACEPARENT`) korunur.
+- Provider yoksa no-op span döner, panik etmez. `RunJob` paniği span'a yazar (`PanicRepanic` / `PanicRecover`).
+- Mesaj tüketimi için `ProcessMessage` / `StartConsumer` (messaging attribute'ları ile) kullanılır, job değil.
+
+**Heartbeat (contracts §4):** metrikler açıkken `Start` `trooper.sdk.heartbeat` gauge'unu (1, meter `TaskTrooper.Telemetry`)
+kaydeder; ilk export `Start`'tan ~5 sn sonra bir kerelik `ForceFlush` ile (`MetricInterval` 30 sn beklenmez), sonra her
+metrik aralığında. Resource'ta process başına rastgele `service.instance.id` (UUIDv4; `OTEL_RESOURCE_ATTRIBUTES` /
+`ResourceAttributes` ezer).
 
 ### Browser
 
