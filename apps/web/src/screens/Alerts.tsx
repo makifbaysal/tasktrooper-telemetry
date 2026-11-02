@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import {
-  Bell, BellOff, Bot, Check, CheckCircle2, ChevronRight, CircleDashed, Code2, ExternalLink, FileCode2, Lock, Pencil, Plus, Send, Sparkles, Target, Trash2, Wrench, X,
+  Bell, BellOff, Bot, Check, CheckCircle2, ChevronRight, CircleDashed, Code2, ExternalLink, FileCode2, Lock, MessagesSquare, Pencil, Plus, Send, Sparkles, Target, Trash2, Wrench, X,
 } from 'lucide-react';
 import { Sparkline, TimeSeries } from '@/components/charts';
 import {
@@ -568,6 +568,7 @@ export function IncidentDrawer({ incident: i, state, onClose, onAck, onResolve, 
       title={i.title}
       subtitle={<span className="row" style={{ gap: 'var(--space-2)' }}><StatusBadge status={incidentStatus(state)} /><Badge tone={sevTone(i.severity)}>{i.severity}</Badge><span className="muted">started {dateTime(i.startedAt)}</span></span>}
       actions={<>
+        <Button size="sm" icon={<MessagesSquare size={12} />} onClick={() => nav(`/assistant?ref=incident:${encodeURIComponent(i.id)}`)}>Ask assistant</Button>
         <Button size="sm" icon={<Sparkles size={12} />} disabled={explaining} onClick={() => void explain()}>{explaining ? 'Explaining…' : 'Explain'}</Button>
         <LocalAICost />
         {i.kpiId && <Button size="sm" icon={<Target size={12} />} onClick={() => nav(`/kpis/${i.kpiId}`)}>Open KPI</Button>}

@@ -29,6 +29,7 @@ Four core capabilities:
 | [`.ai/alerting.md`](.ai/alerting.md) | Alert engine, rule types, automatic alerts from code analysis |
 | [`.ai/code-intelligence.md`](.ai/code-intelligence.md) | Repo reading, inventory extraction, LLM usage |
 | [`.ai/mcp.md`](.ai/mcp.md) | MCP server (`services/mcp`), tool surface, config |
+| [`.ai/assistant.md`](.ai/assistant.md) | Dashboard AI chat (`/assistant`): agent loop, MCP tools in process, approvals, widgets, SSE API |
 | [`skills/`](skills/) | Agent Skills (`trooper-diagnose`, `trooper-query`, `trooper-alerts`, `trooper-contribute`); discovery + install: [`.ai/mcp.md`](.ai/mcp.md) § Agent Skills |
 | [`.ai/load-testing.md`](.ai/load-testing.md) | Load test infrastructure, runners, scenario format |
 | [`.ai/design-system.md`](.ai/design-system.md) | UI tokens, components, chart rules |
@@ -115,5 +116,6 @@ Full check (exactly the same gates as CI): `make check` → gofmt, `go vet`, uni
 - [x] Public site (`telemetry.tasktrooper.ai`): landing (animated service map), `/docs` (SDK installs, MCP server, agent skills), separate `/login`; no sign-up
 - [x] Demo deploy: `deploy-demo` workflow (manual, main) → Mac mini self-hosted runner, Cloudflare Tunnel, Google OIDC — ADR-031
 - [x] MCP v2: 27 read tools + opt-in, approval-gated write tools (monitor, KPI, Slack test, load test; `source=agent`) and the `trooper-alerts` skill — ADR-032
+- [x] Assistant (`/assistant`): AI chat with history, @ mentions, images, MCP tools in process, approval-gated writes, widgets — ADR-033 (replaces Overview "Ask telemetry")
 
 Next work: [`.ai/roadmap.md`](.ai/roadmap.md).

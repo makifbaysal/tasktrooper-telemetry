@@ -217,7 +217,8 @@ func isSafe(method string) bool {
 }
 
 // guard enforces "viewer = read only" and writes the audit log for every mutation. /orgs/* routes check the role
-// of the org in their path themselves.
+// of the org in their path themselves; /assistant/* is chat (a viewer may use it; the tool calls it makes pass this
+// guard again as the viewer).
 func (s *Server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isSafe(r.Method) {
@@ -225,7 +226,8 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			return
 		}
 		p := principalOf(r.Context())
-		if path := strings.TrimPrefix(r.URL.Path, "/api/v1"); p.Role == "viewer" && path != "/orgs" && !strings.HasPrefix(path, "/orgs/") {
+		if path := strings.TrimPrefix(r.URL.Path, "/api/v1"); p.Role == "viewer" && path != "/orgs" && !strings.HasPrefix(path, "/orgs/") &&
+			!strings.HasPrefix(path, "/assistant/") {
 			forbidden(w, "viewers have read-only access")
 			return
 		}

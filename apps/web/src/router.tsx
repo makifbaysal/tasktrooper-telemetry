@@ -3,6 +3,7 @@ import { ServiceMapScreen } from '@/screens/ServiceMapScreen';
 import { AppShell } from './components/layout/AppShell';
 import { safeNext } from './publicRouter';
 import { Overview } from './screens/Overview';
+import { Assistant } from './screens/Assistant';
 import { Services } from './screens/Services';
 import { ServiceDetail } from './screens/ServiceDetail';
 import { EndpointDetail } from './screens/EndpointDetail';
@@ -41,6 +42,8 @@ export const router = createBrowserRouter([
     element: <AppShell />,
     children: [
       { path: '/', element: <Overview /> },
+      { path: '/assistant', element: <Assistant /> },
+      { path: '/assistant/:threadId', element: <Assistant /> },
       { path: '/services', element: <Services /> },
       { path: '/service-map', element: <ServiceMapScreen /> },
       { path: '/services/:serviceId', element: <ServiceDetail /> },

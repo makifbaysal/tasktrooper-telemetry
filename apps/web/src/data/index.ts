@@ -13,3 +13,4 @@ export * from './hosts';
 export * from './traces';
 export * from './replay';
 export * from './profiling';
+export * from './assistant';

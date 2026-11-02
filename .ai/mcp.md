@@ -13,6 +13,9 @@ Wraps `services/api` (`openapi.yaml`); does **not touch** ClickHouse/Postgres. A
 - API client: `net/http`, a single `apiBaseURL` + `Authorization: Bearer <TT_API_KEY>`; all tenant
   filtering (org/project) in the API comes from the key itself (ADR-016, identity.go: api key → `(org, project)`,
   role `admin`).
+- In-process use (ADR-033): the exported package `toolset` builds the same server for the api's dashboard assistant
+  (`.ai/assistant.md`) and connects it with `mcp.NewInMemoryTransports`; `apiclient.WithAuth` replaces the bearer key with the
+  user's session headers and the api serves the calls in process. Keep tool behaviour transport and caller independent.
 
 ## Configuration (`services/pkg/config` with TT_* env)
 

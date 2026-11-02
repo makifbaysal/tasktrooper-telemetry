@@ -49,6 +49,20 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return (text ? JSON.parse(text) : undefined) as T;
 }
 
+/** POST to the api and return the open streaming response (server-sent events; `data/assistant.ts`). */
+export async function apiStream(path: string, body: unknown, signal?: AbortSignal): Promise<ReadableStream<Uint8Array>> {
+  const res = await fetch(`${API_URL}/api/v1${path}`, authInit({
+    method: 'POST', body: JSON.stringify(body), signal, headers: { Accept: 'text/event-stream' },
+  }));
+  if (res.status === 401) onUnauthorized?.();
+  if (!res.ok || !res.body) {
+    let msg = res.statusText;
+    try { const j = await res.json() as { error?: string; message?: string }; msg = j.error ?? j.message ?? msg; } catch { /* not json */ }
+    throw new ApiError(res.status, msg, path);
+  }
+  return res.body;
+}
+
 // ── change notification ──
 let version = 0;
 const listeners = new Set<() => void>();

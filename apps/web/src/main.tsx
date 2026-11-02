@@ -8,6 +8,7 @@ import './styles/charts.css';
 import './styles/account.css';
 import './styles/trace.css';
 import './styles/screens.css';
+import './styles/assistant.css';
 import './styles/motion.css';
 import './styles/public.css';
 import { router } from './router';

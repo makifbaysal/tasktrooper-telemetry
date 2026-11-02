@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import {
-  AlertOctagon, BotMessageSquare, Boxes, Wind, Server, Building2, ChevronsUpDown, Code2, Database, Gauge, KeyRound, LayoutDashboard, LogOut, Moon, Network, Waypoints,
+  AlertOctagon, BotMessageSquare, Boxes, Wind, Server, Building2, ChevronsUpDown, Code2, Database, Gauge, KeyRound, LayoutDashboard, LogOut, MessagesSquare, Moon, Network, Waypoints,
   Layers, PanelLeftClose, PanelLeftOpen, Plug, Settings, Sparkles, SquareFunction, Sun, SunMoon, Target, UserRound, Users, type LucideIcon,
 } from 'lucide-react';
 import { Avatar, Badge, Menu, MenuDivider, MenuItem, MenuLabel, Segmented, Select } from '@/components/ui';
@@ -21,6 +21,7 @@ interface NavItem { to: string; label: string; icon: LucideIcon; end?: boolean; 
 const NAV: { section: string | null; items: NavItem[] }[] = [
   { section: null, items: [
     { to: '/', label: 'Overview', icon: LayoutDashboard, end: true },
+    { to: '/assistant', label: 'Assistant', icon: MessagesSquare },
     { to: '/incidents', label: 'Incidents', icon: AlertOctagon, liveCount: 'firing' },
     { to: '/service-map', label: 'Service map', icon: Network },
   ] },

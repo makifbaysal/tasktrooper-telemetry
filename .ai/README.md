@@ -6,7 +6,7 @@ Source document set for agents and developers. Entry point: [`../AGENTS.md`](../
 
 1. [product.md](product.md) — what we build, and for whom
 2. [architecture.md](architecture.md) — how we build it
-3. By topic: [sdk.md](sdk.md), [data-model.md](data-model.md), [alerting.md](alerting.md), [code-intelligence.md](code-intelligence.md), [load-testing.md](load-testing.md), [mcp.md](mcp.md) (+ Agent Skills: [`../skills/`](../skills/), setup in mcp.md § Agent Skills)
+3. By topic: [sdk.md](sdk.md), [data-model.md](data-model.md), [alerting.md](alerting.md), [code-intelligence.md](code-intelligence.md), [load-testing.md](load-testing.md), [mcp.md](mcp.md), [assistant.md](assistant.md) (+ Agent Skills: [`../skills/`](../skills/), setup in mcp.md § Agent Skills)
 4. UI work: [design-system.md](design-system.md)
 5. Why it is this way: [decisions.md](decisions.md) · What's next: [roadmap.md](roadmap.md)
 

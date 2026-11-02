@@ -1,9 +1,8 @@
-import { useState } from 'react';
 import { useNavigate } from 'react-router';
-import { Activity, ArrowRight, Sparkles } from 'lucide-react';
+import { Activity, ArrowRight, MessagesSquare } from 'lucide-react';
 import { TimeSeries } from '@/components/charts';
 import {
-  Badge, Button, Card, ConnectSdk, Drawer, DrawerSection, KeyValues, Select, Meter, Section, StatusBadge, Table, useDrawer,
+  Badge, Button, Card, ConnectSdk, Drawer, DrawerSection, KeyValues, Meter, Section, StatusBadge, Table, useDrawer,
 } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
 import {
@@ -15,8 +14,6 @@ import { ErrorCell } from './apm';
 import { ServiceType } from './shared';
 import { PathCrumbs, incidentCause } from './rca';
 import { ruleSeries } from '@/lib/lagAlerts';
-import { LocalAICost } from '@/components/ui/LocalAICost';
-import { LocalAIState } from '@/components/ui/LocalAIState';
 
 type Attention = Endpoint & { service: string; reason: 'errors' | 'slow'; score: number };
 
@@ -24,20 +21,8 @@ export function Overview() {
   const { range, env } = useApp();
   const nav = useNavigate();
   const inc = useDrawer<Incident>();
-  const [askOpen, setAskOpen] = useState(false);
-  const [question, setQuestion] = useState('health');
-  const [answer, setAnswer] = useState('');
-  const [askError, setAskError] = useState('');
-  const [asking, setAsking] = useState(false);
   const ts = timestamps(range);
   const backend = services.filter((s) => s.type === 'http' || s.type === 'consumer' || s.type === 'worker');
-  const rpm = backend.reduce((a, s) => a + s.rpm, 0);
-  const err = rpm ? backend.reduce((a, s) => a + s.errorRate * s.rpm, 0) / rpm : 0;
-  // project-wide RED series (`/overview/series`)
-  const red = redSeries(range);
-  // the newest bucket is still filling, so take the last non-empty one
-  const lastNonZero = (xs: number[]) => xs.filter((v) => v > 0).at(-1) ?? 0;
-  const p95Now = lastNonZero(red.p95);
 
   // One list instead of "slowest" + "most failing": an endpoint shows up once, with the reason it's here.
   const attention: Attention[] = backend
@@ -54,24 +39,6 @@ export function Overview() {
   const open = incidents.filter((i) => i.state !== 'resolved');
   const ordered = [...backend].sort((a, b) => ['critical', 'warning', 'ok'].indexOf(a.status) - ['critical', 'warning', 'ok'].indexOf(b.status) || b.rpm - a.rpm);
 
-  const askTelemetry = async () => {
-    setAsking(true);
-    setAskError('');
-    try {
-      const response = await fetch('/local-ai/ask-telemetry', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, rpm, errorRate: err, p95: p95Now, openIncidents: open.length }),
-      });
-      if (!response.ok) throw new Error(`Local mock server returned HTTP ${response.status}`);
-      const result = await response.json() as { answer: string };
-      setAnswer(result.answer);
-    } catch (cause) {
-      setAskError(cause instanceof Error ? cause.message : 'Could not reach the local mock server.');
-    } finally {
-      setAsking(false);
-    }
-  };
-
   return (
     <>
       <header className="overview-heading" aria-labelledby="overview-title">
@@ -79,7 +46,6 @@ export function Overview() {
           <h1 id="overview-title">{env ? `${env[0].toUpperCase()}${env.slice(1)} overview` : 'Overview'}</h1>
           <p>{services.length ? `${backend.length} backend services monitored over the last ${range}. Start with the active incidents.` : 'Waiting for the first data from an SDK.'}</p>
         </div>
-        <Button icon={<Sparkles size={14} />} onClick={() => setAskOpen(true)}>Ask telemetry</Button>
       </header>
 
       {services.length === 0 ? (
@@ -143,21 +109,6 @@ export function Overview() {
       </>}
 
       {inc.item && <IncidentDrawer incident={inc.item} onClose={inc.close} />}
-      <Drawer open={askOpen} onClose={() => setAskOpen(false)} title="Ask telemetry" subtitle="Read-only questions about the current overview">
-        <DrawerSection title="Question" aside="Offline mock · 0 tokens">
-          <div className="stack" style={{ gap: 'var(--space-3)' }}>
-            <Select aria-label="Telemetry question" value={question} onChange={(event) => { setQuestion(event.target.value); setAnswer(''); }}
-              options={[
-                { value: 'health', label: 'How is the project doing now?' },
-                { value: 'errors', label: 'What is happening with errors?' },
-                { value: 'latency', label: 'What is happening with latency?' },
-              ]} />
-            <div className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}><Button variant="primary" disabled={asking} onClick={() => void askTelemetry()}>{asking ? 'Checking…' : 'Ask'}</Button><LocalAICost /></div>
-            {answer && <p className="secondary" style={{ margin: 0 }}>{answer}</p>}
-            <LocalAIState busy={asking} error={askError} onRetry={() => void askTelemetry()} />
-          </div>
-        </DrawerSection>
-      </Drawer>
     </>
   );
 }
@@ -184,7 +135,10 @@ function IncidentDrawer({ incident, onClose }: { incident: Incident; onClose: ()
   return (
     <Drawer open onClose={onClose} title={incident.title}
       subtitle={<><StatusBadge status={incident.state === 'acknowledged' ? 'acknowledged' : incident.state === 'pending' ? 'pending' : 'firing'} /><span className="muted">started {ago(incident.startedAt)}</span></>}
-      actions={<Button size="sm" onClick={() => nav(`/incidents?id=${encodeURIComponent(incident.id)}`)}>Open incident <ArrowRight size={14} /></Button>}>
+      actions={<>
+        <Button size="sm" variant="ghost" icon={<MessagesSquare size={14} />} onClick={() => nav(`/assistant?ref=incident:${encodeURIComponent(incident.id)}`)}>Ask assistant</Button>
+        <Button size="sm" onClick={() => nav(`/incidents?id=${encodeURIComponent(incident.id)}`)}>Open incident <ArrowRight size={14} /></Button>
+      </>}>
       {cause && (
         <section className="card rca" style={{ padding: 'var(--space-4)' }}>
           <div className="stack" style={{ gap: 8 }}>
