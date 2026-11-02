@@ -311,7 +311,7 @@ func (s *Server) assistantTools(ctx context.Context, r *http.Request, allowWrite
 	return tools, append(defs, assistant.WidgetDef()), func() { _ = cs.Close() }, nil
 }
 
-// assistantQuota gates Claude requests with the org's and the user's AI credits.
+// assistantQuota gates model requests with the org's and the user's AI credits.
 type assistantQuota struct {
 	s                  AssistantStore
 	org, project, user int64

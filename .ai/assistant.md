@@ -20,7 +20,7 @@ to the matching dashboard screens.
 
 ```
 web /assistant ──SSE── api  /api/v1/assistant/*  (internal/assistant)
-                        │  agent loop: Claude Messages API (streaming) or offline mock
+                        │  agent loop: OpenAI-compatible Chat Completions (streaming, function calling) or offline mock
                         │  tools: services/mcp/toolset (in-memory MCP client ↔ MCP server)
                         │          └─ apiclient ── in-process RoundTripper ──▶ api router (same user session)
                         └─ Postgres: assistant_threads / assistant_messages / assistant_attachments
@@ -38,8 +38,9 @@ web /assistant ──SSE── api  /api/v1/assistant/*  (internal/assistant)
 
 | Env | Default | Meaning |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | — | Claude API key (server side only) |
-| `TT_ASSISTANT_MODEL` | — | Model id (never hard-coded). Key **and** model set → `claude`; otherwise the offline `mock` provider |
+| `TT_ASSISTANT_API_URL` | `https://api.meta.ai/v1` | Base URL of an **OpenAI-compatible** Chat Completions API (`…/v1`, or the full `…/chat/completions` URL). Default: Meta Muse Spark |
+| `TT_ASSISTANT_API_KEY` | — | API key, sent as `Authorization: Bearer` (server side only) |
+| `TT_ASSISTANT_MODEL` | — | Model id, e.g. a Muse Spark model (never hard-coded). Key **and** model set → `openai`; otherwise the offline `mock` provider |
 | `TT_ASSISTANT_MAX_TOKENS` | `4096` | Output cap per model request |
 | `TT_ASSISTANT_MAX_STEPS` | `12` | Max model requests (tool rounds) per turn |
 | `TT_ASSISTANT_ALLOW_WRITE` | `true` | Register the MCP write tools (each still needs a UI approval) |
@@ -47,7 +48,7 @@ web /assistant ──SSE── api  /api/v1/assistant/*  (internal/assistant)
 The `mock` provider spends nothing: it calls one read tool for the message (or the mentioned item) and renders a
 widget, so the UI can be exercised without credits.
 
-AI quota (ADR-018): every Claude request reserves an estimate and records the real usage in `ai_usage` with feature
+AI quota (ADR-018): every model request reserves an estimate and records the real usage in `ai_usage` with feature
 `assistant`, the user and `ref = assistant:<thread id>`. A denied reservation ends the turn with an `error` event
 (`quota_exceeded`).
 
@@ -55,7 +56,7 @@ AI quota (ADR-018): every Claude request reserves an estimate and records the re
 
 | Method + path | Body | Response |
 |---|---|---|
-| `GET /assistant/status` | | `{ provider: "claude"\|"mock", model, writeTools: bool }` |
+| `GET /assistant/status` | | `{ provider: "openai"\|"mock", model, writeTools: bool }` |
 | `GET /assistant/threads` | | `AssistantThread[]` (newest first, max 100) |
 | `POST /assistant/threads` | `{ title? }` | `AssistantThread` (201) |
 | `GET /assistant/threads/{id}` | | `{ thread: AssistantThread, messages: AssistantMessage[] }` |

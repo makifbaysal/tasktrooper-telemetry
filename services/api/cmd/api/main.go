@@ -145,16 +145,18 @@ func run(cfg config.Common, log *slog.Logger) error {
 			return errors.New("TT_OIDC_ISSUER is set but TT_OIDC_CLIENT_ID is empty")
 		}
 	}
-	// Dashboard assistant (ADR-033): Claude when ANTHROPIC_API_KEY and TT_ASSISTANT_MODEL are both set, else the offline mock.
+	// Dashboard assistant (ADR-033): an OpenAI-compatible chat completions model (default URL: Meta Muse Spark) when
+	// TT_ASSISTANT_API_KEY and TT_ASSISTANT_MODEL are both set, else the offline mock.
 	srv.Assistant = &server.AssistantConfig{
-		Provider: assistant.NewClaude(os.Getenv("ANTHROPIC_API_KEY"), config.String("TT_ASSISTANT_MODEL", ""),
+		Provider: assistant.NewOpenAI(config.String("TT_ASSISTANT_API_URL", assistant.DefaultAPIURL),
+			os.Getenv("TT_ASSISTANT_API_KEY"), config.String("TT_ASSISTANT_MODEL", ""),
 			&http.Client{Timeout: 5 * time.Minute, Transport: selftel.LLMTransport()}),
 		MaxSteps:   config.Int("TT_ASSISTANT_MAX_STEPS", 12),
 		MaxTokens:  int64(config.Int("TT_ASSISTANT_MAX_TOKENS", 4096)),
 		AllowWrite: config.Bool("TT_ASSISTANT_ALLOW_WRITE", true),
 	}
 	if srv.Assistant.Provider == nil {
-		log.Info("assistant uses the offline mock (set ANTHROPIC_API_KEY and TT_ASSISTANT_MODEL for Claude)")
+		log.Info("assistant uses the offline mock (set TT_ASSISTANT_API_KEY and TT_ASSISTANT_MODEL for a model)")
 	}
 	if b := blob.FromEnv(); b != nil {
 		srv.Replays = b

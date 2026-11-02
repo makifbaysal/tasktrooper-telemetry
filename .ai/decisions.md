@@ -547,8 +547,9 @@ and dry-run semantics, but it runs over stdio with an api key.
   approvals.
 - Replies stream as SSE. An assistant-only tool `show_widget` renders entity cards (references, live data from the dashboard data layer),
   charts, tables and stats that link to dashboard paths.
-- Provider: Claude (`ANTHROPIC_API_KEY` + `TT_ASSISTANT_MODEL`, never hard-coded); otherwise an offline mock that calls one read tool and
-  spends nothing. Claude requests reserve and record AI credits (ADR-018, feature `assistant`).
+- Provider: any **OpenAI-compatible Chat Completions** API with function calling — Meta Muse Spark by default
+  (`TT_ASSISTANT_API_URL`, `TT_ASSISTANT_API_KEY`, `TT_ASSISTANT_MODEL`, model never hard-coded; plain HTTP + SSE, no vendor SDK);
+  otherwise an offline mock that calls one read tool and spends nothing. Model requests reserve and record AI credits (ADR-018, feature `assistant`).
 **Consequence:** The approval gate lives in the api, not in the model's goodwill — stronger than the MCP `confirm` convention. Images are
 stored in Postgres (≤ 5 MB each); move them to object storage if volume grows. One running turn per thread is enforced per api instance
 (in-memory lock); several api replicas would need a Postgres advisory lock.

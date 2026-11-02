@@ -16,7 +16,7 @@ type scripted struct {
 	reqs  []StepRequest
 }
 
-func (s *scripted) Name() string  { return "claude" }
+func (s *scripted) Name() string  { return "openai" }
 func (s *scripted) Model() string { return "test-model" }
 func (s *scripted) Step(_ context.Context, req StepRequest, onText func(string)) (StepResult, error) {
 	s.reqs = append(s.reqs, req)
