@@ -24,7 +24,7 @@ importable, and silently skips the rest): `django`, `fastapi`, `starlette`, `fla
 import tasktrooper
 
 tasktrooper.init(
-    dsn="https://<ingest-key>@ingest.trooper.dev/<project>",   # or TROOPER_DSN
+    dsn="https://<ingest-key>@telemetry-ingest.tasktrooper.ai/<project>",   # or TROOPER_DSN
     service="orders-api",
     environment="production",
     version=os.environ.get("GIT_SHA"),                          # deploy marker

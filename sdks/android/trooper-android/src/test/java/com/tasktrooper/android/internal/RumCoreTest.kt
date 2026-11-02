@@ -147,7 +147,7 @@ class RumCoreTest {
         assertEquals("tt_dev_ingest_key", d.key)
         assertEquals("1", d.projectId)
         assertEquals(null, com.tasktrooper.android.Dsn.parse("not a dsn"))
-        assertEquals(null, com.tasktrooper.android.Dsn.parse("https://ingest.trooper.dev/1"))
+        assertEquals(null, com.tasktrooper.android.Dsn.parse("https://telemetry-ingest.tasktrooper.ai/1"))
     }
 
     @Test fun urlSanitizerKeepsKeysOnly() {

@@ -24,13 +24,13 @@ func TestParseDSN(t *testing.T) {
 		wantErr                bool
 	}{
 		{name: "local", in: "http://tt_dev_ingest_key@localhost:4318/1", endpoint: "http://localhost:4318", key: "tt_dev_ingest_key", project: "1"},
-		{name: "https no port", in: "https://abc@ingest.trooper.dev/42", endpoint: "https://ingest.trooper.dev", key: "abc", project: "42"},
-		{name: "trailing slash", in: "https://abc@ingest.trooper.dev/42/", endpoint: "https://ingest.trooper.dev", key: "abc", project: "42"},
+		{name: "https no port", in: "https://abc@telemetry-ingest.tasktrooper.ai/42", endpoint: "https://telemetry-ingest.tasktrooper.ai", key: "abc", project: "42"},
+		{name: "trailing slash", in: "https://abc@telemetry-ingest.tasktrooper.ai/42/", endpoint: "https://telemetry-ingest.tasktrooper.ai", key: "abc", project: "42"},
 		{name: "path prefix", in: "https://abc@proxy.example.com/ingest/7", endpoint: "https://proxy.example.com/ingest", key: "abc", project: "7"},
-		{name: "no project", in: "https://abc@ingest.trooper.dev", endpoint: "https://ingest.trooper.dev", key: "abc"},
+		{name: "no project", in: "https://abc@telemetry-ingest.tasktrooper.ai", endpoint: "https://telemetry-ingest.tasktrooper.ai", key: "abc"},
 		{name: "whitespace", in: "  http://k@h:1/2 ", endpoint: "http://h:1", key: "k", project: "2"},
 		{name: "empty", in: "", wantErr: true},
-		{name: "no key", in: "https://ingest.trooper.dev/1", wantErr: true},
+		{name: "no key", in: "https://telemetry-ingest.tasktrooper.ai/1", wantErr: true},
 		{name: "bad scheme", in: "grpc://k@host/1", wantErr: true},
 		{name: "no host", in: "https://k@/1", wantErr: true},
 		{name: "garbage", in: "::not a url", wantErr: true},

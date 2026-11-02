@@ -186,7 +186,7 @@ export function DesignSystem() {
           <EmptyState icon={<Bell size={18} />} title="No monitors yet">Connect a repo and we will suggest them.</EmptyState>
           <CodeBlock>{`init({ dsn, service: 'orders-api' })`}</CodeBlock>
           <CopyCode>{`{ "Effect": "Allow", "Action": ["cloudwatch:GetMetricData"], "Resource": "*" }`}</CopyCode>
-          <CopyCode wrap>{'https://ingest.trooper.dev/v1/drains/vercel?key=<backend ingest key>&integration=int-vercel'}</CopyCode>
+          <CopyCode wrap>{'https://telemetry-ingest.tasktrooper.ai/v1/drains/vercel?key=<backend ingest key>&integration=int-vercel'}</CopyCode>
         </Card>
         <Card title="ConnectSdk (no data yet)">
           <ConnectSdk icon={<Bell size={18} />} title="No services yet">Services appear here as soon as an SDK reports traces.</ConnectSdk>

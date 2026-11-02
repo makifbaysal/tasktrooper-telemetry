@@ -3,11 +3,11 @@ import XCTest
 
 final class DSNTests: XCTestCase {
     func testParsesFullDSN() throws {
-        let dsn = try XCTUnwrap(TrooperDSN("https://abc123@ingest.trooper.dev:8443/42"))
+        let dsn = try XCTUnwrap(TrooperDSN("https://abc123@telemetry-ingest.tasktrooper.ai:8443/42"))
         XCTAssertEqual(dsn.key, "abc123")
         XCTAssertEqual(dsn.projectId, "42")
-        XCTAssertEqual(dsn.baseURL.absoluteString, "https://ingest.trooper.dev:8443")
-        XCTAssertEqual(dsn.rumURL.absoluteString, "https://ingest.trooper.dev:8443/v1/rum")
+        XCTAssertEqual(dsn.baseURL.absoluteString, "https://telemetry-ingest.tasktrooper.ai:8443")
+        XCTAssertEqual(dsn.rumURL.absoluteString, "https://telemetry-ingest.tasktrooper.ai:8443/v1/rum")
     }
 
     func testParsesLocalDevDSN() throws {

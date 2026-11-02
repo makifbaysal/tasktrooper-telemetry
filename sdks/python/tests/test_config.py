@@ -7,8 +7,8 @@ from tasktrooper.config import DsnError, parse_dsn, parse_headers, resolve_confi
     "dsn,endpoint,key,project",
     [
         ("http://tt_dev_ingest_key@localhost:4318/1", "http://localhost:4318", "tt_dev_ingest_key", "1"),
-        ("https://abc@ingest.trooper.dev/42", "https://ingest.trooper.dev", "abc", "42"),
-        ("https://abc@ingest.trooper.dev/prefix/path/42/", "https://ingest.trooper.dev/prefix/path", "abc", "42"),
+        ("https://abc@telemetry-ingest.tasktrooper.ai/42", "https://telemetry-ingest.tasktrooper.ai", "abc", "42"),
+        ("https://abc@telemetry-ingest.tasktrooper.ai/prefix/path/42/", "https://telemetry-ingest.tasktrooper.ai/prefix/path", "abc", "42"),
         ("https://a%2Fb@h.example", "https://h.example", "a/b", None),
         ("  https://k@[::1]:9000/7 ", "https://[::1]:9000", "k", "7"),
     ],
