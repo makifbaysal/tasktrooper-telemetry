@@ -22,6 +22,7 @@ import (
 	trooperslog "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog"
 	"github.com/makifbaysal/tasktrooper-telemetry/sdks/go/llm"
 
+	"github.com/tasktrooper/telemetry/services/pkg/llmapi"
 	"github.com/tasktrooper/telemetry/services/pkg/tenant"
 )
 
@@ -147,14 +148,15 @@ func Transport(base http.RoundTripper, peer string) http.RoundTripper {
 	return trooperhttp.NewTransport(base, opts...)
 }
 
-// LLMTransport is the transport for the incident-summary provider: GenAI client spans (model, tokens; content
-// capture stays off unless TROOPER_LLM_CAPTURE_CONTENT=true) over an HTTP client span. nil when not Enabled.
+// LLMTransport is the transport for the platform's LLM endpoint (TT_ASSISTANT_API_URL, ADR-034; incident summary and
+// assistant): GenAI client spans (model, tokens; content capture stays off unless TROOPER_LLM_CAPTURE_CONTENT=true)
+// over an HTTP client span. nil when not Enabled.
 func LLMTransport() http.RoundTripper {
 	if !Enabled() {
 		return nil
 	}
-	return llm.Transport(Transport(nil, ""),
-		llm.WithProvider("api.meta.ai", "meta"), llm.WithProvider("inference.baseten.co", "baseten"))
+	cfg := llmapi.FromEnv()
+	return llm.Transport(Transport(nil, ""), llm.WithProvider(cfg.Host(), cfg.Provider()))
 }
 
 // PGTracer is the pgx tracer (sanitized SQL, no parameters).

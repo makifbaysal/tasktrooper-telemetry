@@ -9,32 +9,30 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tasktrooper/telemetry/services/pkg/llmapi"
 )
 
-func TestProviderSelectionFailsClosed(t *testing.T) {
+// The summarizer reads the shared endpoint (TT_ASSISTANT_*): key and model set → real provider, else the mock.
+func TestNewFromEnv(t *testing.T) {
 	for _, tc := range []struct {
-		name, provider, allow, key string
-		wantErr                    bool
+		name, key, model string
+		wantModel        string
 	}{
-		{"default mock", "", "", "", false},
-		{"explicit mock ignores key", "mock", "true", "secret", false},
-		{"default mock ignores paid opt in and key", "", "true", "secret", false},
-		{"meta needs opt in", "meta", "", "secret", true},
-		{"meta needs key", "meta", "true", "", true},
-		{"baseten needs opt in", "baseten", "", "secret", true},
-		{"baseten needs key", "baseten", "true", "", true},
-		{"unknown provider", "unknown", "true", "secret", true},
+		{"unset is mock", "", "", ""},
+		{"key alone is mock", "secret", "", ""},
+		{"model alone is mock", "", "muse", ""},
+		{"key and model is real", "secret", "muse", "muse"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("TT_AI_PROVIDER", tc.provider)
-			t.Setenv("TT_AI_ALLOW_PAID", tc.allow)
-			t.Setenv("MODEL_API_KEY", tc.key)
-			t.Setenv("BASETEN_API_KEY", tc.key)
-			p, err := NewFromEnv()
-			if (err != nil) != tc.wantErr {
-				t.Fatalf("provider=%T err=%v", p, err)
+			t.Setenv(llmapi.EnvURL, "")
+			t.Setenv(llmapi.EnvKey, tc.key)
+			t.Setenv(llmapi.EnvModel, tc.model)
+			p := NewFromEnv()
+			if p.Model() != tc.wantModel {
+				t.Fatalf("model %q, want %q", p.Model(), tc.wantModel)
 			}
-			if !tc.wantErr {
+			if tc.wantModel == "" {
 				got, err := p.Summarize(context.Background(), Input{Title: "Checkout errors"})
 				if err != nil || got.Provider != "mock" || got.Usage != (Usage{}) {
 					t.Fatalf("mock result=%+v err=%v", got, err)
@@ -44,27 +42,38 @@ func TestProviderSelectionFailsClosed(t *testing.T) {
 	}
 }
 
+func newRemote(t *testing.T, url string, hc *http.Client) Summarizer {
+	t.Helper()
+	p := New(llmapi.New(url, "test-key", "test-model"), hc)
+	if p.Model() != "test-model" {
+		t.Fatalf("not a remote provider: %T", p)
+	}
+	return p
+}
+
 func TestRemoteProviderFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name, response, want string
 		status               int
+		wantUsage            Usage
 	}{
-		{"rate limited", `{"error":"rate limited"}`, "HTTP 429", http.StatusTooManyRequests},
-		{"server error", `{"error":"unavailable"}`, "HTTP 503", http.StatusServiceUnavailable},
-		{"invalid JSON", `{`, "decode meta response", http.StatusOK},
-		{"empty choices", `{"choices":[]}`, "no summary", http.StatusOK},
-		{"blank summary", `{"choices":[{"message":{"content":"  "}}]}`, "no summary", http.StatusOK},
+		{"rate limited", `{"error":"rate limited"}`, "HTTP 429", http.StatusTooManyRequests, Usage{}},
+		{"server error", `{"error":"unavailable"}`, "HTTP 503", http.StatusServiceUnavailable, Usage{}},
+		{"invalid JSON", `{`, "decode response", http.StatusOK, Usage{}},
+		{"empty choices", `{"choices":[]}`, "no choices", http.StatusOK, Usage{}},
+		{"blank summary is still billed", `{"choices":[{"message":{"content":"  "}}],"usage":{"prompt_tokens":7,"completion_tokens":1}}`, "no summary", http.StatusOK, Usage{7, 1}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			requests := 0
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				requests++
 				w.WriteHeader(tc.status)
 				_, _ = w.Write([]byte(tc.response))
 			}))
 			defer ts.Close()
-			p := &remote{provider: "meta", endpoint: ts.URL, model: "test", key: "test", client: ts.Client()}
-			got, err := p.Summarize(context.Background(), Input{Title: "Incident"})
-			if err == nil || !strings.Contains(err.Error(), tc.want) || got != (Result{}) {
-				t.Fatalf("result=%+v err=%v; want %q", got, err, tc.want)
+			got, err := newRemote(t, ts.URL, ts.Client()).Summarize(context.Background(), Input{Title: "Incident"})
+			if err == nil || !strings.Contains(err.Error(), tc.want) || got != (Result{Usage: tc.wantUsage}) || requests != 1 {
+				t.Fatalf("result=%+v err=%v requests=%d; want %q", got, err, requests, tc.want)
 			}
 		})
 	}
@@ -94,8 +103,7 @@ func TestRemoteHonorsContextFailure(t *testing.T) {
 			defer ts.Close()
 			ctx, cancel := tc.ctx()
 			defer cancel()
-			p := &remote{provider: "meta", endpoint: ts.URL, model: "test", key: "test", client: ts.Client()}
-			got, err := p.Summarize(ctx, Input{Title: "Incident"})
+			got, err := newRemote(t, ts.URL, ts.Client()).Summarize(ctx, Input{Title: "Incident"})
 			if !errors.Is(err, tc.want) || got != (Result{}) || requests != 0 {
 				t.Fatalf("result=%+v err=%v requests=%d", got, err, requests)
 			}
@@ -104,29 +112,35 @@ func TestRemoteHonorsContextFailure(t *testing.T) {
 }
 
 func TestRemoteRequestAndUsage(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer test-key" {
-			t.Errorf("unexpected request %s %s", r.URL.Path, r.Header.Get("Authorization"))
-		}
-		var req struct {
-			Model     string    `json:"model"`
-			Messages  []message `json:"messages"`
-			MaxTokens int       `json:"max_tokens"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			t.Fatal(err)
-		}
-		if req.Model != "test-model" || req.MaxTokens != IncidentSummaryMaxOutputTokens || len(req.Messages) != 2 ||
-			req.Messages[0].Role != "developer" || !strings.Contains(req.Messages[1].Content, "5xx rate") {
-			t.Errorf("unexpected payload: %+v", req)
-		}
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Likely impact on checkout; cause unknown."}}],"usage":{"prompt_tokens":42,"completion_tokens":9}}`))
-	}))
-	defer ts.Close()
-	p := &remote{provider: "meta", endpoint: ts.URL + "/v1/chat/completions", model: "test-model", key: "test-key", client: ts.Client()}
-	got, err := p.Summarize(context.Background(), Input{Title: "Checkout errors", Evidence: []string{"5xx rate rose"}})
-	if err != nil || got.Provider != "meta" || got.Usage.InputTokens != 42 || got.Usage.OutputTokens != 9 {
-		t.Fatalf("result=%+v err=%v", got, err)
+	for _, tc := range []struct {
+		name, base, wantPath string
+	}{
+		{"base URL", "/v1", "/v1/chat/completions"},
+		{"full URL", "/v1/chat/completions", "/v1/chat/completions"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != tc.wantPath || r.Header.Get("Authorization") != "Bearer test-key" {
+					t.Errorf("unexpected request %s %s", r.URL.Path, r.Header.Get("Authorization"))
+				}
+				var req llmapi.Request
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					t.Error(err)
+				}
+				if req.Model != "test-model" || req.MaxTokens != IncidentSummaryMaxOutputTokens || len(req.Messages) != 2 ||
+					req.Messages[0].Role != "system" || !strings.Contains(req.Messages[1].Content, "5xx rate") {
+					t.Errorf("unexpected payload: %+v", req)
+				}
+				_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Likely impact on checkout; cause unknown."}}],"usage":{"prompt_tokens":42,"completion_tokens":9}}`))
+			}))
+			defer ts.Close()
+			got, err := newRemote(t, ts.URL+tc.base, ts.Client()).Summarize(context.Background(),
+				Input{Title: "Checkout errors", Evidence: []string{"5xx rate rose"}})
+			// httptest hosts are unknown → OpenAI-compatible "openai"
+			if err != nil || got.Provider != "openai" || got.Summary == "" || got.Usage != (Usage{42, 9}) {
+				t.Fatalf("result=%+v err=%v", got, err)
+			}
+		})
 	}
 }
 
@@ -137,8 +151,8 @@ func TestRemoteRejectsOversizedInputBeforeNetwork(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer ts.Close()
-	p := &remote{provider: "meta", endpoint: ts.URL, model: "test", key: "test", client: ts.Client()}
-	got, err := p.Summarize(context.Background(), Input{Title: "Incident", Evidence: []string{strings.Repeat("x", IncidentSummaryMaxInputBytes)}})
+	got, err := newRemote(t, ts.URL, ts.Client()).Summarize(context.Background(),
+		Input{Title: "Incident", Evidence: []string{strings.Repeat("x", IncidentSummaryMaxInputBytes)}})
 	if !errors.Is(err, ErrInputTooLarge) || got != (Result{}) || requests != 0 {
 		t.Fatalf("result=%+v err=%v requests=%d", got, err, requests)
 	}

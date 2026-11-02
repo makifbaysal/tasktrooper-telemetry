@@ -1,17 +1,16 @@
-// Package ai isolates paid model calls from the API and defaults to an offline mock.
+// Package ai is the incident-summary model call. It uses the one OpenAI-compatible endpoint of the platform
+// (services/pkg/llmapi, ADR-034) and defaults to an offline mock.
 package ai
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
+
+	"github.com/tasktrooper/telemetry/services/pkg/llmapi"
 )
 
 type Input struct {
@@ -24,8 +23,11 @@ type Input struct {
 const IncidentSummaryMaxInputBytes = 4000
 const IncidentSummaryMaxOutputTokens = 150
 
-// HTTPTransport is the transport of paid-provider clients built by NewFromEnv (nil = http.DefaultTransport; main
-// sets a GenAI-instrumented one when self telemetry is on, ADR-027).
+// IncidentSummarySystemPrompt is the instruction sent with every summary request.
+const IncidentSummarySystemPrompt = "Write a concise incident summary using only the evidence given. State uncertainty. Do not invent a root cause. Reply in plain text, at most 100 words."
+
+// HTTPTransport is the transport of model clients built by NewFromEnv (nil = http.DefaultTransport; main sets a
+// GenAI-instrumented one when self telemetry is on, ADR-027).
 var HTTPTransport http.RoundTripper
 
 var ErrInputTooLarge = errors.New("incident summary input exceeds 4000 bytes")
@@ -35,6 +37,15 @@ func ValidateInput(in Input) error {
 		return ErrInputTooLarge
 	}
 	return nil
+}
+
+// PromptChars is the size of the prompt sent for in (pre-call AI quota estimate).
+func PromptChars(in Input) int {
+	return len(IncidentSummarySystemPrompt) + len(userPrompt(in))
+}
+
+func userPrompt(in Input) string {
+	return "Incident: " + in.Title + "\nEvidence:\n- " + strings.Join(in.Evidence, "\n- ")
 }
 
 type Usage struct {
@@ -50,11 +61,15 @@ type Result struct {
 
 type Summarizer interface {
 	Summarize(context.Context, Input) (Result, error)
+	// Model is the model id of a real provider; "" for the offline mock (no AI credits involved).
+	Model() string
 }
 
 type mock struct{}
 
 func NewMock() Summarizer { return mock{} }
+
+func (mock) Model() string { return "" }
 
 func (mock) Summarize(_ context.Context, in Input) (Result, error) {
 	return Result{
@@ -64,95 +79,47 @@ func (mock) Summarize(_ context.Context, in Input) (Result, error) {
 }
 
 type remote struct {
-	provider string
-	endpoint string
-	model    string
-	key      string
-	client   *http.Client
+	client *llmapi.Client
 }
 
-type message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+// New returns the summarizer of the shared OpenAI-compatible endpoint (ADR-034), or the offline mock when its key or
+// model is empty. hc nil = a client with a 15 second timeout over HTTPTransport. There is no retry: one summary costs
+// at most one request.
+func New(cfg llmapi.Config, hc *http.Client) Summarizer {
+	if !cfg.Enabled() {
+		return mock{}
+	}
+	if hc == nil {
+		hc = &http.Client{Timeout: 15 * time.Second, Transport: HTTPTransport}
+	}
+	return &remote{client: &llmapi.Client{Config: cfg, HTTP: hc}}
 }
 
-// NewFromEnv is deliberately fail-closed: paid network calls require both an
-// explicit provider and TT_AI_ALLOW_PAID=true. A key alone cannot enable them.
-func NewFromEnv() (Summarizer, error) {
-	provider := strings.ToLower(strings.TrimSpace(os.Getenv("TT_AI_PROVIDER")))
-	if provider == "" || provider == "mock" {
-		return mock{}, nil
-	}
-	if provider != "meta" && provider != "baseten" {
-		return nil, fmt.Errorf("invalid TT_AI_PROVIDER %q", provider)
-	}
-	if os.Getenv("TT_AI_ALLOW_PAID") != "true" {
-		return nil, errors.New("paid AI provider requires TT_AI_ALLOW_PAID=true")
-	}
-	var endpoint, model, key string
-	switch provider {
-	case "meta":
-		endpoint, model, key = "https://api.meta.ai/v1/chat/completions", "muse-spark-1.3", os.Getenv("MODEL_API_KEY")
-	case "baseten":
-		endpoint, model, key = "https://inference.baseten.co/v1/chat/completions", "meta-models/muse-spark-open", os.Getenv("BASETEN_API_KEY")
-	}
-	if strings.TrimSpace(key) == "" {
-		return nil, fmt.Errorf("%s API key is required for paid AI provider", provider)
-	}
-	if v := strings.TrimSpace(os.Getenv("TT_AI_MODEL")); v != "" {
-		model = v
-	}
-	return &remote{provider: provider, endpoint: endpoint, model: model, key: key,
-		client: &http.Client{Timeout: 15 * time.Second, Transport: HTTPTransport}}, nil
-}
+// NewFromEnv reads TT_ASSISTANT_API_URL / TT_ASSISTANT_API_KEY / TT_ASSISTANT_MODEL, the endpoint shared with the
+// dashboard assistant and codeintel: key and model set → real model, otherwise the offline mock.
+func NewFromEnv() Summarizer { return New(llmapi.FromEnv(), nil) }
 
+func (p *remote) Model() string { return p.client.Model }
+
+// Summarize returns the usage of a billed request even when the answer is unusable (the caller records it).
 func (p *remote) Summarize(ctx context.Context, in Input) (Result, error) {
 	if err := ValidateInput(in); err != nil {
 		return Result{}, err
 	}
-	payload := struct {
-		Model     string    `json:"model"`
-		Messages  []message `json:"messages"`
-		MaxTokens int       `json:"max_tokens"`
-	}{Model: p.model, MaxTokens: IncidentSummaryMaxOutputTokens}
-	payload.Messages = append(payload.Messages,
-		message{"developer", "Write a concise incident summary using only the evidence given. State uncertainty. Do not invent a root cause. Reply in plain text, at most 100 words."},
-		message{"user", "Incident: " + in.Title + "\nEvidence:\n- " + strings.Join(in.Evidence, "\n- ")})
-	data, err := json.Marshal(payload)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.endpoint, bytes.NewReader(data))
+	resp, err := p.client.Complete(ctx, llmapi.Request{MaxTokens: IncidentSummaryMaxOutputTokens, Messages: []llmapi.Message{
+		{Role: "system", Content: IncidentSummarySystemPrompt},
+		{Role: "user", Content: userPrompt(in)},
+	}})
+	provider := p.client.Provider()
+	usage := Usage{InputTokens: int(resp.Usage.Prompt), OutputTokens: int(resp.Usage.Completion)}
 	if err != nil {
-		return Result{}, err
+		return Result{Usage: usage}, fmt.Errorf("%s: %w", provider, err)
 	}
-	req.Header.Set("Authorization", "Bearer "+p.key)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return Result{}, err
+	if strings.TrimSpace(resp.Content) == "" {
+		return Result{Usage: usage}, fmt.Errorf("%s API returned no summary", provider)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return Result{}, fmt.Errorf("%s API returned HTTP %d", p.provider, resp.StatusCode)
-	}
-	var body struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-		Usage struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-		} `json:"usage"`
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
-		return Result{}, fmt.Errorf("decode %s response: %w", p.provider, err)
-	}
-	if len(body.Choices) == 0 || strings.TrimSpace(body.Choices[0].Message.Content) == "" {
-		return Result{}, fmt.Errorf("%s API returned no summary", p.provider)
-	}
-	return Result{Summary: strings.TrimSpace(body.Choices[0].Message.Content), Provider: p.provider,
-		Usage: Usage{InputTokens: body.Usage.PromptTokens, OutputTokens: body.Usage.CompletionTokens}}, nil
+	return Result{Summary: strings.TrimSpace(resp.Content), Provider: provider, Usage: usage}, nil
 }

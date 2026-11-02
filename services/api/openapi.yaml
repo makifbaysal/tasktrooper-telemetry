@@ -80,7 +80,7 @@ paths:
                 required: [summary, provider, usage]
                 properties:
                   summary: { type: string }
-                  provider: { type: string, enum: [mock, meta, baseten] }
+                  provider: { type: string, description: "mock, or the gen_ai.provider.name of TT_ASSISTANT_API_URL (meta, baseten, openai, …)" }
                   usage:
                     type: object
                     properties:
@@ -88,6 +88,7 @@ paths:
                       outputTokens: { type: integer }
         '400': { $ref: '#/components/responses/E400' }
         '401': { $ref: '#/components/responses/E401' }
+        '429': { description: AI quota for this month used up (real model only; org or member limit) }
         '502': { description: AI provider failure }
         '503': { description: AI provider unavailable }
   /api/v1/overview/series:

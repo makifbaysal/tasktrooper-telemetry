@@ -28,6 +28,7 @@ import (
 	"github.com/tasktrooper/telemetry/services/pkg/aiquota"
 	"github.com/tasktrooper/telemetry/services/pkg/config"
 	"github.com/tasktrooper/telemetry/services/pkg/githubapp"
+	"github.com/tasktrooper/telemetry/services/pkg/llmapi"
 	"github.com/tasktrooper/telemetry/services/pkg/logx"
 	"github.com/tasktrooper/telemetry/services/pkg/secrets"
 )
@@ -60,10 +61,9 @@ func run(cfg config.Common, log *slog.Logger) error {
 		cloudcheck.HTTPClient = selftel.Client(http.DefaultClient, "")
 		conntest.HTTPClient = selftel.Client(http.DefaultClient, "")
 	}
-	summarizer, err := ai.NewFromEnv()
-	if err != nil {
-		return fmt.Errorf("AI configuration: %w", err)
-	}
+	// Every LLM call goes through one OpenAI-compatible endpoint (ADR-034): TT_ASSISTANT_API_URL / _API_KEY / _MODEL.
+	llmCfg := llmapi.FromEnv()
+	summarizer := ai.New(llmCfg, nil)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -148,8 +148,7 @@ func run(cfg config.Common, log *slog.Logger) error {
 	// Dashboard assistant (ADR-033): an OpenAI-compatible chat completions model (default URL: Meta Muse Spark) when
 	// TT_ASSISTANT_API_KEY and TT_ASSISTANT_MODEL are both set, else the offline mock.
 	srv.Assistant = &server.AssistantConfig{
-		Provider: assistant.NewOpenAI(config.String("TT_ASSISTANT_API_URL", assistant.DefaultAPIURL),
-			os.Getenv("TT_ASSISTANT_API_KEY"), config.String("TT_ASSISTANT_MODEL", ""),
+		Provider: assistant.NewOpenAI(llmCfg.URL, llmCfg.Key, llmCfg.Model,
 			&http.Client{Timeout: 5 * time.Minute, Transport: selftel.LLMTransport()}),
 		MaxSteps:   config.Int("TT_ASSISTANT_MAX_STEPS", 12),
 		MaxTokens:  int64(config.Int("TT_ASSISTANT_MAX_TOKENS", 4096)),

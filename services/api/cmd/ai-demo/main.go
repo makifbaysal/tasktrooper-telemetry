@@ -12,10 +12,7 @@ import (
 )
 
 func main() {
-	provider, err := ai.NewFromEnv()
-	if err != nil {
-		log.Fatal(err)
-	}
+	provider := ai.NewFromEnv()
 	result, err := provider.Summarize(context.Background(), ai.Input{
 		Title:    "Checkout errors rose after deploy",
 		Evidence: []string{"5xx rate increased from 0.2% to 8%", "p95 latency increased from 220ms to 900ms"},

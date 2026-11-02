@@ -13,19 +13,6 @@ import (
 	"github.com/tasktrooper/telemetry/services/api/internal/model"
 )
 
-func TestChatCompletionsURL(t *testing.T) {
-	for _, tc := range []struct{ in, want string }{
-		{"", DefaultAPIURL + "/chat/completions"},
-		{"https://api.meta.ai/v1", "https://api.meta.ai/v1/chat/completions"},
-		{"https://api.meta.ai/v1/", "https://api.meta.ai/v1/chat/completions"},
-		{"https://gw.example/v1/chat/completions", "https://gw.example/v1/chat/completions"},
-	} {
-		if got := ChatCompletionsURL(tc.in); got != tc.want {
-			t.Errorf("ChatCompletionsURL(%q) = %q, want %q", tc.in, got, tc.want)
-		}
-	}
-}
-
 func TestNewOpenAINeedsKeyAndModel(t *testing.T) {
 	for _, tc := range []struct{ key, model string }{{"", "m"}, {"k", ""}, {" ", " "}} {
 		if NewOpenAI("", tc.key, tc.model, nil) != nil {
