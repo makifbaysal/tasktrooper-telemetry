@@ -77,11 +77,12 @@ pnpm -r --filter "./sdks/js/packages/**" build
 rsync -a --delete-after apps/web/dist/ "$TT_DEMO_WEB_DIR/"
 
 step "services"
-"${dc[@]}" "${profiles[@]}" up -d --build ingest-gw ingest-writer api alert-engine notifier loadtest web "${agent[@]}"
+"${dc[@]}" "${profiles[@]}" up -d --build ingest-gw ingest-writer api alert-engine notifier loadtest codeintel web "${agent[@]}"
 
 step "health"
 wait_ok http://127.0.0.1:8080/healthz api
 wait_ok http://127.0.0.1:4318/healthz ingest-gw
+wait_ok http://127.0.0.1:8096/healthz codeintel
 wait_ok http://127.0.0.1:8081/ web
 "${dc[@]}" "${profiles[@]}" ps --format 'table {{.Service}}\t{{.Status}}'
 echo "deployed $(git rev-parse --short HEAD)"
