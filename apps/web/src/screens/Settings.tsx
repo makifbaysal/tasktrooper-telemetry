@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
-import { CheckCircle2, ChevronRight, Hash, KeyRound, Lock, MessageSquare, Plug, RefreshCw, Send, ShieldAlert, Trash2, Unplug, UserPlus } from 'lucide-react';
+import { CheckCircle2, ChevronRight, ExternalLink, GitBranch, Hash, KeyRound, Lock, MessageSquare, Plug, RefreshCw, Send, ShieldAlert, Trash2, Unplug, UserPlus } from 'lucide-react';
 import {
   Avatar, Badge, Button, Callout, Card, CopyCode, Drawer, DrawerSection, EmptyState, Field, Input, KeyValues, PageHeader,
   SdkQuickstart, SearchInput, Section, Select, StatusBadge, Table, Tabs, useDrawer,
@@ -11,6 +11,8 @@ import {
   type ApiKeyRow, type AuditEntry, type KeyScope, type Member, type Role,
 } from '@/data/auth';
 import { connectSlack, disconnectSlack, refreshSlackChannels, slackChannels, slackWorkspace, testSlack, type SlackChannel } from '@/data/slack';
+import { connectGithub, githubInstallations, repoList, type GithubInstallation } from '@/data/codeintel';
+import { INSTALL_CMD, INSTALL_STEPS, INSTALL_TOOLS } from '@/components/public/docsContent';
 import { IntegrationStatusBadge, ProviderMark } from './Integrations';
 import { MemberAiCell, UsageTab } from './Usage';
 import { ago, dateTime } from '@/lib/format';
@@ -68,7 +70,11 @@ function ProjectTab() {
         </Card>
       </Section>
 
+      <McpSetup />
+
       <SlackCard />
+
+      <GithubCard />
 
       <Section title="Cloud integrations" subtitle="AWS, Google Cloud, Vercel and Neon — managed databases, queues, deploys and drains"
         actions={<Button size="sm" icon={<Plug size={12} />} onClick={() => nav('/settings/integrations')}>Manage</Button>}>
@@ -93,6 +99,29 @@ function ProjectTab() {
         </Card>
       </Section>
     </>
+  );
+}
+
+// ---------------------------------------------------------------- MCP server for coding agents (.ai/mcp.md)
+
+/** One-command setup of tt-mcp + the trooper-* skills in the user's coding tools; manual configs live in /docs#mcp. */
+function McpSetup() {
+  const nav = useNavigate();
+  return (
+    <Section title="Connect your coding agent (MCP)" subtitle="Ask about incidents, endpoints, logs and load tests from Claude Code, Cursor, Codex and others"
+      actions={<Button size="sm" variant="ghost" icon={<ExternalLink size={12} />} onClick={() => window.open('/docs#mcp', '_blank', 'noopener')}>Manual setup</Button>}>
+      <Card title="Run in a terminal" subtitle={<>Needs an API key: create one in the <a href="/settings?tab=keys" onClick={(e) => { e.preventDefault(); nav('/settings?tab=keys'); }}>API keys</a> tab. The script asks for it and stores it only in a file you can read.</>}>
+        <div className="stack" style={{ gap: 'var(--space-3)' }}>
+          <CopyCode>{INSTALL_CMD}</CopyCode>
+          <div className="row" style={{ gap: 'var(--space-1)', flexWrap: 'wrap' }}>
+            {INSTALL_TOOLS.map((t) => <Badge key={t}>{t}</Badge>)}
+          </div>
+          <ol className="secondary" style={{ margin: 0, paddingLeft: 'var(--space-5)', display: 'grid', gap: 'var(--space-1)' }}>
+            {INSTALL_STEPS.map((s) => <li key={s}>{s}</li>)}
+          </ol>
+        </div>
+      </Card>
+    </Section>
   );
 }
 
@@ -168,6 +197,59 @@ function SlackTest({ channels }: { channels: SlackChannel[] }) {
       {state.kind === 'ok' && <span className="row" style={{ gap: 'var(--space-1)', fontSize: 'var(--text-sm)', color: 'var(--status-good-text)' }}><CheckCircle2 size={14} aria-hidden />{state.text}</span>}
       {state.kind === 'error' && <span className="row" style={{ gap: 'var(--space-1)', fontSize: 'var(--text-sm)', color: 'var(--status-critical-text)' }}><ShieldAlert size={14} aria-hidden />{state.text}</span>}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------- github (ADR-017)
+
+/** GitHub App connection: installations of this project and how many of their repositories are analyzed. */
+function GithubCard() {
+  const nav = useNavigate();
+  const manage = can('manage');
+  const [installs, setInstalls] = useState<GithubInstallation[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  useEffect(() => {
+    let alive = true;
+    void githubInstallations().then((list) => { if (alive) setInstalls(list); });
+    return () => { alive = false; };
+  }, []);
+  const connect = () => {
+    setBusy(true); setError(undefined);
+    connectGithub().catch((e: unknown) => { setError(e instanceof Error ? e.message : String(e)); setBusy(false); });
+  };
+  const repos = repoList().filter((r) => r.provider === 'github');
+  const connected = !!installs && installs.length > 0;
+  const connectButton = (label: string, variant?: 'primary') => (
+    <Button size="sm" variant={variant} icon={<GitBranch size={12} />} disabled={!manage || busy} title={manage ? undefined : denied('manage')} onClick={connect}>{label}</Button>
+  );
+  return (
+    <Section title="GitHub" subtitle="Code insights read your repositories: endpoint inventory, alert suggestions and load test scenarios; pushes re-analyze">
+      <Card title={<span className="row" style={{ gap: 'var(--space-2)' }}><GitBranch size={16} aria-hidden />GitHub App{connected && <StatusBadge status="ok" label="Connected" />}</span>}
+        subtitle={connected
+          ? `${installs.length} account${installs.length === 1 ? '' : 's'} · ${repos.length} repositor${repos.length === 1 ? 'y' : 'ies'} analyzed`
+          : 'Install the TaskTrooper GitHub App on your account or organization, then pick repositories.'}
+        actions={connected ? connectButton('Add account') : connectButton('Connect GitHub', 'primary')}
+        flush={connected}>
+        {installs === null ? null : connected ? (
+          <div className="list">
+            {installs.map((i) => {
+              const n = repos.filter((r) => r.installationId === i.installationId).length;
+              return (
+                <div key={i.id} className="list__row list__row--clickable" onClick={() => nav(`/code?github=${encodeURIComponent(i.id)}`)}>
+                  <GitBranch size={16} className="muted" aria-hidden />
+                  <div className="list__main"><span className="list__title">{i.account}</span><span className="list__meta">{n} repositor{n === 1 ? 'y' : 'ies'} analyzed · add or remove repositories</span></div>
+                  <ChevronRight size={14} className="muted" aria-hidden />
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="secondary" style={{ margin: 0 }}>The app asks for read-only access to code and metadata, and push events. GitLab, Bitbucket and access tokens are under Code insights → Connect repository.</p>
+        )}
+        {error && <div style={{ color: 'var(--status-critical-text)', fontSize: 'var(--text-sm)', margin: connected ? 'var(--space-2) var(--space-4)' : 'var(--space-2) 0 0' }}>{error}</div>}
+      </Card>
+    </Section>
   );
 }
 
