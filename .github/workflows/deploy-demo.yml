@@ -45,7 +45,7 @@ jobs:
           TT_GITHUB_APP_ID: ${{ vars.DEMO_GITHUB_APP_ID }}
           TT_GITHUB_APP_SLUG: ${{ vars.DEMO_GITHUB_APP_SLUG }}
           TT_GITHUB_APP_PRIVATE_KEY: ${{ secrets.DEMO_GITHUB_APP_PRIVATE_KEY }}
-          # Assistant model (ADR-033), OpenAI-compatible; empty key or model = offline mock
+          # The single LLM endpoint (ADR-033, ADR-034: assistant + incident summary), OpenAI-compatible; empty key or model = offline mock
           TT_ASSISTANT_API_URL: ${{ vars.DEMO_ASSISTANT_API_URL }}
           TT_ASSISTANT_MODEL: ${{ vars.DEMO_ASSISTANT_MODEL }}
           TT_ASSISTANT_API_KEY: ${{ secrets.DEMO_ASSISTANT_API_KEY }}
