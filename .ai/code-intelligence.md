@@ -39,7 +39,7 @@ runner (15 s tick) → due repo (never analyzed | analyze_requested_at > analyze
   → Postgres claim (status=analyzing, analysis_started_at; single analysis across replicas, stale claim reclaimed after 2×timeout)
   → fetch: git clone --depth 1 --single-branch (token only in GIT_CONFIG_* env as http.extraHeader; never in argv/URL/log)
   → changed files: webhook list | else git diff last_analyzed_sha..HEAD | else full scan (below)
-  → extract (deterministic; Go: go/ast, JS/TS: tokenizer, Python: regex+decorator) → raw inventory
+  → extract (deterministic; Go: go/ast, JS/TS/Vue: tokenizer, Python/Java/Kotlin/C#/Swift/Dart: comment/string-blanking scanners) → raw inventory
   → if incremental: only items of changed files are refreshed, others stay as-is from the DB
   → alert-as-code sync (.trooper/monitors/*.yaml → monitors source='code')
   → observation matching (ClickHouse red_1m/consumer_1m, read-only) → observed / dead / shadow + stats
@@ -129,15 +129,25 @@ match → 401.
 | TS/JS | express, fastify (route objects, register prefix), koa, hono, Nest (Controller/Get…/setGlobalPrefix), Next.js (app `route.ts` / pages `api`) | route + method + handler; `use`/`register` mounts across files |
 | TS/JS | kafkajs, bullmq, amqplib, sqs-consumer / ReceiveMessage, Nest EventPattern/Processor | consumer |
 | TS/JS | node-cron, `cron` CronJob, Nest `@Cron` | cron |
-| TS/JS | react-router (object + `<Route>`), Next.js page/app router, react-navigation | view |
+| TS/JS | react-router (object + `<Route>`), Next.js page/app router, react-navigation, vue-router (`createRouter`/`RouteRecordRaw[]`, nested `children` joined), Nuxt `pages/` file routing (`nuxt.config.*` root), Angular router (`Routes`, nested `children`, lazy `loadChildren` mounted under the parent, `**` → `:wildcard`) | view |
+| Vue SFC | `.vue` files: only the `<script>` / `<script setup>` blocks are tokenized (template/style blanked, line numbers kept) | as TS/JS; language `typescript` for `lang="ts"`, else `javascript` |
 | Python | FastAPI (APIRouter prefix, include_router), Flask (Blueprint, register_blueprint), Django (path/re_path/include) | route |
 | Python | Celery task + beat_schedule (crontab → cron), kafka-python, confluent-kafka | consumer / cron |
+| Java/Kotlin | Spring MVC/WebFlux (class `@RequestMapping` prefix, `@*Mapping`, functional `route()`/`coRouter` nest), JAX-RS/Quarkus (`@Path` + `@GET`…), Micronaut (`@Controller` + `@Get`…), Ktor (nested `route {}`, `Route.x()` extensions mounted across files) | route + method + handler (`Class.method`) + source; same-file string constants and Kotlin templates resolved |
+| Java/Kotlin | spring-kafka/amqp/jms, `@SqsListener`, SmallRye `@Incoming`, Micronaut `@KafkaListener`+`@Topic`; `@Scheduled` (Spring/Quarkus/Micronaut); Android Activity/Fragment subclasses, Compose Navigation `composable()` | consumer (process = group/listener id, source = topics/queues), cron (cron or `every <interval>`), view (class name / SDK-style route) |
+| C# (.NET) | ASP.NET Core controllers (`[Route]` incl. inherited/const, `[controller]`/`[action]`/`[area]`, `Http*`/`AcceptVerbs`, absolute `/`·`~/` templates, conventional routes with `MapControllerRoute`), minimal APIs (`Map*`, `MapGroup` chains, group variables, `this RouteGroupBuilder` mounts across files), gRPC (`X.XBase` overrides) | route + method + handler (`Class.Method` / method group / lambda) source |
+| C# (.NET) | MassTransit `IConsumer<T>`, NServiceBus, Confluent.Kafka `Subscribe` (+ `GroupId`), RabbitMQ.Client `BasicConsume`, Azure Service Bus `CreateProcessor`, queue-reading `BackgroundService`; Hangfire `RecurringJob` (`Cron.*` → cron), Quartz `WithCronSchedule`, Coravel `Schedule<T>()` | consumer (process = consumer class / group / queue, source = message type / topic / queue), cron |
+| Swift | SwiftUI (`View` structs named `*Screen`/`*Page` or used as NavigationLink / navigationDestination / sheet / TabView / WindowGroup targets, `.trooperView` name), UIKit (`UIViewController` / `UITableViewController` / `UICollectionViewController` subclasses + in-repo subclasses; containers skipped), Vapor (`get/post/…/on`, `grouped`, `group {}`, `RouteCollection` + `register(collection:)`) | view (key = type name, `meta.rumName`) / route + method + handler |
+| Dart (Flutter) | go_router (`GoRoute` / `@TypedGoRoute`, nested `routes:` joined, ShellRoute transparent), MaterialApp `routes:` map + `onGenerateRoute` `case`, auto_route (`AutoRoute(page:, path:, children:)`, `@RoutePage`), unrouted `*Screen`/`*Page` widgets | view (key = route path / route name / class name; `meta.rumName` = what the SDK observer reports) |
 | YAML | k8s CronJob (+ `TROOPER_SERVICE` env), helm (regex fallback) | cron |
-| All | HTTP client URL literals, DB/cache/queue driver imports | dependency (`<kind> · <name>`) |
+| All | HTTP client URL literals, DB/cache/queue driver imports / `using` / `Use*` calls / connection strings (Go, TS/JS, Python, Java/Kotlin, C#, Swift, Dart) | dependency (`<kind> · <name>`) |
 
 Extractors stay deterministic; the LLM is used for **interpretation**, not **extraction**. Route parameters are normalised to a single
 form (`{id}`, `<int:id>`, `[id]`, `:id(\d+)` → `:id`; wildcard → `:wildcard`). Limits: 50,000 files, 1 MB per file,
-`node_modules`/`vendor`/`dist`/hidden directories are skipped.
+`node_modules`/`vendor`/`dist`/hidden directories and mobile/JVM build output (`build`, `target`, `Pods`, `DerivedData`, `generated`, …) are
+skipped. Test sources are skipped by name (`*Test`, `*Tests`, `*Spec`, `*IT`, `*_test`) and by directory (`src/test`, `androidTest`,
+`Tests`, `*.Tests`, `test`, `integration_test`); so are generated files (`*.g.dart`, `*.freezed.dart`, `*.Designer.cs`, `*.g.cs`). Module
+roots for the service name also include `pom.xml`, `build.gradle[.kts]`, `*.csproj`, `Package.swift`, `pubspec.yaml`.
 
 ## LLM usage
 
