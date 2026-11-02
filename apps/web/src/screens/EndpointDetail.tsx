@@ -17,6 +17,7 @@ import { AlertCount, AlertsBody, OpenIncidents } from './Alerts';
 import { CALLER_KIND_LABEL, CriticalityBadge, DEP_KIND_LABEL, callerColorFor, categoryOf, traceUrl } from './shared';
 import { RootCauseCard, diagnose } from './rca';
 import { EndpointProfile } from './Profiling';
+import { EndpointPerformanceDiagnosis } from './PerformanceDiagnosis';
 
 const catColor = (k: TimeCategory) => seriesColor(TIME_CATEGORIES.find((c) => c.id === k)!.slot);
 
@@ -72,6 +73,8 @@ export function EndpointDetail() {
         </>} />
 
       <OpenIncidents serviceId={svc.id} endpointRef={ref} />
+      {ep.p95 >= 300 && <EndpointPerformanceDiagnosis service={svc.name} endpoint={ep} breakdown={breakdown} calls={calls}
+        codeFile={code ? `${code.file}:${code.line}` : undefined} />}
       {diagnose(svc.id, ep.id).map((d) => <RootCauseCard key={d.metric} d={d} scope={epLabel(ep)} />)}
 
       {suggestion && !ep.monitored && (

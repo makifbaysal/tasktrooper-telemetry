@@ -17,6 +17,7 @@ import { DeployList, IntegrationSourceBadge } from './Integrations';
 import { AlertCount, AlertsBody } from './Alerts';
 import { KpiCount, ServiceKpis } from './Kpis';
 import { ReplaysTab } from './Replays';
+import { PagePerformanceDiagnosis } from './PerformanceDiagnosis';
 
 type Tab = 'pages' | 'sessions' | 'replays' | 'errors' | 'api' | 'deploys' | 'kpis' | 'alerts' | 'logs';
 const TAB_IDS: Tab[] = ['pages', 'sessions', 'replays', 'errors', 'api', 'deploys', 'kpis', 'alerts', 'logs'];
@@ -302,6 +303,7 @@ function PageDrawer({ app, page, vitals, errors, onClose, ts, range, onTrack }: 
           ? [['Load p75', ms(page.lcp)], ['Error rate', pct(page.errorRate)]]
           : vitals.map((v) => [v.label, <VitalCell key={v.id} v={v} value={pageVital(page, v.id)} />])} />
       </DrawerSection>
+      {!mobile && (page.lcp >= 2500 || page.inp >= 200) && <PagePerformanceDiagnosis app={app.name} page={page} />}
       <DrawerSection title="Errors here" aside={`error rate ${pct(page.errorRate)}`}>
         {pageErrors.length === 0
           ? <p className="muted">No errors grouped on this {mobile ? 'screen' : 'page'} in range.</p>

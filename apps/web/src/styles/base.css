@@ -6,7 +6,9 @@ html, body, #root { height: 100%; }
 
 body {
   margin: 0;
-  background: var(--bg-page);
+  background-color: var(--bg-page);
+  background-image: radial-gradient(circle, color-mix(in oklch, var(--border) 55%, transparent) 1px, transparent 1.5px);
+  background-size: 28px 28px;
   color: var(--text-primary);
   font-family: var(--font-sans);
   font-size: var(--text-md);

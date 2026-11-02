@@ -16,6 +16,11 @@ to the matching dashboard screens.
 | Widgets | Assistant-only tool `show_widget` → rendered in the message, click opens the screen |
 | Images | Upload (PNG, JPEG, GIF, WebP, ≤ 5 MB, ≤ 4 per message) → sent to the model as image blocks |
 
+Endpoint details and slow web page drawers offer a local performance investigation. They show telemetry clues and
+open this Assistant with a focused question and an endpoint or service reference. Missing database indexes and
+unoptimised images remain hypotheses until query plans or resource evidence support them. The offline Assistant
+mock is useful for testing navigation but does not perform a full diagnosis.
+
 ## Architecture
 
 ```
