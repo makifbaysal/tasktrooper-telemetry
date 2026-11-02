@@ -21,6 +21,13 @@ func TestNormalize(t *testing.T) {
 		{"/static/*", "/static/:wildcard"},
 		{"//a///b/", "/a/b"},
 		{"/x?y=1", "/x"},
+		// ASP.NET Core: constraints, optional, catch-all
+		{"/orders/{id:guid}", "/orders/:id"},
+		{"/orders/{id:int:min(1)}", "/orders/:id"},
+		{"/items/{id?}", "/items/:id"},
+		{"/items/{id:int?}/x?q=1", "/items/:id/x"},
+		{"/files/{*path}", "/files/:path"},
+		{"/files/{**slug}", "/files/:slug"},
 	}
 	for _, tt := range tests {
 		if got := Normalize(tt.in); got != tt.want {

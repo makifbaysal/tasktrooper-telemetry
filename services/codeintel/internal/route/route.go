@@ -11,9 +11,9 @@ import "strings"
 const maxRouteLen = 256 // same cap as the writer
 
 // Normalize turns a framework route pattern into "/a/:param/b". Query strings, duplicate and trailing slashes
-// are dropped like the writer does.
+// are dropped like the writer does. A "?" inside braces is an ASP.NET optional parameter ("{id?}"), not a query.
 func Normalize(p string) string {
-	if i := strings.IndexAny(p, "?#"); i >= 0 {
+	if i := queryStart(p); i >= 0 {
 		p = p[:i]
 	}
 	p = strings.TrimSpace(p)
@@ -36,6 +36,24 @@ func Normalize(p string) string {
 		s = s[:maxRouteLen]
 	}
 	return s
+}
+
+// queryStart returns the offset of the first "?" or "#" outside {…}, or -1.
+func queryStart(p string) int {
+	depth := 0
+	for i := 0; i < len(p); i++ {
+		switch p[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+		case '?', '#':
+			if depth <= 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 // param rewrites one segment when it is a parameter in any supported syntax.
