@@ -15,10 +15,8 @@ import (
 	"time"
 
 	"github.com/tasktrooper/telemetry/services/api/internal/model"
+	"github.com/tasktrooper/telemetry/services/pkg/llmapi"
 )
-
-// DefaultAPIURL is the base URL used when TT_ASSISTANT_API_URL is empty (Meta Muse Spark, OpenAI-compatible).
-const DefaultAPIURL = "https://api.meta.ai/v1"
 
 // openAI talks to any OpenAI-compatible Chat Completions endpoint (Meta Muse Spark, gateways, ...) with streaming
 // and function calling.
@@ -32,28 +30,17 @@ type openAI struct {
 
 // NewOpenAI returns the OpenAI-compatible provider, or nil when the key or the model is empty (model ids are never
 // hard-coded: TT_ASSISTANT_MODEL). baseURL is the API root (".../v1") or the full ".../chat/completions" URL; empty
-// means DefaultAPIURL. hc carries the GenAI client spans (ADR-027); nil = a client with a 5 minute timeout.
+// means llmapi.DefaultURL (the platform's single LLM endpoint, ADR-034). hc carries the GenAI client spans (ADR-027);
+// nil = a client with a 5 minute timeout.
 func NewOpenAI(baseURL, apiKey, modelID string, hc *http.Client) Provider {
-	if strings.TrimSpace(apiKey) == "" || strings.TrimSpace(modelID) == "" {
+	cfg := llmapi.New(baseURL, apiKey, modelID)
+	if !cfg.Enabled() {
 		return nil
 	}
 	if hc == nil {
 		hc = &http.Client{Timeout: 5 * time.Minute}
 	}
-	return &openAI{endpoint: ChatCompletionsURL(baseURL), key: strings.TrimSpace(apiKey),
-		model: strings.TrimSpace(modelID), hc: hc, retries: 2}
-}
-
-// ChatCompletionsURL turns a base URL into the chat completions endpoint.
-func ChatCompletionsURL(base string) string {
-	base = strings.TrimRight(strings.TrimSpace(base), "/")
-	if base == "" {
-		base = DefaultAPIURL
-	}
-	if strings.HasSuffix(base, "/chat/completions") {
-		return base
-	}
-	return base + "/chat/completions"
+	return &openAI{endpoint: cfg.URL, key: cfg.Key, model: cfg.Model, hc: hc, retries: 2}
 }
 
 func (p *openAI) Name() string  { return "openai" }

@@ -60,7 +60,7 @@ Details: [`.ai/architecture.md`](.ai/architecture.md#monorepo).
 - **Backend:** Go 1.26. `net/http` + chi for HTTP, `go.opentelemetry.io/collector` components for gRPC/OTLP.
 - **Data:** ClickHouse (telemetry: metrics, spans, logs, RUM events), PostgreSQL (metadata: org, project, alert, user), Redpanda (Kafka API, ingest buffer), Redis (rate limit, cache).
 - **Load test engine:** our own Go engine (ADR-015), runners as local process or Kubernetes Job.
-- **LLM:** Claude API (code analysis and alert suggestions). Model IDs are not hard-coded; they come from config.
+- **LLM:** one OpenAI-compatible Chat Completions endpoint for every LLM call (assistant, incident summary, code analysis): `TT_ASSISTANT_API_URL` / `TT_ASSISTANT_API_KEY` / `TT_ASSISTANT_MODEL`, Meta Muse Spark by default (ADR-034, `services/pkg/llmapi`). Model IDs are not hard-coded; they come from config.
 - **Package manager:** pnpm (JS), Go modules.
 
 ## Commands
@@ -117,5 +117,6 @@ Full check (exactly the same gates as CI): `make check` → gofmt, `go vet`, uni
 - [x] Demo deploy: `deploy-demo` workflow (manual, main) → Mac mini self-hosted runner, Cloudflare Tunnel, Google OIDC — ADR-031
 - [x] MCP v2: 27 read tools + opt-in, approval-gated write tools (monitor, KPI, Slack test, load test; `source=agent`) and the `trooper-alerts` skill — ADR-032
 - [x] Assistant (`/assistant`): AI chat with history, @ mentions, images, MCP tools in process, approval-gated writes, widgets — ADR-033 (replaces Overview "Ask telemetry")
+- [x] Single LLM endpoint: assistant, incident summary and codeintel enrichment all use the OpenAI-compatible `TT_ASSISTANT_*` endpoint (Meta Muse Spark by default) — ADR-034
 
 Next work: [`.ai/roadmap.md`](.ai/roadmap.md).

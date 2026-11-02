@@ -113,10 +113,12 @@ Without it the Slack endpoints answer 501 and the dashboard says Slack isn't set
    secret **`DEMO_GITHUB_APP_PRIVATE_KEY`** (General → Private keys → Generate a private key; the whole `.pem`):
    `gh secret set DEMO_GITHUB_APP_PRIVATE_KEY --env demo < task-trooper.*.private-key.pem`, then run deploy-demo.
 
-## Assistant model (ADR-033)
-OpenAI-compatible Chat Completions (Meta Muse Spark by default). `demo` environment: variable **`DEMO_ASSISTANT_MODEL`**
+## LLM model (ADR-033, ADR-034)
+Every LLM call goes through one OpenAI-compatible Chat Completions endpoint (Meta Muse Spark by default): the assistant, the
+incident summary and — where it runs — codeintel enrichment. `demo` environment: variable **`DEMO_ASSISTANT_MODEL`**
 (e.g. a Muse Spark model id), optional variable **`DEMO_ASSISTANT_API_URL`** (default `https://api.meta.ai/v1`), secret
-**`DEMO_ASSISTANT_API_KEY`**. Without key and model the assistant runs the offline mock.
+**`DEMO_ASSISTANT_API_KEY`**; the workflow passes them as `TT_ASSISTANT_*`. Without key and model the assistant and the incident
+summary run the offline mock.
 
 ## First sign-in
 Open `https://telemetry.tasktrooper.ai`, sign in with Google, onboarding creates the org, project and ingest key (DSN).

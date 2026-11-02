@@ -152,7 +152,7 @@ type LoadtestHint struct {
 // LLM step statuses (repositories.analysis.llm.status, contracts §19).
 const (
 	LLMOK            = "ok"
-	LLMDisabled      = "disabled"       // no ANTHROPIC_API_KEY / TT_CODEINTEL_MODEL
+	LLMDisabled      = "disabled"       // no TT_ASSISTANT_API_KEY / TT_ASSISTANT_MODEL
 	LLMQuotaExceeded = "quota_exceeded" // AI quota denied a batch; the remaining items kept static criticality
 )
 

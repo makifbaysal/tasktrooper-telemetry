@@ -309,9 +309,11 @@ func (d *DB) AssistantReserve(ctx context.Context, orgID, projectID, userID int6
 	return dec, err
 }
 
-// AssistantRecord writes the real usage of a model request.
+// AssistantRecord writes the real usage of a model request (feature empty = assistant; the incident summary passes rca).
 func (d *DB) AssistantRecord(ctx context.Context, u aiquota.Usage) error {
-	u.Feature = aiquota.FeatureAssistant
+	if u.Feature == "" {
+		u.Feature = aiquota.FeatureAssistant
+	}
 	return aiquota.Record(ctx, pgxPoolDB{d.Pool}, u)
 }
 

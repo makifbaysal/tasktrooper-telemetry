@@ -1,7 +1,7 @@
 //go:build integration
 
 // AI quota (ADR-018, contracts §19) end to end against the docker-compose Postgres (make infra && make migrate):
-// real enrich.LLM against a fake Messages API, real quota.Gate over aiquota + Postgres.
+// real enrich.LLM against a fake OpenAI-compatible chat completions API, real quota.Gate over aiquota + Postgres.
 //
 //	GOWORK=off go test -tags integration -run TestAnalyzeQuota ./internal/analyze/
 //
@@ -21,9 +21,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/anthropic-sdk-go/option"
-
 	"github.com/tasktrooper/telemetry/services/pkg/aiquota"
+	"github.com/tasktrooper/telemetry/services/pkg/llmapi"
 
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/enrich"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/model"
@@ -79,19 +78,19 @@ func TestAnalyzeQuota(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Fake Messages API: one result (id 0) per request, 1000 in / 200 out tokens → 0.6 credits at 3/15.
+	// Fake chat completions API: one result (id 0) per request, 1000 in / 200 out tokens → 0.6 credits at 3/15.
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		_, _ = io.Copy(io.Discard, r.Body)
 		out := `{"items":[{"id":0,"criticality":"high","business_domain":"orders","summary":"llm summary","failure_modes":[],"suggested_monitors":[],"loadtest_hint":{"payload_example":"","idempotent":true,"notes":""}}]}`
 		w.Header().Set("content-type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"id": "msg", "type": "message", "role": "assistant", "model": "it-model",
-			"content": []any{map[string]any{"type": "text", "text": out}}, "stop_reason": "end_turn",
-			"usage": map[string]any{"input_tokens": 1000, "output_tokens": 200}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "chatcmpl-1", "object": "chat.completion", "model": "it-model",
+			"choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "content": out}, "finish_reason": "stop"}},
+			"usage":   map[string]any{"prompt_tokens": 1000, "completion_tokens": 200}})
 	}))
 	defer srv.Close()
-	llm := enrich.NewLLM("k", "it-model", option.WithBaseURL(srv.URL), option.WithMaxRetries(0))
+	llm := enrich.NewLLM(llmapi.New(srv.URL+"/v1", "k", "it-model"))
 	llm.BatchSize = 1
 	llm.Log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	cfg, err := aiquota.Parse("it-model=3/15", "", "")

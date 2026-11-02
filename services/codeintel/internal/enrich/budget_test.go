@@ -2,14 +2,10 @@ package enrich
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
-
-	"github.com/anthropics/anthropic-sdk-go/option"
 
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/model"
 )
@@ -38,26 +34,15 @@ func (b *fakeBudget) Record(_ context.Context, model string, u Tokens) float64 {
 	return 1.5
 }
 
-// llmServer answers every request with one result per input item and fixed usage; body controls the text.
+// llmServer answers every request with fixed usage (1050 prompt tokens of which 50 cached, 200 completion);
+// body controls the text.
 func llmServer(t *testing.T, calls *atomic.Int32, body func(n int) string) *httptest.Server {
 	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv, _ := chatServer(t, func(n int, _ chatReq) chatAnswer {
 		calls.Add(1)
-		var req struct {
-			Model    string `json:"model"`
-			Messages []struct {
-				Content []struct {
-					Text string `json:"text"`
-				} `json:"content"`
-			} `json:"messages"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&req)
-		resp := map[string]any{"id": "msg", "type": "message", "role": "assistant", "model": req.Model,
-			"content": []any{map[string]any{"type": "text", "text": body(1)}}, "stop_reason": "end_turn",
-			"usage": map[string]any{"input_tokens": 1000, "output_tokens": 200, "cache_read_input_tokens": 50, "cache_creation_input_tokens": 70}}
-		w.Header().Set("content-type", "application/json")
-		_ = json.NewEncoder(w).Encode(resp)
-	}))
+		return chatAnswer{content: body(n), prompt: 1050, cached: 50, completion: 200}
+	})
+	return srv
 }
 
 func okBody(int) string {
@@ -85,8 +70,7 @@ func TestEnrichBudget(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var calls atomic.Int32
 			srv := llmServer(t, &calls, tt.body)
-			defer srv.Close()
-			l := NewLLM("k", "model-x", option.WithBaseURL(srv.URL), option.WithMaxRetries(0))
+			l := newTestLLM(t, srv, "model-x")
 			l.BatchSize = 1
 			var items []*model.Item
 			for i := range 3 {
@@ -112,7 +96,7 @@ func TestEnrichBudget(t *testing.T) {
 				t.Fatalf("recorded %v credits %v", tt.budget.recorded, out.Credits)
 			}
 			if tt.wantCalls > 0 {
-				if got := tt.budget.recorded[0]; got != (Tokens{Input: 1000, CacheWrite: 70, CacheRead: 50, Output: 200}) {
+				if got := tt.budget.recorded[0]; got != (Tokens{Input: 1000, CacheRead: 50, Output: 200}) {
 					t.Fatalf("usage %+v", got)
 				}
 				if tt.budget.estIn[0] <= 0 || tt.budget.estOut[0] != OutputPerItem {

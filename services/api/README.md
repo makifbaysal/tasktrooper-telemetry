@@ -86,10 +86,10 @@ service of `deploy/docker-compose.yml` (profile `app`).
 | `TT_AI_PRICES` | built-in table | LLM prices per model, `<model>=<in>/<out>,...` (USD per 1M tokens → credits; `services/pkg/aiquota`). Invalid value = startup error |
 | `TT_AI_DEFAULT_PRICE` | aiquota default | `<in>/<out>` for models missing from `TT_AI_PRICES` |
 | `TT_AI_PLAN_CREDITS` | `free=100,team=5000,enterprise=-1` | monthly AI credits per plan (`-1` = unlimited); org override via `PUT /orgs/{org}/ai-quota` |
-| `TT_AI_PROVIDER` | `mock` | Incident-summary provider: `mock`, `meta`, or `baseten`. Mock makes no external request. |
-| `TT_AI_ALLOW_PAID` | unset | Must be exactly `true` before the incident-summary route can use a paid provider. |
-| `MODEL_API_KEY` / `BASETEN_API_KEY` | unset | Server-side key for the selected provider; a key alone does not enable paid calls. |
-| `TT_AI_MODEL` | provider default | Optional incident-summary model override. |
+| `TT_ASSISTANT_API_URL` | `https://api.meta.ai/v1` | The platform's single OpenAI-compatible Chat Completions endpoint (ADR-034; `…/v1` or the full `…/chat/completions` URL), used by the assistant **and** the incident summary. Default: Meta Muse Spark |
+| `TT_ASSISTANT_API_KEY` | unset | Server-side key, sent as `Authorization: Bearer` |
+| `TT_ASSISTANT_MODEL` | unset | Model id (never hard-coded). Key **and** model set → real model; otherwise the assistant and the incident summary use the offline mock (no external request) |
+| `TT_ASSISTANT_MAX_TOKENS`, `TT_ASSISTANT_MAX_STEPS`, `TT_ASSISTANT_ALLOW_WRITE` | `4096`, `12`, `true` | Assistant limits (`.ai/assistant.md`) |
 | `TT_FAAS_LAMBDA_REQUEST_PRICE` | `0.20` | USD per 1M Lambda requests (serverless cost estimate) |
 | `TT_FAAS_LAMBDA_GBS_PRICE`, `TT_FAAS_LAMBDA_GBS_PRICE_ARM64` | `0.0000166667`, `0.0000133334` | USD per GB-second (x86_64 / arm64) |
 | `TT_FAAS_AZURE_GBS_PRICE`, `TT_FAAS_AZURE_REQUEST_PRICE` | `0.000016`, `0.20` | Azure Functions consumption plan: USD per GB-s, per 1M executions |
@@ -114,7 +114,7 @@ and CORS preflights produce no span; incoming `traceparent`/`baggage` from the d
 `traceparent`, `tracestate`, `baggage`), every ClickHouse statement of the store (`db.system=clickhouse` client span
 `SELECT <table>`, `db.query.text` through `trooper.SanitizeSQL` so the inlined tenant ids become `?`, `db.collection.name`,
 `db.namespace`; `Ready` pings are untraced), pgx, outgoing HTTP to symbolicator, Slack, GitHub, the OIDC provider and the
-`/integrations/test` / `/connections/test` targets, the incident-summary provider as a GenAI span (`llm` transport,
+`/integrations/test` / `/connections/test` targets, the LLM endpoint (`TT_ASSISTANT_API_URL`: assistant and incident summary) as a GenAI span (`llm` transport,
 content capture off), slog → OTel logs (stdout JSON unchanged, plus `trace_id`/`span_id`). Tenant = span attributes
 `tt.org_id` / `tt.project_id` only, never metric labels. The ingest gateway is never called from here.
 
@@ -124,7 +124,7 @@ See [AI_SETUP.md](AI_SETUP.md) for the local-to-production setup, provider switc
 
 `POST /api/v1/ai/incident-summary` is an authenticated, explicit integration route. The default provider is a deterministic offline mock with zero token usage. `GOWORK=off go run ./cmd/ai-demo` tests it without Docker. For the dashboard's contextual AI buttons, run `GOWORK=off go run ./cmd/ai-playground` from `services/api` alongside the Vite web server; those `/local-ai/*` routes are also offline mocks.
 
-The incident-summary route can use Meta or Baseten only when `TT_AI_PROVIDER`, `TT_AI_ALLOW_PAID=true`, and the corresponding server-side key are set. Each request is limited to 4,000 bytes of user-controlled title/evidence before a provider call and a 150-token output cap; it also has a 15-second timeout and no retry. The team's `aiquota` system currently covers code-intelligence enrichment; this standalone incident-summary route does **not** reserve credits through it yet. These per-request limits do not cap the number of requests or total spending. Keep this route in mock mode until quota accounting is wired in for production use.
+The incident-summary route calls the real model only when `TT_ASSISTANT_API_KEY` and `TT_ASSISTANT_MODEL` are set (the same endpoint as the assistant and codeintel, ADR-034). Each request is limited to 4,000 bytes of user-controlled title/evidence before a provider call and a 150-token output cap; it also has a 15-second timeout and no retry. With a real model every request reserves AI credits first (`aiquota`, org and member limits; HTTP 429 when the month's quota is used up) and records its real usage afterwards (`ai_usage.feature = rca`, `ref = incident-summary`), also when the answer is unusable. The mock spends nothing.
 
 ## Test
 
