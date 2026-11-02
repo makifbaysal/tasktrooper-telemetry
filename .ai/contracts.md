@@ -40,7 +40,7 @@ Each module/folder has a single owner (agent/developer); do not touch another mo
 `services/pkg`, keep it small (the only external dependency is `google.golang.org/protobuf`) and add a note to this file.
 
 `services/pkg` contents: `topics` (topic/header names), `tenant` (Tenant + context), `config` (TT_* env reading),
-`logx` (JSON slog), `secrets` (AES-GCM + credentials ref resolution), `llmprice` (LLM price table + cost, embedded defaults, org override cache; §25), `rumpb` (generated from `proto/rum/v1` with buf: `cd proto && go run github.com/bufbuild/buf/cmd/buf@v1.57.0 generate`).
+`logx` (JSON slog), `secrets` (AES-GCM + credentials ref resolution), `llmprice` (LLM price table + cost, embedded defaults, org override cache; §25), `llmapi` (the single OpenAI-compatible LLM endpoint: `TT_ASSISTANT_*` env, URL normalization, provider name, non-streaming chat completions client; ADR-034), `rumpb` (generated from `proto/rum/v1` with buf: `cd proto && go run github.com/bufbuild/buf/cmd/buf@v1.57.0 generate`).
 
 **Environment variables** (defaults assume host → docker-compose): `TT_POSTGRES_URL`, `TT_CLICKHOUSE_URL`
 (`clickhouse://trooper:trooper@localhost:9000/telemetry`), `TT_KAFKA_BROKERS` (`localhost:19092`; from inside a container `redpanda:9092`),
@@ -267,6 +267,12 @@ functions. Auth: `Authorization: Bearer <api key>` (dev) — OIDC session later.
 `text/event-stream` (events `message`, `text`, `tool`, `widget`, `approval`, `error`, `done`). Viewers may call it (writes made by its
 tools are still checked per request). Env: `TT_ASSISTANT_API_URL` (OpenAI-compatible, default `https://api.meta.ai/v1`), `TT_ASSISTANT_API_KEY`, `TT_ASSISTANT_MODEL`, `TT_ASSISTANT_MAX_TOKENS`, `TT_ASSISTANT_MAX_STEPS`,
 `TT_ASSISTANT_ALLOW_WRITE`.
+
+**Single LLM endpoint (ADR-034):** `TT_ASSISTANT_API_URL` / `TT_ASSISTANT_API_KEY` / `TT_ASSISTANT_MODEL` configure **every** LLM call of
+the platform — the assistant, `POST /ai/incident-summary` (api; key + model set → real model, else mock; reserves/records AI credits with
+feature `rca`, 429 when the quota is used up) and codeintel enrichment (key + model set → LLM, else static rules). Shared code:
+`services/pkg/llmapi`. Removed: `TT_AI_PROVIDER`, `TT_AI_ALLOW_PAID`, `MODEL_API_KEY`, `BASETEN_API_KEY`, `TT_AI_MODEL`,
+`ANTHROPIC_API_KEY`, `TT_CODEINTEL_MODEL`.
 
 ## 9. RUM
 

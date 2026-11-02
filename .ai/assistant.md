@@ -50,6 +50,9 @@ web /assistant ──SSE── api  /api/v1/assistant/*  (internal/assistant)
 | `TT_ASSISTANT_MAX_STEPS` | `12` | Max model requests (tool rounds) per turn |
 | `TT_ASSISTANT_ALLOW_WRITE` | `true` | Register the MCP write tools (each still needs a UI approval) |
 
+`TT_ASSISTANT_API_URL` / `_API_KEY` / `_MODEL` are the platform's **single LLM endpoint** (ADR-034, `services/pkg/llmapi`): the api's
+incident summary (`POST /ai/incident-summary`) and codeintel enrichment read the same three variables (set them on codeintel too).
+
 The `mock` provider spends nothing: it calls one read tool for the message (or the mentioned item) and renders a
 widget, so the UI can be exercised without credits.
 

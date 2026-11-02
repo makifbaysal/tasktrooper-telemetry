@@ -141,9 +141,19 @@ form (`{id}`, `<int:id>`, `[id]`, `:id(\d+)` → `:id`; wildcard → `:wildcard`
 
 ## LLM usage
 
-- Enabled only when `ANTHROPIC_API_KEY` **and** `TT_CODEINTEL_MODEL` are both set (model ID never in code); otherwise static rules.
-- Official Go SDK (`anthropic-sdk-go`), structured output (JSON schema), batches of 15 items; the repo summary (language, services, inventory
-  rows) is a fixed system prefix cached with `cache_control`.
+- The platform's single LLM endpoint (ADR-034, `services/pkg/llmapi`): an **OpenAI-compatible Chat Completions** API from
+  `TT_ASSISTANT_API_URL` (default `https://api.meta.ai/v1`, Meta Muse Spark), `TT_ASSISTANT_API_KEY`, `TT_ASSISTANT_MODEL` — the same
+  variables as the dashboard assistant. Enabled only when key **and** model are both set (model ID never in code); otherwise static rules.
+- Plain `net/http` (no vendor SDK), non-streaming, batches of 15 items, `max_tokens` 16000, up to 3 retries on network errors / 429 / 5xx.
+  JSON output: `response_format: {type: json_schema, strict: true}` **and** the schema in the system prompt; if the endpoint answers HTTP
+  400 to `response_format`, the request is repeated without it and later batches send only the prompt schema. The answer's JSON object is
+  taken from between the outermost braces (Markdown fences tolerated). `finish_reason` `length` → truncated, `content_filter` → refused
+  (batch skipped, usage still recorded).
+- One system message = instructions + schema + repo summary (language, services, inventory rows), a stable prefix for providers that cache
+  prompt prefixes automatically (no explicit cache control).
+- Self telemetry: the HTTP client goes through the trooper `llm` transport with the endpoint host registered under `llmapi.Provider`
+  (`api.meta.ai` → `meta`, `*.baseten.co` → `baseten`, unknown OpenAI-compatible hosts → `openai`) → GenAI client spans
+  (`gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.usage.*`; content only with `TROOPER_LLM_CAPTURE_CONTENT=true`).
 - Input: item + handler source (≤6000 characters) + signatures of called functions. Output: `criticality`, `businessDomain`, `summary`,
   `failureModes[]`, `suggestedMonitors[]` (template + rationale), `loadtestHint` (sample payload, idempotent, note) → `inventory_items.llm`.
 - Cache: same identity + `code_hash` (sha256 of key + snippet) → the previous result is reused; on an incremental push unchanged
@@ -155,8 +165,9 @@ form (`{id}`, `<int:id>`, `[id]`, `:id(\d+)` → `:id`; wildcard → `:wildcard`
 - **Before** each LLM batch, `services/pkg/aiquota` `Reserve` (per org `pg_advisory_xact_lock(7140, org_id)`, short transaction):
   estimate = `ceil(promptChars/4) × in + min(16000, 600 × items) × out` credits (output estimated at 600 tokens per item; estimating with `max_tokens`
   would reject far below the limit). `used + estimate > limit` → rejected. **After** the call, an `ai_usage` row with the real tokens
-  (`feature=codeintel.enrich`, `model` = `TT_CODEINTEL_MODEL`, `ref=repo:<id>`, `input_tokens` including cache read/write; credits:
-  cache write at 1.25×, cache read at 0.1× the input price). The record is written even if the response arrives but cannot be used (decode error, max_tokens).
+  (`feature=codeintel.enrich`, `model` = `TT_ASSISTANT_MODEL`, `ref=repo:<id>`, `input_tokens` = `prompt_tokens` (cached tokens included);
+  credits: `prompt_tokens_details.cached_tokens` count as cache reads at 0.1× the input price, the rest at the input price). The record is
+  written even if the response arrives but cannot be used (decode error, `finish_reason: length`).
 - User = `repositories.analyze_requested_by` (api fills it on manual analysis). Webhooks (push, installation) and other
   automatic requests set this column to `NULL` → only the org limit applies; the member cap (`memberships.ai_monthly_credits`) only applies
   to analyses started by the member.

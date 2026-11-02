@@ -141,8 +141,9 @@ rewriting 27 screens.
 - Parsing: instead of tree-sitter, **deterministic extractors written in Go** (`go/ast` for Go; a lightweight
   tokenizer + framework patterns for TS/JS and Python). Rationale: single binary without CGO, and the extractors are pattern-based anyway. Scope: the code-intelligence.md
   table.
-- LLM (Claude): only for **interpretation** (criticality, summary, failure mode, monitor suggestion, loadtest_hint). Model ID `TT_CODEINTEL_MODEL`,
-  key `ANTHROPIC_API_KEY`; if either is missing the LLM step is off → static rules. Results are cached by file hash.
+- LLM: only for **interpretation** (criticality, summary, failure mode, monitor suggestion, loadtest_hint). Endpoint, key and model come
+  from the platform's single OpenAI-compatible endpoint (`TT_ASSISTANT_API_URL` / `_API_KEY` / `_MODEL`, ADR-034; originally Claude with
+  `ANTHROPIC_API_KEY` + `TT_CODEINTEL_MODEL`); if key or model is missing the LLM step is off → static rules. Results are cached by file hash.
 - Alert-as-code: during a scan `.trooper/monitors/*.yaml` is read → upserted into the `monitors` table with `source='code'`
   (`code_ref` = repo:path). UI and api keep these monitors read-only. A file's monitor is deleted when the file is removed from the repo.
 - Webhook: `POST /v1/webhooks/github` (HMAC `X-Hub-Signature-256`) → incremental analysis on default branch push.
@@ -553,3 +554,28 @@ and dry-run semantics, but it runs over stdio with an api key.
 **Consequence:** The approval gate lives in the api, not in the model's goodwill — stronger than the MCP `confirm` convention. Images are
 stored in Postgres (≤ 5 MB each); move them to object storage if volume grows. One running turn per thread is enforced per api instance
 (in-memory lock); several api replicas would need a Postgres advisory lock.
+
+## ADR-034 — One OpenAI-compatible LLM endpoint for the whole platform (Meta Muse Spark by default)
+**Context:** Three code paths called LLMs with three configurations: the assistant (OpenAI-compatible, `TT_ASSISTANT_*`), the api's
+incident summary (`TT_AI_PROVIDER` meta|baseten, `TT_AI_ALLOW_PAID`, `MODEL_API_KEY` / `BASETEN_API_KEY`, `TT_AI_MODEL`, model ids
+hard-coded per provider) and codeintel enrichment (Anthropic Go SDK, `ANTHROPIC_API_KEY` + `TT_CODEINTEL_MODEL`). Operators had to
+configure, pay for and monitor several providers, and the incident summary violated "model ids come from config".
+**Decision:**
+- **Every** LLM call goes through one **OpenAI-compatible Chat Completions** endpoint: `TT_ASSISTANT_API_URL` (default
+  `https://api.meta.ai/v1`, Meta Muse Spark; `…/v1` or the full `…/chat/completions` URL), `TT_ASSISTANT_API_KEY`, `TT_ASSISTANT_MODEL`.
+  The variable names stay `TT_ASSISTANT_*` (already deployed); api (assistant + incident summary) and codeintel read the same three.
+- Shared helper `services/pkg/llmapi`: env parsing, URL normalization, `gen_ai.provider.name` from the host (`api.meta.ai` → `meta`,
+  `*.baseten.co` → `baseten`, unknown hosts → `openai`) and a small non-streaming client (Bearer auth, retries on network error / 429 /
+  5xx, `usage.prompt_tokens` / `completion_tokens` / `prompt_tokens_details.cached_tokens`). Plain `net/http`, no vendor SDK; the
+  `anthropic-sdk-go` dependency is removed from codeintel. The assistant keeps its own streaming client but uses the same normalization.
+- Key **and** model set → real model; otherwise every feature falls back as before (assistant / incident summary: offline mock,
+  codeintel: static rules). `TT_AI_ALLOW_PAID` is dropped: key + model are the opt-in, like the assistant's. In exchange the incident
+  summary now reserves and records AI credits (ADR-018, feature `rca`, `ref = incident-summary`) and answers 429 when the quota is used up.
+- codeintel asks for JSON with `response_format: json_schema` and the schema in the prompt, and falls back to the prompt alone when the
+  endpoint rejects `response_format` with HTTP 400. Anthropic prompt-cache control is gone; cached prompt tokens reported by the endpoint
+  are billed as cache reads.
+- Removed env vars: `TT_AI_PROVIDER`, `TT_AI_ALLOW_PAID`, `MODEL_API_KEY`, `BASETEN_API_KEY`, `TT_AI_MODEL`, `ANTHROPIC_API_KEY`,
+  `TT_CODEINTEL_MODEL`.
+**Consequence:** One key, one bill, one place to switch providers (any OpenAI-compatible gateway works, including a self-hosted one).
+All features share one model: a smaller/faster model for enrichment and a stronger one for the chat would need separate variables again.
+Endpoints without function calling cannot run the assistant; endpoints without JSON mode still work for codeintel via the prompt schema.
