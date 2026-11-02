@@ -1,0 +1,5 @@
+name: admin_app
+dependencies:
+  flutter:
+    sdk: flutter
+  cloud_firestore: ^5.0.0

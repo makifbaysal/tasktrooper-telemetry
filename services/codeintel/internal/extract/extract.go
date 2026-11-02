@@ -99,6 +99,10 @@ func langOf(rel string) string {
 			return ""
 		}
 		return "python"
+	// manifests before the language suffixes: Package.swift is not Swift source
+	case base == "pubspec.yaml", base == "pom.xml", base == "build.gradle", base == "build.gradle.kts", base == "Package.swift",
+		strings.HasSuffix(base, ".csproj"):
+		return "manifest"
 	case strings.HasSuffix(base, ".vue"):
 		return "vue"
 	case strings.HasSuffix(base, ".java"), strings.HasSuffix(base, ".kt"), strings.HasSuffix(base, ".cs"),
@@ -108,9 +112,6 @@ func langOf(rel string) string {
 			return ""
 		}
 		return map[string]string{".java": "java", ".kt": "kotlin", ".cs": "csharp", ".swift": "swift", ".dart": "dart"}[path.Ext(base)]
-	case base == "pubspec.yaml", base == "pom.xml", base == "build.gradle", base == "build.gradle.kts", base == "Package.swift",
-		strings.HasSuffix(base, ".csproj"):
-		return "manifest"
 	case strings.HasSuffix(base, ".yaml"), strings.HasSuffix(base, ".yml"):
 		return "yaml"
 	case base == "Dockerfile", strings.HasPrefix(base, ".env"), strings.HasSuffix(base, ".dockerfile"):

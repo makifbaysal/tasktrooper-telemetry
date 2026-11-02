@@ -1,0 +1,9 @@
+name: shop_app
+dependencies:
+  flutter:
+    sdk: flutter
+  go_router: ^14.0.0
+  dio: ^5.0.0
+  http: ^1.2.0
+  sqflite: ^2.3.0
+  tasktrooper_flutter: ^0.1.0

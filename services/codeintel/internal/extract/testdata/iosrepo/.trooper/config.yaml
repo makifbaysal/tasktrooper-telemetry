@@ -1,0 +1,5 @@
+services:
+  - path: ShopApp
+    name: shop-ios
+  - path: orders-server
+    name: orders-server
