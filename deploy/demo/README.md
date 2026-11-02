@@ -12,7 +12,7 @@ workflow runs on a self-hosted runner on that machine; Cloudflare Tunnel publish
 One level under the zone on purpose: Cloudflare's free certificate does not cover `api.telemetry.tasktrooper.ai`.
 
 Runs: ClickHouse, Postgres, Redpanda, Redis, s3 (replay blobs), ingest-gw, ingest-writer, api, alert-engine, notifier,
-loadtest, web. Not in the demo: codeintel, trooper-cloud.
+loadtest, codeintel, web. Not in the demo: trooper-cloud.
 
 Load tests run on this machine with small caps (`docker-compose.demo.yml`: 50 VUs, 15 min, one run at a time, 3000
 VU-minutes a month) and only against verified domains: `TT_LOADTEST_ALLOW_LOCAL=false`, so a scenario can never target
@@ -108,17 +108,18 @@ Without it the Slack endpoints answer 501 and the dashboard says Slack isn't set
 1. https://github.com/settings/apps → New GitHub App (or reuse one that no other product depends on).
 2. **Setup URL** `https://telemetry-api.tasktrooper.ai/api/v1/integrations/github/callback`, "Redirect on update" on.
 3. **Permissions & events** → Repository: Contents read-only, Metadata read-only; event **Push**. Webhook can stay inactive:
-   codeintel (analysis, push webhooks) is not part of the demo, so repositories are connected but not analyzed.
+   codeintel analyzes a repository when it is connected; push webhooks (incremental re-analysis) need a tunnel route to
+   codeintel `:8096`, which the demo does not have.
 4. `demo` environment: variables **`DEMO_GITHUB_APP_ID`** (App ID) and **`DEMO_GITHUB_APP_SLUG`** (`github.com/apps/<slug>`),
    secret **`DEMO_GITHUB_APP_PRIVATE_KEY`** (General → Private keys → Generate a private key; the whole `.pem`):
    `gh secret set DEMO_GITHUB_APP_PRIVATE_KEY --env demo < task-trooper.*.private-key.pem`, then run deploy-demo.
 
 ## LLM model (ADR-033, ADR-034)
 Every LLM call goes through one OpenAI-compatible Chat Completions endpoint (Meta Muse Spark by default): the assistant, the
-incident summary and — where it runs — codeintel enrichment. `demo` environment: variable **`DEMO_ASSISTANT_MODEL`**
+incident summary and codeintel enrichment. `demo` environment: variable **`DEMO_ASSISTANT_MODEL`**
 (e.g. a Muse Spark model id), optional variable **`DEMO_ASSISTANT_API_URL`** (default `https://api.meta.ai/v1`), secret
 **`DEMO_ASSISTANT_API_KEY`**; the workflow passes them as `TT_ASSISTANT_*`. Without key and model the assistant and the incident
-summary run the offline mock.
+summary run the offline mock and codeintel uses static rules only.
 
 ## First sign-in
 Open `https://telemetry.tasktrooper.ai`, sign in with Google, onboarding creates the org, project and ingest key (DSN).
