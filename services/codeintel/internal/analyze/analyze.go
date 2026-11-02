@@ -195,13 +195,13 @@ func (a *Analyzer) Run(ctx context.Context, repo model.Repo, pending []string) (
 	}
 	rep.Shadows = len(shadows)
 
-	// LLM for new or changed code, most critical first.
+	// LLM for new or changed code, most critical first; trivial endpoints (health, metrics…) keep their static rating.
 	rep.LLM.Status = model.LLMDisabled
 	if a.LLM != nil {
 		rep.LLM.Status = model.LLMOK
 		var todo []*model.Item
 		for _, it := range items {
-			if it.LLM == nil && it.Snippet != "" && it.Kind != model.KindDependency && it.Kind != model.KindView {
+			if it.LLM == nil && it.Snippet != "" && it.Kind != model.KindDependency && it.Kind != model.KindView && !enrich.Trivial(it) {
 				todo = append(todo, it)
 			}
 		}
@@ -333,12 +333,10 @@ func keepObserved(items []*model.Item, prev map[string]*model.Item) {
 	}
 }
 
+// repoSummary is the LLM context: every inventory row (the enricher sends each batch only its service's rows, capped).
 func repoSummary(repo model.Repo, rep *Report, items []*model.Item) enrich.RepoSummary {
 	s := enrich.RepoSummary{Name: repo.FullName, Languages: rep.Languages, Services: rep.Services}
 	for _, it := range items {
-		if len(s.Inventory) >= 400 {
-			break
-		}
 		s.Inventory = append(s.Inventory, strings.Join([]string{it.Kind, it.Service, it.Key}, " "))
 	}
 	return s

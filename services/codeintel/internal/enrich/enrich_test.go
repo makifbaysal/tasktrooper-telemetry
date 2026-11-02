@@ -46,3 +46,15 @@ func TestStatic(t *testing.T) {
 		t.Fatal("traffic bump")
 	}
 }
+
+func TestTrivial(t *testing.T) {
+	for key, want := range map[string]bool{"GET /healthz": true, "ANY /metrics": true, "GET /static/app.js": true,
+		"GET /v1/orders": false, "POST /status-updates": false} {
+		if got := Trivial(&model.Item{Kind: model.KindEndpoint, Key: key}); got != want {
+			t.Errorf("Trivial(%q) = %v, want %v", key, got, want)
+		}
+	}
+	if Trivial(&model.Item{Kind: model.KindConsumer, Key: "healthz"}) {
+		t.Error("only endpoints are trivial")
+	}
+}

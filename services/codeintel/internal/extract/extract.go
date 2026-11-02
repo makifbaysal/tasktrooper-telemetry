@@ -1,6 +1,8 @@
 // Package extract builds the code inventory of a repository checkout: endpoints, consumers, crons, views and
 // outgoing dependencies (contracts §13). Extractors are deterministic and pure Go: Go source through go/ast,
-// TS/JS through a comment/string-aware tokenizer, Python through a line scanner, Kubernetes CronJobs through YAML.
+// TS/JS (and Vue single-file components) through a comment/string-aware tokenizer, Python, Java/Kotlin (JVM +
+// Android), C# (.NET), Swift (iOS) and Dart (Flutter) through comment/string-blanking line scanners, Kubernetes
+// CronJobs through YAML — every language a TaskTrooper SDK supports.
 package extract
 
 import (
@@ -39,6 +41,10 @@ type Result struct {
 	Files     int
 }
 
+// codeLangs are the languages counted in Result.Languages.
+var codeLangs = map[string]bool{"go": true, "typescript": true, "javascript": true, "vue": true, "python": true,
+	"java": true, "kotlin": true, "csharp": true, "swift": true, "dart": true}
+
 // srcFile is one source file loaded for extraction.
 type srcFile struct {
 	rel  string // slash separated, relative to root
@@ -51,6 +57,27 @@ var skipDirs = map[string]bool{
 	"coverage": true, "__pycache__": true, ".venv": true, "venv": true, "env": true, ".tox": true, "target": true,
 	"bin": true, "obj": true, ".idea": true, ".vscode": true, "__tests__": true, "__mocks__": true, "testdata": true,
 	"fixtures": true, ".turbo": true, ".cache": true, "site-packages": true,
+	// JVM / Android, .NET, iOS, Flutter build and dependency output
+	"Pods": true, "DerivedData": true, "Carthage": true, "generated": true, "intermediates": true,
+}
+
+// testDir reports whether a directory of rel is a test source root of the JVM, .NET, Swift or Dart layouts.
+func testDir(rel string) bool {
+	for _, seg := range strings.Split(path.Dir(rel), "/") {
+		switch {
+		case seg == "test", seg == "tests", seg == "Tests", seg == "androidTest", seg == "testFixtures", seg == "integration_test",
+			strings.HasSuffix(seg, ".Tests"), strings.HasSuffix(seg, ".Test"), strings.HasSuffix(seg, "Tests"):
+			return true
+		}
+	}
+	return false
+}
+
+// testName reports whether a file name follows a JVM, .NET, Swift or Dart test naming convention.
+func testName(base string) bool {
+	stem := strings.TrimSuffix(base, path.Ext(base))
+	return strings.HasSuffix(stem, "Test") || strings.HasSuffix(stem, "Tests") || strings.HasSuffix(stem, "Spec") ||
+		strings.HasSuffix(stem, "IT") || strings.HasSuffix(stem, "_test")
 }
 
 func langOf(rel string) string {
@@ -72,6 +99,19 @@ func langOf(rel string) string {
 			return ""
 		}
 		return "python"
+	// manifests before the language suffixes: Package.swift is not Swift source
+	case base == "pubspec.yaml", base == "pom.xml", base == "build.gradle", base == "build.gradle.kts", base == "Package.swift",
+		strings.HasSuffix(base, ".csproj"):
+		return "manifest"
+	case strings.HasSuffix(base, ".vue"):
+		return "vue"
+	case strings.HasSuffix(base, ".java"), strings.HasSuffix(base, ".kt"), strings.HasSuffix(base, ".cs"),
+		strings.HasSuffix(base, ".swift"), strings.HasSuffix(base, ".dart"):
+		if testName(base) || testDir(rel) || strings.HasSuffix(base, ".g.dart") || strings.HasSuffix(base, ".freezed.dart") ||
+			strings.HasSuffix(base, ".Designer.cs") || strings.HasSuffix(base, ".g.cs") {
+			return ""
+		}
+		return map[string]string{".java": "java", ".kt": "kotlin", ".cs": "csharp", ".swift": "swift", ".dart": "dart"}[path.Ext(base)]
 	case strings.HasSuffix(base, ".yaml"), strings.HasSuffix(base, ".yml"):
 		return "yaml"
 	case base == "Dockerfile", strings.HasPrefix(base, ".env"), strings.HasSuffix(base, ".dockerfile"):
@@ -133,19 +173,27 @@ func FromFiles(files []srcFile, opt Options) *Result {
 
 	var items []model.Item
 	counts := map[string]int{}
-	goFiles, jsFiles, pyFiles := []srcFile{}, []srcFile{}, []srcFile{}
+	var goFiles, jsFiles, pyFiles, jvmFiles, csFiles, swiftFiles, dartFiles []srcFile
 	for _, f := range files {
 		switch f.lang {
 		case "go":
 			goFiles = append(goFiles, f)
-		case "typescript", "javascript":
+		case "typescript", "javascript", "vue":
 			jsFiles = append(jsFiles, f)
 		case "python":
 			pyFiles = append(pyFiles, f)
+		case "java", "kotlin":
+			jvmFiles = append(jvmFiles, f)
+		case "csharp":
+			csFiles = append(csFiles, f)
+		case "swift":
+			swiftFiles = append(swiftFiles, f)
+		case "dart":
+			dartFiles = append(dartFiles, f)
 		case "yaml":
 			items = append(items, extractK8sCron(f)...)
 		}
-		if f.lang == "go" || f.lang == "typescript" || f.lang == "javascript" || f.lang == "python" {
+		if codeLangs[f.lang] {
 			counts[f.lang]++
 		}
 	}
@@ -158,6 +206,10 @@ func FromFiles(files []srcFile, opt Options) *Result {
 	}
 	items = append(items, extractJS(jsFiles, svc, hasNext)...)
 	items = append(items, extractPython(pyFiles)...)
+	items = append(items, extractJVM(jvmFiles)...)
+	items = append(items, extractDotnet(csFiles)...)
+	items = append(items, extractSwift(swiftFiles)...)
+	items = append(items, extractDart(dartFiles)...)
 
 	for i := range items {
 		if items[i].Service == "" {

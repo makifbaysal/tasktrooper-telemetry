@@ -3,7 +3,7 @@
 Code intelligence (ADR-014, `.ai/code-intelligence.md`, contracts §13/§18/§18a): reads connected repositories (GitHub,
 GitLab, Bitbucket Cloud, local), extracts an
 inventory of endpoints / consumers / crons / views / dependencies, matches it with observed traffic, scores criticality
-(static rules + optional Claude enrichment), and writes alert suggestions, generated load test drafts and
+(static rules + optional LLM enrichment through `TT_ASSISTANT_*`, Meta Muse Spark by default), and writes alert suggestions, generated load test drafts and
 alert-as-code monitors to Postgres.
 
 ```bash

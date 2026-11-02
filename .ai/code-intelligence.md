@@ -39,7 +39,7 @@ runner (15 s tick) → due repo (never analyzed | analyze_requested_at > analyze
   → Postgres claim (status=analyzing, analysis_started_at; single analysis across replicas, stale claim reclaimed after 2×timeout)
   → fetch: git clone --depth 1 --single-branch (token only in GIT_CONFIG_* env as http.extraHeader; never in argv/URL/log)
   → changed files: webhook list | else git diff last_analyzed_sha..HEAD | else full scan (below)
-  → extract (deterministic; Go: go/ast, JS/TS: tokenizer, Python: regex+decorator) → raw inventory
+  → extract (deterministic; Go: go/ast, JS/TS/Vue: tokenizer, Python/Java/Kotlin/C#/Swift/Dart: comment/string-blanking scanners) → raw inventory
   → if incremental: only items of changed files are refreshed, others stay as-is from the DB
   → alert-as-code sync (.trooper/monitors/*.yaml → monitors source='code')
   → observation matching (ClickHouse red_1m/consumer_1m, read-only) → observed / dead / shadow + stats
@@ -129,32 +129,51 @@ match → 401.
 | TS/JS | express, fastify (route objects, register prefix), koa, hono, Nest (Controller/Get…/setGlobalPrefix), Next.js (app `route.ts` / pages `api`) | route + method + handler; `use`/`register` mounts across files |
 | TS/JS | kafkajs, bullmq, amqplib, sqs-consumer / ReceiveMessage, Nest EventPattern/Processor | consumer |
 | TS/JS | node-cron, `cron` CronJob, Nest `@Cron` | cron |
-| TS/JS | react-router (object + `<Route>`), Next.js page/app router, react-navigation | view |
+| TS/JS | react-router (object + `<Route>`), Next.js page/app router, react-navigation, vue-router (`createRouter`/`RouteRecordRaw[]`, nested `children` joined), Nuxt `pages/` file routing (`nuxt.config.*` root), Angular router (`Routes`, nested `children`, lazy `loadChildren` mounted under the parent, `**` → `:wildcard`) | view |
+| Vue SFC | `.vue` files: only the `<script>` / `<script setup>` blocks are tokenized (template/style blanked, line numbers kept) | as TS/JS; language `typescript` for `lang="ts"`, else `javascript` |
 | Python | FastAPI (APIRouter prefix, include_router), Flask (Blueprint, register_blueprint), Django (path/re_path/include) | route |
 | Python | Celery task + beat_schedule (crontab → cron), kafka-python, confluent-kafka | consumer / cron |
+| Java/Kotlin | Spring MVC/WebFlux (class `@RequestMapping` prefix, `@*Mapping`, functional `route()`/`coRouter` nest), JAX-RS/Quarkus (`@Path` + `@GET`…), Micronaut (`@Controller` + `@Get`…), Ktor (nested `route {}`, `Route.x()` extensions mounted across files) | route + method + handler (`Class.method`) + source; same-file string constants and Kotlin templates resolved |
+| Java/Kotlin | spring-kafka/amqp/jms, `@SqsListener`, SmallRye `@Incoming`, Micronaut `@KafkaListener`+`@Topic`; `@Scheduled` (Spring/Quarkus/Micronaut); Android Activity/Fragment subclasses, Compose Navigation `composable()` | consumer (process = group/listener id, source = topics/queues), cron (cron or `every <interval>`), view (class name / SDK-style route) |
+| C# (.NET) | ASP.NET Core controllers (`[Route]` incl. inherited/const, `[controller]`/`[action]`/`[area]`, `Http*`/`AcceptVerbs`, absolute `/`·`~/` templates, conventional routes with `MapControllerRoute`), minimal APIs (`Map*`, `MapGroup` chains, group variables, `this RouteGroupBuilder` mounts across files), gRPC (`X.XBase` overrides) | route + method + handler (`Class.Method` / method group / lambda) source |
+| C# (.NET) | MassTransit `IConsumer<T>`, NServiceBus, Confluent.Kafka `Subscribe` (+ `GroupId`), RabbitMQ.Client `BasicConsume`, Azure Service Bus `CreateProcessor`, queue-reading `BackgroundService`; Hangfire `RecurringJob` (`Cron.*` → cron), Quartz `WithCronSchedule`, Coravel `Schedule<T>()` | consumer (process = consumer class / group / queue, source = message type / topic / queue), cron |
+| Swift | SwiftUI (`View` structs named `*Screen`/`*Page` or used as NavigationLink / navigationDestination / sheet / TabView / WindowGroup targets, `.trooperView` name), UIKit (`UIViewController` / `UITableViewController` / `UICollectionViewController` subclasses + in-repo subclasses; containers skipped), Vapor (`get/post/…/on`, `grouped`, `group {}`, `RouteCollection` + `register(collection:)`) | view (key = type name, `meta.rumName`) / route + method + handler |
+| Dart (Flutter) | go_router (`GoRoute` / `@TypedGoRoute`, nested `routes:` joined, ShellRoute transparent), MaterialApp `routes:` map + `onGenerateRoute` `case`, auto_route (`AutoRoute(page:, path:, children:)`, `@RoutePage`), unrouted `*Screen`/`*Page` widgets | view (key = route path / route name / class name; `meta.rumName` = what the SDK observer reports) |
 | YAML | k8s CronJob (+ `TROOPER_SERVICE` env), helm (regex fallback) | cron |
-| All | HTTP client URL literals, DB/cache/queue driver imports | dependency (`<kind> · <name>`) |
+| All | HTTP client URL literals, DB/cache/queue driver imports / `using` / `Use*` calls / connection strings (Go, TS/JS, Python, Java/Kotlin, C#, Swift, Dart) | dependency (`<kind> · <name>`) |
 
 Extractors stay deterministic; the LLM is used for **interpretation**, not **extraction**. Route parameters are normalised to a single
 form (`{id}`, `<int:id>`, `[id]`, `:id(\d+)` → `:id`; wildcard → `:wildcard`). Limits: 50,000 files, 1 MB per file,
-`node_modules`/`vendor`/`dist`/hidden directories are skipped.
+`node_modules`/`vendor`/`dist`/hidden directories and mobile/JVM build output (`build`, `target`, `Pods`, `DerivedData`, `generated`, …) are
+skipped. Test sources are skipped by name (`*Test`, `*Tests`, `*Spec`, `*IT`, `*_test`) and by directory (`src/test`, `androidTest`,
+`Tests`, `*.Tests`, `test`, `integration_test`); so are generated files (`*.g.dart`, `*.freezed.dart`, `*.Designer.cs`, `*.g.cs`). Module
+roots for the service name also include `pom.xml`, `build.gradle[.kts]`, `*.csproj`, `Package.swift`, `pubspec.yaml`.
 
 ## LLM usage
 
 - The platform's single LLM endpoint (ADR-034, `services/pkg/llmapi`): an **OpenAI-compatible Chat Completions** API from
   `TT_ASSISTANT_API_URL` (default `https://api.meta.ai/v1`, Meta Muse Spark), `TT_ASSISTANT_API_KEY`, `TT_ASSISTANT_MODEL` — the same
   variables as the dashboard assistant. Enabled only when key **and** model are both set (model ID never in code); otherwise static rules.
-- Plain `net/http` (no vendor SDK), non-streaming, batches of 15 items, `max_tokens` 16000, up to 3 retries on network errors / 429 / 5xx.
+- Plain `net/http` (no vendor SDK), non-streaming, `max_tokens` 16000, up to 3 retries on network errors / 429 / 5xx.
+- Two tiers: **full** (items the static rules rate medium or above, 15 per request) asks every field; **lite** (static `low`,
+  30 per request) asks only `criticality`, `business_domain`, `summary` — suggestions start at `high` and load test drafts only use
+  write endpoints of critical services, so monitor templates / load test hints of low items were unused output. Trivial endpoints
+  (health, metrics, static assets — `enrich.Trivial`) are not sent at all.
+- Batches are grouped by tier, then by service (services in order of their most critical item), so the AI quota still goes to the
+  most critical items first.
   JSON output: `response_format: {type: json_schema, strict: true}` **and** the schema in the system prompt; if the endpoint answers HTTP
   400 to `response_format`, the request is repeated without it and later batches send only the prompt schema. The answer's JSON object is
-  taken from between the outermost braces (Markdown fences tolerated). `finish_reason` `length` → truncated, `content_filter` → refused
-  (batch skipped, usage still recorded).
-- One system message = instructions + schema + repo summary (language, services, inventory rows), a stable prefix for providers that cache
-  prompt prefixes automatically (no explicit cache control).
+  taken from between the outermost braces (Markdown fences tolerated). `finish_reason` `length` (truncated) or undecodable JSON →
+  the batch is retried once per half (usage of every request recorded); `content_filter` → refused (batch skipped, usage recorded).
+- System message = tier instructions + schema only: identical for every request of a tier (a stable prefix for providers that cache
+  prompt prefixes automatically; no explicit cache control). User message = repository context (name, languages, service names, the
+  **inventory rows of the batch's service** only, sorted, ≤300) + the items as compact JSON.
 - Self telemetry: the HTTP client goes through the trooper `llm` transport with the endpoint host registered under `llmapi.Provider`
   (`api.meta.ai` → `meta`, `*.baseten.co` → `baseten`, unknown OpenAI-compatible hosts → `openai`) → GenAI client spans
   (`gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.usage.*`; content only with `TROOPER_LLM_CAPTURE_CONTENT=true`).
-- Input: item + handler source (≤6000 characters) + signatures of called functions. Output: `criticality`, `businessDomain`, `summary`,
+- Input: item + handler source + signatures of called functions. The source is compacted first (trailing whitespace, blank lines and
+  common indentation removed; comment runs of 3+ lines keep 2 lines + `…`), then capped at 6000 characters. The code hash uses the
+  original snippet. Output: `criticality`, `businessDomain`, `summary`,
   `failureModes[]`, `suggestedMonitors[]` (template + rationale), `loadtestHint` (sample payload, idempotent, note) → `inventory_items.llm`.
 - Cache: same identity + `code_hash` (sha256 of key + snippet) → the previous result is reused; on an incremental push unchanged
   handlers are not sent to the LLM. Per-analysis cap `TT_CODEINTEL_LLM_MAX_ITEMS` (300; critical ones first). Dependencies/views are not sent.

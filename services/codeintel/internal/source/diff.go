@@ -79,8 +79,10 @@ func LayoutChange(p, status string) bool {
 	if p == ".trooper/config.yaml" || p == ".trooper/config.yml" {
 		return true
 	}
-	switch path.Base(p) {
-	case "go.mod", "package.json", "pyproject.toml", "requirements.txt", "setup.py":
+	switch b := path.Base(p); {
+	case b == "go.mod", b == "package.json", b == "pyproject.toml", b == "requirements.txt", b == "setup.py",
+		b == "pom.xml", b == "build.gradle", b == "build.gradle.kts", b == "Package.swift", b == "pubspec.yaml",
+		strings.HasSuffix(b, ".csproj"):
 		return status == "" || strings.HasPrefix(status, "A") || strings.HasPrefix(status, "D")
 	}
 	return false
