@@ -91,8 +91,8 @@ const TIMELINE_TODAY = [
 const TIMELINE_TROOPER = [
   { t: '14:02', title: 'Deploy', body: 'The same migration ships with recommendation-api 2.14.' },
   { t: '14:04', title: 'Latency rises', body: 'Homepage p95 climbs from 380 ms to 4.1 s for real users.' },
-  { t: '14:05', title: 'Alert with the cause', body: 'Slack gets the KPI alert, and it names reco-db: queries 63× slower since migration 0042.' },
-  { t: '14:07', title: 'Rollback', body: 'On-call opens the incident from Slack and rolls the migration back. No war room.' },
+  { t: '14:05', title: 'Alert with the cause', body: 'The team\'s Slack channel gets the KPI alert, and it names reco-db: queries 63× slower since migration 0042.' },
+  { t: '14:07', title: 'Developer reverts', body: 'The developer who shipped 0042 sees the alert in the channel and reverts it. No war room.' },
   { t: '14:09', title: 'Resolved', body: 'p95 is back to 380 ms and the incident closes itself.' },
 ];
 
