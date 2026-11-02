@@ -5,7 +5,7 @@
  * them empty — screens show empty states instead of failing.
  */
 import { inventory, repos, suggestions } from './apm';
-import { API_URL, ApiError, api, invalidate, registerHydrator } from './remote';
+import { API_URL, ApiError, api, invalidate, qs, registerHydrator } from './remote';
 import type { Criticality, InventoryItem, Monitor, Repo, Suggestion } from './types';
 
 // ---------------------------------------------------------------- types
@@ -210,6 +210,23 @@ export interface GithubRepoOption { fullName: string; defaultBranch: string; pri
 
 /** Full-page redirect target that starts the GitHub App installation. */
 export const githubInstallUrl = () => `${API_URL}/api/v1/integrations/github/install`;
+
+/**
+ * Starts the GitHub App installation from anywhere (Settings): asks the api for the signed install URL and leaves the
+ * page. `redirect` is where the api sends the browser back, with `?github=<integrationId>` (Code insights opens the
+ * repo picker on it).
+ */
+export async function connectGithub(redirect = `${window.location.origin}/code`): Promise<void> {
+  try {
+    const { url } = await api<{ url: string }>(`/integrations/github/install-url${qs({ redirect })}`, { method: 'POST' });
+    window.location.href = url;
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 501) {
+      throw new Error('GitHub isn’t set up on this server yet: the operator has to register a GitHub App and set TT_GITHUB_APP_ID, TT_GITHUB_APP_SLUG and TT_GITHUB_APP_PRIVATE_KEY on the api.');
+    }
+    throw e;
+  }
+}
 
 /** GitHub App installations of this project (integrations with provider=github). */
 export async function githubInstallations(): Promise<GithubInstallation[]> {
