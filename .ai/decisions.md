@@ -529,3 +529,26 @@ restrict writes.
 **Consequence:** Confirmation is part of the tool contract, not the MCP client; a careless agent could pass `confirm: true` on the first call —
 the real protection is the env flag and reversibility via the `agent` source. A separate write-scoped API key role (read-only key) is open work.
 With this decision the demo (ADR-031) also runs the `loadtest` service; limits are in `deploy/demo/docker-compose.demo.yml`.
+## ADR-033 — Dashboard assistant: AI chat over the MCP tool surface, approvals in the UI
+**Context:** The Overview "Ask telemetry" drawer offered three fixed questions answered by the offline playground mock. Users want a free-text
+chat that knows the project: ask about incidents, services and load test results, mention items, attach screenshots, and define monitors /
+KPIs or start a load test without leaving the chat. The MCP server (ADR-025, ADR-032) already has the right tool surface with shaped results
+and dry-run semantics, but it runs over stdio with an api key.
+**Decision:**
+- A new screen `/assistant` (chat history per user and project, `assistant_*` tables in Postgres) replaces the Overview drawer; the
+  playground's `/ask-telemetry` route is removed. Spec: `.ai/assistant.md`.
+- The agent loop runs in `services/api` (`internal/assistant`). Tools come from `services/mcp/toolset`, an exported wrapper over the MCP
+  server, connected with an in-memory MCP transport — the assistant and `tt-mcp` share one tool surface. The api module requires
+  `services/mcp` with a `replace ../mcp` (the api Dockerfile copies it).
+- Tool HTTP calls are served **in process** by the api router (a `RoundTripper`), carrying the user's `tt_session` cookie and project header:
+  tools act with the user's role (viewers cannot write), writes are audited as the user, created entities get `source = agent`.
+- Write tools are on (`TT_ASSISTANT_ALLOW_WRITE`, default `true`) because the human is in the loop: any tool call with `confirm: true` stops
+  the turn and becomes an **approval card**; only `POST …/approvals/{id}` with `approve: true` executes it. A new message rejects pending
+  approvals.
+- Replies stream as SSE. An assistant-only tool `show_widget` renders entity cards (references, live data from the dashboard data layer),
+  charts, tables and stats that link to dashboard paths.
+- Provider: Claude (`ANTHROPIC_API_KEY` + `TT_ASSISTANT_MODEL`, never hard-coded); otherwise an offline mock that calls one read tool and
+  spends nothing. Claude requests reserve and record AI credits (ADR-018, feature `assistant`).
+**Consequence:** The approval gate lives in the api, not in the model's goodwill — stronger than the MCP `confirm` convention. Images are
+stored in Postgres (≤ 5 MB each); move them to object storage if volume grows. One running turn per thread is enforced per api instance
+(in-memory lock); several api replicas would need a Postgres advisory lock.

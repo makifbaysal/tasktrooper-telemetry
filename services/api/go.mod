@@ -4,6 +4,7 @@ go 1.26.3
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.49.0
+	github.com/anthropics/anthropic-sdk-go v1.84.0
 	github.com/aws/aws-sdk-go-v2 v1.47.4
 	github.com/aws/aws-sdk-go-v2/config v1.33.10
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.10
@@ -19,12 +20,31 @@ require (
 	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/nethttp v0.1.0
 	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx v0.1.0
 	github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog v0.1.0
+	github.com/modelcontextprotocol/go-sdk v1.7.0
+	github.com/tasktrooper/telemetry/services/mcp v0.0.0-00010101000000-000000000000
 	github.com/tasktrooper/telemetry/services/pkg v0.0.0
 	github.com/twmb/franz-go v1.22.2
 	github.com/twmb/franz-go/pkg/kadm v1.19.0
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
 	golang.org/x/oauth2 v0.37.0
+)
+
+require (
+	github.com/bahlo/generic-list-go v0.2.0 // indirect
+	github.com/buger/jsonparser v1.1.2 // indirect
+	github.com/google/jsonschema-go v0.4.3 // indirect
+	github.com/invopop/jsonschema v0.14.0 // indirect
+	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
+	github.com/segmentio/encoding v0.5.4 // indirect
+	github.com/standard-webhooks/standard-webhooks/libraries v0.0.1 // indirect
+	github.com/tidwall/gjson v1.18.0 // indirect
+	github.com/tidwall/match v1.1.1 // indirect
+	github.com/tidwall/pretty v1.2.1 // indirect
+	github.com/tidwall/sjson v1.2.5 // indirect
+	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
+	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
+	golang.org/x/time v0.15.0 // indirect
 )
 
 require (
@@ -51,7 +71,7 @@ require (
 	github.com/go-faster/errors v0.7.1 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/google/uuid v1.6.0 // indirect
+	github.com/google/uuid v1.6.0
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.31.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
@@ -87,3 +107,5 @@ require (
 )
 
 replace github.com/tasktrooper/telemetry/services/pkg => ../pkg
+
+replace github.com/tasktrooper/telemetry/services/mcp => ../mcp

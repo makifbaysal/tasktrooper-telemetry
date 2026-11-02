@@ -26,6 +26,7 @@ const (
 	FeatureCodeintelEnrich  = "codeintel.enrich"
 	FeatureCodeintelSuggest = "codeintel.suggest"
 	FeatureRCA              = "rca"
+	FeatureAssistant        = "assistant" // dashboard assistant chat (ADR-033)
 	FeatureOther            = "other"
 )
 

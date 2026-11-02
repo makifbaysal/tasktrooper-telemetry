@@ -133,6 +133,9 @@ llm_prices(org_id, provider, model, input_per_mtok, output_per_mtok, cache_read_
 broker_clusters(id, project_id, name, kind kafka|rabbitmq, endpoint, vhost, auth jsonb, credentials_ref, created_at)
 loadtest_scenarios(id, project_id, name, spec jsonb, source manual|generated|agent)
 loadtest_runs(id, scenario_id, state, started_at, finished_at, summary jsonb, thresholds_passed bool)
+assistant_threads(id, org_id, project_id, user_id, title, created_at, updated_at)        -- dashboard assistant, private per user (ADR-033)
+assistant_messages(id, thread_id, org_id, project_id, role user|assistant, content jsonb, transcript jsonb, created_at)
+assistant_attachments(id uuid, org_id, project_id, user_id, media_type, size, data bytea, created_at)  -- images ≤ 5 MB
 ```
 
 ## Cardinality rules

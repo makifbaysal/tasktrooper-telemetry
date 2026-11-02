@@ -25,6 +25,23 @@ type Client struct {
 	base string
 	key  string
 	hc   *http.Client
+	// auth replaces the bearer key when set (the dashboard assistant forwards the user's session, ADR-033).
+	auth func(h http.Header)
+}
+
+// WithAuth makes every request carry the headers set by fn instead of `Authorization: Bearer <key>`.
+func (c *Client) WithAuth(fn func(h http.Header)) *Client {
+	c.auth = fn
+	return c
+}
+
+// authorize sets the credentials on req. The key goes only on the wire, never into a message or a log.
+func (c *Client) authorize(req *http.Request) {
+	if c.auth != nil {
+		c.auth(req.Header)
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+c.key)
 }
 
 // New returns a Client for baseURL authenticated with key.
@@ -62,8 +79,7 @@ func (c *Client) Get(ctx context.Context, path string, q url.Values, out any) er
 	if err != nil {
 		return toolErrf("could not build request for %s", path)
 	}
-	// The key goes only on the wire, never into a message or a log.
-	req.Header.Set("Authorization", "Bearer "+c.key)
+	c.authorize(req)
 	req.Header.Set("Accept", "application/json")
 
 	res, err := c.hc.Do(req)
@@ -133,7 +149,7 @@ func (c *Client) Check(ctx context.Context, log *slog.Logger, wantOrg, wantProje
 	if err != nil {
 		return fmt.Errorf("build /me request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.key)
+	c.authorize(req)
 
 	res, err := c.hc.Do(req)
 	if err != nil {
@@ -246,7 +262,7 @@ func (c *Client) Send(ctx context.Context, method, path string, q url.Values, bo
 	if err != nil {
 		return toolErrf("could not build request for %s", path)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.key)
+	c.authorize(req)
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")

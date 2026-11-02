@@ -38,6 +38,7 @@ tags:
   - { name: ChatOps, description: "Slack App and GitHub App installations, Slack interactivity (ADR-017)" }
   - { name: AI usage, description: "AI credit usage and quotas (ADR-018)" }
   - { name: AI, description: "Explicit incident summary draft (local mock by default)" }
+  - { name: Assistant, description: "Dashboard AI chat over the MCP tool surface, streamed replies, approvals (ADR-033)" }
   - { name: Hosts & Kubernetes, description: "Hosts, containers, processes and Kubernetes (trooper-agent host / cluster modes, ADR-019)" }
   - { name: Serverless, description: "AWS Lambda and Azure Functions (ADR-020)" }
   - { name: Code insights, description: "Repo analysis, code inventory and monitor suggestions (services/codeintel)" }
@@ -2958,6 +2959,177 @@ paths:
         '400': { $ref: '#/components/responses/E400' }
         '401': { $ref: '#/components/responses/E401' }
         '500': { $ref: '#/components/responses/E500' }
+  /api/v1/assistant/status:
+    get:
+      tags: [Assistant]
+      operationId: getAssistantStatus
+      summary: Assistant provider (claude or offline mock), model and whether write tools are on (ADR-033)
+      responses:
+        '200':
+          description: Status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  provider: { type: string, enum: [claude, mock] }
+                  model: { type: string }
+                  writeTools: { type: boolean }
+        '403': { description: Not a user session (api keys use the MCP server) }
+  /api/v1/assistant/threads:
+    get:
+      tags: [Assistant]
+      operationId: listAssistantThreads
+      summary: The signed-in user's chats in the current project, newest first (max 100)
+      responses:
+        '200':
+          description: Threads
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/AssistantThread' } }
+    post:
+      tags: [Assistant]
+      operationId: createAssistantThread
+      summary: Start a chat (the title defaults to the first message)
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, properties: { title: { type: string, maxLength: 80 } } }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AssistantThread' }
+  /api/v1/assistant/threads/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [Assistant]
+      operationId: getAssistantThread
+      summary: A chat with its messages (.ai/assistant.md § API for the message and block shapes)
+      responses:
+        '200':
+          description: Thread and messages
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  thread: { $ref: '#/components/schemas/AssistantThread' }
+                  messages: { type: array, items: { type: object, additionalProperties: true } }
+        '404': { description: Not found }
+    patch:
+      tags: [Assistant]
+      operationId: renameAssistantThread
+      summary: Rename a chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [title], properties: { title: { type: string, maxLength: 80 } } }
+      responses:
+        '200':
+          description: Renamed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AssistantThread' }
+    delete:
+      tags: [Assistant]
+      operationId: deleteAssistantThread
+      summary: Delete a chat and its messages
+      responses:
+        '204': { description: Deleted }
+  /api/v1/assistant/threads/{id}/messages:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Assistant]
+      operationId: sendAssistantMessage
+      summary: Send a message; the reply streams back as server-sent events (message, text, tool, widget, approval, error, done)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text: { type: string, maxLength: 20000 }
+                refs:
+                  type: array
+                  maxItems: 20
+                  items:
+                    type: object
+                    required: [kind, id, label]
+                    properties:
+                      kind: { type: string, enum: [service, endpoint, incident, kpi, monitor, loadtest_run, loadtest_scenario, host, database] }
+                      id: { type: string }
+                      label: { type: string }
+                      service: { type: string }
+                attachments: { type: array, maxItems: 4, items: { type: string } }
+      responses:
+        '200':
+          description: Event stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '400': { description: Empty or invalid message }
+        '409': { description: The chat is already answering }
+  /api/v1/assistant/threads/{id}/approvals/{toolUseId}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: toolUseId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Assistant]
+      operationId: decideAssistantApproval
+      summary: Approve or reject a pending write tool call; the same reply continues as server-sent events
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [approve], properties: { approve: { type: boolean } } }
+      responses:
+        '200':
+          description: Event stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '409': { description: No pending approval with this id }
+  /api/v1/assistant/attachments:
+    post:
+      tags: [Assistant]
+      operationId: uploadAssistantAttachment
+      summary: Upload an image for a message (PNG, JPEG, GIF or WebP, at most 5 MB, base64)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mediaType, data]
+              properties:
+                mediaType: { type: string, enum: [image/png, image/jpeg, image/gif, image/webp] }
+                data: { type: string, format: byte }
+      responses:
+        '201':
+          description: Stored
+          content:
+            application/json:
+              schema: { type: object, properties: { id: { type: string }, mediaType: { type: string }, size: { type: integer } } }
+  /api/v1/assistant/attachments/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [Assistant]
+      operationId: getAssistantAttachment
+      summary: An image the user uploaded
+      responses:
+        '200':
+          description: Image bytes
+          content:
+            image/*:
+              schema: { type: string, format: binary }
+        '404': { description: Not found }
   /api/v1/ai/overview:
     get:
       tags: [AI monitoring]
@@ -3092,6 +3264,14 @@ components:
     E500: { description: Internal error, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
     E503: { description: Dependency not configured or unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
   schemas:
+    AssistantThread:
+      type: object
+      required: [id, title, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     CodeSuggestion:
       type: object
       required: [id, title, kind, target, condition, criticality, confidence, rationale, codeRef, calibrated, state, createdAt, monitorDraft]

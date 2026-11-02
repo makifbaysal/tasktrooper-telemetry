@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -155,6 +156,7 @@ type Store interface {
 	ChatOpsStore
 	Phase6Store
 	ObsStore
+	AssistantStore
 }
 
 var _ Store = (*store.DB)(nil)
@@ -209,7 +211,14 @@ type Server struct {
 	// PublicIngestURL is the ingest gateway as reachable by SDKs; DSNs returned by POST /orgs (TT_PUBLIC_INGEST_URL).
 	PublicIngestURL string
 
-	channels channelCache
+	// Assistant configures the dashboard assistant (nil = offline mock, write tools on; ADR-033).
+	Assistant *AssistantConfig
+
+	channels       channelCache
+	assistantLocks threadLocks
+	// router is the built handler; the assistant serves its tool calls with it in process.
+	router    http.Handler
+	innerOnce sync.Once
 }
 
 // Handler builds the router.
@@ -229,8 +238,10 @@ func (s *Server) Handler() http.Handler {
 			s.identityRoutes(r)
 			s.chatOpsRoutes(r)
 			s.routes(r)
+			s.assistantRoutes(r)
 		})
 	})
+	s.router = r
 	return r
 }
 

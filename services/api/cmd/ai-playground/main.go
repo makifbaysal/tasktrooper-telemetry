@@ -211,37 +211,6 @@ func main() {
 			Usage    ai.Usage `json:"usage"`
 		}{groups, "mock", ai.Usage{}})
 	})
-	mux.HandleFunc("POST /ask-telemetry", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		var in struct {
-			Question      string  `json:"question"`
-			RPM           float64 `json:"rpm"`
-			ErrorRate     float64 `json:"errorRate"`
-			P95           float64 `json:"p95"`
-			OpenIncidents int     `json:"openIncidents"`
-		}
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&in); err != nil {
-			http.Error(w, `{"error":"invalid telemetry question"}`, http.StatusBadRequest)
-			return
-		}
-		var answer string
-		switch in.Question {
-		case "health":
-			answer = fmt.Sprintf("Current snapshot: %.0f requests/min, %.2f%% error rate, p95 %.0f ms, and %d open incidents. Inspect the incident and service detail views for causes.", in.RPM, in.ErrorRate*100, in.P95, in.OpenIncidents)
-		case "errors":
-			answer = fmt.Sprintf("The current project-wide error rate is %.2f%% with %d open incidents. Open an incident for its monitor, timeline, and related logs.", in.ErrorRate*100, in.OpenIncidents)
-		case "latency":
-			answer = fmt.Sprintf("Current project-wide p95 latency is %.0f ms. Compare service and endpoint charts to identify which path contributes most.", in.P95)
-		default:
-			http.Error(w, `{"error":"question is not allowed"}`, http.StatusBadRequest)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(struct {
-			Answer   string   `json:"answer"`
-			Provider string   `json:"provider"`
-			Usage    ai.Usage `json:"usage"`
-		}{answer, "mock", ai.Usage{}})
-	})
 	server := &http.Server{Addr: "127.0.0.1:8099", Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	log.Println("offline AI playground listening on 127.0.0.1:8099")
 	log.Fatal(server.ListenAndServe())

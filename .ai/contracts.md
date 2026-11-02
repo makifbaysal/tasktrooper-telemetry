@@ -18,6 +18,7 @@ services/                      Go 1.26, multi-module via go.work
   codeintel/                   .../services/codeintel   (repo analysis, webhook — ADR-014)
   loadtest/                    .../services/loadtest    loadtest-ctl + runner (ADR-015)
   mcp/                         .../services/mcp         cmd/tt-mcp (MCP server, stdio — ADR-025, §26)
+                               toolset/: exported tool surface, imported by api for the dashboard assistant (ADR-033)
 tools/
   trooper-cli/                 sourcemap / dSYM / mapping upload CLI (§12)
 deploy/
@@ -250,6 +251,9 @@ Schema: `deploy/postgres/001_init.sql`, seed `002_seed.sql`. Owner is `api`; ale
 `kpis`, `kpi_alert_rules`. The collector reads `databases` and `broker_clusters` from the api (`GET /api/v1/internal/collector-config`,
 with an api key) and does not connect to the DB directly.
 
+Dashboard assistant (ADR-033, `deploy/postgres/015_assistant.sql`, owner api): `assistant_threads`, `assistant_messages`
+(`content` UI shape + `transcript` model messages), `assistant_attachments` (images, bytea ≤ 5 MB). Private to the user, project scoped.
+
 ## 8. API (the dashboard's backend)
 
 `services/api/openapi.yaml` is the single source. Rules: JSON, camelCase fields; time `ts` in unix ms; durations in ms; ratios 0..1;
@@ -258,6 +262,11 @@ Response shapes match `apps/web/src/data/types.ts` (+ `infra.ts`) exactly; in th
 functions. Auth: `Authorization: Bearer <api key>` (dev) — OIDC session later.
 
 `GET /service-map?range=&env=` returns the whole system graph: `nodes` (`tier` client|service|data|external, `kind`, `system`, `status`, rpm/errorRate/p95, heaviest open `incident`) + `edges` (from→to, callsPerMin, errorRate, p95, `status` from error rate: ≥1% warning, ≥5% critical). Incoming edges come from `callers_1m` (callee view), dependencies from `edges_1m`; an http call whose `child_service` resolves to a service that sends telemetry is a service→service edge, an unresolved `peer.service` becomes an external (`external`) node. Dependency node id is `dep:<system> · <name>`.
+
+`/assistant/*` (ADR-033, `.ai/assistant.md`): session-only chat API; `POST …/messages` and `POST …/approvals/{toolUseId}` answer with
+`text/event-stream` (events `message`, `text`, `tool`, `widget`, `approval`, `error`, `done`). Viewers may call it (writes made by its
+tools are still checked per request). Env: `ANTHROPIC_API_KEY`, `TT_ASSISTANT_MODEL`, `TT_ASSISTANT_MAX_TOKENS`, `TT_ASSISTANT_MAX_STEPS`,
+`TT_ASSISTANT_ALLOW_WRITE`.
 
 ## 9. RUM
 
@@ -541,7 +550,7 @@ CREATE TABLE IF NOT EXISTS ai_usage (
   org_id bigint NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
   project_id bigint REFERENCES projects(id) ON DELETE SET NULL,
   user_id bigint REFERENCES users(id) ON DELETE SET NULL,      -- NULL = automatic job
-  feature text NOT NULL,                                       -- codeintel.enrich | codeintel.suggest | rca | other
+  feature text NOT NULL,                                       -- codeintel.enrich | codeintel.suggest | rca | assistant | other
   model text NOT NULL, input_tokens integer NOT NULL, output_tokens integer NOT NULL,
   credits numeric(12,4) NOT NULL, ref text NOT NULL DEFAULT '',  -- e.g. 'repo:12'
   created_at timestamptz NOT NULL DEFAULT now());
@@ -1062,6 +1071,9 @@ If the OTel log event `gen_ai.client.inference.operation.details` arrives, conte
 ## 26. MCP server (`services/mcp`, ADR-025)
 
 MCP server for local coding agents; read-only by default, write is opt-in (ADR-032). (`cmd/tt-mcp`, stdio; official Go MCP SDK). Details: `.ai/mcp.md`.
+
+- **In-process use (ADR-033):** `services/mcp/toolset` builds the same server for the api's dashboard assistant over an in-memory transport;
+  its HTTP client then sends the user's session (`apiclient.WithAuth`) through an in-process transport instead of an api key.
 
 - **Wrapping:** Tools wrap `services/api` (`openapi.yaml`); no direct DB connection. HTTP client
   `Authorization: Bearer <TT_API_KEY>`; the tenant comes from the api key (ADR-016). Extra check: if `TT_ORG_ID` /
