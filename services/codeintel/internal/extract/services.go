@@ -12,7 +12,8 @@ import (
 // serviceMap resolves the service of a file (contracts §13):
 //  1. `.trooper/config.yaml` `services: [{path, name}]` (longest path prefix wins);
 //  2. the nearest directory with a TaskTrooper SDK init (`service:` / `serviceName` / `TROOPER_SERVICE`);
-//  3. the nearest module root (go.mod, package.json, pyproject.toml, requirements.txt, setup.py) → its directory name;
+//  3. the nearest module root (go.mod, package.json, pyproject.toml, requirements.txt, setup.py, pom.xml,
+//     build.gradle[.kts], *.csproj, Package.swift, pubspec.yaml) → its directory name;
 //  4. the repository name.
 type serviceMap struct {
 	explicit []dirName // sorted by path length, longest first
@@ -71,7 +72,7 @@ func newServiceMap(files []srcFile, repo string) *serviceMap {
 // detectSDKService finds a service name in an SDK init / TROOPER_SERVICE setting.
 func detectSDKService(f srcFile) string {
 	switch f.lang {
-	case "go", "typescript", "javascript", "python", "config", "yaml":
+	case "go", "typescript", "javascript", "vue", "python", "java", "kotlin", "csharp", "swift", "dart", "config", "yaml":
 	default:
 		return ""
 	}
