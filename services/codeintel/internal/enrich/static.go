@@ -1,5 +1,5 @@
 // Package enrich assigns criticality to inventory items: deterministic static rules always, and an optional
-// Claude pass (structured JSON) that adds business domain, summary, failure modes, monitor templates and a
+// LLM pass (structured JSON, OpenAI-compatible endpoint) that adds business domain, summary, failure modes, monitor templates and a
 // load test hint. alerting.md § Code-aware automatic alerts.
 package enrich
 
@@ -86,6 +86,16 @@ func staticLevel(it *model.Item) (string, string) {
 		return model.Low, "external dependency"
 	}
 	return model.Low, ""
+}
+
+// Trivial reports items the static rules classify with certainty (health, metrics, static assets…): an LLM answer
+// would not change their criticality or produce suggestions, so they are not sent.
+func Trivial(it *model.Item) bool {
+	if it.Kind != model.KindEndpoint {
+		return false
+	}
+	_, p := route.SplitKey(it.Key)
+	return reTrivial.MatchString(strings.ToLower(p))
 }
 
 // BumpForTraffic raises medium items with heavy observed traffic (≥ 100 rpm) to high.

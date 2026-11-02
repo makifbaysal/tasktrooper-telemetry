@@ -144,17 +144,26 @@ form (`{id}`, `<int:id>`, `[id]`, `:id(\d+)` → `:id`; wildcard → `:wildcard`
 - The platform's single LLM endpoint (ADR-034, `services/pkg/llmapi`): an **OpenAI-compatible Chat Completions** API from
   `TT_ASSISTANT_API_URL` (default `https://api.meta.ai/v1`, Meta Muse Spark), `TT_ASSISTANT_API_KEY`, `TT_ASSISTANT_MODEL` — the same
   variables as the dashboard assistant. Enabled only when key **and** model are both set (model ID never in code); otherwise static rules.
-- Plain `net/http` (no vendor SDK), non-streaming, batches of 15 items, `max_tokens` 16000, up to 3 retries on network errors / 429 / 5xx.
+- Plain `net/http` (no vendor SDK), non-streaming, `max_tokens` 16000, up to 3 retries on network errors / 429 / 5xx.
+- Two tiers: **full** (items the static rules rate medium or above, 15 per request) asks every field; **lite** (static `low`,
+  30 per request) asks only `criticality`, `business_domain`, `summary` — suggestions start at `high` and load test drafts only use
+  write endpoints of critical services, so monitor templates / load test hints of low items were unused output. Trivial endpoints
+  (health, metrics, static assets — `enrich.Trivial`) are not sent at all.
+- Batches are grouped by tier, then by service (services in order of their most critical item), so the AI quota still goes to the
+  most critical items first.
   JSON output: `response_format: {type: json_schema, strict: true}` **and** the schema in the system prompt; if the endpoint answers HTTP
   400 to `response_format`, the request is repeated without it and later batches send only the prompt schema. The answer's JSON object is
-  taken from between the outermost braces (Markdown fences tolerated). `finish_reason` `length` → truncated, `content_filter` → refused
-  (batch skipped, usage still recorded).
-- One system message = instructions + schema + repo summary (language, services, inventory rows), a stable prefix for providers that cache
-  prompt prefixes automatically (no explicit cache control).
+  taken from between the outermost braces (Markdown fences tolerated). `finish_reason` `length` (truncated) or undecodable JSON →
+  the batch is retried once per half (usage of every request recorded); `content_filter` → refused (batch skipped, usage recorded).
+- System message = tier instructions + schema only: identical for every request of a tier (a stable prefix for providers that cache
+  prompt prefixes automatically; no explicit cache control). User message = repository context (name, languages, service names, the
+  **inventory rows of the batch's service** only, sorted, ≤300) + the items as compact JSON.
 - Self telemetry: the HTTP client goes through the trooper `llm` transport with the endpoint host registered under `llmapi.Provider`
   (`api.meta.ai` → `meta`, `*.baseten.co` → `baseten`, unknown OpenAI-compatible hosts → `openai`) → GenAI client spans
   (`gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.usage.*`; content only with `TROOPER_LLM_CAPTURE_CONTENT=true`).
-- Input: item + handler source (≤6000 characters) + signatures of called functions. Output: `criticality`, `businessDomain`, `summary`,
+- Input: item + handler source + signatures of called functions. The source is compacted first (trailing whitespace, blank lines and
+  common indentation removed; comment runs of 3+ lines keep 2 lines + `…`), then capped at 6000 characters. The code hash uses the
+  original snippet. Output: `criticality`, `businessDomain`, `summary`,
   `failureModes[]`, `suggestedMonitors[]` (template + rationale), `loadtestHint` (sample payload, idempotent, note) → `inventory_items.llm`.
 - Cache: same identity + `code_hash` (sha256 of key + snippet) → the previous result is reused; on an incremental push unchanged
   handlers are not sent to the LLM. Per-analysis cap `TT_CODEINTEL_LLM_MAX_ITEMS` (300; critical ones first). Dependencies/views are not sent.
