@@ -61,6 +61,8 @@ type jsFile struct {
 	imports  map[string]bool   // package / relative specifiers
 	bindings map[string]string // local identifier → import specifier
 	funcs    map[string]int    // function name → line
+	language string            // item language: a Vue SFC reports its script block language
+	lazy     []jsMount         // Angular loadChildren mounts of this file
 }
 
 // jsMount is `app.use('/prefix', router)` where router is imported from another file.
@@ -72,8 +74,14 @@ type jsMount struct {
 func extractJS(files []srcFile, svc *serviceMap, hasNext bool) []model.Item {
 	var parsed []*jsFile
 	index := map[string][]jsFuncRef{}
+	nuxt := nuxtRoots(files)
 	for _, f := range files {
-		jf := &jsFile{f: f, toks: tokenizeJS(f.src), imports: map[string]bool{}, bindings: map[string]string{}, funcs: map[string]int{}}
+		language := f.lang
+		if f.lang == "vue" { // only the <script> blocks, line numbers preserved
+			f.src, language = vueScript(f.src)
+		}
+		jf := &jsFile{f: f, toks: tokenizeJS(f.src), imports: map[string]bool{}, bindings: map[string]string{}, funcs: map[string]int{},
+			language: language}
 		jf.scanImports()
 		for _, re := range []*regexp.Regexp{reJSFuncDecl, reJSArrowDecl, reJSMethod} {
 			for _, m := range re.FindAllSubmatchIndex(f.src, -1) {
@@ -93,6 +101,7 @@ func extractJS(files []srcFile, svc *serviceMap, hasNext bool) []model.Item {
 	var items []model.Item
 	var mounts []jsMount
 	globalPrefix := map[string]string{} // service → Nest setGlobalPrefix
+	lazy := map[string][]jsMount{}      // file → Angular loadChildren mounts
 	for _, jf := range parsed {
 		it, m, gp := jf.extract(index)
 		items = append(items, it...)
@@ -100,10 +109,17 @@ func extractJS(files []srcFile, svc *serviceMap, hasNext bool) []model.Item {
 		if gp != "" {
 			globalPrefix[svc.service(jf.f.rel)] = gp
 		}
-		if hasNext {
+		switch {
+		case underNuxt(jf.f.rel, nuxt):
+			items = append(items, jf.nuxtRoutes(nuxt)...)
+		case hasNext && jf.f.lang != "vue":
 			items = append(items, jf.nextRoutes()...)
 		}
+		if len(jf.lazy) > 0 {
+			lazy[jf.f.rel] = jf.lazy
+		}
 	}
+	applyLazyMounts(items, lazy)
 	// Apply cross-file mounts (express/koa/hono app.use('/api', ordersRouter)) and Nest global prefixes.
 	for i := range items {
 		it := &items[i]
@@ -185,7 +201,7 @@ func (jf *jsFile) imported(pkgs ...string) bool {
 	return false
 }
 
-func (jf *jsFile) lang() string { return jf.f.lang }
+func (jf *jsFile) lang() string { return jf.language }
 
 // snippetFor returns the source of handler name (this file first, then any file) or the registration lines.
 func (jf *jsFile) snippetFor(name string, line int, index map[string][]jsFuncRef) string {
@@ -238,6 +254,8 @@ func (jf *jsFile) extract(index map[string][]jsFuncRef) (items []model.Item, mou
 	nestPrefix, inNest := "", false
 	kafkaGroup := ""
 	isReactRouter := jf.imported("react-router", "react-router-dom", "@tanstack/react-router", "@remix-run/react")
+	isVueRouter := jf.imported("vue-router")
+	isAngularRouter := jf.imported("@angular/router")
 	isNavigation := jf.imported("@react-navigation/native", "@react-navigation/stack", "@react-navigation/native-stack", "@react-navigation/bottom-tabs", "expo-router")
 	cronIdents := map[string]bool{}
 	for local, spec := range jf.bindings {
@@ -457,6 +475,18 @@ func (jf *jsFile) extract(index map[string][]jsFuncRef) (items []model.Item, mou
 			add(model.Item{Kind: model.KindView, Key: route.Normalize("/" + strings.TrimLeft(t[i+2].val, "/")), Line: tk.line, Framework: "react-router"})
 		}
 	}
+	// vue-router / Angular route trees (react-router files keep the flat object rule above).
+	if !isReactRouter && (isVueRouter || isAngularRouter) {
+		fw := "vue-router"
+		if isAngularRouter {
+			fw = "angular-router"
+		}
+		views, lazy := jf.routeTrees(fw)
+		for _, v := range views {
+			add(v)
+		}
+		jf.lazy = lazy
+	}
 	items = append(items, jf.dependencies()...)
 	return items, mounts, globalPrefix
 }
@@ -580,8 +610,25 @@ func (jf *jsFile) dependencies() []model.Item {
 		switch {
 		case (t[i].val == "fetch" || t[i].val == "got" || t[i].val == "ky") && t[i+1].is("("):
 			arg = t[i+2]
-		case (t[i].val == "axios" || t[i].val == "http" || t[i].val == "https") && t[i+1].is(".") && i+4 < len(t) && t[i+3].is("("):
-			arg = t[i+4]
+		case (t[i].val == "axios" || t[i].val == "http" || t[i].val == "https" || t[i].val == "httpClient") && t[i+1].is(".") && i+4 < len(t):
+			// axios.get('…') | this.http.get<Order[]>('…') (Angular HttpClient generic)
+			j := i + 3
+			if t[j].is("<") {
+				for depth := 0; j < len(t) && j < i+40; j++ {
+					if t[j].is("<") {
+						depth++
+					} else if t[j].is(">") {
+						if depth--; depth == 0 {
+							j++
+							break
+						}
+					}
+				}
+			}
+			if j+1 >= len(t) || !t[j].is("(") {
+				continue
+			}
+			arg = t[j+1]
 		default:
 			continue
 		}
