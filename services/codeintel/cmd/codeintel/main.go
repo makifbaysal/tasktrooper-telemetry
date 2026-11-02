@@ -20,6 +20,7 @@ import (
 	"github.com/tasktrooper/telemetry/services/pkg/aiquota"
 	"github.com/tasktrooper/telemetry/services/pkg/config"
 	"github.com/tasktrooper/telemetry/services/pkg/githubapp"
+	"github.com/tasktrooper/telemetry/services/pkg/llmapi"
 	"github.com/tasktrooper/telemetry/services/pkg/logx"
 	"github.com/tasktrooper/telemetry/services/pkg/secrets"
 	"github.com/tasktrooper/telemetry/services/pkg/vcs"
@@ -91,12 +92,14 @@ func run(once int64) error {
 	}
 
 	var llm enrich.Enricher
-	if l := enrich.NewLLM(os.Getenv("ANTHROPIC_API_KEY"), os.Getenv("TT_CODEINTEL_MODEL")); l != nil {
+	// The platform's single OpenAI-compatible LLM endpoint (ADR-034), shared with the api's assistant.
+	llmCfg := llmapi.FromEnv()
+	if l := enrich.NewLLM(llmCfg); l != nil {
 		l.Log = log
 		llm = l
-		log.Info("LLM enrichment enabled", "model", l.Model())
+		log.Info("LLM enrichment enabled", "model", l.Model(), "provider", llmCfg.Provider())
 	} else {
-		log.Info("LLM enrichment disabled (set ANTHROPIC_API_KEY and TT_CODEINTEL_MODEL); static criticality rules only")
+		log.Info("LLM enrichment disabled (set TT_ASSISTANT_API_KEY and TT_ASSISTANT_MODEL); static criticality rules only")
 	}
 
 	qcfg, err := aiquota.FromEnv()

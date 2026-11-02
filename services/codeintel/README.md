@@ -33,7 +33,8 @@ VALUES (1, 'local', 'acme/shop', 'main', '/path/to/checkout');
 | `TT_GITHUB_APP_ID`, `TT_GITHUB_APP_PRIVATE_KEY` | — | GitHub App (key: PEM or `env:`/`file:` ref); needed for installation repositories |
 | `TT_GITHUB_API_URL` | `https://api.github.com` | GitHub Enterprise: `https://host/api/v3` (clone host derived from it) |
 | `TT_GITHUB_WEBHOOK_SECRET` | — | App webhook secret (literal or `env:`/`file:` ref) |
-| `ANTHROPIC_API_KEY` + `TT_CODEINTEL_MODEL` | — | both set → LLM enrichment; otherwise static rules only. No model id is hard-coded |
+| `TT_ASSISTANT_API_URL` | `https://api.meta.ai/v1` | the platform's single OpenAI-compatible Chat Completions endpoint (ADR-034; `…/v1` or the full `…/chat/completions` URL). Default: Meta Muse Spark |
+| `TT_ASSISTANT_API_KEY` + `TT_ASSISTANT_MODEL` | — | both set → LLM enrichment; otherwise static rules only. Same values as the api's assistant. No model id is hard-coded |
 | `TT_CODEINTEL_LLM_MAX_ITEMS` | `300` | items sent to the LLM per analysis (most critical first) |
 | `TT_AI_PRICES` | — | AI quota price table `<model>=<in>/<out>,…` (USD per million tokens; exact id, else longest prefix) |
 | `TT_AI_DEFAULT_PRICE` | `3/15` | price of models missing from `TT_AI_PRICES` |
@@ -70,9 +71,10 @@ What is traced:
   `tt.repo.provider`, `tt.analysis.full`, `tt.analysis.result`, item / observed / suggestion / scenario / LLM item counts and
   `tt.analysis.llm_status`. Postgres (pgx, sanitized SQL), ClickHouse (`db.system=clickhouse` client spans, sanitized SQL)
   and LLM calls are children; queries outside a span (scheduler polls) are not traced.
-- **LLM:** the Anthropic client uses the SDK's `llm` transport → GenAI client spans (provider, configured model, input /
-  output / cache tokens, finish reason) for the AI monitoring screen; content capture is off. The model id still comes
-  from `TT_CODEINTEL_MODEL`.
+- **LLM:** the chat completions client uses the SDK's `llm` transport with the `TT_ASSISTANT_API_URL` host registered
+  (`api.meta.ai` → provider `meta`, unknown OpenAI-compatible hosts → `openai`) → GenAI client spans (provider, configured
+  model, input / output / cached tokens, finish reason) for the AI monitoring screen; content capture is off. The model id
+  comes from `TT_ASSISTANT_MODEL`.
 - **GitHub API** (GitHub App installation tokens): client spans (`peer.service=github`). Clones run through the `git` CLI and
   are not traced.
 - **Logs:** the JSON `slog` output is kept and also exported as OTel logs (with `trace_id` / `span_id`).

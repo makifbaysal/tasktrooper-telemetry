@@ -6,14 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"sort"
 	"strings"
+	"sync/atomic"
+	"time"
 
-	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/makifbaysal/tasktrooper-telemetry/sdks/go/llm"
 
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/model"
+	"github.com/tasktrooper/telemetry/services/pkg/llmapi"
 )
 
 // Enricher interprets items (never extracts them). budget (nil: unlimited) gates every request (AI quota, ADR-018).
@@ -31,7 +33,8 @@ type Budget interface {
 	Record(ctx context.Context, model string, u Tokens) float64
 }
 
-// Tokens is the usage of one request (Anthropic semantics: Input excludes cache reads and writes).
+// Tokens is the usage of one request. Input excludes cache reads and writes (aiquota semantics); for the
+// OpenAI-compatible endpoint Input = prompt_tokens − cached_tokens, CacheRead = cached_tokens, CacheWrite = 0.
 type Tokens struct {
 	Input, CacheWrite, CacheRead, Output int64
 }
@@ -52,28 +55,31 @@ type RepoSummary struct {
 	Inventory []string // "kind service key" lines
 }
 
-// LLM calls the Claude Messages API with structured output. Model id comes from TT_CODEINTEL_MODEL (never hard-coded).
+// LLM calls the platform's OpenAI-compatible Chat Completions endpoint (TT_ASSISTANT_API_URL / _API_KEY / _MODEL,
+// ADR-034; Meta Muse Spark by default) and asks for JSON output. The model id comes from config (never hard-coded).
 type LLM struct {
-	client    anthropic.Client
+	client    *llmapi.Client
 	model     string
 	BatchSize int // items per request (default 15)
 	MaxChars  int // handler source cap per item (default 6000 ≈ 1.5k tokens)
 	Log       *slog.Logger
+	// noSchema is set once the endpoint rejected response_format json_schema (HTTP 400); later requests rely on the
+	// schema in the system prompt only.
+	noSchema atomic.Bool
 }
 
-// llmTransportOptions configure the trooper GenAI transport (tests register their fake API host).
-var llmTransportOptions []llm.Option
-
 // NewLLM returns nil when either the API key or the model is empty (LLM step disabled → static rules only).
-// Requests go through the trooper llm transport (ADR-027, contracts §25): GenAI client spans with model, tokens and
-// cost; prompt/completion content is recorded only with TROOPER_LLM_CAPTURE_CONTENT=true (default off).
-func NewLLM(apiKey, model string, opts ...option.RequestOption) *LLM {
-	if apiKey == "" || model == "" {
+// Requests go through the trooper llm transport (ADR-027, contracts §25) with the endpoint host registered under its
+// provider (llmapi.Provider: meta for api.meta.ai, openai for unknown OpenAI-compatible hosts): GenAI client spans with
+// model, tokens and cost; prompt/completion content is recorded only with TROOPER_LLM_CAPTURE_CONTENT=true (default
+// off). Network errors, 429 and 5xx are retried up to 3 times.
+func NewLLM(cfg llmapi.Config) *LLM {
+	if !cfg.Enabled() {
 		return nil
 	}
-	opts = append([]option.RequestOption{option.WithAPIKey(apiKey), option.WithMaxRetries(3),
-		option.WithHTTPClient(llm.HTTPClient(nil, llmTransportOptions...))}, opts...)
-	return &LLM{client: anthropic.NewClient(opts...), model: model, BatchSize: 15, MaxChars: 6000, Log: slog.Default()}
+	hc := llm.HTTPClient(&http.Client{Timeout: 5 * time.Minute}, llm.WithProvider(cfg.Host(), cfg.Provider()))
+	return &LLM{client: &llmapi.Client{Config: cfg, HTTP: hc, Retries: 3}, model: cfg.Model, BatchSize: 15,
+		MaxChars: 6000, Log: slog.Default()}
 }
 
 // Model returns the configured model id.
@@ -133,6 +139,17 @@ var outputSchema = map[string]any{
 	"additionalProperties": false,
 }
 
+// schemaInstruction puts the output schema into the prompt, so JSON output also works on endpoints without
+// response_format json_schema support.
+var schemaInstruction = func() string {
+	b, _ := json.Marshal(outputSchema)
+	return "\n\nReply with exactly one JSON object (no Markdown, no prose) that matches this JSON schema:\n" + string(b)
+}()
+
+// responseFormat asks OpenAI-compatible endpoints for schema-constrained JSON output.
+var responseFormat = map[string]any{"type": "json_schema", "json_schema": map[string]any{
+	"name": "inventory_classification", "strict": true, "schema": outputSchema}}
+
 type llmItem struct {
 	ID                int                      `json:"id"`
 	Criticality       string                   `json:"criticality"`
@@ -187,18 +204,16 @@ const OutputPerItem = 600
 // Enrich fills it.LLM for items in batches; a failed batch is logged and skipped (static rules stay). Before every
 // batch the budget is asked; a denial leaves the remaining items static and reports quota_exceeded.
 func (l *LLM) Enrich(ctx context.Context, repo RepoSummary, items []*model.Item, budget Budget) (Outcome, error) {
-	sum := summaryText(repo)
-	system := []anthropic.TextBlockParam{
-		{Text: systemPrompt},
-		{Text: sum, CacheControl: anthropic.NewCacheControlEphemeralParam()},
-	}
+	// One system message: instructions + schema + the repo summary — a stable prefix for providers that cache
+	// prompt prefixes automatically.
+	system := systemPrompt + schemaInstruction + "\n\n" + summaryText(repo)
 	out := Outcome{Status: model.LLMOK}
 	var firstErr error
 	for start := 0; start < len(items); start += l.BatchSize {
 		batch := items[start:min(start+l.BatchSize, len(items))]
 		payload := l.payload(batch)
 		if budget != nil {
-			chars := len(systemPrompt) + len(sum) + len(payload)
+			chars := len(system) + len(payload)
 			if ok, reason := budget.Reserve(ctx, l.model, int64((chars+3)/4), min(int64(maxTokens), int64(OutputPerItem*len(batch)))); !ok {
 				out.Status, out.Reason, out.Skipped = model.LLMQuotaExceeded, reason, len(items)-start
 				l.Log.Info("llm enrichment stopped by AI quota", "reason", reason, "skipped", out.Skipped)
@@ -241,47 +256,44 @@ func (l *LLM) payload(batch []*model.Item) string {
 }
 
 // batch sends one request. usage is non-nil whenever the API answered (billed), even when the answer is unusable.
-func (l *LLM) batch(ctx context.Context, system []anthropic.TextBlockParam, batch []*model.Item, payload string) (*Tokens, error) {
-	resp, err := l.client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     anthropic.Model(l.model),
-		MaxTokens: maxTokens,
-		System:    system,
-		Messages: []anthropic.MessageParam{
-			anthropic.NewUserMessage(anthropic.NewTextBlock(payload)),
-		},
-		OutputConfig: anthropic.OutputConfigParam{
-			Effort: anthropic.OutputConfigEffortLow,
-			Format: anthropic.JSONOutputFormatParam{Schema: outputSchema},
-		},
-	})
+func (l *LLM) batch(ctx context.Context, system string, batch []*model.Item, payload string) (*Tokens, error) {
+	req := llmapi.Request{MaxTokens: maxTokens, Messages: []llmapi.Message{
+		{Role: "system", Content: system},
+		{Role: "user", Content: payload},
+	}}
+	if !l.noSchema.Load() {
+		req.ResponseFormat = responseFormat
+	}
+	resp, err := l.client.Complete(ctx, req)
+	var se *llmapi.StatusError
+	if err != nil && req.ResponseFormat != nil && errors.As(err, &se) && se.Code == http.StatusBadRequest {
+		// The endpoint does not support json_schema output: rely on the schema in the system prompt from now on.
+		l.noSchema.Store(true)
+		l.Log.Info("llm endpoint rejected response_format json_schema; using prompt-only JSON", "err", err)
+		req.ResponseFormat = nil
+		resp, err = l.client.Complete(ctx, req)
+	}
+	var usage *Tokens
+	if err == nil || errors.Is(err, llmapi.ErrEmpty) { // answered → billed
+		u := resp.Usage
+		usage = &Tokens{Input: u.Prompt - u.Cached, CacheRead: u.Cached, Output: u.Completion}
+	}
 	if err != nil {
-		var apiErr *anthropic.Error
-		if errors.As(err, &apiErr) {
-			return nil, fmt.Errorf("anthropic %d: %w", apiErr.StatusCode, err)
-		}
-		return nil, err
+		return usage, fmt.Errorf("llm: %w", err)
 	}
-	usage := &Tokens{Input: resp.Usage.InputTokens, CacheWrite: resp.Usage.CacheCreationInputTokens,
-		CacheRead: resp.Usage.CacheReadInputTokens, Output: resp.Usage.OutputTokens}
-	if resp.StopReason == anthropic.StopReasonRefusal {
-		return usage, errors.New("anthropic: request refused")
-	}
-	if resp.StopReason == anthropic.StopReasonMaxTokens {
-		return usage, errors.New("anthropic: output truncated (max_tokens)")
-	}
-	var text string
-	for _, b := range resp.Content {
-		if tb, ok := b.AsAny().(anthropic.TextBlock); ok {
-			text += tb.Text
-		}
+	switch resp.FinishReason {
+	case "content_filter":
+		return usage, errors.New("llm: request refused (content_filter)")
+	case "length":
+		return usage, errors.New("llm: output truncated (max_tokens)")
 	}
 	var out struct {
 		Items []llmItem `json:"items"`
 	}
-	if err := json.Unmarshal([]byte(text), &out); err != nil {
-		return usage, fmt.Errorf("anthropic: decode structured output: %w", err)
+	if err := json.Unmarshal([]byte(jsonObject(resp.Content)), &out); err != nil {
+		return usage, fmt.Errorf("llm: decode JSON output: %w", err)
 	}
-	l.Log.Debug("llm batch", "items", len(batch), "cache_read", resp.Usage.CacheReadInputTokens, "cache_write", resp.Usage.CacheCreationInputTokens)
+	l.Log.Debug("llm batch", "items", len(batch), "prompt_tokens", resp.Usage.Prompt, "cached_tokens", resp.Usage.Cached)
 	for _, r := range out.Items {
 		if r.ID < 0 || r.ID >= len(batch) {
 			continue
@@ -295,6 +307,17 @@ func (l *LLM) batch(ctx context.Context, system []anthropic.TextBlockParam, batc
 		Apply(batch[r.ID], res)
 	}
 	return usage, nil
+}
+
+// jsonObject returns the JSON object in a model answer: Markdown code fences and text around the outermost braces
+// are dropped (models without json_schema support sometimes add them).
+func jsonObject(s string) string {
+	s = strings.TrimSpace(s)
+	i, j := strings.IndexByte(s, '{'), strings.LastIndexByte(s, '}')
+	if i < 0 || j < i {
+		return s
+	}
+	return s[i : j+1]
 }
 
 // Apply attaches an LLM result (fresh or cached by code hash) and lets it decide criticality.

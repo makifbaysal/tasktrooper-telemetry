@@ -56,7 +56,7 @@ type Analyzer struct {
 	Store       Store
 	Fetcher     Fetcher
 	Traffic     observe.Source  // nil: ClickHouse not configured
-	LLM         enrich.Enricher // nil: ANTHROPIC_API_KEY / TT_CODEINTEL_MODEL not set
+	LLM         enrich.Enricher // nil: TT_ASSISTANT_API_KEY / TT_ASSISTANT_MODEL not set
 	Quota       Budgets         // nil: no AI quota (unlimited)
 	MaxLLMItems int             // per analysis (default 300)
 	Log         *slog.Logger
