@@ -103,5 +103,20 @@ Without it the Slack endpoints answer 501 and the dashboard says Slack isn't set
    secrets **`DEMO_SLACK_CLIENT_ID`**, **`DEMO_SLACK_CLIENT_SECRET`**, **`DEMO_SLACK_SIGNING_SECRET`**, then run
    deploy-demo. Kept out of `DEMO_ENV` on purpose: regenerating that would rotate `TT_SECRETS_KEY`.
 
+## GitHub App (ADR-017)
+"Connect GitHub" (Settings, Code insights) needs one GitHub App; without it the install endpoints answer 501.
+1. https://github.com/settings/apps → New GitHub App (or reuse one that no other product depends on).
+2. **Setup URL** `https://telemetry-api.tasktrooper.ai/api/v1/integrations/github/callback`, "Redirect on update" on.
+3. **Permissions & events** → Repository: Contents read-only, Metadata read-only; event **Push**. Webhook can stay inactive:
+   codeintel (analysis, push webhooks) is not part of the demo, so repositories are connected but not analyzed.
+4. `demo` environment: variables **`DEMO_GITHUB_APP_ID`** (App ID) and **`DEMO_GITHUB_APP_SLUG`** (`github.com/apps/<slug>`),
+   secret **`DEMO_GITHUB_APP_PRIVATE_KEY`** (General → Private keys → Generate a private key; the whole `.pem`):
+   `gh secret set DEMO_GITHUB_APP_PRIVATE_KEY --env demo < task-trooper.*.private-key.pem`, then run deploy-demo.
+
+## Assistant model (ADR-033)
+OpenAI-compatible Chat Completions (Meta Muse Spark by default). `demo` environment: variable **`DEMO_ASSISTANT_MODEL`**
+(e.g. a Muse Spark model id), optional variable **`DEMO_ASSISTANT_API_URL`** (default `https://api.meta.ai/v1`), secret
+**`DEMO_ASSISTANT_API_KEY`**. Without key and model the assistant runs the offline mock.
+
 ## First sign-in
 Open `https://telemetry.tasktrooper.ai`, sign in with Google, onboarding creates the org, project and ingest key (DSN).
