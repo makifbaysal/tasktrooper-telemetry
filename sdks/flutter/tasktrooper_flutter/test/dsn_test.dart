@@ -3,10 +3,10 @@ import 'package:tasktrooper_flutter/tasktrooper_flutter.dart';
 
 void main() {
   test('parses https DSN', () {
-    final d = Dsn.parse('https://abc123@ingest.trooper.dev/42');
+    final d = Dsn.parse('https://abc123@telemetry-ingest.tasktrooper.ai/42');
     expect(d.key, 'abc123');
     expect(d.projectId, '42');
-    expect(d.endpoint.toString(), 'https://ingest.trooper.dev/v1/rum');
+    expect(d.endpoint.toString(), 'https://telemetry-ingest.tasktrooper.ai/v1/rum');
   });
 
   test('keeps port and path prefix', () {

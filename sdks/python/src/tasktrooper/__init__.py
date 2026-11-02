@@ -4,7 +4,7 @@
 
     import tasktrooper
 
-    tasktrooper.init(dsn="https://<ingest-key>@ingest.trooper.dev/<project>", service="orders-api")
+    tasktrooper.init(dsn="https://<ingest-key>@telemetry-ingest.tasktrooper.ai/<project>", service="orders-api")
 
 See ``sdks/python/README.md``.
 """

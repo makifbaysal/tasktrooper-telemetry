@@ -31,7 +31,7 @@ dependencies { implementation("ai.tasktrooper:trooper-spring-boot-starter:0.1.0"
 curl -fsSLo trooper-javaagent.jar \
   https://repo1.maven.org/maven2/ai/tasktrooper/trooper-javaagent/0.1.0/trooper-javaagent-0.1.0.jar
 # or build it: ./gradlew :trooper-javaagent:trooperJavaagentJar  → trooper-javaagent/build/libs/trooper-javaagent.jar
-export TROOPER_DSN=https://<ingest-key>@ingest.trooper.dev/<project>
+export TROOPER_DSN=https://<ingest-key>@telemetry-ingest.tasktrooper.ai/<project>
 export TROOPER_SERVICE=orders-api TROOPER_ENV=production TROOPER_VERSION=$GIT_SHA
 java -javaagent:trooper-javaagent.jar -jar app.jar
 ```

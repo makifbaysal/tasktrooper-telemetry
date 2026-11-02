@@ -19,15 +19,15 @@ class DsnAndConfigTest {
 
     @Test
     void parsesHttpsDsnWithoutPort() {
-        Dsn dsn = Dsn.parse("https://abc123@ingest.trooper.dev/42/");
-        assertThat(dsn.endpoint()).isEqualTo("https://ingest.trooper.dev");
+        Dsn dsn = Dsn.parse("https://abc123@telemetry-ingest.tasktrooper.ai/42/");
+        assertThat(dsn.endpoint()).isEqualTo("https://telemetry-ingest.tasktrooper.ai");
         assertThat(dsn.key()).isEqualTo("abc123");
         assertThat(dsn.projectId()).isEqualTo("42");
     }
 
     @Test
     void rejectsMalformedDsn() {
-        assertThatThrownBy(() -> Dsn.parse("https://ingest.trooper.dev/1")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> Dsn.parse("https://telemetry-ingest.tasktrooper.ai/1")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> Dsn.parse("ftp://k@host/1")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> Dsn.parse("")).isInstanceOf(IllegalArgumentException.class);
     }

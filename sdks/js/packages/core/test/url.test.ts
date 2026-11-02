@@ -33,10 +33,10 @@ describe('parseDsn', () => {
     });
   });
   it('keeps a path prefix', () => {
-    expect(parseDsn('https://k@ingest.trooper.dev/eu/42').rumEndpoint).toBe('https://ingest.trooper.dev/eu/v1/rum');
+    expect(parseDsn('https://k@telemetry-ingest.tasktrooper.ai/eu/42').rumEndpoint).toBe('https://telemetry-ingest.tasktrooper.ai/eu/v1/rum');
   });
   it('rejects invalid DSNs', () => {
-    expect(() => parseDsn('https://ingest.trooper.dev/1')).toThrow();
+    expect(() => parseDsn('https://telemetry-ingest.tasktrooper.ai/1')).toThrow();
     expect(() => parseDsn('')).toThrow();
   });
 });

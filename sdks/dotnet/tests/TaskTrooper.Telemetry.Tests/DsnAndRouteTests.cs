@@ -3,7 +3,7 @@ namespace TaskTrooper.Telemetry.Tests;
 public class DsnAndRouteTests
 {
     [Theory]
-    [InlineData("https://abc123@ingest.trooper.dev/42", "https://ingest.trooper.dev/", "abc123", "42")]
+    [InlineData("https://abc123@telemetry-ingest.tasktrooper.ai/42", "https://telemetry-ingest.tasktrooper.ai/", "abc123", "42")]
     [InlineData("http://tt_dev_ingest_key@localhost:4318/1", "http://localhost:4318/", "tt_dev_ingest_key", "1")]
     [InlineData("https://k@example.com:8443/otel/ingest/7", "https://example.com:8443/otel/ingest/", "k", "7")]
     [InlineData("  https://k%40x@example.com/9  ", "https://example.com/", "k@x", "9")]
@@ -19,9 +19,9 @@ public class DsnAndRouteTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData("not a url")]
-    [InlineData("https://ingest.trooper.dev/1")] // no key
-    [InlineData("https://key@ingest.trooper.dev")] // no project
-    [InlineData("ftp://key@ingest.trooper.dev/1")]
+    [InlineData("https://telemetry-ingest.tasktrooper.ai/1")] // no key
+    [InlineData("https://key@telemetry-ingest.tasktrooper.ai")] // no project
+    [InlineData("ftp://key@telemetry-ingest.tasktrooper.ai/1")]
     public void Rejects_invalid_dsn(string? dsn)
     {
         Assert.False(TrooperDsn.TryParse(dsn, out _));

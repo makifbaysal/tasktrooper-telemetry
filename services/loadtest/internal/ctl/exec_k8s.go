@@ -93,10 +93,10 @@ func JobName(run int64, region string) string {
 // RenderJob renders the Job manifest of a region runner.
 func RenderJob(cfg K8sConfig, j Job) map[string]any {
 	labels := map[string]any{
-		"app.kubernetes.io/name":    "loadtest-runner",
-		"app.kubernetes.io/part-of": "tasktrooper",
-		"trooper.dev/loadtest-run":  strconv.FormatInt(j.RunID, 10),
-		"trooper.dev/region":        strings.Trim(nonDNS.ReplaceAllString(strings.ToLower(j.Region), "-"), "-"),
+		"app.kubernetes.io/name":      "loadtest-runner",
+		"app.kubernetes.io/part-of":   "tasktrooper",
+		"tasktrooper.ai/loadtest-run": strconv.FormatInt(j.RunID, 10),
+		"tasktrooper.ai/region":       strings.Trim(nonDNS.ReplaceAllString(strings.ToLower(j.Region), "-"), "-"),
 	}
 	envMap := map[string]string{}
 	for k, v := range cfg.Env {

@@ -25,7 +25,7 @@ import 'package:tasktrooper_flutter/tasktrooper_flutter.dart';
 void main() {
   TaskTrooper.init(
     const TrooperConfig(
-      dsn: 'https://<ingest-key>@ingest.trooper.dev/<project_id>',
+      dsn: 'https://<ingest-key>@telemetry-ingest.tasktrooper.ai/<project_id>',
       app: 'courier-app',
       version: '1.4.2+87',
       environment: 'production',

@@ -30,7 +30,7 @@ dotnet add package TaskTrooper.Telemetry.AspNetCore     # + the integrations you
 
 ```csharp
 builder.Services
-    .AddTaskTrooper(o => { o.Dsn = "https://<key>@ingest.trooper.dev/<project>"; o.ServiceName = "orders-api"; })
+    .AddTaskTrooper(o => { o.Dsn = "https://<key>@telemetry-ingest.tasktrooper.ai/<project>"; o.ServiceName = "orders-api"; })
     .AddAspNetCore();
 ```
 
@@ -206,7 +206,7 @@ Order (later wins): environment variables → `TaskTrooper` config section (`app
 | `ResourceAttributes`, `Sources`, `Meters` | — | — | Extra resource attributes / ActivitySources / Meters |
 
 ```json
-{ "TaskTrooper": { "Dsn": "https://key@ingest.trooper.dev/1", "ServiceName": "orders-api", "SampleRate": 0.2 } }
+{ "TaskTrooper": { "Dsn": "https://key@telemetry-ingest.tasktrooper.ai/1", "ServiceName": "orders-api", "SampleRate": 0.2 } }
 ```
 
 ## Wire & conventions

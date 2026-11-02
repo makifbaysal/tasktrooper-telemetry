@@ -172,7 +172,8 @@ export async function createOrg(name: string, projectName: string): Promise<Crea
 
 export const KEY_PLACEHOLDER = '<ingest-key>';
 const DSN_KEY = (projectId: string) => `trooper-dsn:${projectId}`;
-const INGEST_URL: string = (import.meta.env.VITE_INGEST_URL as string | undefined) ?? 'http://localhost:4318';
+/** Public ingest base URL (`VITE_INGEST_URL`, set by the demo deploy to the public ingest host). */
+export const INGEST_URL: string = (import.meta.env.VITE_INGEST_URL as string | undefined) ?? 'http://localhost:4318';
 function rememberDsn(projectId: string, dsnWithoutKey: string) {
   try { localStorage.setItem(DSN_KEY(projectId), dsnWithoutKey); } catch { /* storage unavailable */ }
 }

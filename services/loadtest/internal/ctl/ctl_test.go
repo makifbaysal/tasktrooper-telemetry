@@ -243,7 +243,7 @@ func TestRenderJob(t *testing.T) {
 		t.Fatal(err)
 	}
 	if job.APIVersion != "batch/v1" || job.Kind != "Job" || job.Metadata.Name != "tt-loadtest-42-eu-central" || job.Metadata.Namespace != "tt" ||
-		job.Metadata.Labels["trooper.dev/loadtest-run"] != "42" || job.Spec.BackoffLimit != 0 || job.Spec.ActiveDeadlineSeconds != 900 {
+		job.Metadata.Labels["tasktrooper.ai/loadtest-run"] != "42" || job.Spec.BackoffLimit != 0 || job.Spec.ActiveDeadlineSeconds != 900 {
 		t.Fatalf("job meta: %s", b)
 	}
 	ps := job.Spec.Template.Spec

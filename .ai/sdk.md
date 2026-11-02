@@ -53,7 +53,7 @@ version (ADR-029): Go services `v0.1.0` from proxy.golang.org, `apps/web` `^0.1.
 import { init } from '@tasktrooper/node';
 
 init({
-  dsn: process.env.TROOPER_DSN,           // https://<ingest-key>@ingest.trooper.dev/<project>
+  dsn: process.env.TROOPER_DSN,           // https://<ingest-key>@telemetry-ingest.tasktrooper.ai/<project>
   service: 'orders-api',
   environment: 'production',
   version: process.env.GIT_SHA,           // deploy marker
@@ -213,13 +213,13 @@ reach the handler.
 AWS_LAMBDA_EXEC_WRAPPER=/opt/otel-instrument          # node/java: /opt/otel-handler
 OTEL_SERVICE_NAME=orders-api
 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
-OTEL_EXPORTER_OTLP_ENDPOINT=https://ingest.trooper.dev
+OTEL_EXPORTER_OTLP_ENDPOINT=https://telemetry-ingest.tasktrooper.ai
 OTEL_EXPORTER_OTLP_HEADERS=x-trooper-key=<ingest key>
 OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=production
 ```
 
 If the collector layer (ADOT) is used, the SDK sends to `localhost:4318`; in the collector config (`OPENTELEMETRY_COLLECTOR_CONFIG_URI`)
-the `otlphttp` exporter is defined with `endpoint: https://ingest.trooper.dev`, `headers: {x-trooper-key: <ingest key>}`.
+the `otlphttp` exporter is defined with `endpoint: https://telemetry-ingest.tasktrooper.ai`, `headers: {x-trooper-key: <ingest key>}`.
 The OTel semconv Lambda instrumentation writes `faas.coldstart` / `faas.trigger` / `faas.invocation_id` itself.
 
 **Azure Functions — OpenTelemetry mode:** `host.json`:
@@ -231,7 +231,7 @@ The OTel semconv Lambda instrumentation writes `faas.coldstart` / `faas.trigger`
 App settings (Function App → Environment variables):
 
 ```bash
-OTEL_EXPORTER_OTLP_ENDPOINT=https://ingest.trooper.dev
+OTEL_EXPORTER_OTLP_ENDPOINT=https://telemetry-ingest.tasktrooper.ai
 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 OTEL_EXPORTER_OTLP_HEADERS=x-trooper-key=<ingest key>
 OTEL_SERVICE_NAME=billing-func                         # = Function App name or tag tasktrooper.service

@@ -14,9 +14,10 @@ import {
   type DiscoveredResource, type Integration, type IntegrationDraft, type IntegrationProvider, type IntegrationStatus, type IntegrationTestResult,
 } from '@/data';
 import { ago, dateTime } from '@/lib/format';
+import { INGEST_URL as INGEST_BASE } from '@/data/auth';
 
 /** Public ingest host the Vercel drain posts to (contracts §2). */
-const INGEST_URL = 'https://ingest.trooper.dev';
+const INGEST_URL = INGEST_BASE.replace(/\/$/, '');
 /** TaskTrooper's AWS account that assumes the customer role. */
 const TT_AWS_ACCOUNT = '811122233344';
 
