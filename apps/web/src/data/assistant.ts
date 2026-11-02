@@ -9,7 +9,7 @@ export const REF_KINDS: RefKind[] = ['service', 'endpoint', 'incident', 'kpi', '
 
 export interface AssistantRef { kind: RefKind; id: string; label: string; service?: string }
 export interface AssistantThread { id: string; title: string; createdAt: string; updatedAt: string }
-export interface AssistantStatus { provider: 'claude' | 'mock'; model: string; writeTools: boolean }
+export interface AssistantStatus { provider: 'openai' | 'mock'; model: string; writeTools: boolean }
 
 export type ChartUnit = 'ms' | 'percent' | 'count' | 'rpm' | 'bytes';
 export type Widget =

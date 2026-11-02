@@ -156,7 +156,7 @@ func (f *assistantFake) AssistantRecord(_ context.Context, u aiquota.Usage) erro
 // writeScript asks for a monitor (approval), then answers.
 type writeScript struct{ n int }
 
-func (w *writeScript) Name() string  { return "claude" }
+func (w *writeScript) Name() string  { return "openai" }
 func (w *writeScript) Model() string { return "test-model" }
 func (w *writeScript) Step(_ context.Context, req assistant.StepRequest, onText func(string)) (assistant.StepResult, error) {
 	w.n++

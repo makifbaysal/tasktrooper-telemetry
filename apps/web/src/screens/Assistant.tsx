@@ -195,7 +195,7 @@ export function Assistant() {
           </div>
           {status && (status.provider === 'mock'
             ? <Badge tone="warning" icon={<AlertTriangle size={12} aria-hidden />}>Offline mock</Badge>
-            : <Badge tone="accent" icon={<Sparkles size={12} aria-hidden />}>{status.model || 'Claude'}</Badge>)}
+            : <Badge tone="accent" icon={<Sparkles size={12} aria-hidden />}>{status.model || 'AI'}</Badge>)}
         </header>
 
         <div className="assistant__scroll" ref={scroller}>

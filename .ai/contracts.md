@@ -265,7 +265,7 @@ functions. Auth: `Authorization: Bearer <api key>` (dev) — OIDC session later.
 
 `/assistant/*` (ADR-033, `.ai/assistant.md`): session-only chat API; `POST …/messages` and `POST …/approvals/{toolUseId}` answer with
 `text/event-stream` (events `message`, `text`, `tool`, `widget`, `approval`, `error`, `done`). Viewers may call it (writes made by its
-tools are still checked per request). Env: `ANTHROPIC_API_KEY`, `TT_ASSISTANT_MODEL`, `TT_ASSISTANT_MAX_TOKENS`, `TT_ASSISTANT_MAX_STEPS`,
+tools are still checked per request). Env: `TT_ASSISTANT_API_URL` (OpenAI-compatible, default `https://api.meta.ai/v1`), `TT_ASSISTANT_API_KEY`, `TT_ASSISTANT_MODEL`, `TT_ASSISTANT_MAX_TOKENS`, `TT_ASSISTANT_MAX_STEPS`,
 `TT_ASSISTANT_ALLOW_WRITE`.
 
 ## 9. RUM

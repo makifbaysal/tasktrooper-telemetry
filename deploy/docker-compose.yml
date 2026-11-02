@@ -138,8 +138,9 @@ services:
       TT_OIDC_ISSUER: ${TT_OIDC_ISSUER:-}
       TT_OIDC_CLIENT_ID: ${TT_OIDC_CLIENT_ID:-}
       TT_OIDC_CLIENT_SECRET: ${TT_OIDC_CLIENT_SECRET:-}
-      # Dashboard assistant (ADR-033): Claude when both are set, else the offline mock
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Dashboard assistant (ADR-033): OpenAI-compatible chat completions (Meta Muse Spark) when key + model are set, else the offline mock
+      TT_ASSISTANT_API_URL: ${TT_ASSISTANT_API_URL:-https://api.meta.ai/v1}
+      TT_ASSISTANT_API_KEY: ${TT_ASSISTANT_API_KEY:-}
       TT_ASSISTANT_MODEL: ${TT_ASSISTANT_MODEL:-}
     depends_on: [clickhouse, postgres]
 

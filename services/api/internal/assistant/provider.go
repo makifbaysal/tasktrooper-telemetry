@@ -1,18 +1,12 @@
 // Package assistant is the dashboard's AI chat agent (ADR-033, .ai/assistant.md): a tool loop over the MCP tool
-// surface (services/mcp/toolset) with Claude, or an offline mock that spends nothing.
+// surface (services/mcp/toolset) with an OpenAI-compatible chat completions model, or an offline mock that spends nothing.
 package assistant
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"net/http"
 	"strings"
-
-	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/option"
 
 	"github.com/tasktrooper/telemetry/services/api/internal/model"
 )
@@ -45,167 +39,9 @@ type StepResult struct {
 
 // Provider runs one model request, streaming text through onText.
 type Provider interface {
-	Name() string  // claude | mock
+	Name() string  // openai | mock
 	Model() string // model id ("" for mock)
 	Step(ctx context.Context, req StepRequest, onText func(string)) (StepResult, error)
-}
-
-// ---------------------------------------------------------------- Claude
-
-type claude struct {
-	client anthropic.Client
-	model  string
-}
-
-// NewClaude returns the Claude provider, or nil when the key or the model is empty (model ids are never
-// hard-coded: TT_ASSISTANT_MODEL). hc carries the GenAI client spans (ADR-027); nil = default client.
-func NewClaude(apiKey, modelID string, hc *http.Client, opts ...option.RequestOption) Provider {
-	if strings.TrimSpace(apiKey) == "" || strings.TrimSpace(modelID) == "" {
-		return nil
-	}
-	o := []option.RequestOption{option.WithAPIKey(apiKey), option.WithMaxRetries(2)}
-	if hc != nil {
-		o = append(o, option.WithHTTPClient(hc))
-	}
-	return &claude{client: anthropic.NewClient(append(o, opts...)...), model: modelID}
-}
-
-func (c *claude) Name() string  { return "claude" }
-func (c *claude) Model() string { return c.model }
-
-func (c *claude) Step(ctx context.Context, req StepRequest, onText func(string)) (StepResult, error) {
-	msgs, err := toParams(ctx, req.Messages, req.Image)
-	if err != nil {
-		return StepResult{}, err
-	}
-	tools := make([]anthropic.ToolUnionParam, 0, len(req.Tools))
-	for i, t := range req.Tools {
-		schema := anthropic.ToolInputSchemaParam{ExtraFields: map[string]any{}}
-		for k, v := range t.Schema {
-			switch k {
-			case "type":
-			case "properties":
-				schema.Properties = v
-			case "required":
-				if rs, ok := v.([]any); ok {
-					for _, r := range rs {
-						if s, ok := r.(string); ok {
-							schema.Required = append(schema.Required, s)
-						}
-					}
-				}
-			default:
-				schema.ExtraFields[k] = v
-			}
-		}
-		tp := anthropic.ToolParam{Name: t.Name, InputSchema: schema, Description: anthropic.String(t.Description)}
-		if i == len(req.Tools)-1 { // cache the system prompt + tool list prefix
-			tp.CacheControl = anthropic.NewCacheControlEphemeralParam()
-		}
-		tools = append(tools, anthropic.ToolUnionParam{OfTool: &tp})
-	}
-	params := anthropic.MessageNewParams{
-		Model:     anthropic.Model(c.model),
-		MaxTokens: req.MaxTokens,
-		System:    []anthropic.TextBlockParam{{Text: req.System}},
-		Messages:  msgs,
-		Tools:     tools,
-	}
-	stream := c.client.Messages.NewStreaming(ctx, params)
-	defer stream.Close()
-	var acc anthropic.Message
-	for stream.Next() {
-		ev := stream.Current()
-		if err := acc.Accumulate(ev); err != nil {
-			return StepResult{}, err
-		}
-		if ev.Type == "content_block_delta" {
-			if d := ev.AsContentBlockDelta().Delta; d.Type == "text_delta" && d.Text != "" {
-				onText(d.Text)
-			}
-		}
-	}
-	if err := stream.Err(); err != nil {
-		return StepResult{}, providerError(err)
-	}
-	out := StepResult{StopReason: string(acc.StopReason), Usage: model.AssistantUsage{
-		InputTokens:  acc.Usage.InputTokens + acc.Usage.CacheCreationInputTokens + acc.Usage.CacheReadInputTokens,
-		OutputTokens: acc.Usage.OutputTokens,
-	}}
-	for _, b := range acc.Content {
-		switch b.Type {
-		case "text":
-			if b.Text != "" {
-				out.Blocks = append(out.Blocks, model.TBlock{Type: "text", Text: b.Text})
-			}
-		case "tool_use":
-			tu := b.AsToolUse()
-			in := tu.Input
-			if len(in) == 0 {
-				in = json.RawMessage(`{}`)
-			}
-			out.Blocks = append(out.Blocks, model.TBlock{Type: "tool_use", ID: tu.ID, Name: tu.Name, Input: in})
-		}
-	}
-	return out, nil
-}
-
-// providerError keeps upstream bodies (which may echo the prompt) out of messages shown to users.
-func providerError(err error) error {
-	var ae *anthropic.Error
-	if errors.As(err, &ae) {
-		return fmt.Errorf("model API returned HTTP %d", ae.StatusCode)
-	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return err
-	}
-	return errors.New("model API unreachable")
-}
-
-func toParams(ctx context.Context, msgs []model.TMsg, img ImageLoader) ([]anthropic.MessageParam, error) {
-	out := make([]anthropic.MessageParam, 0, len(msgs))
-	for _, m := range msgs {
-		var blocks []anthropic.ContentBlockParamUnion
-		for _, b := range m.Blocks {
-			switch b.Type {
-			case "text":
-				if b.Text != "" {
-					blocks = append(blocks, anthropic.NewTextBlock(b.Text))
-				}
-			case "image":
-				if img == nil {
-					continue
-				}
-				mt, data, err := img(ctx, b.AttachmentID)
-				if err != nil {
-					blocks = append(blocks, anthropic.NewTextBlock("[image "+b.AttachmentID+" is no longer available]"))
-					continue
-				}
-				blocks = append(blocks, anthropic.NewImageBlockBase64(mt, base64.StdEncoding.EncodeToString(data)))
-			case "tool_use":
-				var in any = map[string]any{}
-				if len(b.Input) > 0 {
-					_ = json.Unmarshal(b.Input, &in)
-				}
-				blocks = append(blocks, anthropic.NewToolUseBlock(b.ID, in, b.Name))
-			case "tool_result":
-				content := b.Content
-				if content == "" {
-					content = "(empty)"
-				}
-				blocks = append(blocks, anthropic.NewToolResultBlock(b.ToolUseID, content, b.IsError))
-			}
-		}
-		if len(blocks) == 0 {
-			blocks = append(blocks, anthropic.NewTextBlock("(empty)"))
-		}
-		if m.Role == "assistant" {
-			out = append(out, anthropic.NewAssistantMessage(blocks...))
-		} else {
-			out = append(out, anthropic.NewUserMessage(blocks...))
-		}
-	}
-	return out, nil
 }
 
 // ---------------------------------------------------------------- offline mock
@@ -213,7 +49,7 @@ func toParams(ctx context.Context, msgs []model.TMsg, img ImageLoader) ([]anthro
 type mock struct{}
 
 // NewMock returns the offline provider: no network, no cost. It calls one read tool for the newest user message
-// (the mentioned item when there is one), renders a widget and explains how to enable Claude.
+// (the mentioned item when there is one), renders a widget and explains how to enable a model.
 func NewMock() Provider { return mock{} }
 
 func (mock) Name() string  { return "mock" }
@@ -265,7 +101,7 @@ func (mock) Step(_ context.Context, req StepRequest, onText func(string)) (StepR
 		return say("\n\nThe tool returned an error: " + truncate(r.Content, 300)), nil
 	}
 	return say("\n\nThe tool answered with " + fmt.Sprint(len(r.Content)) + " bytes of data. " +
-		"This is the offline mock: set `ANTHROPIC_API_KEY` and `TT_ASSISTANT_MODEL` on the api for real answers."), nil
+		"This is the offline mock: set `TT_ASSISTANT_API_KEY` and `TT_ASSISTANT_MODEL` on the api for real answers."), nil
 }
 
 type mockCall struct {

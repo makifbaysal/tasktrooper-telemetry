@@ -2963,7 +2963,7 @@ paths:
     get:
       tags: [Assistant]
       operationId: getAssistantStatus
-      summary: Assistant provider (claude or offline mock), model and whether write tools are on (ADR-033)
+      summary: Assistant provider (OpenAI-compatible model or offline mock), model and whether write tools are on (ADR-033)
       responses:
         '200':
           description: Status
@@ -2972,7 +2972,7 @@ paths:
               schema:
                 type: object
                 properties:
-                  provider: { type: string, enum: [claude, mock] }
+                  provider: { type: string, enum: [openai, mock] }
                   model: { type: string }
                   writeTools: { type: boolean }
         '403': { description: Not a user session (api keys use the MCP server) }
