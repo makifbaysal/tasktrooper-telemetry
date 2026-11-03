@@ -109,6 +109,19 @@ func TestDescribeCondition(t *testing.T) {
 	if got := DescribeCondition("latency", "", model.MonitorCondition{Op: ">", Threshold: 800, Window: float64(10), ForMin: 5}); got != "p95 over 10m > 800 ms for 5m" {
 		t.Error(got)
 	}
+	// error_rate monitors have no query.metric: the threshold is still a fraction shown as a percentage
+	for _, tc := range []struct {
+		c    model.MonitorCondition
+		want string
+	}{
+		{model.MonitorCondition{Op: ">", Threshold: 0.02, Window: "5m", ForMin: 5}, "error rate over 5m > 2% for 5m"},
+		{model.MonitorCondition{Op: ">", Threshold: 0.05, Window: "15m", ForMin: 5}, "error rate over 15m > 5% for 5m"},
+		{model.MonitorCondition{Op: ">", Threshold: 0.2, Window: "1h"}, "error rate over 1h > 20%"},
+	} {
+		if got := DescribeCondition("error_rate", "", tc.c); got != tc.want {
+			t.Errorf("got %q, want %q", got, tc.want)
+		}
+	}
 	for _, tc := range []struct {
 		metric string
 		c      model.MonitorCondition

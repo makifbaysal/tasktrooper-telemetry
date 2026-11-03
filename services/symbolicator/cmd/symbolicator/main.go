@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	"github.com/redis/go-redis/v9/maintnotifications"
 
 	"github.com/tasktrooper/telemetry/services/pkg/config"
 	"github.com/tasktrooper/telemetry/services/pkg/logx"
@@ -81,6 +82,7 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("redis url: %w", err)
 		}
+		opt.MaintNotificationsConfig = &maintnotifications.Config{Mode: maintnotifications.ModeDisabled} // Redis < 8 rejects CLIENT MAINT_NOTIFICATIONS
 		rc := redis.NewClient(opt)
 		defer rc.Close()
 		if err := selftel.Redis(rc); err != nil {

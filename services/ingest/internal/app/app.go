@@ -19,6 +19,7 @@ import (
 	trooperredis "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/goredis"
 	trooperpgx "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx"
 	"github.com/redis/go-redis/v9"
+	"github.com/redis/go-redis/v9/maintnotifications"
 
 	"github.com/tasktrooper/telemetry/services/ingest/internal/auth"
 	"github.com/tasktrooper/telemetry/services/ingest/internal/blob"
@@ -98,6 +99,7 @@ func RunGateway(ctx context.Context, cfg GatewayConfig, log *slog.Logger, ready 
 		log.Warn("invalid TT_REDIS_URL, rate limiting in-memory only", "err", err)
 	} else {
 		opt.DialTimeout, opt.ReadTimeout, opt.WriteTimeout = 200*time.Millisecond, 100*time.Millisecond, 100*time.Millisecond
+		opt.MaintNotificationsConfig = &maintnotifications.Config{Mode: maintnotifications.ModeDisabled} // Redis < 8 rejects CLIENT MAINT_NOTIFICATIONS
 		rdb = redis.NewClient(opt)
 		if tel != nil {
 			if err := trooperredis.Instrument(rdb, trooperredis.WithoutMetrics()); err != nil {
