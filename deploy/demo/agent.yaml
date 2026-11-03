@@ -18,6 +18,18 @@ databases:
     node: tasktrooper-postgres-1
     slowQueryMs: 500
 
+  - id: tt-clickhouse
+    name: telemetry
+    engine: clickhouse
+    host: clickhouse
+    port: 9000
+    user: trooper
+    database: telemetry
+    collector: agent
+    credentialsRef: env:TT_SELF_CH_PASSWORD
+    node: tasktrooper-clickhouse-1
+    slowQueryMs: 500
+
   - id: tt-redis
     name: tt-redis
     engine: redis

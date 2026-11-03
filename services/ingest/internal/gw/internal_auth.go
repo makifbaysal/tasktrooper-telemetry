@@ -32,7 +32,7 @@ func (s *Server) authenticate(ctx context.Context, internalToken, project, origi
 			if errors.Is(err, auth.ErrInvalidKey) {
 				return nil, errInternalInvalid
 			}
-			s.log.Error("internal project lookup failed", "err", err)
+			s.log.ErrorContext(ctx, "internal project lookup failed", "err", err)
 			return nil, &ingestError{status: http.StatusServiceUnavailable, msg: "auth backend unavailable", retryAfter: 5}
 		}
 		return key, nil
@@ -42,7 +42,7 @@ func (s *Server) authenticate(ctx context.Context, internalToken, project, origi
 		if errors.Is(err, auth.ErrInvalidKey) {
 			return nil, errUnauthorized
 		}
-		s.log.Error("key lookup failed", "err", err)
+		s.log.ErrorContext(ctx, "key lookup failed", "err", err)
 		return nil, &ingestError{status: http.StatusServiceUnavailable, msg: "auth backend unavailable", retryAfter: 5}
 	}
 	if origin != "" && !key.OriginAllowed(origin) {

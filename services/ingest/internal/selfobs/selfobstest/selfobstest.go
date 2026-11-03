@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/log/global"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -86,4 +87,22 @@ func (e *LogExporter) Bodies() []string {
 		out = append(out, r.Body().AsString())
 	}
 	return out
+}
+
+// Attrs returns the string attributes of the exported record with body (nil when there is none).
+func (e *LogExporter) Attrs(body string) map[string]string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, r := range e.recs {
+		if r.Body().AsString() != body {
+			continue
+		}
+		out := map[string]string{}
+		r.WalkAttributes(func(kv attribute.KeyValue) bool {
+			out[string(kv.Key)] = kv.Value.Emit()
+			return true
+		})
+		return out
+	}
+	return nil
 }

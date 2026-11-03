@@ -39,7 +39,7 @@ func Run(ctx context.Context, in model.ConnTestInput) model.ConnTestResult {
 	switch in.Kind {
 	case "postgres":
 		res, err = postgres(ctx, in)
-	case "mysql", "mongodb":
+	case "mysql", "mongodb", "clickhouse":
 		res, err = dialOnly(ctx, in)
 	case "redis":
 		res, err = redis(ctx, in)
@@ -48,7 +48,7 @@ func Run(ctx context.Context, in model.ConnTestInput) model.ConnTestResult {
 	case "rabbitmq":
 		res, err = rabbit(ctx, in)
 	default:
-		err = fmt.Errorf("unknown kind %q (want postgres|mysql|redis|mongodb|kafka|rabbitmq)", in.Kind)
+		err = fmt.Errorf("unknown kind %q (want postgres|mysql|redis|mongodb|clickhouse|kafka|rabbitmq)", in.Kind)
 	}
 	res.LatencyMs = float64(time.Since(start).Microseconds()) / 1000
 	if err != nil {
@@ -74,7 +74,7 @@ func addr(in model.ConnTestInput, def int) (string, error) {
 	return net.JoinHostPort(host, strconv.Itoa(port)), nil
 }
 
-var defaults = map[string]int{"postgres": 5432, "mysql": 3306, "redis": 6379, "mongodb": 27017}
+var defaults = map[string]int{"postgres": 5432, "mysql": 3306, "redis": 6379, "mongodb": 27017, "clickhouse": 9000}
 
 func dial(ctx context.Context, a string) (net.Conn, error) {
 	var d net.Dialer

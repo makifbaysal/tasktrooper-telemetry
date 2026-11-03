@@ -108,11 +108,11 @@ func (e *Engine) EvalNow(ctx context.Context, m *model.Monitor) {
 func (e *Engine) handOff(ctx context.Context, m *model.Monitor, kind string, value float64, detail map[string]any) {
 	if err := e.st.HandOffStreamHit(ctx, m.ID, kind, value, detail); err != nil {
 		e.reg.Add(streamHitsMetric, 1, "dir", streamHitErrorDir)
-		e.log.Error("stream hand-off failed", "monitor", m.ID, "kind", kind, "err", err)
+		e.log.ErrorContext(ctx, "stream hand-off failed", "monitor", m.ID, "kind", kind, "err", err)
 		return
 	}
 	e.reg.Add(streamHitsMetric, 1, "dir", streamHitSentDir)
-	e.log.Debug("stream hit handed off", "monitor", m.ID, "kind", kind)
+	e.log.DebugContext(ctx, "stream hit handed off", "monitor", m.ID, "kind", kind)
 }
 
 // RunStreamHandoff claims stream hits for the held shards until ctx ends: LISTEN tt_stream_hit wakes it up right
@@ -135,7 +135,7 @@ func (e *Engine) RunStreamHandoff(ctx context.Context, pool *pgxpool.Pool) {
 			}
 			if err != nil {
 				if ctx.Err() == nil {
-					e.log.Warn("stream hand-off: listen failed, polling", "err", err)
+					e.log.WarnContext(ctx, "stream hand-off: listen failed, polling", "err", err)
 				}
 			} else {
 				conn = c
@@ -146,7 +146,7 @@ func (e *Engine) RunStreamHandoff(ctx context.Context, pool *pgxpool.Pool) {
 			_, err := conn.Conn().WaitForNotification(wctx)
 			cancel()
 			if err != nil && ctx.Err() == nil && !errors.Is(err, context.DeadlineExceeded) {
-				e.log.Warn("stream hand-off: listen connection lost", "err", err)
+				e.log.WarnContext(ctx, "stream hand-off: listen connection lost", "err", err)
 				conn.Hijack().Close(context.Background())
 				conn = nil
 			}
@@ -177,7 +177,7 @@ func (e *Engine) ClaimStreamHits(ctx context.Context) int {
 	hits, err := e.st.ClaimStreamHits(ctx, store.Shards{N: e.elector.Shards, Held: held}, streamHitMaxAge, streamHitBatch)
 	if err != nil {
 		if ctx.Err() == nil {
-			e.log.Error("stream hand-off: claim failed", "err", err)
+			e.log.ErrorContext(ctx, "stream hand-off: claim failed", "err", err)
 		}
 		return 0
 	}

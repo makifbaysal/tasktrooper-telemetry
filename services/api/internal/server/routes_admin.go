@@ -46,7 +46,7 @@ func (s *Server) symbolicate(r *http.Request, app, release, platform, stack stri
 	out, frames, ok, err := s.Symbolicator.Symbolicate(r.Context(), r.Header.Get("Authorization"),
 		symbolicate.Request{App: app, Release: release, Platform: platform, Stack: stack})
 	if err != nil {
-		s.Log.Warn("symbolication failed, returning the raw stack", "err", err, "app", app, "release", release)
+		s.Log.WarnContext(r.Context(), "symbolication failed, returning the raw stack", "err", err, "app", app, "release", release)
 	}
 	if frames == nil {
 		frames = []model.Frame{}

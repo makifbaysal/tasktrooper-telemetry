@@ -69,7 +69,36 @@ func Logger(log *slog.Logger) *slog.Logger {
 	if !Enabled() || log == nil {
 		return log
 	}
-	return slog.New(trooperslog.NewHandler(Config("").Service, log.Handler(), trooperslog.WithLevel(minLevel(log))))
+	return slog.New(EntryHandler(trooperslog.NewHandler(Config("").Service, log.Handler(), trooperslog.WithLevel(minLevel(log)))))
+}
+
+// EntryHandler adds trooper.entry.route / trooper.entry.method of the request in ctx (trooper.EntryFromContext,
+// set by the chi middleware) to every record logged with a *Context call, so ingest fills logs.route.
+func EntryHandler(next slog.Handler) slog.Handler { return entryHandler{next} }
+
+type entryHandler struct{ next slog.Handler }
+
+func (h entryHandler) Enabled(ctx context.Context, l slog.Level) bool { return h.next.Enabled(ctx, l) }
+
+func (h entryHandler) Handle(ctx context.Context, r slog.Record) error {
+	if e := trooper.EntryFromContext(ctx); e != nil {
+		if route, method := e.Route(); route != "" {
+			r = r.Clone()
+			r.AddAttrs(slog.String(string(trooper.AttrEntryRoute), route))
+			if method != "" {
+				r.AddAttrs(slog.String(string(trooper.AttrEntryMethod), method))
+			}
+		}
+	}
+	return h.next.Handle(ctx, r)
+}
+
+func (h entryHandler) WithAttrs(as []slog.Attr) slog.Handler {
+	return entryHandler{h.next.WithAttrs(as)}
+}
+
+func (h entryHandler) WithGroup(name string) slog.Handler {
+	return entryHandler{h.next.WithGroup(name)}
 }
 
 func minLevel(log *slog.Logger) slog.Level {
@@ -162,10 +191,14 @@ func LLMTransport() http.RoundTripper {
 // PGTracer is the pgx tracer (sanitized SQL, no parameters).
 func PGTracer() *trooperpgx.Tracer { return trooperpgx.NewTracer() }
 
-// End records err (if any) and ends span.
+// CaptureError records err on the request/job span in ctx as an exception event with type, message and stack
+// (the Errors screen); without a recording span the SDK emits an ERROR log record. No-op for nil.
+func CaptureError(ctx context.Context, err error) { trooper.CaptureError(ctx, err) }
+
+// End records err (if any, with a stack trace) and ends span.
 func End(span trace.Span, err error) {
 	if err != nil {
-		span.RecordError(err)
+		span.RecordError(err, trace.WithStackTrace(true))
 		span.SetStatus(codes.Error, err.Error())
 	}
 	span.End()

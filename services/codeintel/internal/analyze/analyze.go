@@ -121,7 +121,7 @@ func (a *Analyzer) Run(ctx context.Context, repo model.Repo, pending []string) (
 		opt.Only = changed
 		rep.Incremental, rep.Changed = true, len(changed)
 	} else if rep.FullReason != "" {
-		log.Info("full scan", "repo", repo.FullName, "reason", rep.FullReason)
+		log.InfoContext(ctx, "full scan", "repo", repo.FullName, "reason", rep.FullReason)
 	}
 	res, err := extract.Repo(co.Dir, opt)
 	if err != nil {

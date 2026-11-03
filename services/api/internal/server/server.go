@@ -49,6 +49,7 @@ type Store interface {
 	SetErrorStatus(ctx context.Context, fingerprint, status string) error
 	GetError(ctx context.Context, q store.Q, fingerprint string) (*model.ErrorDetail, error)
 	ListDeploys(ctx context.Context, q store.Q, f store.DeployFilter) ([]model.DeployMarker, error)
+	CreateDeploys(ctx context.Context, now time.Time, in model.DeployInput) ([]model.DeployMarker, error)
 	ListEnvironments(ctx context.Context) ([]string, error)
 	// logs
 	SearchLogs(ctx context.Context, q store.Q, f store.LogFilter) (model.LogPage, error)
@@ -266,7 +267,7 @@ func (s *Server) recoverer(next http.Handler) http.Handler {
 				if v == http.ErrAbortHandler {
 					panic(v)
 				}
-				s.Log.Error("panic", "err", v, "path", r.URL.Path, "stack", string(debug.Stack()))
+				s.Log.ErrorContext(r.Context(), "panic", "err", v, "path", r.URL.Path, "stack", string(debug.Stack()))
 				writeJSON(w, http.StatusInternalServerError, apiError{Error: "internal error"})
 			}
 		}()
@@ -337,7 +338,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	// Marshal before writing the header: a NaN/Inf float would otherwise leave a 200 with an empty body.
 	b, err := json.Marshal(v)
 	if err != nil {
-		slog.Error("response encode failed", "err", err)
+		slog.Error("response encode failed", "err", err) // no request context here
 		status = http.StatusInternalServerError
 		b, _ = json.Marshal(apiError{Error: "response encode failed: " + err.Error()})
 	}
@@ -362,7 +363,8 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, context.Canceled):
 		w.WriteHeader(499)
 	default:
-		s.Log.Error("request failed", "path", r.URL.Path, "err", err, "request_id", middleware.GetReqID(r.Context()))
+		selftel.CaptureError(r.Context(), err) // exception event with type/message/stack on the server span
+		s.Log.ErrorContext(r.Context(), "request failed", "path", r.URL.Path, "err", err, "request_id", middleware.GetReqID(r.Context()))
 		writeJSON(w, http.StatusInternalServerError, apiError{Error: "internal error"})
 	}
 }

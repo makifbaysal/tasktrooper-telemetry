@@ -1,7 +1,7 @@
 # Demo deployment on a single machine behind Cloudflare Tunnel (ADR-031, deploy/demo/README.md).
 # Layered on the local stack:
 #   docker compose -f deploy/docker-compose.yml -f deploy/demo/docker-compose.demo.yml --profile app up -d --build \
-#     ingest-gw ingest-writer api alert-engine notifier loadtest codeintel web trooper-agent
+#     ingest-gw ingest-writer api alert-engine notifier loadtest codeintel symbolicator web trooper-agent
 # Values come from deploy/.env (the deploy-demo workflow writes it from the DEMO_ENV secret). Relative paths resolve against deploy/.
 # Self-observability (ADR-027): deploy.sh exports TROOPER_SELF_DSN / TT_SELF_PROJECT_ID from the DEMO_TROOPER_DSN secret (a
 # project created in the dashboard, public ingest host); empty = the services export nothing and trooper-agent is not started.
@@ -9,7 +9,8 @@ x-restart: &restart { restart: unless-stopped }
 # public resolvers: a stale home-router cache must not send self-telemetry (public ingest host) elsewhere
 x-dns: &dns [1.1.1.1, 8.8.8.8]
 # TT_DEMO_VERSION = git short sha (deploy.sh) → service.version + deploy markers of the self project
-x-self-env: &self_env { TROOPER_ENV: demo, TROOPER_VERSION: "${TT_DEMO_VERSION:-}" }
+# TROOPER_PROFILING: continuous profiles for the Profiling screen (off by default in the SDK)
+x-self-env: &self_env { TROOPER_ENV: demo, TROOPER_VERSION: "${TT_DEMO_VERSION:-}", TROOPER_PROFILING: "true" }
 
 services:
   clickhouse: *restart
@@ -23,6 +24,8 @@ services:
   notifier: { restart: unless-stopped, dns: *dns, environment: *self_env }
   # repo analysis (ADR-014) with LLM enrichment through TT_ASSISTANT_* (ADR-034); new repositories are analyzed by the
   # scheduler, push webhooks need a tunnel route to :8096 (not set up)
+  # stacks of tt-web (sourcemaps uploaded by deploy.sh) and of customer apps
+  symbolicator: { restart: unless-stopped, dns: *dns, environment: *self_env }
   codeintel: { restart: unless-stopped, dns: *dns, environment: *self_env }
 
   # load tests (ADR-015/032): one machine, so small caps; targets must be verified domains (never this host itself)
@@ -43,6 +46,7 @@ services:
     environment:
       TROOPER_ENV: demo
       TROOPER_VERSION: "${TT_DEMO_VERSION:-}"
+      TROOPER_PROFILING: "true"
       # public site: never the dev login
       TT_AUTH_DEV: "false"
       TT_COOKIE_SECURE: "true"
@@ -78,10 +82,11 @@ services:
       TROOPER_ENV: demo
       TROOPER_VERSION: "${TT_DEMO_VERSION:-}"
       TT_SELF_PG_PASSWORD: trooper
+      TT_SELF_CH_PASSWORD: trooper
     volumes:
       - ./demo/agent.yaml:/etc/trooper/agent.yaml:ro
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
       - /:/host/root:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    depends_on: [postgres, redis, redpanda, ingest-gw]
+    depends_on: [postgres, clickhouse, redis, redpanda, ingest-gw]

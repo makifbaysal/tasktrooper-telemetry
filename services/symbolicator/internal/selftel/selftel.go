@@ -63,7 +63,7 @@ func Logger(log *slog.Logger) *slog.Logger {
 	if !Enabled() || log == nil {
 		return log
 	}
-	return slog.New(trooperslog.NewHandler(Config("").Service, log.Handler(), trooperslog.WithLevel(minLevel(log))))
+	return slog.New(entryHandler{trooperslog.NewHandler(Config("").Service, log.Handler(), trooperslog.WithLevel(minLevel(log)))})
 }
 
 func minLevel(log *slog.Logger) slog.Level {

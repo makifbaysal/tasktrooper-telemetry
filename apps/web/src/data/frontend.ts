@@ -11,7 +11,7 @@ import {
 import type { Endpoint, RumPage, Service, Session, TimeRange } from './types';
 
 const appPath = (appId: string) => `/apps/${seg(services.find((s) => s.id === appId)?.name ?? appId)}`;
-const H1 = () => qs({ range: '1h' });
+const R = (range: TimeRange) => qs({ range });
 
 export const isClientApp = (s: Pick<Service, 'type'>) => s.type === 'web' || s.type === 'mobile';
 export const clientApps = () => services.filter(isClientApp);
@@ -33,12 +33,12 @@ export interface AppApiCall { endpoint: Endpoint; service: Service; rpm: number;
 
 /** Backend endpoints this app calls (from the app's traceparent on each request). */
 /** Pages (web) or screens (mobile) of an app. Never empty (a zero "/" row while loading / without data). */
-export function rumPagesFor(appId: string): RumPage[] {
-  return remote(`${appPath(appId)}/pages${H1()}`, [emptyPage()], mapRumPages);
+export function rumPagesFor(appId: string, range: TimeRange = '1h'): RumPage[] {
+  return remote(`${appPath(appId)}/pages${R(range)}`, [emptyPage()], mapRumPages);
 }
 
-export function sessionsFor(appId: string): Session[] {
-  return list(`${appPath(appId)}/sessions${qs({ range: '1h', limit: 50 })}`, mapSessions);
+export function sessionsFor(appId: string, range: TimeRange = '1h'): Session[] {
+  return list(`${appPath(appId)}/sessions${qs({ range, limit: 50 })}`, mapSessions);
 }
 
 const VITAL_DEFAULTS: Record<'web' | 'mobile', AppSummary['vitals']> = {
@@ -56,10 +56,10 @@ const VITAL_DEFAULTS: Record<'web' | 'mobile', AppSummary['vitals']> = {
   ],
 };
 
-export function appSummary(appId: string): AppSummary {
+export function appSummary(appId: string, range: TimeRange = '1h'): AppSummary {
   const kind = services.find((s) => s.id === appId)?.type === 'mobile' ? 'mobile' : 'web';
   const fallback: AppSummary = { activeUsers: 0, prevActiveUsers: 0, sessions: 0, pageViewsPerMin: 0, avgSessionSec: 0, errorRate: 0, prevErrorRate: 0, vitals: VITAL_DEFAULTS[kind] };
-  return remote(`${appPath(appId)}/summary${H1()}`, fallback, (r: RawAppSummary) => {
+  return remote(`${appPath(appId)}/summary${R(range)}`, fallback, (r: RawAppSummary) => {
     const vitals = (r.vitals ?? []).map(mapVital);
     return {
       activeUsers: r.activeUsers ?? 0, prevActiveUsers: r.prevActiveUsers ?? 0, sessions: r.sessions ?? 0, pageViewsPerMin: r.pageViewsPerMin ?? 0,
@@ -70,8 +70,8 @@ export function appSummary(appId: string): AppSummary {
   });
 }
 
-export function appApiCalls(appId: string): AppApiCall[] {
-  return list(`${appPath(appId)}/api-calls${H1()}`, (raw: RawAppApiCall[] | null) => (raw ?? []).map((c) => ({
+export function appApiCalls(appId: string, range: TimeRange = '1h'): AppApiCall[] {
+  return list(`${appPath(appId)}/api-calls${R(range)}`, (raw: RawAppApiCall[] | null) => (raw ?? []).map((c) => ({
     endpoint: mapEndpoint(c.endpoint), service: services.find((s) => s.id === c.service.id) ?? mapService(c.service),
     rpm: c.rpm ?? 0, errorRate: c.errorRate ?? 0, p95: c.p95 ?? 0,
   })).sort((a, b) => b.rpm - a.rpm));
@@ -89,10 +89,19 @@ export function vitalSeries(appId: string, vital: string, range: TimeRange, view
   return pick(seriesSet(`${appPath(appId)}/vitals/${seg(vital)}/series${qs({ range, view })}`, range), 'p75', timestamps(range).length);
 }
 
+export interface AppResource { url: string; method: string; callsPerMin: number; errorRate: number; p50: number; p95: number }
+interface RawAppResource { url?: string | null; method?: string | null; callsPerMin?: number | null; errorRate?: number | null; p50?: number | null; p95?: number | null }
+/** Network calls (fetch / XHR) the app makes, grouped by URL template + method (`/apps/{app}/resources`). */
+export function appResources(appId: string, range: TimeRange = '1h'): AppResource[] {
+  return list(`${appPath(appId)}/resources${R(range)}`, (raw: RawAppResource[] | null) => (raw ?? []).map((r) => ({
+    url: r.url || '—', method: (r.method || 'GET').toUpperCase(), callsPerMin: r.callsPerMin ?? 0, errorRate: r.errorRate ?? 0, p50: r.p50 ?? 0, p95: r.p95 ?? 0,
+  })));
+}
+
 export interface AppError { fingerprint: string; type: string; message: string; view: string; count: number; sessions: number; crash: boolean; firstSeen: number; lastSeen: number; appVersion: string }
 /** JS errors / crashes grouped by fingerprint. */
-export function appErrors(appId: string): AppError[] {
-  return list(`${appPath(appId)}/errors${H1()}`, (raw: RawRumError[] | null) => raw ?? []);
+export function appErrors(appId: string, range: TimeRange = '1h'): AppError[] {
+  return list(`${appPath(appId)}/errors${R(range)}`, (raw: RawRumError[] | null) => raw ?? []);
 }
 
 export interface AppErrorDetail { stack: string; symbolicated: boolean }

@@ -1,15 +1,16 @@
 import { useState, type ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
-import { AlertTriangle, ArrowRight, MonitorSmartphone, PlayCircle, Target, UserRound } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Globe, MonitorSmartphone, PlayCircle, Target, UserRound } from 'lucide-react';
 import { TimeSeries } from '@/components/charts';
 import {
   Badge, Button, Card, CodeBlock, ConnectSdk, Drawer, DrawerSection, EmptyState, KeyValues, MetricCard, Section, SkeletonText, StatusBadge, Table, Tabs, useDrawer,
 } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
 import {
-  errorReplay, replayUrl, replaysFor, sessionHasReplay, appApiCalls, appErrorDetail, appErrors, appSeries, vitalSeries as vitalSeriesOf, deployEvents, deploysOf, integrations, appSummary, rumPagesFor, sessionsFor, timestamps,
-  type AppApiCall, type AppSummary, type RumPage, type Service, type Session, type TimeRange,
+  errorReplay, replayUrl, replaysFor, sessionHasReplay, appApiCalls, appErrorDetail, appErrors, appSeries, vitalSeries as vitalSeriesOf, deployEvents, deploysOf, integrations, appSummary, appResources, rumPagesFor, sessionsFor, timestamps,
+  type AppApiCall, type AppResource, type AppSummary, type RumPage, type Service, type Session, type TimeRange,
 } from '@/data';
+import { membersOf, useAuth, type Member } from '@/data/auth';
 import { ago, clock, compact, duration, int, ms, pct } from '@/lib/format';
 import { ErrorCell } from './apm';
 import { LogExplorer } from './Logs';
@@ -19,8 +20,8 @@ import { KpiCount, ServiceKpis } from './Kpis';
 import { ReplaysTab } from './Replays';
 import { PagePerformanceDiagnosis } from './PerformanceDiagnosis';
 
-type Tab = 'pages' | 'sessions' | 'replays' | 'errors' | 'api' | 'deploys' | 'kpis' | 'alerts' | 'logs';
-const TAB_IDS: Tab[] = ['pages', 'sessions', 'replays', 'errors', 'api', 'deploys', 'kpis', 'alerts', 'logs'];
+type Tab = 'pages' | 'sessions' | 'replays' | 'errors' | 'api' | 'network' | 'deploys' | 'kpis' | 'alerts' | 'logs';
+const TAB_IDS: Tab[] = ['pages', 'sessions', 'replays', 'errors', 'api', 'network', 'deploys', 'kpis', 'alerts', 'logs'];
 type Vital = AppSummary['vitals'][number];
 
 // ---------------------------------------------------------------- vitals
@@ -79,17 +80,21 @@ export function FrontendApp({ app }: { app: Service }) {
   const errorDrawer = useDrawer<JsError>();
   const ts = timestamps(range);
   const mobile = app.type === 'mobile';
-  const pages = rumPagesFor(app.id);
-  const sessions = sessionsFor(app.id);
-  const summary = appSummary(app.id);
+  const pages = rumPagesFor(app.id, range);
+  const sessions = sessionsFor(app.id, range);
+  const summary = appSummary(app.id, range);
   // grouped RUM errors (`/apps/{id}/errors`)
-  const errors: JsError[] = appErrors(app.id).map((e) => ({
+  const errors: JsError[] = appErrors(app.id, range).map((e) => ({
     id: e.fingerprint, message: e.type && !e.message.startsWith(e.type) ? `${e.type}: ${e.message}` : e.message,
     location: e.crash ? `crash · ${e.appVersion}` : e.appVersion || '—', page: e.view, events: e.count, users: e.sessions,
     firstSeen: e.firstSeen, lastSeen: e.lastSeen,
   }));
   const appS = appSeries(app.id, range);
-  const calls = appApiCalls(app.id);
+  const calls = appApiCalls(app.id, range);
+  const resources = appResources(app.id, range);
+  const { org } = useAuth();
+  const members = new Map(membersOf(org?.id).map((m) => [m.userId, m]));
+  const memberOf = (s: Session) => (s.identified ? members.get(s.user) : undefined);
   const totalViews = pages.reduce((a, p) => a + p.views, 0);
   const pageNoun = mobile ? 'Screen' : 'Page';
   const errLabel = mobile ? 'Crash rate' : 'JS error rate';
@@ -99,7 +104,7 @@ export function FrontendApp({ app }: { app: Service }) {
 
   const vitalSeries = (v: Vital) => vitalSeriesOf(app.id, v.id, range);
   // no RUM data at all yet: a single setup state instead of empty charts
-  const noData = totalViews === 0 && sessions.length === 0 && summary.activeUsers === 0 && summary.sessions === 0 && errors.length === 0;
+  const noData = totalViews === 0 && sessions.length === 0 && summary.activeUsers === 0 && summary.sessions === 0 && errors.length === 0 && resources.length === 0;
 
   if (noData) {
     return (
@@ -159,6 +164,7 @@ export function FrontendApp({ app }: { app: Service }) {
           { id: 'replays', label: <>Replays <Badge>{replaysFor(app.id, { range }).length}</Badge></> },
           { id: 'errors', label: <>{mobile ? 'Crashes & errors' : 'Errors'} <Badge>{errors.length}</Badge></> },
           { id: 'api', label: <>API calls <Badge>{calls.length}</Badge></> },
+          { id: 'network', label: <>Network <Badge>{resources.length}</Badge></> },
           { id: 'deploys', label: <>Deploys <Badge>{deploys.length}</Badge></> },
           { id: 'kpis', label: <>KPIs <KpiCount serviceId={app.id} /></> },
           { id: 'alerts', label: <>Alerts <AlertCount serviceId={app.id} /></> },
@@ -185,7 +191,7 @@ export function FrontendApp({ app }: { app: Service }) {
           <Card flush>
             <Table rows={sessions} rowKey={(s) => s.id} defaultSort={{ key: 'start', dir: 'desc' }} onRowClick={sessionDrawer.open}
               empty={<EmptyState icon={<UserRound />} title="No sessions in this range" />} columns={[
-              { key: 'user', header: 'User', render: (s) => <span className="row"><UserRound size={14} className="muted" />{s.identified ? s.user : <span className="muted">{s.user}</span>}</span> },
+              { key: 'user', header: 'User', sortValue: (s) => sessionUser(s, memberOf(s)), render: (s) => <SessionUser session={s} member={memberOf(s)} /> },
               { key: 'country', header: 'Country', render: (s) => s.country },
               { key: 'device', header: 'Device', render: (s) => <span className="secondary">{s.device}</span> },
               { key: 'flow', header: 'Entry → exit', render: (s) => <span className="mono" style={{ fontSize: 'var(--text-xs)' }}>{s.entry} → {s.exit}</span> },
@@ -229,6 +235,7 @@ export function FrontendApp({ app }: { app: Service }) {
                 ]} />}
           </Card>
         )}
+        {tab === 'network' && <NetworkTab resources={resources} />}
         {tab === 'kpis' && <ServiceKpis serviceId={app.id} />}
         {tab === 'alerts' && <AlertsBody serviceId={app.id} />}
         {tab === 'deploys' && (
@@ -248,9 +255,56 @@ export function FrontendApp({ app }: { app: Service }) {
         onPage={(p) => { vitalDrawer.close(); pageDrawer.open(p); }} />
       <PageDrawer app={app} page={pageDrawer.item} vitals={pageVitals} errors={errors} onClose={pageDrawer.close} ts={ts} range={range}
         onTrack={(p) => nav(`/kpis/new?app=${app.id}&page=${encodeURIComponent(p.path)}`)} />
-      <SessionDrawer appId={app.id} session={sessionDrawer.item} pageNoun={pageNoun} onClose={sessionDrawer.close} onReplay={(id) => nav(replayUrl(id))} />
+      <SessionDrawer appId={app.id} session={sessionDrawer.item} member={sessionDrawer.item ? memberOf(sessionDrawer.item) : undefined} pageNoun={pageNoun} onClose={sessionDrawer.close} onReplay={(id) => nav(replayUrl(id))} />
       <ErrorDrawer appId={app.id} error={errorDrawer.item} onClose={errorDrawer.close} onReplay={(id, off) => nav(replayUrl(id, off))} />
     </>
+  );
+}
+
+// ---------------------------------------------------------------- sessions · users
+/**
+ * The SDK identifies users by internal id only (no PII on the wire). When that id is a member of the
+ * current org (e.g. the dashboard's own RUM app), show their name / email instead; otherwise the raw id.
+ */
+const sessionUser = (s: Session, m?: Member) => (m ? m.name || m.email : s.user);
+
+function SessionUser({ session, member }: { session: Session; member?: Member }) {
+  const label = sessionUser(session, member);
+  return (
+    <span className="row" title={member ? `${member.email} · ${session.user}` : undefined}>
+      <UserRound size={14} className="muted" aria-hidden />
+      {session.identified ? label : <span className="muted">{label}</span>}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------- network
+/** "https://api.example.com/users/:id" → host + path; relative URLs (same origin) have no host. */
+function splitUrl(url: string): { host: string; path: string } {
+  const m = /^[a-z][a-z0-9+.-]*:\/\/([^/]+)(.*)$/i.exec(url);
+  return m ? { host: m[1]!, path: m[2] || '/' } : { host: '', path: url };
+}
+
+function NetworkTab({ resources }: { resources: AppResource[] }) {
+  return (
+    <Card flush subtitle="fetch / XHR calls made by the app, grouped by URL template and method">
+      <Table<AppResource> rows={resources} rowKey={(r) => `${r.method} ${r.url}`} defaultSort={{ key: 'rpm', dir: 'desc' }}
+        empty={<EmptyState icon={<Globe />} title="No network calls in this range" />} columns={[
+        { key: 'url', header: 'URL', sortValue: (r) => r.url, render: (r) => {
+          const { host, path } = splitUrl(r.url);
+          return (
+            <span style={{ minWidth: 0 }}>
+              <div className="truncate" style={{ maxWidth: 520 }}><span className="mono muted">{r.method}</span> <span className="mono">{path}</span></div>
+              {host && <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>{host}</div>}
+            </span>
+          );
+        } },
+        { key: 'rpm', header: 'Calls / min', numeric: true, sortValue: (r) => r.callsPerMin, render: (r) => compact(r.callsPerMin) },
+        { key: 'err', header: 'Error rate', numeric: true, sortValue: (r) => r.errorRate, render: (r) => <ErrorCell rate={r.errorRate} /> },
+        { key: 'p50', header: 'p50', numeric: true, sortValue: (r) => r.p50, render: (r) => ms(r.p50) },
+        { key: 'p95', header: 'p95', numeric: true, sortValue: (r) => r.p95, render: (r) => ms(r.p95) },
+      ]} />
+    </Card>
   );
 }
 
@@ -322,14 +376,16 @@ function PageDrawer({ app, page, vitals, errors, onClose, ts, range, onTrack }: 
   );
 }
 
-function SessionDrawer({ appId, session, pageNoun, onClose, onReplay }: { appId: string; session: Session | null; pageNoun: string; onClose: () => void; onReplay: (sessionId: string) => void }) {
+function SessionDrawer({ appId, session, member, pageNoun, onClose, onReplay }: { appId: string; session: Session | null; member?: Member; pageNoun: string; onClose: () => void; onReplay: (sessionId: string) => void }) {
   if (!session) return null;
   return (
-    <Drawer open onClose={onClose} title={session.user}
+    <Drawer open onClose={onClose} title={sessionUser(session, member)}
       subtitle={<>{session.identified ? <Badge tone="accent">Identified</Badge> : <Badge>Anonymous</Badge>}{session.pages} {pageNoun.toLowerCase()}s · {duration(session.duration)}</>}
       actions={sessionHasReplay(appId, session) ? <Button size="sm" icon={<PlayCircle size={14} />} onClick={() => onReplay(session.id)}>Watch replay</Button> : undefined}>
       <DrawerSection title="Session">
         <KeyValues items={[
+          ...(member ? [['Team member', member.name ? `${member.name} · ${member.email}` : member.email] as [string, ReactNode]] : []),
+          ['User id', <span className="mono">{session.user}</span>],
           ['Session id', <span className="mono">{session.id}</span>],
           ['Started', `${clock(session.startedAt)} · ${ago(session.startedAt)}`],
           ['Device', session.device],

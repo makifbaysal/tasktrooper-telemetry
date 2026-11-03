@@ -199,6 +199,20 @@ type DeployMarker struct {
 	IntegrationID string `json:"integrationId,omitempty"`
 }
 
+// DeployInput is the body of POST /deploys (CI deploy marker, source "ci").
+type DeployInput struct {
+	Service     string   `json:"service,omitempty"`
+	Services    []string `json:"services,omitempty"` // one marker per service
+	Version     string   `json:"version,omitempty"`  // defaults to commitSha
+	CommitSHA   string   `json:"commitSha,omitempty"`
+	Message     string   `json:"message,omitempty"`
+	Author      string   `json:"author,omitempty"`
+	URL         string   `json:"url,omitempty"`
+	Environment string   `json:"environment,omitempty"` // default production
+	Ts          int64    `json:"ts,omitempty"`          // unix ms; default now
+	Time        string   `json:"time,omitempty"`        // RFC 3339, alternative to ts
+}
+
 // Frame is one symbolicated stack frame (symbolicator contract, .ai/contracts.md §12).
 type Frame struct {
 	Fn    string `json:"fn"`
@@ -660,6 +674,8 @@ type Database struct {
 	IntegrationID   string         `json:"integrationId,omitempty"`
 	// Missing: the cloud resource was not found in the last discovery (meta.missing).
 	Missing bool `json:"missing,omitempty"`
+	// Observed: not registered, seen only in trooper-agent metrics (static agent.yaml target).
+	Observed bool `json:"observed,omitempty"`
 }
 
 type DatabaseInput struct {
@@ -713,6 +729,7 @@ type Cluster struct {
 	Version        string          `json:"version"`
 	IntegrationID  string          `json:"integrationId,omitempty"`
 	Missing        bool            `json:"missing,omitempty"`
+	Observed       bool            `json:"observed,omitempty"` // not registered, seen only in trooper-agent metrics
 	Endpoint       string          `json:"endpoint"`
 	Vhost          string          `json:"vhost,omitempty"`
 	Source         string          `json:"source"`
@@ -786,7 +803,7 @@ type GroupOwnerInput struct {
 }
 
 type ConnTestInput struct {
-	Kind     string `json:"kind"`               // postgres | mysql | redis | mongodb | kafka | rabbitmq
+	Kind     string `json:"kind"`               // postgres | mysql | redis | mongodb | clickhouse | kafka | rabbitmq
 	Host     string `json:"host,omitempty"`     // databases
 	Port     int    `json:"port,omitempty"`     // databases
 	Endpoint string `json:"endpoint,omitempty"` // kafka bootstrap servers or rabbitmq management URL

@@ -117,7 +117,7 @@ func (r *Runner) Tick(ctx context.Context) {
 	r.defaults()
 	repos, err := r.Store.Repos(ctx)
 	if err != nil {
-		r.Log.Error("list repositories", "err", err)
+		r.Log.ErrorContext(ctx, "list repositories", "err", err)
 		r.Metrics.Add("codeintel_errors_total", 1, "stage", "list")
 		return
 	}
@@ -180,7 +180,7 @@ func (r *Runner) ready(repo model.Repo, now time.Time) bool {
 func (r *Runner) analyze(ctx context.Context, repo model.Repo) {
 	started, pending, ok, err := r.Store.Claim(ctx, repo.ID, 2*r.Timeout)
 	if err != nil {
-		r.Log.Error("claim repository", "repo", repo.FullName, "err", err)
+		r.Log.ErrorContext(ctx, "claim repository", "repo", repo.FullName, "err", err)
 		r.Metrics.Add("codeintel_errors_total", 1, "stage", "claim")
 		return
 	}
@@ -220,7 +220,7 @@ func (r *Runner) analyze(ctx context.Context, repo model.Repo) {
 		r.failed[repo.ID] = failure{at: r.Now(), requested: req}
 		r.mu.Unlock()
 		if ferr := r.Store.FinishError(fctx, repo.ID, started, err.Error(), restore); ferr != nil {
-			log.Error("record analysis error", "err", ferr)
+			log.ErrorContext(ctx, "record analysis error", "err", ferr)
 		}
 		return
 	}
@@ -240,9 +240,9 @@ func (r *Runner) analyze(ctx context.Context, repo model.Repo) {
 	r.Metrics.Add("codeintel_items_total", float64(rep.Items))
 	r.Metrics.Add("codeintel_llm_items_total", float64(rep.LLMItems))
 	for _, w := range rep.Warnings {
-		log.Warn("analysis warning", "warning", w)
+		log.WarnContext(ctx, "analysis warning", "warning", w)
 	}
-	log.Info("analysis done", "sha", rep.SHA, "incremental", rep.Incremental, "diff_source", rep.DiffSource, "changed", rep.Changed, "items", rep.Items,
+	log.InfoContext(ctx, "analysis done", "sha", rep.SHA, "incremental", rep.Incremental, "diff_source", rep.DiffSource, "changed", rep.Changed, "items", rep.Items,
 		"observed", rep.Observed, "shadows", rep.Shadows, "suggestions", rep.Suggestions, "scenarios", rep.Scenarios,
 		"llm_items", rep.LLMItems, "llm_status", rep.LLM.Status, "llm_credits", rep.LLM.Credits, "monitors_created", rep.Monitors.Created, "monitors_updated", rep.Monitors.Updated,
 		"monitors_deleted", rep.Monitors.Deleted, "dur", dur.Round(time.Millisecond))
@@ -252,7 +252,7 @@ func (r *Runner) analyze(ctx context.Context, repo model.Repo) {
 func (r *Runner) safeRun(ctx context.Context, repo model.Repo, pending []string) (rep *analyze.Report, err error) {
 	defer func() {
 		if p := recover(); p != nil {
-			r.Log.Error("analysis panic", "repo", repo.FullName, "panic", p, "stack", string(debug.Stack()))
+			r.Log.ErrorContext(ctx, "analysis panic", "repo", repo.FullName, "panic", p, "stack", string(debug.Stack()))
 			err = fmt.Errorf("internal error: %v", p)
 		}
 	}()

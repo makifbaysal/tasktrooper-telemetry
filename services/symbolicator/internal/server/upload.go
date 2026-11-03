@@ -138,14 +138,14 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		}
 		unlock()
 		if err != nil {
-			s.cfg.Log.Error("save index", "err", err)
+			s.cfg.Log.ErrorContext(ctx, "save index", "err", err)
 			writeErr(w, http.StatusBadGateway, "blob store error")
 			return
 		}
 		if s.cfg.Cache != nil {
 			s.cfg.Cache.Bump(ctx, scope(project, app, release))
 		}
-		s.cfg.Log.Info("artifacts uploaded", "project", project, "kind", kind, "app", app, "release", release, "files", len(stored), "errors", len(errs))
+		s.cfg.Log.InfoContext(ctx, "artifacts uploaded", "project", project, "kind", kind, "app", app, "release", release, "files", len(stored), "errors", len(errs))
 	}
 	status := http.StatusCreated
 	if len(stored) == 0 {

@@ -94,6 +94,9 @@ callback `https://api.telemetry.tasktrooper.ai/api/v1/integrations/github/callba
 **Internal credential:** internal senders (trooper-cloud, loadtest-runner) send `x-trooper-internal: <TT_INTERNAL_TOKEN>` +
 `x-trooper-project: <id>` (OTLP HTTP/gRPC metadata, `/v1/rum`); constant-time comparison, 403 if `Origin` is present, 401 if the token
 is not set. Org comes from Postgres (60 s cache).
+The same credential is accepted by `symbolicator` on `POST /v1/symbolicate` only: the api sends it for dashboard users (cookie
+session, no bearer key) with the request tenant's project id; both read `TT_INTERNAL_TOKEN` (unset = off, 401). A caller bearer key
+is still forwarded as is (§12).
 **Ingest auth:** `x-trooper-key: <ingest key>` header, or `Authorization: Bearer <key>`. Because browser `sendBeacon` cannot set
 headers, a `?key=` query parameter is also accepted (only `/v1/rum` and `/v1/replay`). Keys are stored in the Postgres `api_keys` table as a sha256
 hash; ingest-gw keeps an in-memory cache with a 60 s TTL. Key → `(org_id, project_id)`. Browser keys are checked against `allowed_origins`.
@@ -194,10 +197,11 @@ The collector sends DB and broker data to ingest-gw as **OTLP gauge/sum**; the w
 DB (`db_1m`): `trooper.db.cpu` (0..1), `trooper.db.memory` (0..1), `trooper.db.disk` (0..1), `trooper.db.connections`,
 `trooper.db.max_connections`, `trooper.db.ops` (/s), `trooper.db.latency.p95` (ms), `trooper.db.slow` (/min),
 `trooper.db.hit_ratio` (0..1), `trooper.db.evictions` (/min), `trooper.db.replication_lag` (ms).
-Attributes: `trooper.db.id`, `trooper.db.name`, `db.system` (postgresql|mysql|redis|mongodb), `trooper.db.node`, `trooper.db.role`.
+Attributes: `trooper.db.id`, `trooper.db.name`, `db.system` (postgresql|mysql|redis|mongodb|clickhouse), `trooper.db.node`, `trooper.db.role`.
 
 DB queries (`db_queries_1m`): `trooper.db.query.calls`, `trooper.db.query.total_ms`, `trooper.db.query.p95_ms`, `trooper.db.query.rows`
 + `trooper.db.id`, `trooper.db.query.hash`, `db.query.text` (normalized).
+Custom (not in `db_1m`, → `metrics` table): `trooper.db.errors` (/min, failed queries; ClickHouse `FailedQuery`), same attributes as `db_1m`.
 
 Broker lag (`broker_lag_1m`): `trooper.broker.lag`, `trooper.broker.end_offset`, `trooper.broker.committed_offset`,
 `trooper.broker.consume_rate`, `trooper.broker.produce_rate`, for RabbitMQ `trooper.broker.unacked`.
@@ -229,6 +233,13 @@ Extra rules:
 - `trooper.db.query.hash` is the engine's own id (decimal uint64: pg `queryid`, first 64 bits of the MySQL digest, FNV of the Redis command name).
   It does not match `db_query_hash` (cityHash64) on spans; query ↔ endpoint matching is done via the normalized text.
 - `trooper.db.id` and `trooper.broker.cluster` = the `slug` in Postgres.
+- **Unregistered targets** (static `agent.yaml`, no `databases` / `broker_clusters` row): `GET /infra/databases` and `/infra/clusters`
+  (and their detail routes) also list every `db_1m.database_id` (window, at least the last 10 min) and every `cluster_id` of
+  `broker_nodes_1m` / `broker_lag_1m` / `broker_topics_1m` (last 24 h), with `observed: true`, `collector: agent`; registered rows win.
+  Engine = `db_1m.engine` (`db.system`, `postgresql` → `postgres`). `trooper.db.name` is not stored in `db_1m`, so the name is the
+  dependency target services use (`edges_1m` dep `<db.system> · <target>`, e.g. `postgresql · trooper` → `trooper`) when the id is such a
+  target, or when the database is the only unregistered one of its engine and exactly one unclaimed target exists; otherwise the id.
+  Cluster kind: the messaging system of a queue dependency on one of its topics, else `rabbitmq` for `rabbit@` node names, else `kafka`.
 - Collector health: `trooper.collector.up` (0/1) + `trooper.collector.target`, `trooper.collector.kind` → `metrics` table.
 - `GET /api/v1/internal/collector-config` JSON shape: `services/collector/README.md` (DB user name `databases.username`,
   `trooper_monitor` if empty).
@@ -260,6 +271,11 @@ Dashboard assistant (ADR-033, `deploy/postgres/015_assistant.sql`, owner api): `
 `?range=1h|6h|24h|7d` (`TimeRange` in the UI) and `?env=`. Series are `{ timestamps: number[], series: [{ id, label, data: number[] }] }`.
 Response shapes match `apps/web/src/data/types.ts` (+ `infra.ts`) exactly; in the UI the api mapping lives only in `src/data/*`
 functions. Auth: `Authorization: Bearer <api key>` (dev) — OIDC session later.
+
+`POST /deploys` (API key or session; viewers 403) writes CI deploy markers: body `{ service | services[], version | commitSha, commitSha?,
+message?, author?, url? (http/https), environment? (default production), ts? (unix ms) | time? (RFC 3339), default now }` → `201`
+`DeployMarker[]` (one per service, `deploy_markers.source = 'ci'`). Idempotent per (service, environment, version)
+(`external_id = <service>@<env>@<version>`); `version` defaults to `commitSha`, a different `commitSha` is appended to the message.
 
 `GET /service-map?range=&env=` returns the whole system graph: `nodes` (`tier` client|service|data|external, `kind`, `system`, `status`, rpm/errorRate/p95, heaviest open `incident`) + `edges` (from→to, callsPerMin, errorRate, p95, `status` from error rate: ≥1% warning, ≥5% critical). Incoming edges come from `callers_1m` (callee view), dependencies from `edges_1m`; an http call whose `child_service` resolves to a service that sends telemetry is a service→service edge, an unresolved `peer.service` becomes an external (`external`) node. Dependency node id is `dep:<system> · <name>`.
 
@@ -404,7 +420,9 @@ events ≤ 24 h old coming from the offline queue keep their own time.
     both slices of a fat file. Swift demangling if `swift-demangle` is on the host (not in the container image → stays mangled).
   - Flutter: `kind=dart` split-debug-info symbols (Android ELF, iOS Mach-O). Dart obfuscation maps are not supported.
 - In error detail (`/errors/{fingerprint}`, RUM app errors) the api asks the symbolicator for the stack (`TT_SYMBOLICATOR_URL`, timeout 2 s);
-  if unreachable, the raw stack is returned.
+  if unreachable, the raw stack is returned. A caller bearer key is forwarded; without one (dashboard cookie session) the api sends the
+  internal credential `x-trooper-internal: <TT_INTERNAL_TOKEN>` + `x-trooper-project: <tenant project>` (§2), which the symbolicator
+  accepts on `/v1/symbolicate` only.
 - CLI: `tools/trooper-cli` → `trooper-cli upload-sourcemaps|upload-dsym|upload-mapping|upload-flutter-symbols|upload-ndk-symbols|delete
   --app --release <path>` (`TROOPER_API_URL`, `TROOPER_API_KEY`). Exit codes: 0 ok, 1 server/network, 2 usage, 3 unauthorized, 4 some
   files rejected. The Android Gradle plugin (`ai.tasktrooper.mapping-upload`) uploads only `r8`; for NDK `.so` use CLI
@@ -1138,14 +1156,15 @@ project idempotently and writes the ingest key to `deploy/self/.run/dsn`; `TT_SE
 | `TROOPER_DSN` | — | ingest DSN of the self project |
 | `TROOPER_SERVICE` | fixed per binary (`tt-api` …, ADR-027) | override |
 | `TROOPER_ENV` | value of `TT_ENV`, otherwise `development` | |
-| `TROOPER_VERSION` | the `-ldflags` version from the build / empty | deploy marker |
+| `TROOPER_VERSION` | the `-ldflags` version from the build (Dockerfile `ARG VERSION` → `-X main.version`, default `dev`) / empty | deploy marker |
 | `TROOPER_SAMPLE_RATE` | `1` | lowered for ingest-gw under high traffic |
 | `TROOPER_PROFILING` | `false` | §24 |
 | `TT_SELF_PROJECT_ID` | `0` (off) | only ingest-gw / ingest-writer: no spans/logs are produced for this project's requests/records |
 
 Instrumentation: incoming HTTP (with route templates), pgx, go-redis, franz-go (produce/consume), ClickHouse queries
 (`db.system=clickhouse` client span, SQL goes through `SanitizeSQL`), slog → OTel logs (the existing `slog` handler is kept, log
-level unchanged), codeintel LLM calls (§25, content off). Health/metrics endpoints (`/healthz`, `/readyz`, `/metrics`) produce no
+level unchanged; services log with the `*Context` methods so records carry trace/span id and `trooper.entry.route` / `trooper.entry.method`
+of the request or job entry → logs `route` column), codeintel LLM calls (§25, content off; HTTP client span under the GenAI span). Health/metrics endpoints (`/healthz`, `/readyz`, `/metrics`) produce no
 spans. No tenant id in metric labels (cardinality); if tenant info is needed, it goes only on spans as span attributes `tt.org_id` /
 `tt.project_id`.
 
@@ -1156,14 +1175,17 @@ show up on the Services screen with throughput / errors / duration, root spans a
 |---|---|---|
 | `tt-alert-engine` | `alert.cycle` | each tick that holds a shard (a standby replica produces no span; a leader election error is a failed cycle); `alert.evaluate` / `alert.kpis` children |
 | `tt-alert-engine` | `alert.ai_quota_check` | each check (5 min; every replica runs it, `ai_quota_alerts` dedupes) |
-| `tt-notifier` | `notify.deliver` | per delivery attempt (an empty outbox poll produces no span) |
+| `tt-notifier` | `notify.deliver` | per delivery attempt (an empty outbox poll produces no span); `trooper.consumer.attempt` = attempt, `trooper.consumer.dlq=true` on the final give-up (permanent error / `MaxAttempts`) → retries / DLQ columns; email sends are `smtp send` client spans (`peer.service=smtp`) |
 | `tt-trooper-agent` | `agent.scrape` | per target scrape |
 | `tt-codeintel` | `codeintel.analyze` | per analysis run |
 | `tt-loadtest-ctl` | `loadtest.claim`, `loadtest.verify_domains` | only when a run is claimed / while a verification is pending; `loadtest.finish` / `.abort` are children of the claim |
 | `tt-loadtest-runner` | `loadtest.run` | per shard (remote parent = claim span, `TRACEPARENT`) |
 | `tt-trooper-cloud` | `discover <provider>`, `collect <provider>` | per step |
 
-ingest-writer's `process flush` is a real Kafka consumer (`messaging.system=kafka`, group) — not a job. Services with no
+ingest-writer's `process flush` is a real Kafka consumer (`messaging.system=kafka`, group) — not a job. So is alert-engine's
+stream consumer (`TT_ALERT_STREAM`): one `process <topic>` consumer span per topic per poll batch (group `tt-alert-stream`,
+`messaging.destination.name`, `messaging.batch.message_count`, `tt.self_records`); a batch of only `TT_SELF_PROJECT_ID` records
+produces no span (loop guard; alert-engine reads `TT_SELF_PROJECT_ID` too). Services with no
 traffic (an idle ingest-gw, a writer with no flushes besides self records) are listed via heartbeat / runtime metrics (§4).
 
 **ingest-gw / ingest-writer (loop protection, `services/ingest/internal/selfobs`):**
@@ -1173,9 +1195,11 @@ traffic (an idle ingest-gw, a writer with no flushes besides self records) are l
   and the log handler writes records with this context only locally. Unauthenticated requests (401/403) produce no span (so a wrong
   self key does not create a 401 loop). One `send <topic>` producer span per Kafka record (enqueue → ack); trace context is
   **not injected** into records (the customer record does not change).
-- writer: one consumer span `process flush` per flush (`trooper.process=flush`, `messaging.batch.message_count`,
-  `tt.self_records`) + one `INSERT <table>` per table batch (`db.system=clickhouse`, `db.operation.batch.size`; no span
-  per row). A flush made only of self records produces no span/log; a mixed flush is traced (it happens anyway because of other projects,
+- writer: one consumer span `process flush` per consumed topic per flush (`trooper.process=flush`,
+  `messaging.destination.name` = topic so `consumer_1m.topic` / the service map join gw's `send <topic>` producers to the writer,
+  that topic's `messaging.batch.message_count` / `tt.self_records`; a topic of only self records gets none). The largest topic's span
+  is the parent of one `INSERT <table>` per table batch (`db.system=clickhouse`, `db.operation.batch.size`; no span
+  per row) and of the replay S3 uploads (client spans `peer.service=s3`, scheme + host only); the other topics' spans link to it. A flush made only of self records produces no span/log; a mixed flush is traced (it happens anyway because of other projects,
   self data does not trigger an extra flush). The warning for an unresolvable self record is local only.
 - `TT_SELF_PROJECT_ID` = the project in the DSN; if it is `0` while a DSN is given, the service logs a warning at startup. With telemetry off
   (no `TROOPER_DSN`) there is no extra work/allocation on the hot path (`BenchmarkHTTPTraces` unchanged).
@@ -1188,14 +1212,22 @@ sent on the first error), `VITE_TROOPER_SAMPLE_RATE` (`1`), `VITE_TROOPER_ENV` (
 (default `<package version>+<git sha>`), `VITE_TROOPER_TRACE_PROPAGATION=false` (for an api whose CORS predates ADR-027;
 otherwise the preflight fails). Without a DSN the SDK chunks are not in the build at all; if both replay rates are 0, the replay chunk is not included.
 The view name is the react-router route template; `identify` uses only the internal user id (no email/name). Details: `apps/web/.env.example`.
+`TT_WEB_SOURCEMAP=hidden` (build-time, not `VITE_`) emits `*.js.map` without the `sourceMappingURL` comment for
+`trooper-cli upload-sourcemaps --app tt-web --release <VITE_TROOPER_VERSION>`; the maps are never served.
+
+**Demo (`deploy/demo`, ADR-031):** `TROOPER_PROFILING=true` on every service, both replay rates `1`, the symbolicator runs, and
+with the optional `DEMO_TROOPER_API_KEY` (kind `api`) every deploy uploads the `tt-web` sourcemaps and posts one deploy marker per
+`tt-*` service (`POST /api/v1/deploys`, source `ci`). Postgres preloads `pg_stat_statements` (compose `command`, migration
+`016_pg_stat_statements.sql`) so `tt-postgres` has top queries.
 
 **Infrastructure:** `deploy/self/agent.yaml` — trooper-agent; Postgres, ClickHouse, Redpanda, Redis receivers from compose + host
 metrics → self project. `make self`: applies the seed, starts the agent, prints the env the services need.
 The agent runs with `--agent-modes db,host` (binary + log in `deploy/self/.run/`, gitignored; `make self-down` stops it, calling `make self`
-again restarts it). db: Postgres `tt-postgres` (name `trooper` = the `db.namespace` of pgx spans), Redis
+again restarts it). db: Postgres `tt-postgres` (name `trooper` = the `db.namespace` of pgx spans), ClickHouse `tt-clickhouse`
+(engine `clickhouse`, name `telemetry` = the `db.namespace` of the services' ClickHouse spans, `credentialsRef: env:TT_SELF_CH_PASSWORD`;
+system tables + `system.query_log` for latency / top queries), Redis
 `tt-redis`, Redpanda `tt-redpanda` (only `^tt\.` topics and `^tt-` groups — demo topics on the same broker belong to the demo
 project; node metrics `:9644/public_metrics`). host: the machine + all compose containers via the Docker Engine API.
-**ClickHouse** has no engine in the collector: for now only container metrics (`tasktrooper-clickhouse-1`).
 
 **Notes:**
 - The notifier's outbound client is `RedactedTransport`, not otelhttp: the path of Slack/Teams/webhook URLs carries secrets →

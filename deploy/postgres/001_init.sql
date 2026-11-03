@@ -227,7 +227,7 @@ CREATE TABLE IF NOT EXISTS databases (
     project_id        bigint NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     slug              text NOT NULL,
     name              text NOT NULL,                       -- matches dependency name "<engine> · <name>"
-    engine            text NOT NULL CHECK (engine IN ('postgres', 'mysql', 'redis', 'mongodb')),
+    engine            text NOT NULL CHECK (engine IN ('postgres', 'mysql', 'redis', 'mongodb', 'clickhouse')),
     host              text NOT NULL,
     port              integer NOT NULL,
     collector         text NOT NULL CHECK (collector IN ('agent', 'cloud', 'direct')),

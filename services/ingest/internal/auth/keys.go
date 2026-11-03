@@ -161,7 +161,7 @@ func (c *Cache) Lookup(ctx context.Context, raw string) (*Key, error) {
 	})
 	if err != nil {
 		if ok { // Postgres down: serve the stale entry rather than reject traffic
-			c.log.Warn("api key lookup failed, serving stale entry", "err", err)
+			c.log.WarnContext(ctx, "api key lookup failed, serving stale entry", "err", err)
 			return c.hit(e.key)
 		}
 		return nil, err

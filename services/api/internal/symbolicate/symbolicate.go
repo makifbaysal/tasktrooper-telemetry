@@ -9,10 +9,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/tasktrooper/telemetry/services/api/internal/model"
+	"github.com/tasktrooper/telemetry/services/pkg/tenant"
 )
 
 // Timeout is the per-call budget (contract: 2 s).
@@ -33,10 +35,19 @@ type Result struct {
 	Symbolicated *bool         `json:"symbolicated,omitempty"`
 }
 
+// Internal credential headers (contracts §2), sent when the caller has no bearer key (dashboard cookie session).
+const (
+	HeaderInternal = "X-Trooper-Internal"
+	HeaderProject  = "X-Trooper-Project"
+)
+
 // Client talks to the symbolicator. A nil *Client or an empty BaseURL disables symbolication.
 type Client struct {
 	BaseURL string
 	HTTP    *http.Client
+	// InternalToken (TT_INTERNAL_TOKEN) authenticates calls without a caller bearer key as
+	// x-trooper-internal + x-trooper-project (the request's tenant). Empty = forward the caller's header only.
+	InternalToken string
 }
 
 // New returns a client for base ("" = disabled → nil).
@@ -48,7 +59,8 @@ func New(base string) *Client {
 	return &Client{BaseURL: base, HTTP: &http.Client{Timeout: Timeout}}
 }
 
-// Symbolicate resolves stack. authorization is forwarded as is (the caller's "Bearer <api key>").
+// Symbolicate resolves stack. A bearer authorization is forwarded as is (the caller's "Bearer <api key>");
+// without one (cookie session) the internal credential is used with the project of the tenant in ctx.
 // ok=false means the raw stack should be shown (service down, timeout, no artifacts, empty stack).
 func (c *Client) Symbolicate(ctx context.Context, authorization string, req Request) (stack string, frames []model.Frame, ok bool, err error) {
 	if c == nil || c.BaseURL == "" || strings.TrimSpace(req.Stack) == "" {
@@ -62,8 +74,15 @@ func (c *Client) Symbolicate(ctx context.Context, authorization string, req Requ
 		return req.Stack, nil, false, err
 	}
 	hr.Header.Set("Content-Type", "application/json")
-	if authorization != "" {
+	if isBearer(authorization) {
 		hr.Header.Set("Authorization", authorization)
+	} else if c.InternalToken != "" {
+		t, ok := tenant.From(ctx)
+		if !ok || t.ProjectID == 0 {
+			return req.Stack, nil, false, fmt.Errorf("symbolicator: no tenant for the internal credential")
+		}
+		hr.Header.Set(HeaderInternal, c.InternalToken)
+		hr.Header.Set(HeaderProject, strconv.FormatUint(uint64(t.ProjectID), 10))
 	}
 	hc := c.HTTP
 	if hc == nil {
@@ -93,4 +112,8 @@ func (c *Client) Symbolicate(ctx context.Context, authorization string, req Requ
 		r.Frames = []model.Frame{}
 	}
 	return r.Stack, r.Frames, sym, nil
+}
+
+func isBearer(h string) bool {
+	return len(h) > 7 && strings.EqualFold(h[:7], "bearer ") && strings.TrimSpace(h[7:]) != ""
 }

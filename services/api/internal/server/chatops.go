@@ -242,7 +242,7 @@ func (s *Server) slackCallback(w http.ResponseWriter, r *http.Request) {
 	ctx := stateCtx(r.Context(), st)
 	res, err := s.Slack.API.OAuthAccess(ctx, s.Slack.ClientID, s.Slack.ClientSecret, qs(r, "code"), s.publicAPI()+"/api/v1/integrations/slack/callback")
 	if err != nil {
-		s.Log.Warn("slack oauth failed", "err", err)
+		s.Log.WarnContext(r.Context(), "slack oauth failed", "err", err)
 		http.Redirect(w, r, withQuery(back, "slack", "error", "message", "Slack did not accept the installation"), http.StatusFound)
 		return
 	}
@@ -280,7 +280,7 @@ func (s *Server) githubCallback(w http.ResponseWriter, r *http.Request) {
 	ctx := stateCtx(r.Context(), st)
 	info, err := s.GitHub.Client.Installation(ctx, inst) // also proves the installation belongs to our app
 	if err != nil {
-		s.Log.Warn("github installation lookup failed", "err", err, "installation", inst)
+		s.Log.WarnContext(r.Context(), "github installation lookup failed", "err", err, "installation", inst)
 		http.Redirect(w, r, withQuery(back, "github", "error", "message", "installation not found for this app"), http.StatusFound)
 		return
 	}
@@ -333,7 +333,7 @@ func (s *Server) slackChannels(w http.ResponseWriter, r *http.Request) {
 		}
 		list, err := s.Slack.API.Channels(r.Context(), in.Token)
 		if err != nil {
-			s.Log.Warn("slack conversations.list failed", "err", err)
+			s.Log.WarnContext(r.Context(), "slack conversations.list failed", "err", err)
 			writeJSON(w, http.StatusBadGateway, apiError{Error: "Slack: " + err.Error()})
 			return
 		}
@@ -373,7 +373,7 @@ func (s *Server) githubRepos(w http.ResponseWriter, r *http.Request) {
 	}
 	repos, err := s.GitHub.Client.InstallationRepos(r.Context(), inst)
 	if err != nil {
-		s.Log.Warn("github installation repos failed", "err", err, "installation", inst)
+		s.Log.WarnContext(r.Context(), "github installation repos failed", "err", err, "installation", inst)
 		writeJSON(w, http.StatusBadGateway, apiError{Error: "GitHub: " + err.Error()})
 		return
 	}
@@ -453,7 +453,7 @@ func (s *Server) slackInteractions(w http.ResponseWriter, r *http.Request) {
 	msg := s.slackAction(r.Context(), in)
 	if msg != "" {
 		if err := s.Slack.API.Respond(r.Context(), in.ResponseURL, msg); err != nil {
-			s.Log.Warn("slack response_url failed", "err", err)
+			s.Log.WarnContext(r.Context(), "slack response_url failed", "err", err)
 		}
 	}
 	w.WriteHeader(http.StatusOK)
@@ -487,7 +487,7 @@ func (s *Server) slackAction(ctx context.Context, in slackInteraction) string {
 		return "That incident or monitor no longer exists."
 	}
 	if err != nil {
-		s.Log.Error("slack action", "err", err)
+		s.Log.ErrorContext(ctx, "slack action", "err", err)
 		return "TaskTrooper could not process this action, try again."
 	}
 	org := int64(t.OrgID)
@@ -504,7 +504,7 @@ func (s *Server) slackAction(ctx context.Context, in slackInteraction) string {
 		return "No TaskTrooper member has the email " + email + ": ask an org admin to invite you."
 	}
 	if err != nil {
-		s.Log.Error("slack action member lookup", "err", err)
+		s.Log.ErrorContext(ctx, "slack action member lookup", "err", err)
 		return "TaskTrooper could not process this action, try again."
 	}
 	if !store.RoleAtLeast(role, "member") {
@@ -525,7 +525,7 @@ func (s *Server) slackAction(ctx context.Context, in slackInteraction) string {
 		_, err = s.Store.PatchMonitor(ctx, target, model.MonitorPatch{MutedUntil: &until, MutedUntilSet: true})
 	}
 	if err != nil {
-		s.Log.Error("slack action failed", "err", err, "action", kind)
+		s.Log.ErrorContext(ctx, "slack action failed", "err", err, "action", kind)
 		return "TaskTrooper could not process this action, try again."
 	}
 	s.writeAudit(ctx, store.AuditRecord{OrgID: org, ProjectID: p.ProjectID, UserID: uid, Action: "slack." + kind, Target: target,

@@ -46,7 +46,7 @@ func addMonitorRefs(p map[string]any, m *model.Monitor) {
 func (e *Engine) deployContext(ctx context.Context, projectID uint32, service string, now time.Time) map[string]any {
 	d, err := e.st.RecentDeploy(ctx, int64(projectID), service, now, deployWindow)
 	if err != nil {
-		e.log.Warn("deploy context lookup failed", "service", service, "err", err)
+		e.log.WarnContext(ctx, "deploy context lookup failed", "service", service, "err", err)
 		return nil
 	}
 	if d == nil {

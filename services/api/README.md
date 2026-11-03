@@ -63,6 +63,7 @@ service of `deploy/docker-compose.yml` (profile `app`).
 | `TT_API_CORS_ORIGINS` | `http://localhost:*,http://127.0.0.1:*` | allowed browser origins: exact origins, `*` = any, `scheme://host:*` = any port on that host (dev default: every localhost port). Set exact origins in production |
 | `TT_SECRETS_KEY` | dev key (warns) | AES-256-GCM key for the `secrets` table (`services/pkg/secrets`; AAD = project id). Integration and notification-channel secrets are sealed with it and never returned |
 | `TT_SYMBOLICATOR_URL` | `http://localhost:8095` | `POST /v1/symbolicate` for error / RUM error detail (2 s timeout, raw stack on any failure; empty = disabled) |
+| `TT_INTERNAL_TOKEN` | — | internal credential for the symbolicator when the caller has no bearer key (dashboard sessions): `x-trooper-internal` + `x-trooper-project` (contracts §2). Same value as symbolicator / ingest-gw. Unset → session users get raw stacks |
 | `TT_POSTGRES_URL` | `postgres://trooper:trooper@localhost:5432/trooper?sslmode=disable` | |
 | `TT_CLICKHOUSE_URL` | `clickhouse://trooper:trooper@localhost:9000/telemetry` | clickhouse-go DSN |
 | `TT_API_CH_MAX_CONNS` | `20` | |
@@ -114,8 +115,10 @@ and CORS preflights produce no span; incoming `traceparent`/`baggage` from the d
 `traceparent`, `tracestate`, `baggage`), every ClickHouse statement of the store (`db.system=clickhouse` client span
 `SELECT <table>`, `db.query.text` through `trooper.SanitizeSQL` so the inlined tenant ids become `?`, `db.collection.name`,
 `db.namespace`; `Ready` pings are untraced), pgx, outgoing HTTP to symbolicator, Slack, GitHub, the OIDC provider and the
-`/integrations/test` / `/connections/test` targets, the LLM endpoint (`TT_ASSISTANT_API_URL`: assistant and incident summary) as a GenAI span (`llm` transport,
-content capture off), slog → OTel logs (stdout JSON unchanged, plus `trace_id`/`span_id`). Tenant = span attributes
+`/integrations/test` / `/connections/test` targets, the S3 replay store (`peer.service=s3`), the LLM endpoint (`TT_ASSISTANT_API_URL`: assistant and incident summary) as a GenAI span (`llm` transport,
+content capture off), slog → OTel logs (stdout JSON unchanged, plus `trace_id`/`span_id`, and `trooper.entry.route` /
+`trooper.entry.method` of the request for `*Context` calls → logs `route`). 500s call `trooper.CaptureError` (exception event with
+type, message and stack → Errors screen). The Docker image takes `--build-arg VERSION=<sha>` (→ `-X main.version`). Tenant = span attributes
 `tt.org_id` / `tt.project_id` only, never metric labels. The ingest gateway is never called from here.
 
 ## Local AI development
@@ -179,6 +182,9 @@ npx @redocly/cli lint openapi.yaml
   `log_pattern` (new patterns), `dlq` / `consumer_failures`, `rum_vital`, `crash_rate` — same window / `minRequests` /
   severity math as `services/alerting`.
 * Deploys: versions first seen in `spans` merged with Postgres `deploy_markers` (Vercel, CI, …); `?source=&service=`.
+  `POST /deploys` writes CI markers (source `ci`, API key or session), e.g.
+  `curl -H "Authorization: Bearer $KEY" -d '{"service":"tt-api","version":"'$SHA'","author":"ci","url":"https://…/runs/1"}' $API/api/v1/deploys`.
+* Infra databases / clusters also list targets seen only in trooper-agent metrics (static `agent.yaml`, `observed: true`; contracts §5).
 * Integrations (`/integrations`, ADR-012): secrets sealed into `secrets` (`credentials_ref = secret:<id>`), PATCH
   rotates in place, DELETE removes secrets; Vercel accepts `secret = {"token","drainSecret"}` (drain secret sealed
   separately → `config.drainSecretRef`). `POST /integrations/{id}/sync` stamps `config.syncRequestedAt` for

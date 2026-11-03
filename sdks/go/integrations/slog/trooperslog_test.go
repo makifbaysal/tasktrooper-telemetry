@@ -8,11 +8,13 @@ import (
 	"sync"
 	"testing"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/log/global"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 
+	trooper "github.com/makifbaysal/tasktrooper-telemetry/sdks/go"
 	trooperslog "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/slog"
 )
 
@@ -106,5 +108,56 @@ func TestNilNext(t *testing.T) {
 	slog.New(trooperslog.NewHandler("test", nil)).Info("x")
 	if len(exp.recs) != 1 {
 		t.Fatalf("records = %d", len(exp.recs))
+	}
+}
+
+func TestEntryAttrs(t *testing.T) {
+	tests := []struct {
+		name       string
+		method     string
+		route      string
+		wantRoute  string
+		wantMethod string
+	}{
+		{"route and method", "GET", "/orders/{id}", "/orders/:id", "GET"},
+		{"route only", "", "orders.process", "orders.process", ""},
+		{"no entry", "", "", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exp := setup(t)
+			ctx := context.Background()
+			if tt.route != "" {
+				var e *trooper.Entry
+				ctx, e = trooper.BeginEntry(ctx, tt.method, tt.route, nil)
+				defer e.Finish("")
+			}
+			var buf bytes.Buffer
+			next := slog.NewJSONHandler(&buf, nil)
+			slog.New(trooperslog.NewHandler("test", next)).InfoContext(ctx, "hello")
+
+			var line map[string]any
+			if err := json.Unmarshal(buf.Bytes(), &line); err != nil {
+				t.Fatalf("next output: %v (%q)", err, buf.String())
+			}
+			if got, _ := line["trooper.entry.route"].(string); got != tt.wantRoute {
+				t.Errorf("next route = %q, want %q", got, tt.wantRoute)
+			}
+			if got, _ := line["trooper.entry.method"].(string); got != tt.wantMethod {
+				t.Errorf("next method = %q, want %q", got, tt.wantMethod)
+			}
+
+			if len(exp.recs) != 1 {
+				t.Fatalf("otel records = %d", len(exp.recs))
+			}
+			got := map[string]string{}
+			exp.recs[0].WalkAttributes(func(kv attribute.KeyValue) bool {
+				got[string(kv.Key)] = kv.Value.AsString()
+				return true
+			})
+			if got["trooper.entry.route"] != tt.wantRoute || got["trooper.entry.method"] != tt.wantMethod {
+				t.Errorf("otel attrs = %v, want route=%q method=%q", got, tt.wantRoute, tt.wantMethod)
+			}
+		})
 	}
 }

@@ -251,6 +251,9 @@ is computed from entry spans with `faas.coldstart='true'`.
 RUM event types: `view_start`, `view_end`, `vital`, `resource`, `error`, `action`, `custom`, `session_start`.
 Common fields: `session_id`, `view_id`, `anonymous_id`, `user_id?`, `ts`, `service`, `version`, `env`, `device`, `connection`.
 
+`vital` view attribution (browser): load metrics (LCP, FCP, TTFB) carry the landing (initial) view; INP and CLS accumulate over
+the whole page life and are reported on hide, so they carry the view that is current at report time (falling back to the last view).
+
 ## Semantic conventions
 
 OTel semantic conventions are the basis. Full list of `trooper.*` attributes and how the writer reads them:

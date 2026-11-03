@@ -34,6 +34,8 @@ func NewDatabase(t config.Database, host HostOptions, log *slog.Logger) (Scraper
 		s, err = NewRedis(t, log)
 	case "mongodb":
 		s, err = NewMongoDB(t, log)
+	case "clickhouse":
+		s, err = NewClickHouse(t, log)
 	default:
 		return nil, fmt.Errorf("unknown engine %q", t.Engine)
 	}

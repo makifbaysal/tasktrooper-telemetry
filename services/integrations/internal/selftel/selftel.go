@@ -64,7 +64,7 @@ func Logger(log *slog.Logger) *slog.Logger {
 	if !Enabled() || log == nil {
 		return log
 	}
-	return slog.New(trooperslog.NewHandler(Config("").Service, log.Handler(), trooperslog.WithLevel(minLevel(log))))
+	return slog.New(entryHandler{trooperslog.NewHandler(Config("").Service, log.Handler(), trooperslog.WithLevel(minLevel(log)))})
 }
 
 func minLevel(log *slog.Logger) slog.Level {
@@ -107,7 +107,7 @@ func StartJob(ctx context.Context, name string, attrs ...attribute.KeyValue) (co
 // End records err (if any) and ends span.
 func End(span trace.Span, err error) {
 	if err != nil {
-		span.RecordError(err)
+		span.RecordError(err, trace.WithStackTrace(true))
 		span.SetStatus(codes.Error, err.Error())
 	}
 	span.End()

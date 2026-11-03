@@ -227,7 +227,7 @@ func (h *RepoHook) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if ev.fullName != "" {
 		all, err := h.Store.ReposByName(ctx, h.Provider, ev.fullName)
 		if err != nil {
-			log.Error("webhook repo lookup", "provider", h.Provider, "err", err)
+			log.ErrorContext(ctx, "webhook repo lookup", "provider", h.Provider, "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -247,12 +247,12 @@ func (h *RepoHook) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ids[i] = repo.ID
 	}
 	if err := h.Store.WebhookReceived(ctx, ids); err != nil {
-		log.Warn("webhook received_at", "provider", h.Provider, "err", err)
+		log.WarnContext(ctx, "webhook received_at", "provider", h.Provider, "err", err)
 	}
 	if delivery != "" {
 		fresh, err := h.Store.RecordDelivery(ctx, delivery, label)
 		if err != nil {
-			log.Error("webhook delivery record", "err", err)
+			log.ErrorContext(ctx, "webhook delivery record", "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -268,7 +268,7 @@ func (h *RepoHook) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if delivery != "" {
 			_ = h.Store.ForgetDelivery(context.WithoutCancel(ctx), delivery) // let the provider's retry through
 		}
-		log.Error("webhook", "provider", h.Provider, "event", label, "err", err)
+		log.ErrorContext(ctx, "webhook", "provider", h.Provider, "event", label, "err", err)
 		h.count(label, "error")
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return

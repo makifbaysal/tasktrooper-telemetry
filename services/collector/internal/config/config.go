@@ -113,7 +113,7 @@ type Database struct {
 	Slug string     `yaml:"slug" json:"slug"`
 	// Name is what services use in their dependency ("postgres · orders-db").
 	Name string `yaml:"name" json:"name"`
-	// Engine: postgres | mysql | redis | mongodb.
+	// Engine: postgres | mysql | redis | mongodb | clickhouse.
 	Engine string `yaml:"engine" json:"engine"`
 	Host   string `yaml:"host" json:"host"`
 	Port   int    `yaml:"port" json:"port"`
@@ -127,8 +127,8 @@ type Database struct {
 	// Collector-only (optional).
 	DSN      string `yaml:"dsn" json:"dsn"`           // inline DSN; wins over credentialsRef when set
 	User     string `yaml:"user" json:"user"`         // default trooper_monitor (redis: none)
-	Database string `yaml:"database" json:"database"` // postgres/mysql database to connect to
-	TLS      string `yaml:"tls" json:"tls"`           // postgres sslmode / mysql tls / redis "true"
+	Database string `yaml:"database" json:"database"` // postgres/mysql/clickhouse database to connect to
+	TLS      string `yaml:"tls" json:"tls"`           // postgres sslmode / mysql tls / redis + clickhouse "true"
 	Node     string `yaml:"node" json:"node"`         // node name (default host)
 	// HostMetrics: when the agent runs on the database host (sidecar / VM), report CPU/memory/disk
 	// of this machine for this database. nil = follow --host-metrics for agent-mode targets.
@@ -237,6 +237,8 @@ func DefaultPort(engine string) int {
 		return 6379
 	case "mongodb":
 		return 27017
+	case "clickhouse":
+		return 9000 // native protocol
 	}
 	return 0
 }
@@ -270,7 +272,7 @@ func LoadFile(path string) (*Config, error) {
 	return Parse(b)
 }
 
-var engines = []string{"postgres", "mysql", "redis", "mongodb"}
+var engines = []string{"postgres", "mysql", "redis", "mongodb", "clickhouse"}
 var kinds = []string{"kafka", "rabbitmq"}
 var collectors = []string{"agent", "cloud", "direct"}
 

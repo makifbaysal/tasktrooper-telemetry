@@ -52,7 +52,8 @@ func LooksLikeDSN(s string) bool {
 //   - else the secret is a password and the DSN is built from host/port/user/database.
 //
 // Shapes: postgres → postgres://user:pass@host:port/db?sslmode=…; mysql → user:pass@tcp(host:port)/db;
-// redis → redis://[user:pass@]host:port/0; mongodb → mongodb://user:pass@host:port.
+// redis → redis://[user:pass@]host:port/0; mongodb → mongodb://user:pass@host:port;
+// clickhouse → clickhouse://user:pass@host:port/db[?secure=true].
 func (d Database) ConnString() (string, error) {
 	if d.DSN != "" {
 		return os.ExpandEnv(d.DSN), nil
@@ -115,6 +116,20 @@ func (d Database) ConnString() (string, error) {
 		u := url.URL{Scheme: "mongodb", Host: hostport}
 		if secret != "" {
 			u.User = url.UserPassword(user, secret)
+		}
+		return u.String(), nil
+	case "clickhouse":
+		if user == "" {
+			user = DefaultUserSQL
+		}
+		u := url.URL{Scheme: "clickhouse", Host: hostport, Path: "/" + firstNonEmpty(d.Database, "default")}
+		if secret != "" {
+			u.User = url.UserPassword(user, secret)
+		} else {
+			u.User = url.User(user)
+		}
+		if d.TLS == "true" {
+			u.RawQuery = "secure=true"
 		}
 		return u.String(), nil
 	}

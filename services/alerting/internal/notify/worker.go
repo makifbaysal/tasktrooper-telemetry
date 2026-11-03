@@ -15,6 +15,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/otel/attribute"
 
+	trooper "github.com/makifbaysal/tasktrooper-telemetry/sdks/go"
+
 	"github.com/tasktrooper/telemetry/services/alerting/internal/obs"
 	"github.com/tasktrooper/telemetry/services/alerting/internal/selftel"
 )
@@ -152,7 +154,8 @@ func (w *Worker) Once(ctx context.Context) (int, error) {
 func (w *Worker) handle(ctx context.Context, r Row) {
 	// one notify.deliver job entry per delivery attempt (ADR-027, contracts §4); the empty outbox polls produce no spans
 	ctx, span := selftel.StartJob(ctx, "notify.deliver", attribute.Int64("tt.project_id", r.ProjectID),
-		attribute.String("tt.notification.kind", r.Kind), attribute.Int("tt.notification.attempt", r.Attempts+1))
+		attribute.String("tt.notification.kind", r.Kind), attribute.Int("tt.notification.attempt", r.Attempts+1),
+		trooper.AttrConsumerAttempt.Int(r.Attempts+1)) // trooper.consumer.attempt: retries column (contracts §4)
 	var serr error
 	defer func() { selftel.End(span, serr) }()
 	ch, err := w.Resolve(ctx, r.ProjectID, r.Channel)
@@ -174,17 +177,20 @@ func (w *Worker) handle(ctx context.Context, r Row) {
 		span.SetAttributes(attribute.String("tt.channel.type", orDefault(ch.Type, "unknown")))
 		w.count("sent", ch.Type)
 		if merr := w.markSent(ctx, r, ch); merr != nil {
-			w.Log.Error("mark sent failed", "notification", r.ID, "err", merr)
+			w.Log.ErrorContext(ctx, "mark sent failed", "notification", r.ID, "err", merr)
 		}
 		return
 	}
 	serr = err
 	span.SetAttributes(attribute.String("tt.channel.type", orDefault(ch.Type, "unknown")))
 	terminal := IsPermanent(err) || r.Attempts+1 >= w.Cfg.MaxAttempts
+	if terminal {
+		trooper.MarkDLQ(ctx) // final give-up: the row stays failed in the outbox (DLQ column)
+	}
 	w.count(map[bool]string{true: "failed", false: "retry"}[terminal], ch.Type)
-	w.Log.Warn("notification delivery failed", "notification", r.ID, "channel", r.Channel, "attempt", r.Attempts+1, "terminal", terminal, "err", err)
+	w.Log.WarnContext(ctx, "notification delivery failed", "notification", r.ID, "channel", r.Channel, "attempt", r.Attempts+1, "terminal", terminal, "err", err)
 	if merr := w.markFailed(ctx, r, err, terminal); merr != nil {
-		w.Log.Error("mark failed failed", "notification", r.ID, "err", merr)
+		w.Log.ErrorContext(ctx, "mark failed failed", "notification", r.ID, "err", merr)
 	}
 }
 

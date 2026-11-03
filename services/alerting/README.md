@@ -347,14 +347,19 @@ What is traced:
   cycle; standby replicas produce no span); children `alert.evaluate` per monitor (`tt.monitor.kind`, `tt.monitor.id`,
   `tt.org_id`, `tt.project_id`, `tt.alert.breached`, `tt.alert.no_data`, `tt.alert.stream`), `alert.kpis`, and every
   Postgres (pgx, sanitized SQL) and ClickHouse query (`db.system=clickhouse`, `db.namespace`, `SanitizeSQL`'d
-  `db.query.text`) under them. Stream-triggered evaluations are root `alert.evaluate` spans; stream records themselves are
-  not traced (they are the customers' ingest traffic). Job entry `alert.ai_quota_check` per quota check (every replica runs it).
+  `db.query.text`) under them. Stream-triggered evaluations are root `alert.evaluate` spans. The stream consumer emits one
+  `process <topic>` consumer span per topic per poll batch (group `tt-alert-stream`, `messaging.batch.message_count`,
+  `tt.self_records`; not per record); a batch of only `TT_SELF_PROJECT_ID` records gets no span. Job entry `alert.ai_quota_check` per quota check (every replica runs it).
 - **notifier:** job entry `notify.deliver` per delivery attempt (`tt.project_id`, `tt.notification.kind`,
-  `tt.notification.attempt`, `tt.channel.type`) with Postgres and outgoing HTTP client spans. The HTTP client spans come from
+  `tt.notification.attempt` + `trooper.consumer.attempt`, `tt.channel.type`; `trooper.consumer.dlq=true` on the final
+  give-up) with Postgres, outgoing HTTP and `smtp send` (`peer.service=smtp`) client spans. The HTTP client spans come from
   `selftel.RedactedTransport`, not otelhttp: they record only scheme + host (`url.full`, `server.address`), method and status,
   never the path or query — Slack/Teams/webhook URLs carry secrets there. Empty outbox polls produce no spans (DB spans are
   only created under a recording parent).
 - Logs: the JSON slog output is unchanged and additionally exported as OTel logs (with `trace_id`/`span_id` locally).
+  Code logs with the `*Context` methods; records under a job/consumer entry also get `trooper.entry.route` /
+  `trooper.entry.method` (`selftel.EntryRoute`) → the logs `route` column. Errors on spans carry a stack trace.
+- `TT_SELF_PROJECT_ID` (alert-engine, stream consumer loop guard) and the Dockerfile `ARG VERSION` (→ `-X main.version`).
 - Tenant ids appear only as span attributes, never as metric labels.
 
 ## Tests

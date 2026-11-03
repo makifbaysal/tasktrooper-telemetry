@@ -294,10 +294,14 @@ go-redis hooks — the request path is byte-for-byte the old one (`BenchmarkHTTP
   `tt.org_id`, `tt.project_id`; children: go-redis (rate limit), pgx (integration lookups) and one producer span
   `send <topic>` per Kafka record (enqueue → broker ack). No trace context is injected into the records.
   `/healthz` and `/metrics` and unauthenticated requests (401/403) get no span.
-- writer, per flush: consumer span `process flush` (`trooper.process=flush`, `messaging.batch.message_count`,
-  `tt.self_records`) with one ClickHouse client span `INSERT <table>` per table batch (`db.system=clickhouse`,
-  `db.operation.batch.size`; all retries inside one span) — never per row.
-- slog → OTel logs at the local level; the local JSON logger stays as before (records get `trace_id`/`span_id`).
+- writer, per flush: one consumer span `process flush` per consumed topic (`trooper.process=flush`,
+  `messaging.destination.name`, that topic's `messaging.batch.message_count` / `tt.self_records`); the largest topic's span
+  parents one ClickHouse client span `INSERT <table>` per table batch (`db.system=clickhouse`,
+  `db.operation.batch.size`; all retries inside one span) — never per row — and the replay S3 uploads (`peer.service=s3`,
+  scheme + host only, no trace headers on signed requests); the other topics' spans link to it.
+- slog → OTel logs at the local level; the local JSON logger stays as before (records get `trace_id`/`span_id`, and
+  `trooper.entry.route` / `trooper.entry.method` under a request or flush entry). Errors on spans carry a stack trace.
+- `TROOPER_VERSION` defaults to the build version (Dockerfile `ARG VERSION` → `-X main.version`, default `dev`).
 
 **Loop guard.** The gw knows the project only after key auth, so the server span starts lazily after authentication
 (with the arrival time as start). For the self project the context instead gets a fixed, *unsampled* parent span context:

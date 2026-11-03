@@ -120,7 +120,7 @@ func Run(ctx context.Context, st *store.Store, cfg Config, log *slog.Logger) (er
 
 	exp, err := otlpx.Config(cfg.IngestURL, cfg.DSN, cfg.InternalToken, run.ProjectID)
 	if err != nil {
-		log.Warn("metrics export disabled", "err", err)
+		log.WarnContext(ctx, "metrics export disabled", "err", err)
 	}
 	if exp != nil {
 		exp.RunID, exp.Region, exp.Version = fmt.Sprint(cfg.RunID), cfg.Region, cfg.Version
@@ -136,7 +136,7 @@ func Run(ctx context.Context, st *store.Store, cfg Config, log *slog.Logger) (er
 					ectx, c := context.WithTimeout(context.WithoutCancel(pollCtx), 10*time.Second)
 					defer c()
 					if err := exp.Export(ectx, w, vus, from, now); err != nil {
-						log.Warn("metrics export", "err", err)
+						log.WarnContext(ctx, "metrics export", "err", err)
 					}
 				}(tk.Window, tk.Live.Vus)
 			}
@@ -146,12 +146,12 @@ func Run(ctx context.Context, st *store.Store, cfg Config, log *slog.Logger) (er
 			uctx, c := context.WithTimeout(context.WithoutCancel(pollCtx), 5*time.Second)
 			defer c()
 			if err := st.ShardUpdate(uctx, cfg.RunID, cfg.Region, tk.Live, tk.Total); err != nil {
-				log.Warn("shard update", "err", err)
+				log.WarnContext(ctx, "shard update", "err", err)
 			}
 		}})
 	ab := e.Abort
 	abortFn.Store(&ab)
-	log.Info("shard starting", "mode", plan.Mode, "steps", len(plan.Steps), "share", cfg.Share, "duration", spec.Duration(plan.Stages).String())
+	log.InfoContext(ctx, "shard starting", "mode", plan.Mode, "steps", len(plan.Steps), "share", cfg.Share, "duration", spec.Duration(plan.Stages).String())
 	started := time.Now()
 	res := e.Run(runCtx) // ctx (SIGTERM) → "stopped"; abortFn → user/gate reasons
 	stageSpans(ctx, plan.Stages, started, time.Now())

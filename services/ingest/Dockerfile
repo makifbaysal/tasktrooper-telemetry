@@ -10,8 +10,9 @@ WORKDIR /src/services/ingest
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY services/ingest/ .
 ARG CMD=ingest-gw
+ARG VERSION=dev
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    go build -trimpath -ldflags="-s -w" -o /out/app ./cmd/${CMD}
+    go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/app ./cmd/${CMD}
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/app /app

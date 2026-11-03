@@ -100,7 +100,7 @@ func (i *Internal) Lookup(ctx context.Context, token, project string) (*Key, err
 	})
 	if err != nil {
 		if ok {
-			i.log.Warn("project lookup failed, serving stale entry", "project", pid, "err", err)
+			i.log.WarnContext(ctx, "project lookup failed, serving stale entry", "project", pid, "err", err)
 			return hitProject(e.key)
 		}
 		return nil, err

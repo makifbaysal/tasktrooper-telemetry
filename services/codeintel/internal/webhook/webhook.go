@@ -106,7 +106,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if event == "push" || !appSigned {
 		all, err := h.Store.ReposByFullName(ctx, p.Repository.FullName)
 		if err != nil {
-			log.Error("webhook repo lookup", "err", err)
+			log.ErrorContext(ctx, "webhook repo lookup", "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -131,14 +131,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				ids[i] = repo.ID
 			}
 			if err := h.Store.WebhookReceived(ctx, ids); err != nil {
-				log.Warn("webhook received_at", "err", err)
+				log.WarnContext(ctx, "webhook received_at", "err", err)
 			}
 		}
 	}
 	if delivery != "" {
 		fresh, err := h.Store.RecordDelivery(ctx, delivery, event)
 		if err != nil {
-			log.Error("webhook delivery record", "err", err)
+			log.ErrorContext(ctx, "webhook delivery record", "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -154,7 +154,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if delivery != "" {
 			_ = h.Store.ForgetDelivery(context.WithoutCancel(ctx), delivery) // let GitHub's redelivery through
 		}
-		log.Error("webhook", "event", event, "delivery", delivery, "err", err)
+		log.ErrorContext(ctx, "webhook", "event", event, "delivery", delivery, "err", err)
 		h.count(event, "error")
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return

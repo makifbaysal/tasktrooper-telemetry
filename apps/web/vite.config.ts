@@ -20,5 +20,7 @@ function webVersion(mode: string): string {
 export default defineConfig(({ mode }) => ({
   plugins: [react()],
   define: { __TT_WEB_VERSION__: JSON.stringify(webVersion(mode)) },
+  // TT_WEB_SOURCEMAP=hidden: *.js.map without the sourceMappingURL comment, for `trooper-cli upload-sourcemaps` (deploy/demo/deploy.sh)
+  build: { sourcemap: process.env.TT_WEB_SOURCEMAP === 'hidden' ? 'hidden' : false },
   resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
 }));

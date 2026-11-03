@@ -130,7 +130,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	for {
 		err := e.Tick(ctx) // alert.cycle job entry when this replica holds shards
 		if err != nil && ctx.Err() == nil {
-			e.log.Error("cycle failed", "err", err)
+			e.log.ErrorContext(ctx, "cycle failed", "err", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -163,14 +163,14 @@ func (e *Engine) Tick(ctx context.Context) (err error) {
 	if len(held) == 0 {
 		e.reg.Set("tt_alert_leader", 0)
 		if len(e.held) > 0 {
-			e.log.Info("lost leadership; standing by")
+			e.log.InfoContext(ctx, "lost leadership; standing by")
 		}
 		e.reset(nil)
 		return nil
 	}
 	e.reg.Set("tt_alert_leader", 1)
 	if !slices.Equal(held, e.held) {
-		e.log.Info("shards acquired", "held", held, "of", e.elector.Shards)
+		e.log.InfoContext(ctx, "shards acquired", "held", held, "of", e.elector.Shards)
 		e.reset(held)
 	}
 	if err := e.refresh(ctx); err != nil {
@@ -191,9 +191,9 @@ func (e *Engine) Tick(ctx context.Context) (err error) {
 	e.evalKpis(ctx, now)
 	if e.StreamLeader() { // one instance (shard 0): Slack App acks for every shard
 		if n, err := e.st.EnqueueAcks(ctx); err != nil {
-			e.log.Error("enqueue ack notifications", "err", err)
+			e.log.ErrorContext(ctx, "enqueue ack notifications", "err", err)
 		} else if n > 0 {
-			e.log.Info("ack notifications enqueued", "count", n)
+			e.log.InfoContext(ctx, "ack notifications enqueued", "count", n)
 		}
 	}
 	e.reg.Set("tt_alert_cycle_seconds", time.Since(start).Seconds())
@@ -246,7 +246,7 @@ func (e *Engine) refresh(ctx context.Context) error {
 	e.fp, e.loadedAt = fp, time.Now()
 	e.reg.Set("tt_alert_monitors", float64(len(e.monitors)))
 	e.reg.Set("tt_alert_kpis", float64(len(e.kpis)))
-	e.log.Debug("monitors loaded", "monitors", len(e.monitors), "kpis", len(e.kpis))
+	e.log.DebugContext(ctx, "monitors loaded", "monitors", len(e.monitors), "kpis", len(e.kpis))
 	return nil
 }
 
@@ -274,7 +274,7 @@ func (e *Engine) evalMonitors(ctx context.Context, now time.Time) {
 		go func(m *model.Monitor) {
 			defer func() {
 				if r := recover(); r != nil {
-					e.log.Error("monitor evaluation panicked", "monitor", m.ID, "panic", r)
+					e.log.ErrorContext(ctx, "monitor evaluation panicked", "monitor", m.ID, "panic", r)
 				}
 				<-sem
 				wg.Done()
@@ -347,7 +347,7 @@ func (e *Engine) evalComposite(ctx context.Context, m *model.Monitor, now time.T
 	states, err := e.st.MonitorStates(ctx, int64(m.ProjectID), ids)
 	if err != nil {
 		e.reg.Add("tt_alert_evaluations_total", 1, "kind", m.Kind, "outcome", "error")
-		e.log.Error("composite children", "monitor", m.ID, "err", err)
+		e.log.ErrorContext(ctx, "composite children", "monitor", m.ID, "err", err)
 		return
 	}
 	e.apply(ctx, m, CompositeResult(m.Query.Op, ids, states), now, false)
@@ -440,12 +440,12 @@ func (e *Engine) apply(ctx context.Context, m *model.Monitor, res eval.Result, n
 		}
 	}
 	if perr != nil {
-		e.log.Error("persist failed", "monitor", m.ID, "transition", tr.String(), "err", perr)
+		e.log.ErrorContext(ctx, "persist failed", "monitor", m.ID, "transition", tr.String(), "err", perr)
 		return // state stays as it was; the transition is retried next cycle
 	}
 	if tr != statemachine.None {
 		e.reg.Add("tt_alert_transitions_total", 1, "to", tr.String())
-		e.log.Info("monitor transition", "monitor", m.ID, "name", m.Name, "transition", tr.String(), "value", res.Value, "stream", escalateOnly)
+		e.log.InfoContext(ctx, "monitor transition", "monitor", m.ID, "name", m.Name, "transition", tr.String(), "value", res.Value, "stream", escalateOnly)
 	}
 	e.mu.Lock()
 	m.State, m.StateSince, m.LastValue = next.State, next.Since, value
@@ -493,12 +493,12 @@ func (e *Engine) remindMonitors(ctx context.Context, now time.Time) {
 			return p
 		})
 		if err != nil {
-			e.log.Error("reminder failed", "monitor", m.ID, "err", err)
+			e.log.ErrorContext(ctx, "reminder failed", "monitor", m.ID, "err", err)
 			continue
 		}
 		if sent {
 			e.reg.Add("tt_alert_reminders_total", 1)
-			e.log.Info("reminder enqueued", "incident", due.IncidentID, "monitor", m.ID, "n", due.N)
+			e.log.InfoContext(ctx, "reminder enqueued", "incident", due.IncidentID, "monitor", m.ID, "n", due.N)
 		}
 	}
 }
@@ -534,7 +534,7 @@ func (e *Engine) analyze(ctx context.Context, org, project uint32, service, rout
 		res, _, err := rca.Analyze(rctx, src, service, route, method, unit)
 		if err != nil {
 			e.reg.Add("tt_alert_rca_total", 1, "outcome", "error")
-			e.log.Warn("root cause analysis failed", "service", service, "route", route, "err", err)
+			e.log.WarnContext(ctx, "root cause analysis failed", "service", service, "route", route, "err", err)
 		} else {
 			e.reg.Add("tt_alert_rca_total", 1, "outcome", "ok")
 			c := rca.Compact(res)
@@ -544,7 +544,7 @@ func (e *Engine) analyze(ctx context.Context, org, project uint32, service, rout
 	// Kubernetes / host candidates of the service (contracts §20); best effort
 	pods, hosts, err := eval.InfraSignals(rctx, e.ch, org, project, service, now)
 	if err != nil {
-		e.log.Warn("infra root cause signals failed", "service", service, "err", err)
+		e.log.WarnContext(ctx, "infra root cause signals failed", "service", service, "err", err)
 		return out
 	}
 	return rca.ApplyInfra(out, service, unit, rca.InfraCandidates(pods, hosts))
@@ -596,7 +596,7 @@ func (e *Engine) fire(ctx context.Context, m *model.Monitor, res eval.Result, co
 	}
 	id, created, err := e.st.Open(ctx, inc, ms, payload)
 	if err == nil && created {
-		e.log.Info("incident opened", "incident", id, "monitor", m.ID, "channels", m.Channels, "suppressed", inc.Suppressed)
+		e.log.InfoContext(ctx, "incident opened", "incident", id, "monitor", m.ID, "channels", m.Channels, "suppressed", inc.Suppressed)
 	}
 	return err
 }

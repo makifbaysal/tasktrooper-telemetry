@@ -305,6 +305,7 @@ export function DatabaseDetail() {
 // =================================================================== connect
 const ENGINES: { id: DbEngine; label: string }[] = [
   { id: 'postgres', label: 'PostgreSQL' }, { id: 'mysql', label: 'MySQL' }, { id: 'redis', label: 'Redis' }, { id: 'mongodb', label: 'MongoDB' },
+  { id: 'clickhouse', label: 'ClickHouse' },
 ];
 const COLLECTORS: { id: Collector; label: string }[] = [
   { id: 'agent', label: 'Agent' }, { id: 'cloud', label: 'Cloud' }, { id: 'direct', label: 'Direct' },
@@ -314,6 +315,7 @@ const GRANTS: Record<DbEngine, string> = {
   mysql: "CREATE USER 'trooper_monitor'@'%' IDENTIFIED BY '…';\nGRANT PROCESS, REPLICATION CLIENT, SELECT ON performance_schema.* TO 'trooper_monitor'@'%';",
   redis: 'ACL SETUSER trooper_monitor on >… +info +slowlog +latency +client|list +config|get -@all',
   mongodb: 'db.createUser({ user: "trooper_monitor", pwd: "…", roles: [{ role: "clusterMonitor", db: "admin" }] })',
+  clickhouse: "CREATE USER trooper_monitor IDENTIFIED BY '…';\nGRANT SELECT ON system.* TO trooper_monitor;\n-- latency + top queries read system.query_log (log_queries = 1, the default)",
 };
 /** Providers without a cloud integration yet: connected one database at a time. */
 const CLOUD: Record<DbEngine, string[]> = {
@@ -321,6 +323,7 @@ const CLOUD: Record<DbEngine, string[]> = {
   mysql: ['Azure Database for MySQL'],
   redis: ['Azure Cache for Redis'],
   mongodb: ['MongoDB Atlas', 'AWS DocumentDB'],
+  clickhouse: ['ClickHouse Cloud'],
 };
 /** Managed services a cloud integration discovers by itself (Settings → Integrations). */
 const DISCOVERED: Record<DbEngine, string> = {
@@ -328,6 +331,7 @@ const DISCOVERED: Record<DbEngine, string> = {
   mysql: 'AWS RDS / Aurora and Google Cloud SQL',
   redis: 'AWS ElastiCache and Google Memorystore',
   mongodb: '',
+  clickhouse: '',
 };
 
 function ConnectDatabase({ onClose, onDone }: { onClose: () => void; onDone: (id: string) => void }) {

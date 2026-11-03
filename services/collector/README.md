@@ -1,6 +1,6 @@
 # trooper-agent (services/collector)
 
-Database, message-broker, host and Kubernetes collector (modes below). In `db` mode it reads statistics from PostgreSQL, MySQL, Redis, MongoDB, Kafka and
+Database, message-broker, host and Kubernetes collector (modes below). In `db` mode it reads statistics from PostgreSQL, MySQL, Redis, MongoDB, ClickHouse, Kafka and
 RabbitMQ with read-only monitoring users and ships them to TaskTrooper as **OTLP metrics** (contracts §5)
 via the OpenTelemetry Go SDK (`otlpmetrichttp`) to ingest-gw. It never consumes or publishes messages and
 never runs anything but catalog/statistics queries.
@@ -8,7 +8,7 @@ never runs anything but catalog/statistics queries.
 ```
 targets (static YAML and/or GET /api/v1/internal/collector-config every 60 s)
    └─ one loop per target, every `interval` (15 s), per-target `timeout`
-        └─ scraper (pgx / go-sql-driver / go-redis / mongo-driver v2 / franz-go kadm / RabbitMQ management API /
+        └─ scraper (pgx / go-sql-driver / go-redis / mongo-driver v2 / clickhouse-go v2 / franz-go kadm / RabbitMQ management API /
                     Prometheus text endpoints / gopsutil)
              └─ emitter: gauges (latest snapshot per target) + delta sums (query calls/ms/rows)
                   └─ OTLP/HTTP protobuf, gzip → {TT_DSN host}/v1/metrics, header x-trooper-key
@@ -286,15 +286,15 @@ fields are rejected (typo safety); unknown JSON fields are ignored (forward comp
 | Field | Source | |
 |---|---|---|
 | `id`, `slug`, `name` | row | `trooper.db.id` = `slug` ‖ `id` ‖ `name`; `trooper.db.name` = `name` (the dependency name `postgres · orders-db`) |
-| `engine` | row | `postgres` \| `mysql` \| `redis` \| `mongodb` |
+| `engine` | row | `postgres` \| `mysql` \| `redis` \| `mongodb` \| `clickhouse` (native protocol, default port 9000) |
 | `host`, `port` | row | port defaults per engine |
 | `collector` | row | `agent` \| `direct` \| `cloud` (filter with `--modes`) |
 | `credentialsRef` | row | `env:NAME` or `file:/path`. The secret is a **full DSN/URL** (used as is) or a **bare password** (DSN built from host/port/user/database) |
 | `cloudResourceId`, `env` | row | passed through, not used yet |
 | `dsn` | agent | inline DSN (`$VARS` expanded); wins over `credentialsRef` |
 | `user` | agent | default `trooper_monitor` (Redis: none / ACL user) |
-| `database` | agent | Postgres/MySQL database to connect to (Postgres default `postgres`) |
-| `tls` | agent | Postgres `sslmode` (default `prefer`), MySQL `tls=` value, Redis `"true"` → `rediss://` |
+| `database` | agent | Postgres/MySQL/ClickHouse database to connect to (Postgres default `postgres`, ClickHouse `default`) |
+| `tls` | agent | Postgres `sslmode` (default `prefer`), MySQL `tls=` value, Redis `"true"` → `rediss://`, ClickHouse `"true"` → `secure=true` (TLS, usually port 9440) |
 | `node` | agent | `trooper.db.node` (default host) |
 | `hostMetrics` | agent | override `--host-metrics` for this database |
 | `interval`, `timeout`, `topQueries` (50), `slowQueryMs` (500) | agent | |
@@ -353,6 +353,9 @@ CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 CREATE USER 'trooper_monitor'@'%' IDENTIFIED BY '…';
 GRANT PROCESS, REPLICATION CLIENT ON *.* TO 'trooper_monitor'@'%';
 GRANT SELECT ON performance_schema.* TO 'trooper_monitor'@'%';
+-- ClickHouse (latency / slow / top queries read system.query_log: log_queries = 1, the default)
+CREATE USER trooper_monitor IDENTIFIED BY '…';
+GRANT SELECT ON system.* TO trooper_monitor;
 ```
 ```js
 // MongoDB (top queries: $queryStats needs 7.0.12+/8.0 — clusterMonitor includes queryStatsRead; on
@@ -406,8 +409,25 @@ metrics are per node):
 | `query.calls` / `total_ms` / `rows` | `$queryStats`: Δ`execCount` / Δ`totalExecMicros.sum` / Δ`docsReturned.sum` per key, merged per `queryShapeHash`; hash = first 64 bits of `queryShapeHash`; text = `<command> <db>.<coll> <shape JSON>` (literals are already `?string`/`?number`). Fallback: `system.profile` entries since the last scrape in every database with profiling on (only what the profiler kept — at level 1 just ops ≥ slowms), grouped by a normalized shape (literals → `"?"`, session/cursor fields dropped), hash = FNV-1a of that text |
 | `query.p95_ms` | `$queryStats`: mean + 2σ from `totalExecMicros.sumOfSquares` (cumulative); profiler: interval p95 of `millis` |
 
+**ClickHouse** (`db.system=clickhouse`, clickhouse-go v2 native protocol, user with `SELECT ON system.*`; role is always
+`primary` — replicas are multi-leader):
+
+| Metric | Source |
+|---|---|
+| `connections` / `max_connections` | `system.metrics` TCP + HTTP + MySQL + PostgreSQL + Interserver connections / `system.server_settings.max_connections` (23.3+) |
+| `ops` (/s) | Δ`Query` (`system.events`) |
+| `trooper.db.errors` (/min, **custom** → `metrics` table) | Δ`FailedQuery` |
+| `hit_ratio` | Δ`MarkCacheHits` / Δ(hits + `MarkCacheMisses`) |
+| `cpu` / `memory` | `system.asynchronous_metrics`: `OSUserTimeNormalized` + `OSSystemTimeNormalized` / `MemoryResident` ÷ min(`CGroupMemoryTotal`, `OSMemoryTotal`) |
+| `disk` | 1 − Σ`free_space` / Σ`total_space` of `system.disks` |
+| `replication_lag` (ms) | max `system.replicas.absolute_delay` × 1000; only when replicated tables exist |
+| `latency.p95` / `slow` (/min) | `system.query_log` (`QueryFinish` + `ExceptionWhileProcessing`, initial queries only) in a server-time window (cursor, `now() − 10 s`] — the lag covers the log's 7.5 s flush interval; first scrape only sets the cursor, a gap longer than 10 intervals is capped to one interval. `slow` = queries with `query_duration_ms ≥ slowQueryMs` |
+| `query.calls` / `total_ms` / `rows` / `p95_ms` | same window grouped by `normalized_query_hash` (hash as is); text = `normalizeQuery(query)` (literals → `?`); rows = `written_rows` for inserts, else `result_rows`; p95 = interval `quantile(0.95)(query_duration_ms)` |
+
+Every agent statement starts with `/* trooper-agent */`; those rows are excluded from `query_log` results (`ops` still counts them, ≈ 0.5/s).
+
 Query attributes: `trooper.db.id`, `trooper.db.query.hash` (decimal uint64: pg `queryid`; MySQL first 64 bits
-of `DIGEST`; Redis FNV-1a of the command), `db.query.text` (engine-normalized — `$1` / `?` — whitespace collapsed,
+of `DIGEST`; Redis FNV-1a of the command; ClickHouse `normalized_query_hash`), `db.query.text` (engine-normalized — `$1` / `?` — whitespace collapsed,
 ≤ 1 KB). Only the top `topQueries` statements by DB time in the interval are sent. A statement that first
 appears between two scrapes counts entirely in that interval.
 
@@ -471,6 +491,8 @@ Counter-based values need two scrapes. RabbitMQ: without `nodes`, `nodeMetrics: 
   detected at start-up (a Podman socket enabled later needs an agent restart); the Windows HostProcess image is built
   but not exercised on a real Windows node yet.
 * Kafka share groups (KIP-932) and streams groups; Kerberos (GSSAPI).
+* ClickHouse clusters: each server is its own target (point the agent at every replica/shard); `system.query_log` is per
+  server, so a `Distributed` query is counted on the initiator only.
 * MongoDB sharded clusters via `mongos` (point the agent at each shard's mongod instead); `$queryStats` on
   self-managed servers needs `internalQueryStatsRateLimit` set (0 = off by default).
 * Cloud mode (CloudWatch / RDS / MSK metrics) is a separate integration; this agent only does SQL/protocol scraping for `cloud` targets that have credentials.

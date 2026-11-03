@@ -1,6 +1,8 @@
 package selftel
 
 import (
+	"context"
+	"net"
 	"net/http"
 	"strconv"
 
@@ -61,4 +63,19 @@ func (t *redacted) RoundTrip(req *http.Request) (*http.Response, error) {
 		span.SetStatus(codes.Error, "")
 	}
 	return resp, nil
+}
+
+// StartClient starts a client span to a non-HTTP peer (e.g. SMTP) at addr ("host:port"): peer.service = peer,
+// server.address / server.port, network.protocol.name = peer. End it with End.
+func StartClient(ctx context.Context, name, peer, addr string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
+	kv := append([]attribute.KeyValue{attribute.String("peer.service", peer), attribute.String("network.protocol.name", peer)}, attrs...)
+	if host, port, err := net.SplitHostPort(addr); err == nil {
+		kv = append(kv, attribute.String("server.address", host))
+		if n, err := strconv.Atoi(port); err == nil {
+			kv = append(kv, attribute.Int("server.port", n))
+		}
+	} else if addr != "" {
+		kv = append(kv, attribute.String("server.address", addr))
+	}
+	return tracer().Start(ctx, name, trace.WithSpanKind(trace.SpanKindClient), trace.WithAttributes(kv...))
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/makifbaysal/tasktrooper-telemetry/sdks/go/llm"
 
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/model"
+	"github.com/tasktrooper/telemetry/services/codeintel/internal/selftel"
 	"github.com/tasktrooper/telemetry/services/pkg/llmapi"
 )
 
@@ -78,7 +79,14 @@ func NewLLM(cfg llmapi.Config) *LLM {
 	if !cfg.Enabled() {
 		return nil
 	}
-	hc := llm.HTTPClient(&http.Client{Timeout: 5 * time.Minute}, llm.WithProvider(cfg.Host(), cfg.Provider()))
+	// The HTTP client span (peer.service = API host) sits under the GenAI span, so connection/TLS time and
+	// status codes of the LLM endpoint show up like any other dependency.
+	peer := cfg.Host()
+	if peer == "" {
+		peer = "llm"
+	}
+	base := &http.Client{Timeout: 5 * time.Minute, Transport: selftel.Transport(nil, peer)}
+	hc := llm.HTTPClient(base, llm.WithProvider(cfg.Host(), cfg.Provider()))
 	return &LLM{client: &llmapi.Client{Config: cfg, HTTP: hc, Retries: 3}, model: cfg.Model, BatchSize: 15,
 		LiteBatchSize: 30, MaxChars: 6000, Log: slog.Default()}
 }
@@ -317,11 +325,11 @@ func (l *LLM) Enrich(ctx context.Context, repo RepoSummary, items []*model.Item,
 			for _, rest := range batches[i+1:] {
 				out.Skipped += len(rest.items)
 			}
-			l.Log.Info("llm enrichment stopped by AI quota", "reason", out.Reason, "skipped", out.Skipped)
+			l.Log.InfoContext(ctx, "llm enrichment stopped by AI quota", "reason", out.Reason, "skipped", out.Skipped)
 			break
 		}
 		if err != nil {
-			l.Log.Warn("llm enrichment batch failed", "err", err, "items", len(b.items))
+			l.Log.WarnContext(ctx, "llm enrichment batch failed", "err", err, "items", len(b.items))
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -358,7 +366,7 @@ func (l *LLM) send(ctx context.Context, repo RepoSummary, b llmBatch, budget Bud
 	if err == nil || !errors.Is(err, errSplittable) || !split || len(b.items) < 2 {
 		return err
 	}
-	l.Log.Info("llm batch retried in halves", "err", err, "items", len(b.items))
+	l.Log.InfoContext(ctx, "llm batch retried in halves", "err", err, "items", len(b.items))
 	half := len(b.items) / 2
 	var firstErr error
 	for _, part := range [][]*model.Item{b.items[:half], b.items[half:]} {
@@ -405,7 +413,7 @@ func (l *LLM) batch(ctx context.Context, spec tierSpec, user string, batch []*mo
 	if err != nil && req.ResponseFormat != nil && errors.As(err, &se) && se.Code == http.StatusBadRequest {
 		// The endpoint does not support json_schema output: rely on the schema in the system prompt from now on.
 		l.noSchema.Store(true)
-		l.Log.Info("llm endpoint rejected response_format json_schema; using prompt-only JSON", "err", err)
+		l.Log.InfoContext(ctx, "llm endpoint rejected response_format json_schema; using prompt-only JSON", "err", err)
 		req.ResponseFormat = nil
 		resp, err = l.client.Complete(ctx, req)
 	}
@@ -429,7 +437,7 @@ func (l *LLM) batch(ctx context.Context, spec tierSpec, user string, batch []*mo
 	if err := json.Unmarshal([]byte(jsonObject(resp.Content)), &out); err != nil {
 		return usage, fmt.Errorf("llm: decode JSON output: %w (%w)", err, errSplittable)
 	}
-	l.Log.Debug("llm batch", "items", len(batch), "prompt_tokens", resp.Usage.Prompt, "cached_tokens", resp.Usage.Cached)
+	l.Log.DebugContext(ctx, "llm batch", "items", len(batch), "prompt_tokens", resp.Usage.Prompt, "cached_tokens", resp.Usage.Cached)
 	for _, r := range out.Items {
 		if r.ID < 0 || r.ID >= len(batch) {
 			continue

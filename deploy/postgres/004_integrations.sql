@@ -58,7 +58,7 @@ ALTER TABLE databases ADD COLUMN IF NOT EXISTS instance_class text;
 ALTER TABLE databases ADD COLUMN IF NOT EXISTS disk_gb        double precision;
 ALTER TABLE databases ADD COLUMN IF NOT EXISTS meta           jsonb NOT NULL DEFAULT '{}';
 ALTER TABLE databases DROP CONSTRAINT IF EXISTS databases_engine_check;
-ALTER TABLE databases ADD CONSTRAINT databases_engine_check CHECK (engine IN ('postgres', 'mysql', 'redis', 'mongodb'));
+ALTER TABLE databases ADD CONSTRAINT databases_engine_check CHECK (engine IN ('postgres', 'mysql', 'redis', 'mongodb', 'clickhouse'));
 
 ALTER TABLE broker_clusters ADD COLUMN IF NOT EXISTS integration_id bigint REFERENCES integrations(id) ON DELETE SET NULL;
 ALTER TABLE broker_clusters ADD COLUMN IF NOT EXISTS source  text;      -- 'Amazon MSK · eu-central-1', 'Amazon SQS · eu-west-1', 'Google Pub/Sub · shop-prod'
