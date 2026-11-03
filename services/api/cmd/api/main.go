@@ -40,6 +40,9 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "bootstrap" { // ADR-028: org / project / ingest key without seed SQL
 		os.Exit(bootstrapMain(os.Args[2:], os.Stdout, os.Stderr))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "set-password" { // ADR-035: email + password account (shared demo login)
+		os.Exit(setPasswordMain(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
+	}
 	cfg := config.Load()
 	log := logx.New("api", cfg.LogLevel)
 	// Self telemetry (ADR-027): a no-op unless TROOPER_DSN is set.
@@ -120,12 +123,15 @@ func run(cfg config.Common, log *slog.Logger) error {
 		Symbolicator: sym,
 		Auth:         auth.NewPG(pool),
 		DevLogin:     config.Bool("TT_AUTH_DEV", false),
-		SessionTTL:   config.Duration("TT_SESSION_TTL", 7*24*time.Hour),
-		WebURL:       config.String("TT_WEB_URL", "http://localhost:5173"),
-		CookieSecure: config.Bool("TT_COOKIE_SECURE", false),
-		Log:          log,
-		Origins:      config.List("TT_API_CORS_ORIGINS", "http://localhost:*,http://127.0.0.1:*"),
-		Test:         conntest.Run,
+		// ADR-035: POST /auth/password-login for users with a password (`api set-password`)
+		PasswordLogin:  config.Bool("TT_AUTH_PASSWORD", false),
+		ClientIPHeader: config.String("TT_CLIENT_IP_HEADER", ""),
+		SessionTTL:     config.Duration("TT_SESSION_TTL", 7*24*time.Hour),
+		WebURL:         config.String("TT_WEB_URL", "http://localhost:5173"),
+		CookieSecure:   config.Bool("TT_COOKIE_SECURE", false),
+		Log:            log,
+		Origins:        config.List("TT_API_CORS_ORIGINS", "http://localhost:*,http://127.0.0.1:*"),
+		Test:           conntest.Run,
 		Ready: func(ctx context.Context) error {
 			if err := pool.Ping(ctx); err != nil {
 				return fmt.Errorf("postgres: %w", err)

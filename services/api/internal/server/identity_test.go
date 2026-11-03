@@ -266,7 +266,7 @@ func TestDevLoginAndLogout(t *testing.T) {
 	}
 	h = identityServer(t, f, func(s *Server) { s.DevLogin = true }).Handler()
 	w := do(h, "GET", "/api/v1/auth/config", "", "")
-	if strings.TrimSpace(w.Body.String()) != `{"oidc":false,"devLogin":true}` {
+	if strings.TrimSpace(w.Body.String()) != `{"oidc":false,"devLogin":true,"password":false}` {
 		t.Errorf("config: %s", w.Body)
 	}
 	w = do(h, "POST", "/api/v1/auth/dev-login", "", `{"email":"dev@tasktrooper.local"}`)
@@ -516,4 +516,9 @@ func TestOnboardingWithoutOrgs(t *testing.T) {
 			}
 		})
 	}
+}
+
+// PasswordHash: no identityFake user has a password (passwordFake overrides it).
+func (f *identityFake) PasswordHash(context.Context, string) (int64, string, error) {
+	return 0, "", store.ErrNotFound
 }

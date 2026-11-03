@@ -118,5 +118,6 @@ Full check (exactly the same gates as CI): `make check` → gofmt, `go vet`, uni
 - [x] MCP v2: 27 read tools + opt-in, approval-gated write tools (monitor, KPI, Slack test, load test; `source=agent`) and the `trooper-alerts` skill — ADR-032
 - [x] Assistant (`/assistant`): AI chat with history, @ mentions, images, MCP tools in process, approval-gated writes, widgets — ADR-033 (replaces Overview "Ask telemetry")
 - [x] Single LLM endpoint: assistant, incident summary and codeintel enrichment all use the OpenAI-compatible `TT_ASSISTANT_*` endpoint (Meta Muse Spark by default) — ADR-034
+- [x] Password login (`TT_AUTH_PASSWORD`, `api set-password`) for the shared viewer account of the demo — ADR-035
 
 Next work: [`.ai/roadmap.md`](.ai/roadmap.md).

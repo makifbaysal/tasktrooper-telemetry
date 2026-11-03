@@ -7,7 +7,8 @@ info:
     Query API behind the dashboard (apps/web). Single source of truth for the HTTP contract (.ai/contracts.md).
 
     * Auth (ADR-016): `Authorization: Bearer <api key>` (api_keys.kind = 'api'; the key selects org + project and acts as admin)
-      or the `tt_session` cookie set by OIDC login (`/auth/login`) or dev login (`/auth/dev-login`, TT_AUTH_DEV=true).
+      or the `tt_session` cookie set by OIDC login (`/auth/login`), password login (`/auth/password-login`, TT_AUTH_PASSWORD=true,
+      ADR-035) or dev login (`/auth/dev-login`, TT_AUTH_DEV=true).
       Cookie sessions pick the project with `X-Trooper-Project: <project id>` (default: first project of the user).
       Roles: viewer = read only; member = normal writes; admin+ = members, api keys, integrations, domains; owner = owner role changes.
       Every non-GET request is written to the audit log. Every query is tenant-scoped.
@@ -33,7 +34,7 @@ tags:
   - { name: Load tests, description: "Scenarios and runs" }
   - { name: Internal, description: "Service-to-service endpoints (collector)" }
   - { name: Integrations, description: "Cloud integrations (AWS, Google Cloud, Vercel, Neon — ADR-012)" }
-  - { name: Auth, description: "OIDC / dev login, sessions, current user (ADR-016)" }
+  - { name: Auth, description: "OIDC / password / dev login, sessions, current user (ADR-016)" }
   - { name: Team, description: "Members, projects, API keys, audit log" }
   - { name: ChatOps, description: "Slack App and GitHub App installations, Slack interactivity (ADR-017)" }
   - { name: AI usage, description: "AI credit usage and quotas (ADR-018)" }
@@ -1992,6 +1993,36 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } }
         '400': { $ref: '#/components/responses/E400' }
         '404': { $ref: '#/components/responses/E404' }
+        '500': { $ref: '#/components/responses/E500' }
+  /api/v1/auth/password-login:
+    post:
+      tags: [Auth]
+      operationId: postAuthPasswordLogin
+      summary: 'Email + password login (only when TT_AUTH_PASSWORD=true, ADR-035): sets the tt_session cookie'
+      description: |
+        For users given a password with `api set-password` (e.g. the shared viewer account of the public demo). Unknown
+        email, a user without a password (OIDC only) and a wrong password all answer the same 401. Failed attempts are
+        limited per client IP (10 / 15 min) and per email (30 / 15 min) → 429 with Retry-After. A request with an
+        Origin header outside TT_API_CORS_ORIGINS → 403 (login CSRF).
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PasswordLoginInput' } } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401':
+          description: 'Invalid email or password'
+          content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } }
+        '403': { $ref: '#/components/responses/E403' }
+        '404': { $ref: '#/components/responses/E404' }
+        '429':
+          description: 'Too many failed attempts (Retry-After seconds)'
+          headers:
+            Retry-After: { schema: { type: integer } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } }
         '500': { $ref: '#/components/responses/E500' }
   /api/v1/auth/logout:
     post:
@@ -4524,10 +4555,17 @@ components:
         method: { type: string, enum: [dns, http] }
     AuthConfig:
       type: object
-      required: [oidc, devLogin]
+      required: [oidc, devLogin, password]
       properties:
         oidc: { type: boolean }
         devLogin: { type: boolean }
+        password: { type: boolean, description: 'POST /auth/password-login is enabled (TT_AUTH_PASSWORD)' }
+    PasswordLoginInput:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string }
+        password: { type: string, format: password }
     DevLoginInput:
       type: object
       properties:

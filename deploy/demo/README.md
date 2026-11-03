@@ -134,3 +134,22 @@ summary run the offline mock and codeintel uses static rules only.
 
 ## First sign-in
 Open `https://telemetry.tasktrooper.ai`, sign in with Google, onboarding creates the org, project and ingest key (DSN).
+
+## Shared demo login (ADR-035)
+One email + password account for people who want to look inside the demo without a Google account. It is a **viewer** of
+the org that owns the self project (read only: no monitors, KPIs, keys, members, integrations or deletes). `demo`
+environment: variable **`DEMO_LOGIN_EMAIL`** (e.g. `demo@tasktrooper.ai`), secret **`DEMO_LOGIN_PASSWORD`** (12–72 bytes):
+
+```bash
+gh variable set DEMO_LOGIN_EMAIL --env demo --body demo@tasktrooper.ai
+gh secret set DEMO_LOGIN_PASSWORD --env demo          # paste the password
+```
+
+Then run deploy-demo. After the health checks `deploy.sh` runs `api set-password --project "$TT_SELF_PROJECT_ID" --role viewer`
+inside the api container (password over stdin). Idempotent: same password = no change; a new password signs out everyone
+using the old one. Skipped (with a log line) when either value is empty or self-observability (`DEMO_TROOPER_DSN`) is off.
+The api runs with `TT_AUTH_PASSWORD=true` and `TT_CLIENT_IP_HEADER=CF-Connecting-IP` (failed logins: 10 per visitor IP, 30
+per account per 15 min). To lock people out, change `DEMO_LOGIN_PASSWORD` and redeploy (old sessions are signed out).
+
+Visitors share the one user: they share its AI assistant credits (the member quota, else the org quota: set a member quota
+in Settings → AI usage) and see each other's assistant threads.
