@@ -99,12 +99,12 @@ export function Services() {
                     <div><div style={{ fontWeight: 'var(--weight-medium)' }}>{s.name}</div><div className="muted" style={{ fontSize: 'var(--text-xs)' }}>{meta(s)}</div></div>) },
                   { key: 'type', header: 'Type', render: (s) => <ServiceType type={s.type} /> },
                   { key: 'status', header: 'Health', sortValue: (s) => ['ok', 'warning', 'critical'].indexOf(s.status), render: (s) => <StatusBadge status={s.status} /> },
-                  { key: 'users', header: 'Active users', numeric: true, sortValue: (s) => appSummary(s.id).activeUsers, render: (s) => compact(appSummary(s.id).activeUsers) },
+                  { key: 'users', header: 'Active users', numeric: true, sortValue: (s) => appSummary(s.id, range).activeUsers, render: (s) => compact(appSummary(s.id, range).activeUsers) },
                   { key: 'rpm', header: 'Views', numeric: true, sortValue: (s) => s.rpm, render: (s) => <span>{compact(s.rpm)} <span className="muted">/min</span></span> },
                   { key: 'rpm-t', header: '', render: (s) => <Sparkline data={serviceTrafficSeries(s.id, range).slice(-24)} width={72} height={24} /> },
                   { key: 'err', header: 'JS error / crash rate', numeric: true, sortValue: (s) => s.errorRate, render: (s) => <span>{pct(s.errorRate)} <span className="muted">{s.type === 'mobile' ? 'crash' : 'JS'}</span></span> },
-                  { key: 'load', header: 'Load p75', numeric: true, sortValue: (s) => appSummary(s.id).vitals[0]?.value ?? -1, render: (s) => {
-                    const v = appSummary(s.id).vitals[0];
+                  { key: 'load', header: 'Load p75', numeric: true, sortValue: (s) => appSummary(s.id, range).vitals[0]?.value ?? -1, render: (s) => {
+                    const v = appSummary(s.id, range).vitals[0];
                     if (!v) return <span className="muted">—</span>;
                     return <span>{ms(v.value)} <span className="muted">{v.label === 'LCP' ? 'LCP' : 'cold start'}</span></span>;
                   } },

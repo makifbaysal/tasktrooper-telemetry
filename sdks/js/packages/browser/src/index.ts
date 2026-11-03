@@ -237,11 +237,13 @@ export class BrowserSdk {
   private instrumentVitals(): void {
     const report = (m: Metric) =>
       safe('vital', () => {
-        const v = this.views.initial;
+        // Load metrics (LCP, FCP, TTFB) belong to the landing view. INP and CLS accumulate over the whole page
+        // life and are reported on hide: attribute them to the view the user is on at report time.
+        const v = m.name === 'INP' || m.name === 'CLS' ? (this.views.cur ?? this.client.view) : (this.views.initial ?? this.client.view);
         this.client.capture({
           type: 'VITAL',
-          view_id: v?.id ?? this.client.view?.id,
-          view_name: v?.name ?? this.client.view?.name,
+          view_id: v?.id,
+          view_name: v?.name,
           vital: { name: m.name, value: m.name === 'CLS' ? Math.round(m.value * 10000) / 10000 : Math.round(m.value), rating: m.rating },
         });
       });
