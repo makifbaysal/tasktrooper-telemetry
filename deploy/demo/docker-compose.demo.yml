@@ -11,7 +11,13 @@ x-restart: &restart { restart: unless-stopped }
 x-dns: &dns [1.1.1.1, 8.8.8.8]
 # TT_DEMO_VERSION = git short sha (deploy.sh) → service.version + deploy markers of the self project
 # TROOPER_PROFILING: continuous profiles for the Profiling screen (off by default in the SDK)
-x-self-env: &self_env { TROOPER_ENV: demo, TROOPER_VERSION: "${TT_DEMO_VERSION:-}", TROOPER_PROFILING: "true" }
+# TT_AI_PLAN_CREDITS: 5x the default monthly AI credits (ADR-018) so the demo org does not run out; api, codeintel and
+# alert-engine must agree on it
+x-self-env: &self_env
+  TROOPER_ENV: demo
+  TROOPER_VERSION: "${TT_DEMO_VERSION:-}"
+  TROOPER_PROFILING: "true"
+  TT_AI_PLAN_CREDITS: free=500,team=25000,enterprise=-1
 
 services:
   clickhouse: *restart
@@ -48,6 +54,7 @@ services:
       TROOPER_ENV: demo
       TROOPER_VERSION: "${TT_DEMO_VERSION:-}"
       TROOPER_PROFILING: "true"
+      TT_AI_PLAN_CREDITS: free=500,team=25000,enterprise=-1
       # public site: never the dev login
       TT_AUTH_DEV: "false"
       # shared member account (ADR-035, deploy.sh "demo login"); failed attempts limited per visitor IP from Cloudflare

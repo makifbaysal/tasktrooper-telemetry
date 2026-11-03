@@ -242,11 +242,9 @@ func (s *Server) codeInsightRoutes(r chi.Router) {
 	})
 	r.Post("/suggestions/{id}/accept", func(w http.ResponseWriter, r *http.Request) {
 		var o model.SuggestionAccept
-		if r.ContentLength != 0 {
-			if err := decode(r, &o); err != nil {
-				s.fail(w, r, err)
-				return
-			}
+		if err := decodeOptional(r, &o); err != nil {
+			s.fail(w, r, err)
+			return
 		}
 		v, err := s.Store.AcceptSuggestion(r.Context(), param(r, "id"), o)
 		s.reply(w, r, v, err)

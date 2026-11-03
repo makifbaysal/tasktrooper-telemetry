@@ -126,11 +126,9 @@ func (s *Server) assistantRoutes(r chi.Router) {
 		})
 		r.Post("/threads", func(w http.ResponseWriter, r *http.Request) {
 			var in model.AssistantThreadInput
-			if r.ContentLength != 0 {
-				if err := decode(r, &in); err != nil {
-					s.fail(w, r, err)
-					return
-				}
+			if err := decodeOptional(r, &in); err != nil {
+				s.fail(w, r, err)
+				return
 			}
 			v, err := s.Store.CreateAssistantThread(r.Context(), principalOf(r.Context()).UserID, in.Title)
 			s.created(w, r, v, err)

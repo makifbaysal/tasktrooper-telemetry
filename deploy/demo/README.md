@@ -158,4 +158,6 @@ The api runs with `TT_AUTH_PASSWORD=true` and `TT_CLIENT_IP_HEADER=CF-Connecting
 per account per 15 min). To lock people out, change `DEMO_LOGIN_PASSWORD` and redeploy (old sessions are signed out).
 
 Visitors share the one user: they share its AI assistant credits (the member quota, else the org quota: set a member quota
-in Settings → AI usage) and see each other's assistant threads.
+in Settings → AI usage) and see each other's assistant threads. Plan credits on the demo are 5x the default
+(`TT_AI_PLAN_CREDITS: free=500,team=25000,enterprise=-1` in `docker-compose.demo.yml`); an org override set in
+Settings → AI usage still wins.
