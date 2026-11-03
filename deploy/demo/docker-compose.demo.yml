@@ -4,9 +4,10 @@
 #     ingest-gw ingest-writer api alert-engine notifier loadtest codeintel symbolicator web trooper-agent
 # Values come from deploy/.env (the deploy-demo workflow writes it from the DEMO_ENV secret). Relative paths resolve against deploy/.
 # Self-observability (ADR-027): deploy.sh exports TROOPER_SELF_DSN / TT_SELF_PROJECT_ID from the DEMO_TROOPER_DSN secret (a
-# project created in the dashboard, public ingest host); empty = the services export nothing and trooper-agent is not started.
+# project created in the dashboard; host rewritten to ingest-gw:4318 so self-telemetry never crosses the tunnel); empty = the
+# services export nothing and trooper-agent is not started.
 x-restart: &restart { restart: unless-stopped }
-# public resolvers: a stale home-router cache must not send self-telemetry (public ingest host) elsewhere
+# public resolvers for outbound calls (GitHub, Slack, LLM): a stale home-router cache must not send them elsewhere
 x-dns: &dns [1.1.1.1, 8.8.8.8]
 # TT_DEMO_VERSION = git short sha (deploy.sh) → service.version + deploy markers of the self project
 # TROOPER_PROFILING: continuous profiles for the Profiling screen (off by default in the SDK)
