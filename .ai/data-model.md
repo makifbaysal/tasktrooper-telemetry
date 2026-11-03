@@ -127,7 +127,7 @@ repositories(id, project_id, provider github|gitlab|bitbucket|local, full_name, 
 inventory_items(id, repository_id, kind endpoint|consumer|cron|view|dependency, key, source, file, line, meta jsonb)
 -- consumer/cron: key = process name, source = topic/queue or schedule
 alert_suggestions(id, inventory_item_id, monitor_draft jsonb, rationale text, confidence real, state proposed|accepted|rejected)
-databases(id, project_id, name, engine postgres|mysql|redis|mongodb, host, collector agent|cloud|direct,
+databases(id, project_id, name, engine postgres|mysql|redis|mongodb|clickhouse, host, collector agent|cloud|direct,
           credentials_ref, cloud_resource_id, created_at)      -- credentials in the secret store, only the ref here
 llm_prices(org_id, provider, model, input_per_mtok, output_per_mtok, cache_read_per_mtok, cache_write_per_mtok)  -- org override, defaults in api
 broker_clusters(id, project_id, name, kind kafka|rabbitmq, endpoint, vhost, auth jsonb, credentials_ref, created_at)

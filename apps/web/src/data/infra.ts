@@ -33,8 +33,8 @@ export type Collector = 'agent' | 'cloud' | 'direct';
 export const COLLECTOR_LABEL: Record<Collector, string> = { agent: 'TaskTrooper agent', cloud: 'Cloud integration', direct: 'Direct connection' };
 
 // =================================================================== databases
-export type DbEngine = 'postgres' | 'mysql' | 'redis' | 'mongodb';
-export const ENGINE_LABEL: Record<DbEngine, string> = { postgres: 'PostgreSQL', mysql: 'MySQL', redis: 'Redis', mongodb: 'MongoDB' };
+export type DbEngine = 'postgres' | 'mysql' | 'redis' | 'mongodb' | 'clickhouse';
+export const ENGINE_LABEL: Record<DbEngine, string> = { postgres: 'PostgreSQL', mysql: 'MySQL', redis: 'Redis', mongodb: 'MongoDB', clickhouse: 'ClickHouse' };
 /** Redis is a key-value store: "ops", "commands", memory and hit ratio instead of queries and buffer cache. */
 export const isKv = (e: DbEngine) => e === 'redis';
 

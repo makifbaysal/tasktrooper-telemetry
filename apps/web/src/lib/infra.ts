@@ -36,7 +36,7 @@ export interface DbDraft {
   provider: string;
 }
 
-const PORT: Record<DbEngine, number> = { postgres: 5432, mysql: 3306, redis: 6379, mongodb: 27017 };
+const PORT: Record<DbEngine, number> = { postgres: 5432, mysql: 3306, redis: 6379, mongodb: 27017, clickhouse: 9000 };
 export const defaultPort = (e: DbEngine) => PORT[e];
 
 /** "host:port" / "host" → parts (api DatabaseInput). */

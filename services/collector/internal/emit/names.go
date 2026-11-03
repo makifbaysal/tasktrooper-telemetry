@@ -16,6 +16,8 @@ const (
 	DBHitRatio       = "trooper.db.hit_ratio"       // 0..1
 	DBEvictions      = "trooper.db.evictions"       // per minute
 	DBReplLag        = "trooper.db.replication_lag" // ms
+	// DBErrors is a custom metric (→ metrics table): failed queries per minute (ClickHouse FailedQuery).
+	DBErrors = "trooper.db.errors"
 
 	// Query metrics: calls/total_ms/rows are monotonic Sums with DELTA temporality (the amount
 	// in the export interval; the writer sums them per minute), p95_ms is a gauge.
@@ -80,7 +82,7 @@ const (
 
 // GaugeNames lists every gauge the emitter registers.
 var GaugeNames = []string{
-	DBCPU, DBMemory, DBDisk, DBConnections, DBMaxConnections, DBOps, DBLatencyP95, DBSlow, DBHitRatio, DBEvictions, DBReplLag,
+	DBCPU, DBMemory, DBDisk, DBConnections, DBMaxConnections, DBOps, DBLatencyP95, DBSlow, DBHitRatio, DBEvictions, DBReplLag, DBErrors,
 	DBQueryP95Ms,
 	BrokerLag, BrokerEndOffset, BrokerCommittedOffset, BrokerConsumeRate, BrokerProduceRate, BrokerUnacked,
 	BrokerGroupMembers, BrokerGroupRebalances,
@@ -96,7 +98,7 @@ var CounterNames = []string{DBQueryCalls, DBQueryTotalMs, DBQueryRows}
 // Units per metric (UCUM), informational.
 var units = map[string]string{
 	DBCPU: "1", DBMemory: "1", DBDisk: "1", DBHitRatio: "1",
-	DBOps: "{operation}/s", DBSlow: "{query}/min", DBEvictions: "{key}/min",
+	DBOps: "{operation}/s", DBSlow: "{query}/min", DBErrors: "{query}/min", DBEvictions: "{key}/min",
 	DBLatencyP95: "ms", DBReplLag: "ms", DBQueryP95Ms: "ms", DBQueryTotalMs: "ms",
 	BrokerConsumeRate: "{message}/s", BrokerProduceRate: "{message}/s",
 	BrokerGroupRebalances: "{rebalance}/h",
