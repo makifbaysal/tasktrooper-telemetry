@@ -16,6 +16,7 @@ wait_ok() {
     sleep 2
   done
   echo "$name is not healthy at $url" >&2
+  "${dc[@]}" logs --tail 40 "$name" >&2 || true
   return 1
 }
 
@@ -79,7 +80,7 @@ pnpm -r --filter "./sdks/js/packages/**" build
 rsync -a --delete-after --exclude '*.map' apps/web/dist/ "$TT_DEMO_WEB_DIR/"
 
 step "services"
-"${dc[@]}" "${profiles[@]}" up -d --build ingest-gw ingest-writer api alert-engine notifier loadtest codeintel web "${agent[@]}"
+"${dc[@]}" "${profiles[@]}" up -d --build ingest-gw ingest-writer api alert-engine notifier loadtest codeintel symbolicator web "${agent[@]}"
 
 step "health"
 wait_ok http://127.0.0.1:8080/healthz api
