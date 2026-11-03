@@ -15,7 +15,7 @@ import {
 } from '@/components/ui';
 import { useApp } from '@/components/layout/context';
 import { can, denied } from '@/data/auth';
-import { endpointsFor, monitors, services, useData } from '@/data';
+import { endpointsFor, monitors, services, timestamps, useData } from '@/data';
 import type { ApiMonitor } from '@/data/api/ops';
 import {
   AI_PRICE_FAMILIES, aiCall, aiCalls, aiOverview, aiPrices, aiProviderLabel, findPrice, priceKey, resetAiPrice, setAiPrice,
@@ -113,17 +113,12 @@ export function AiMonitoringBody({ service }: { service?: string }) {
   if (loading) {
     return <SkeletonPage label="Loading LLM calls" />;
   }
-  if (data.totals.calls === 0) {
-    return (
-      <>
-        {error && <Callout icon={<ShieldAlert size={16} />}>Could not load AI monitoring data: {error}</Callout>}
-        <AiSetup scoped={!!service} onPrices={() => openPrices()} />
-        {drawers}
-      </>
-    );
-  }
+  // no calls in the range: the dashboard still renders (zeros, empty tables) with a setup hint on top
+  const idle = data.totals.calls === 0;
   return (
     <>
+      {error && <Callout icon={<ShieldAlert size={16} />}>Could not load AI monitoring data: {error}</Callout>}
+      {idle && <AiIdleHint scoped={!!service} onPrices={() => openPrices()} />}
       {service && <LlmMonitors service={service} />}
       <AiCharts data={data} service={service} onPrices={() => openPrices()} />
       <Section title="Models" subtitle="cost is an estimate from token counts × model price · click a row for its recent calls">
@@ -185,11 +180,15 @@ function LlmMonitors({ service }: { service: string }) {
 // ---------------------------------------------------------------- charts (value + chart in one MetricCard each)
 
 function AiCharts({ data, service, onPrices }: { data: AiOverview; service?: string; onPrices: () => void }) {
+  const { range } = useApp();
   const t = data.totals;
+  // an empty range comes back without points: flat zero lines on the page's axis instead of blank charts
+  const axisOf = (set: keyof AiOverview['series']) => (data.series[set].timestamps.length ? data.series[set].timestamps : timestamps(range));
   const color = useModelColors([...data.byModel.map((m) => m.model), ...data.series.cost.series.map((s) => s.id)]);
   const unknown = data.byModel.filter((m) => !m.priceKnown && m.calls > 0);
   const costSeries = data.series.cost.series.map((s) => ({ ...s, color: color(s.id) }));
-  const pick = (set: keyof AiOverview['series'], id: string) => data.series[set].series.find((s) => s.id === id)?.data ?? [];
+  const pick = (set: keyof AiOverview['series'], id: string) =>
+    data.series[set].series.find((s) => s.id === id)?.data ?? new Array<number>(axisOf(set).length).fill(0);
   return (
     <>
       {unknown.length > 0 && (
@@ -215,17 +214,17 @@ function AiCharts({ data, service, onPrices }: { data: AiOverview; service?: str
           </MetricCard>
           <MetricCard label="Tokens" value={compact(t.inputTokens + t.outputTokens)}
             hint={`input ${compact(t.inputTokens)}${t.cacheReadTokens ? ` (${compact(t.cacheReadTokens)} from cache)` : ''} · output ${compact(t.outputTokens)}`}>
-            <TimeSeries timestamps={data.series.tokens.timestamps} height={180} format={(v) => compact(v)}
+            <TimeSeries timestamps={axisOf('tokens')} height={180} format={(v) => compact(v)}
               series={[{ id: 'input', label: 'Input', slot: 1, data: pick('tokens', 'input') }, { id: 'output', label: 'Output', slot: 2, data: pick('tokens', 'output') }]} />
           </MetricCard>
           <MetricCard label="Calls" value={compact(t.calls)}
             hint={`${compact(t.errors)} errors · error rate ${pct(t.errorRate)}`}>
-            <TimeSeries timestamps={data.series.calls.timestamps} height={150} format={(v) => compact(v)}
+            <TimeSeries timestamps={axisOf('calls')} height={150} format={(v) => compact(v)}
               series={[{ id: 'calls', label: 'Calls', slot: 1, data: pick('calls', 'calls') }, { id: 'errors', label: 'Errors', slot: 8, data: pick('calls', 'errors') }]} />
           </MetricCard>
           <MetricCard label="Latency · p95" value={ms(t.p95Ms)}
             hint={`p50 ${ms(t.p50Ms)}${t.ttftP95Ms !== undefined ? ` · time to first token p95 ${ms(t.ttftP95Ms)} (streaming)` : ''}`}>
-            <TimeSeries timestamps={data.series.latency.timestamps} height={150} format={ms} area
+            <TimeSeries timestamps={axisOf('latency')} height={150} format={ms} area
               series={[{ id: 'p95', label: 'p95', slot: 1, data: pick('latency', 'p95') }]} />
           </MetricCard>
         </div>
@@ -251,7 +250,8 @@ function ModelsTable({ rows, service, onSetPrice }: { rows: AiModelRow[]; servic
     { key: 'cost', header: 'Cost (est.)', numeric: true, sortValue: (m) => m.costUsd ?? -1, render: (m) => <CostCell value={m.costUsd} unknown={!m.priceKnown} onSetPrice={() => onSetPrice(m)} /> },
     { key: 'alert', header: '', render: (m) => <AlertAction to={llmAlertLink({ service, provider: m.provider, model: m.model })} label={`Create an alert for ${m.model}`} /> },
   ];
-  return <Table rows={rows} rowKey={(m) => `${m.provider}|${m.model}`} defaultSort={{ key: 'cost', dir: 'desc' }} columns={columns} />;
+  return <Table rows={rows} rowKey={(m) => `${m.provider}|${m.model}`} defaultSort={{ key: 'cost', dir: 'desc' }} columns={columns}
+    empty="No model was called in this range" />;
 }
 
 function ServicesTable({ rows }: { rows: AiServiceRow[] }) {
@@ -292,6 +292,7 @@ function EndpointsTable({ rows, scoped }: { rows: AiEndpointRow[]; scoped: boole
   ];
   return (
     <Table rows={rows} rowKey={(e) => `${e.service}|${e.method}|${e.route}`} defaultSort={{ key: 'cost', dir: 'desc' }} columns={columns}
+      empty="No endpoint made an LLM call in this range"
       onRowClick={(e) => { const to = target(e); if (to) nav(to); }} />
   );
 }
@@ -712,7 +713,24 @@ client = tasktrooper.instrument_openai(OpenAI())
   },
 };
 
-/** Empty state: no LLM spans in the range — how to instrument per SDK. */
+/** No LLM calls in the range: one line above the (zero) dashboard, the per-SDK setup on demand. */
+function AiIdleHint({ scoped, onPrices }: { scoped: boolean; onPrices: () => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Callout icon={<BotMessageSquare size={16} />}>
+        <span className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+          <span className="secondary">{scoped ? 'No LLM calls from this service in this range.' : 'No LLM calls in this range.'}</span>
+          <span className="spacer" />
+          <Button size="sm" variant="ghost" onClick={() => setOpen(!open)}>{open ? 'Hide setup' : 'How to instrument'}</Button>
+        </span>
+      </Callout>
+      {open && <AiSetup scoped={scoped} onPrices={onPrices} />}
+    </>
+  );
+}
+
+/** Per-SDK setup: how to make a service report GenAI spans. */
 function AiSetup({ scoped, onPrices }: { scoped: boolean; onPrices: () => void }) {
   const [sdk, setSdk] = useState<SdkId>('node');
   const s = SETUP[sdk];
