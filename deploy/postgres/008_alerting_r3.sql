@@ -22,4 +22,5 @@ CREATE INDEX IF NOT EXISTS alert_stream_hits_created ON alert_stream_hits (creat
 -- 3. Slack App threads (contracts §17): an incident acknowledged in the dashboard / Slack is announced in the
 --    firing message's thread. The alert-engine enqueues kind 'acknowledged' for slack:<channel id> targets.
 ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_kind_check;
-ALTER TABLE notifications ADD CONSTRAINT notifications_kind_check CHECK (kind IN ('firing', 'resolved', 'reminder', 'acknowledged'));
+-- make migrate re-runs every file: the list must be the final one (010 adds 'ai_quota'), or existing rows fail this check
+ALTER TABLE notifications ADD CONSTRAINT notifications_kind_check CHECK (kind IN ('firing', 'resolved', 'reminder', 'acknowledged', 'ai_quota'));
