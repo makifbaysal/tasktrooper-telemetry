@@ -50,7 +50,7 @@ services:
       TROOPER_PROFILING: "true"
       # public site: never the dev login
       TT_AUTH_DEV: "false"
-      # shared viewer account (ADR-035, deploy.sh "demo login"); failed attempts limited per visitor IP from Cloudflare
+      # shared member account (ADR-035, deploy.sh "demo login"); failed attempts limited per visitor IP from Cloudflare
       TT_AUTH_PASSWORD: "true"
       TT_CLIENT_IP_HEADER: CF-Connecting-IP
       TT_COOKIE_SECURE: "true"

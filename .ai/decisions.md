@@ -598,7 +598,8 @@ org, which means inviting every visitor by email. We want one shared, read-only 
 - Failed attempts are limited in memory per client IP (10 / 15 min) and per email (30 / 15 min; looser so one client cannot
   lock the shared account) → 429. The IP comes from `TT_CLIENT_IP_HEADER` (demo: `CF-Connecting-IP`). A success does not reset the
   IP counter: knowing the public demo password must not buy more guesses at other accounts. A foreign `Origin` → 403 (login CSRF).
-- Demo: `deploy.sh` runs `set-password` for `DEMO_LOGIN_EMAIL` / `DEMO_LOGIN_PASSWORD` as a **viewer** of the self project's org.
+- Demo: `deploy.sh` runs `set-password` for `DEMO_LOGIN_EMAIL` / `DEMO_LOGIN_PASSWORD` as a **member** of the self project's org (the jury tries writes:
+  monitors, KPIs, load tests, assistant write tools; members / keys / integrations stay admin-only).
 - A user with a password cannot `POST /orgs` (403): a shared login must not own orgs, ingest keys or invites.
-**Consequence:** Anyone with the shared password sees the demo org read-only; all of them are one user (shared AI credits and
+**Consequence:** Anyone with the shared password can read and change the demo org's monitors, KPIs and load tests; all of them are one user (shared AI credits and
 assistant threads, one audit identity). Limits are per api replica (no Redis yet). Not meant for customer accounts: those use OIDC.
