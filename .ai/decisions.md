@@ -180,7 +180,7 @@ once. Since the Bitbucket push payload doesn't list files, every push enqueues `
   `TT_OIDC_REDIRECT_URL`). On successful login: `users` upsert, httpOnly `tt_session` cookie (Postgres `sessions`, 7 days, sliding).
 - Identity order on a request: `Authorization: Bearer <api key>` (automation, CLI, SDK upload) → `tt_session` cookie. For requests coming
   with a cookie, the project comes from the `X-Trooper-Project` header (otherwise the user's first project).
-- Roles at org level: `owner | admin | member | viewer`. viewer is GET only; admin+ manages members/keys/integrations.
+- Roles at org level: `owner | admin | member | viewer`. viewer is GET only (plus read-only POSTs that change nothing, e.g. `POST /monitors/preview`; list in `server.readOnlyPosts`); admin+ manages members/keys/integrations.
 - If OIDC is not configured (`TT_OIDC_ISSUER` empty), **dev login**: `POST /auth/dev-login {email}` only when `TT_AUTH_DEV=true`;
   in that case the UI shows email login. ~~The existing `VITE_API_KEY` flow keeps working for dev~~ (removed by ADR-028).
 - `audit_log` table: who, when, which mutation.
@@ -504,8 +504,8 @@ yet. There is a Mac mini (Apple Silicon, 16 GB) with Docker Desktop on hand. Ope
   send to `ingest-gw:4318` on the compose network (deploy.sh rewrites the DSN host, so self-telemetry never crosses the tunnel);
   the agent (`deploy/demo/agent.yaml`, modes `db,host`) sends Postgres/Redis/Redpanda and container metrics.
   `TT_SELF_PROJECT_ID` (loop protection) is derived from the DSN's project id.
-- The tunnel runs with `protocol: http2`: on QUIC the home network dropped idle UDP flows and every hostname answered 530 about
-  once a minute.
+- The tunnel runs with `protocol: http2` and `edge-ip-version: "4"`: on QUIC the home network dropped idle UDP flows, and over
+  IPv6 the HTTP/2 connections still dropped every ~2 minutes (every hostname 530 until the reconnect). The Mac never sleeps (`pmset`).
 - The service containers use `dns: [1.1.1.1, 8.8.8.8]` (so the home router's stale DNS cache doesn't send outbound calls
   elsewhere); `TROOPER_VERSION` = git short sha (deploy marker). Dashboard: long cache for `/assets/*`,
   `no-cache` for every other path; the build is copied with `rsync --delete-after` (no 404s during deploy).

@@ -69,7 +69,11 @@ cloudflared tunnel info trooper-demo     # a CONNECTOR ID line = connected
 `protocol: http2` (in the example config) keeps the tunnel on TCP. On QUIC the home network dropped the idle UDP flows:
 every minute `timeout: no recent network activity` in `/Library/Logs/com.cloudflare.cloudflared.err.log` and 530 on all
 hostnames until the reconnect. Existing machine: add the line to `/etc/cloudflared/config.yml`, then
-`sudo launchctl kickstart -k system/com.cloudflare.cloudflared`.
+`sudo launchctl kickstart -k system/com.cloudflare.cloudflared`. `edge-ip-version: "4"` too: on HTTP/2 over IPv6 the
+edge connections still dropped every ~2 minutes (`Error shutting down control stream: client disconnected`).
+
+The machine must never sleep (a sleeping Mac drops the tunnel; `pmset -g` showed `sleep 1`):
+`sudo pmset -a sleep 0 disksleep 0 powernap 0`.
 
 ## Deploy
 Actions → **deploy-demo** → Run workflow (branch `main`). The job checks out the commit, writes `deploy/.env` from
