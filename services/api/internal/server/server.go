@@ -190,6 +190,11 @@ type Server struct {
 	OIDC *auth.OIDC
 	// DevLogin enables POST /auth/dev-login (TT_AUTH_DEV=true).
 	DevLogin bool
+	// PasswordLogin enables POST /auth/password-login (TT_AUTH_PASSWORD=true, ADR-035).
+	PasswordLogin bool
+	// ClientIPHeader is the header holding the caller's IP, set by the reverse proxy (TT_CLIENT_IP_HEADER, e.g.
+	// CF-Connecting-IP); empty = the TCP peer. Keys the failed-login limiter.
+	ClientIPHeader string
 	// SessionTTL is the sliding session lifetime (default 7 days).
 	SessionTTL time.Duration
 	// WebURL is the dashboard base URL login redirects go to (TT_WEB_URL, default http://localhost:5173).
@@ -215,6 +220,7 @@ type Server struct {
 	// Assistant configures the dashboard assistant (nil = offline mock, write tools on; ADR-033).
 	Assistant *AssistantConfig
 
+	loginLimits    loginLimits
 	channels       channelCache
 	assistantLocks threadLocks
 	// router is the built handler; the assistant serves its tool calls with it in process.

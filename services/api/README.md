@@ -54,6 +54,22 @@ user, project by slug or name in it, ingest key named `bootstrap`. A key's plain
 Without `--json`: `org_id=…`, `project_id=…`, `dsn=…` lines. `--ingest-url` (default `TT_PUBLIC_INGEST_URL`) sets the
 DSN base. Revoked keys stop working at ingest within the auth cache TTL (60 s).
 
+### `api set-password` (password login, ADR-035)
+
+```bash
+printf '%s' "$PASSWORD" | GOWORK=off go run ./cmd/api set-password --email demo@example.com --name Demo \
+  --org TaskTrooper --role viewer --password-stdin
+# stdout: user_id=…  org_id=…  role=viewer  password=changed|unchanged
+```
+
+Gives a user an email + password login for `POST /api/v1/auth/password-login` (served only with `TT_AUTH_PASSWORD=true`).
+The password comes from stdin only (first line, 12–72 bytes; bcrypt cost 12 in `users.password_hash`). Idempotent:
+the user is created when unknown; the same password again changes nothing; a new password replaces the hash and signs
+out all of the user's sessions. `--org <id or exact name>` or `--project <id>` (its org) adds a membership when missing
+with `--role` (default `viewer`; `owner` is not accepted); an existing membership keeps its role unless `--role` is
+passed (the last owner of an org is never demoted). Exit 2 = usage / password policy, 1 = other errors. The user can
+still sign in with OIDC (verified email links it); OIDC users without a password cannot use password login.
+
 Docker (build context = repo root, ADR-027): `docker build -f services/api/Dockerfile -t tasktrooper/api .`, or the `api`
 service of `deploy/docker-compose.yml` (profile `app`).
 
@@ -69,6 +85,8 @@ service of `deploy/docker-compose.yml` (profile `app`).
 | `TT_API_CH_MAX_CONNS` | `20` | |
 | `TT_LOG_LEVEL` | `info` | JSON slog |
 | `TT_AUTH_DEV` | `false` | enables `POST /auth/dev-login` (no IdP; logs a warning). Never in production |
+| `TT_AUTH_PASSWORD` | `false` | enables `POST /auth/password-login` for users with a password (`api set-password`, ADR-035). Failed attempts: 10 per client IP and 30 per email per 15 min → 429 (in-memory, per replica) |
+| `TT_CLIENT_IP_HEADER` | – | header carrying the caller's IP, set by the proxy in front of the api (e.g. `CF-Connecting-IP` behind Cloudflare Tunnel); keys the failed-login limit. Unset = TCP peer. Only set it when clients cannot reach the api around that proxy |
 | `TT_SESSION_TTL` | `168h` | sliding session lifetime (`tt_session` cookie, httpOnly, SameSite=Lax) |
 | `TT_COOKIE_SECURE` | `false` | force `Secure` cookies (also set automatically on TLS / `X-Forwarded-Proto: https`) |
 | `TT_WEB_URL` | `http://localhost:5173` | where login / install callbacks redirect (`redirect` params may only point here or to an allowed origin) |

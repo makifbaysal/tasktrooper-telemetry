@@ -386,7 +386,7 @@ events ≤ 24 h old coming from the offline queue keep their own time.
   {name, project: {name}}` → 201 `{org: {id, name, role: "owner"}, project: {id, name}, ingestKey: {id, prefix, key}, dsn}`
   (key and dsn once; dsn = `TT_PUBLIC_INGEST_URL` (default `http://localhost:4318`) + key + project id). Every signed-in user
   can create an org (becomes owner of their own org); audit_log `org.create`. Project in an existing org: the existing `POST /projects`.
-  Details: session only (api key → 403); names trimmed, 1–100 characters; `project.slug` optional (derived from the name if missing, the response
+  Details: session only (api key → 403), never a password account (shared demo login, ADR-035 → 403); names trimmed, 1–100 characters; `project.slug` optional (derived from the name if missing, the response
   also has `project.slug`); at most `TT_MAX_ORGS_PER_USER` (default 20) owned orgs per user → 409. For a user without an org
   `GET /me` → `orgs: []`, `currentProjectId: null`; `/me`, `/projects`, `/orgs*` ignore an invalid `X-Trooper-Project`
   (not 403).
@@ -471,12 +471,18 @@ events ≤ 24 h old coming from the offline queue keep their own time.
   user_agent)`, `org_members.role` ∈ owner|admin|member|viewer, `audit_log (id, org_id, project_id, user_id, api_key_id,
   action, target, meta jsonb, at)`, `users.oidc_subject`, `api_keys.created_by`, `api_keys.last_used_at`.
 - Endpoints (`/api/v1`):
-  - `GET /auth/config` (anonymous) → `{ oidc: bool, devLogin: bool }`; `GET /auth/login?redirect=` → redirects to OIDC;
-    `GET /auth/callback`; `POST /auth/dev-login {email}`; `POST /auth/logout`; `GET /me` → `{ user, orgs: [{id, name, role,
+  - `GET /auth/config` (anonymous) → `{ oidc: bool, devLogin: bool, password: bool }`; `GET /auth/login?redirect=` → redirects to OIDC;
+    `GET /auth/callback`; `POST /auth/dev-login {email}`; `POST /auth/password-login {email, password}` (ADR-035, only with
+    `TT_AUTH_PASSWORD=true`, else 404; → `Me` + `tt_session` cookie like the OIDC callback; unknown email / no password / wrong
+    password = the same 401 `invalid email or password`; failed attempts 10 per client IP (`TT_CLIENT_IP_HEADER`, else TCP peer)
+    and 30 per email per 15 min → 429 + `Retry-After`; foreign `Origin` → 403; audit `login` with `meta.method = password`); `POST /auth/logout`; `GET /me` → `{ user, orgs: [{id, name, role,
     projects: [{id, name}]}], currentProjectId }`.
   - `GET/POST /orgs/{org}/members`, `PATCH/DELETE /orgs/{org}/members/{user}` (role), `GET/POST /projects`,
     `GET/POST /api-keys` (the POST response returns the key **once**), `DELETE /api-keys/{id}`, `GET /audit-log?limit=`.
 - CORS: for requests with cookies, `Access-Control-Allow-Credentials: true` and the exact origin (not a wildcard).
+- Password accounts (ADR-035, `deploy/postgres/018_password_login.sql`): `users.password_hash` (bcrypt, cost 12) +
+  `password_updated_at`, written only by `api set-password --email <e> [--name] [--org <id|name> | --project <id>]
+  [--role viewer|member|admin] --password-stdin` (12–72 bytes; new password → the user's sessions are deleted). NULL = OIDC only.
 
 ## 16. Phase 4–5 api endpoints and other open items
 

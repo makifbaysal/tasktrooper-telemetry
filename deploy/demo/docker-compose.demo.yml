@@ -50,6 +50,9 @@ services:
       TROOPER_PROFILING: "true"
       # public site: never the dev login
       TT_AUTH_DEV: "false"
+      # shared viewer account (ADR-035, deploy.sh "demo login"); failed attempts limited per visitor IP from Cloudflare
+      TT_AUTH_PASSWORD: "true"
+      TT_CLIENT_IP_HEADER: CF-Connecting-IP
       TT_COOKIE_SECURE: "true"
       TT_API_CORS_ORIGINS: ${TT_WEB_URL:?set TT_WEB_URL in deploy/.env}
       TT_PUBLIC_INGEST_URL: ${TT_PUBLIC_INGEST_URL:?set TT_PUBLIC_INGEST_URL in deploy/.env}

@@ -51,6 +51,9 @@ jobs:
           TT_ASSISTANT_API_URL: ${{ vars.DEMO_ASSISTANT_API_URL }}
           TT_ASSISTANT_MODEL: ${{ vars.DEMO_ASSISTANT_MODEL }}
           TT_ASSISTANT_API_KEY: ${{ secrets.DEMO_ASSISTANT_API_KEY }}
+          # Shared viewer login of the demo (ADR-035): email + password; either empty = no password account
+          TT_DEMO_LOGIN_EMAIL: ${{ vars.DEMO_LOGIN_EMAIL }}
+          TT_DEMO_LOGIN_PASSWORD: ${{ secrets.DEMO_LOGIN_PASSWORD }}
         run: deploy/demo/deploy.sh
 
       - name: Remove deploy/.env

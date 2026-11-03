@@ -184,7 +184,8 @@ once. Since the Bitbucket push payload doesn't list files, every push enqueues `
 - If OIDC is not configured (`TT_OIDC_ISSUER` empty), **dev login**: `POST /auth/dev-login {email}` only when `TT_AUTH_DEV=true`;
   in that case the UI shows email login. ~~The existing `VITE_API_KEY` flow keeps working for dev~~ (removed by ADR-028).
 - `audit_log` table: who, when, which mutation.
-**Consequence:** SAML/SCIM is follow-up work. API keys stay project-scoped.
+**Consequence:** SAML/SCIM is follow-up work. API keys stay project-scoped. Password login for operator-provisioned accounts (shared demo viewer) was added
+later: ADR-035.
 
 ## ADR-017 — Slack App and GitHub App integrations
 **Context:** Today alerts go to Slack only via incoming webhook (the channel is fixed to the webhook). Connecting a repo requires entering a token/installation id
@@ -582,3 +583,22 @@ configure, pay for and monitor several providers, and the incident summary viola
 **Consequence:** One key, one bill, one place to switch providers (any OpenAI-compatible gateway works, including a self-hosted one).
 All features share one model: a smaller/faster model for enrichment and a stronger one for the chat would need separate variables again.
 Endpoints without function calling cannot run the assistant; endpoints without JSON mode still work for codeintel via the prompt schema.
+
+## ADR-035 — Password login for shared demo accounts
+**Context:** The public demo (ADR-031) signs in with Google OIDC only. People who want to look inside it need an account in the
+org, which means inviting every visitor by email. We want one shared, read-only login we can hand out.
+**Decision:**
+- `POST /auth/password-login {email, password}`, served only when `TT_AUTH_PASSWORD=true` (default off → 404; `GET /auth/config`
+  says `password: true`). Success creates the same `tt_session` cookie and `login` audit entry (`method: password`) as OIDC.
+- Hashes: bcrypt (cost 12, `golang.org/x/crypto/bcrypt`) in `users.password_hash` (migration 018). Unknown email, an OIDC user
+  without a hash and a wrong password give the same 401 and the same bcrypt work (dummy hash), so accounts cannot be probed.
+- No sign-up, reset or self-service change: hashes are set only by the operator CLI `api set-password … --password-stdin`
+  (12–72 bytes; creates the user, ensures the membership, default role viewer, never demotes the last owner; a changed password
+  deletes the user's sessions). Users with a password can still sign in with OIDC.
+- Failed attempts are limited in memory per client IP (10 / 15 min) and per email (30 / 15 min; looser so one client cannot
+  lock the shared account) → 429. The IP comes from `TT_CLIENT_IP_HEADER` (demo: `CF-Connecting-IP`). A success does not reset the
+  IP counter: knowing the public demo password must not buy more guesses at other accounts. A foreign `Origin` → 403 (login CSRF).
+- Demo: `deploy.sh` runs `set-password` for `DEMO_LOGIN_EMAIL` / `DEMO_LOGIN_PASSWORD` as a **viewer** of the self project's org.
+- A user with a password cannot `POST /orgs` (403): a shared login must not own orgs, ingest keys or invites.
+**Consequence:** Anyone with the shared password sees the demo org read-only; all of them are one user (shared AI credits and
+assistant threads, one audit identity). Limits are per api replica (no Redis yet). Not meant for customer accounts: those use OIDC.

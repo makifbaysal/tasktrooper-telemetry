@@ -39,6 +39,8 @@ type Me struct {
 type AuthConfig struct {
 	OIDC     bool `json:"oidc"`
 	DevLogin bool `json:"devLogin"`
+	// Password: POST /auth/password-login is enabled (TT_AUTH_PASSWORD, ADR-035).
+	Password bool `json:"password"`
 }
 
 type Member struct {

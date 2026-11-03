@@ -93,6 +93,16 @@ wait_ok http://127.0.0.1:8095/healthz symbolicator
 wait_ok http://127.0.0.1:8081/ web
 "${dc[@]}" "${profiles[@]}" ps --format 'table {{.Service}}\t{{.Status}}'
 
+# Shared demo login (ADR-035): one email + password viewer account in the org of the self project. Idempotent; a new
+# password signs out the old sessions. The password goes over stdin, never argv.
+if [ -n "${TT_DEMO_LOGIN_EMAIL:-}" ] && [ -n "${TT_DEMO_LOGIN_PASSWORD:-}" ] && [ -n "${TT_SELF_PROJECT_ID:-}" ]; then
+  step "demo login"
+  printf '%s' "$TT_DEMO_LOGIN_PASSWORD" | "${dc[@]}" exec -T api /api set-password --email "$TT_DEMO_LOGIN_EMAIL" --name Demo \
+    --project "$TT_SELF_PROJECT_ID" --role viewer --password-stdin
+else
+  echo "demo login skipped (needs DEMO_LOGIN_EMAIL, DEMO_LOGIN_PASSWORD and self-observability)"
+fi
+
 # Self project API key (kind api, DEMO_TROOPER_API_KEY): tt-web sourcemaps + one deploy marker per service
 if [ -n "${TROOPER_DSN:-}" ] && [ -n "${TROOPER_API_KEY:-}" ]; then
   step "release"

@@ -29,6 +29,7 @@ type IdentityStore interface {
 	SaveLoginState(ctx context.Context, state, verifier, nonce, redirect string) error
 	TakeLoginState(ctx context.Context, state string) (verifier, nonce, redirect string, err error)
 	UpsertUser(ctx context.Context, c store.UserClaims) (int64, error)
+	PasswordHash(ctx context.Context, email string) (userID int64, hash string, err error)
 	ProjectAccess(ctx context.Context, userID, projectID int64) (orgID int64, role string, err error)
 	DefaultProject(ctx context.Context, userID int64) (projectID, orgID int64, role string, err error)
 	OrgRole(ctx context.Context, userID, orgID int64) (string, error)
@@ -349,8 +350,9 @@ func (s *Server) adminOnly(next http.Handler) http.Handler {
 
 func (s *Server) authRoutes(r chi.Router) {
 	r.Get("/auth/config", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, model.AuthConfig{OIDC: s.OIDC != nil, DevLogin: s.DevLogin})
+		writeJSON(w, http.StatusOK, model.AuthConfig{OIDC: s.OIDC != nil, DevLogin: s.DevLogin, Password: s.PasswordLogin})
 	})
+	r.Post("/auth/password-login", s.passwordLogin)
 	r.Get("/auth/login", s.oidcLogin)
 	r.Get("/auth/callback", s.oidcCallback)
 	r.Post("/auth/dev-login", func(w http.ResponseWriter, r *http.Request) {
@@ -636,6 +638,14 @@ func (s *Server) identityRoutes(r chi.Router) {
 		p := principalOf(r.Context())
 		if !p.Session {
 			forbidden(w, "creating an org needs a user session (api keys are project scoped)")
+			return
+		}
+		// password accounts are shared demo logins (ADR-035): they look around, they never own orgs
+		if shared, err := s.passwordAccount(r.Context(), p.UserID); err != nil {
+			s.fail(w, r, err)
+			return
+		} else if shared {
+			forbidden(w, "shared password accounts cannot create orgs")
 			return
 		}
 		var in model.OrgInput

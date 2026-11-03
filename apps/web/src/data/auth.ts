@@ -13,7 +13,7 @@ export interface Project { id: string; name: string; slug?: string }
 export interface Org { id: string; name: string; role: Role; projects: Project[] }
 export interface User { id: string; email: string; name?: string; avatarUrl?: string }
 export interface Me { user: User; orgs: Org[]; currentProjectId?: string }
-export interface AuthConfig { oidc: boolean; devLogin: boolean }
+export interface AuthConfig { oidc: boolean; devLogin: boolean; password: boolean }
 
 interface State { config?: AuthConfig; me?: Me; projectId?: string; expired: boolean }
 let state: State = { expired: false };
@@ -81,7 +81,7 @@ export type BootStep = 'ready' | 'login' | 'onboarding';
 export async function initAuth(): Promise<BootStep> {
   const c = await raw<Partial<AuthConfig>>('/auth/config');
   if (c.status !== 200 || !c.body) throw new ApiError(c.status, `GET /auth/config returned ${c.status}`, '/auth/config');
-  const config: AuthConfig = { oidc: !!c.body.oidc, devLogin: !!c.body.devLogin };
+  const config: AuthConfig = { oidc: !!c.body.oidc, devLogin: !!c.body.devLogin, password: !!c.body.password };
 
   const r = await raw<RawMe>('/me');
   if (r.status === 401) {
@@ -105,6 +105,23 @@ export function loginUrl(redirect = window.location.href): string {
 export async function devLogin(email: string): Promise<void> {
   const r = await raw<{ error?: string; message?: string }>('/auth/dev-login', { method: 'POST', body: JSON.stringify({ email }) });
   if (r.status >= 300) throw new ApiError(r.status, r.body?.error ?? r.body?.message ?? `Sign-in failed (${r.status})`, '/auth/dev-login');
+}
+
+/**
+ * Email + password login (TT_AUTH_PASSWORD=true, ADR-035): sets the session cookie. Errors carry a message for the
+ * sign-in form: 401 → invalid credentials, 429 → too many attempts (with the api's Retry-After).
+ */
+export async function passwordLogin(email: string, password: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/v1/auth/password-login`, authInit({ method: 'POST', body: JSON.stringify({ email, password }) }));
+  if (res.ok) return;
+  let body: { error?: string } | undefined;
+  try { body = (await res.json()) as { error?: string }; } catch { /* not json */ }
+  const retry = Number(res.headers.get('Retry-After'));
+  const why = res.status === 401 ? 'Invalid e-mail or password.'
+    : res.status === 429 ? `Too many failed attempts. Try again in ${retry > 0 ? Math.ceil(retry / 60) : 15} minute${retry > 0 && retry <= 60 ? '' : 's'}.`
+    : res.status === 404 ? 'Password sign-in is not enabled on this api.'
+    : body?.error ?? `Sign-in failed (${res.status})`;
+  throw new ApiError(res.status, why, '/auth/password-login');
 }
 
 export async function logout(): Promise<void> {
