@@ -72,11 +72,9 @@ func (s *Server) infraRoutes(r chi.Router) {
 		// Tests the registered host/port; credentials come in the body (they are never stored, only credentials_ref).
 		r.Post("/test-connection", func(w http.ResponseWriter, r *http.Request) {
 			var in model.ConnTestInput
-			if r.ContentLength != 0 {
-				if err := decode(r, &in); err != nil {
-					s.fail(w, r, err)
-					return
-				}
+			if err := decodeOptional(r, &in); err != nil {
+				s.fail(w, r, err)
+				return
 			}
 			target, err := s.Store.DatabaseConn(r.Context(), param(r, "id"))
 			if err != nil {
@@ -131,11 +129,9 @@ func (s *Server) infraRoutes(r chi.Router) {
 		})
 		r.Post("/test-connection", func(w http.ResponseWriter, r *http.Request) {
 			var in model.ConnTestInput
-			if r.ContentLength != 0 {
-				if err := decode(r, &in); err != nil {
-					s.fail(w, r, err)
-					return
-				}
+			if err := decodeOptional(r, &in); err != nil {
+				s.fail(w, r, err)
+				return
 			}
 			kind, endpoint, vhost, err := s.Store.ClusterConn(r.Context(), param(r, "id"))
 			if err != nil {
@@ -294,11 +290,9 @@ func (s *Server) loadTestRoutes(r chi.Router) {
 			var in struct {
 				Method string `json:"method"`
 			}
-			if r.ContentLength != 0 {
-				if err := decode(r, &in); err != nil {
-					s.fail(w, r, err)
-					return
-				}
+			if err := decodeOptional(r, &in); err != nil {
+				s.fail(w, r, err)
+				return
 			}
 			v, err := s.Store.RequestDomainVerify(r.Context(), param(r, "id"), in.Method)
 			if err != nil {

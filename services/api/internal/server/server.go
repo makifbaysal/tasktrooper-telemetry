@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -403,6 +404,16 @@ func (s *Server) noContent(w http.ResponseWriter, r *http.Request, err error) {
 func decode(r *http.Request, v any) error {
 	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20))
 	if err := dec.Decode(v); err != nil {
+		return store.Invalid("invalid JSON body: " + err.Error())
+	}
+	return nil
+}
+
+// decodeOptional is decode for endpoints whose body may be empty. An empty body leaves v unchanged; it does not rely
+// on ContentLength, which is -1 when a proxy (Cloudflare Tunnel) forwards the request chunked.
+func decodeOptional(r *http.Request, v any) error {
+	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20))
+	if err := dec.Decode(v); err != nil && !errors.Is(err, io.EOF) {
 		return store.Invalid("invalid JSON body: " + err.Error())
 	}
 	return nil
