@@ -56,11 +56,14 @@ agent=()
 web_dsn=""
 if [ -n "${TROOPER_DSN:-}" ]; then
   # Self-observability (ADR-027) like any customer: the DSN of a project created in the dashboard (DEMO_TROOPER_DSN
-  # secret), sent through the public ingest host. The project id only feeds ingest-gw/writer's loop guard.
+  # secret). The project id only feeds ingest-gw/writer's loop guard.
   step "self-observability"
   project="${TROOPER_DSN##*/}"
   [[ "$TROOPER_DSN" =~ ^https?://[^@/]+@[^/]+/[0-9]+$ ]] || { echo "TROOPER_DSN is not <scheme>://<key>@<host>/<project id>" >&2; exit 1; }
-  export TROOPER_SELF_DSN="$TROOPER_DSN" TT_SELF_PROJECT_ID="$project"
+  # containers send straight to ingest-gw on the compose network (same key + project), never out and back in through
+  # the tunnel; the browser (tt-web) keeps the public DSN
+  key="${TROOPER_DSN#*://}"; key="${key%%@*}"
+  export TROOPER_SELF_DSN="http://${key}@ingest-gw:4318/${project}" TT_SELF_PROJECT_ID="$project"
   web_dsn="$TROOPER_DSN"
   profiles+=(--profile self)
   agent=(trooper-agent)

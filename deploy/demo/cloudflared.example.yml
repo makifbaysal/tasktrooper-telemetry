@@ -2,6 +2,9 @@
 # Hostnames are one level under the zone: Cloudflare's free Universal SSL does not cover api.telemetry.tasktrooper.ai.
 tunnel: <TUNNEL_ID>
 credentials-file: /Users/<user>/.cloudflared/<TUNNEL_ID>.json
+# TCP instead of QUIC: home routers / ISPs drop idle UDP flows, so QUIC connections time out every minute
+# ("timeout: no recent network activity") and every hostname answers 530 until the tunnel reconnects
+protocol: http2
 ingress:
   - hostname: telemetry.tasktrooper.ai
     service: http://localhost:8081

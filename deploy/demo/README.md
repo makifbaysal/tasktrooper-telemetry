@@ -66,13 +66,18 @@ sudo launchctl bootstrap system "$PL"
 cloudflared tunnel info trooper-demo     # a CONNECTOR ID line = connected
 ```
 
+`protocol: http2` (in the example config) keeps the tunnel on TCP. On QUIC the home network dropped the idle UDP flows:
+every minute `timeout: no recent network activity` in `/Library/Logs/com.cloudflare.cloudflared.err.log` and 530 on all
+hostnames until the reconnect. Existing machine: add the line to `/etc/cloudflared/config.yml`, then
+`sudo launchctl kickstart -k system/com.cloudflare.cloudflared`.
+
 ## Deploy
 Actions → **deploy-demo** → Run workflow (branch `main`). The job checks out the commit, writes `deploy/.env` from
 `DEMO_ENV`, runs [`deploy.sh`](deploy.sh) and removes the env file. `deploy.sh`:
 infra up → `make migrate` → dashboard build (copied to `~/trooper-demo/web`) → services `up -d --build` → health checks
 on api, ingest-gw, codeintel, symbolicator and web. Data volumes (compose project `tasktrooper`) survive every deploy.
-Every deploy stamps `TROOPER_VERSION` with the short commit sha (service version, deploy markers). The containers that
-send self-telemetry resolve with 1.1.1.1 / 8.8.8.8, so a stale router DNS cache cannot point the public ingest host elsewhere.
+Every deploy stamps `TROOPER_VERSION` with the short commit sha (service version, deploy markers). The service containers
+resolve with 1.1.1.1 / 8.8.8.8, so a stale router DNS cache cannot point their outbound calls elsewhere.
 
 By hand on the machine (from a checkout with `deploy/.env`): `deploy/demo/deploy.sh`.
 
@@ -82,8 +87,9 @@ copy its DSN (`https://<ingest-key>@telemetry-ingest.tasktrooper.ai/<project-id>
 secret **`DEMO_TROOPER_DSN`** and run deploy-demo. Then:
 - the Go services export traces, logs, metrics and continuous profiles (`TROOPER_PROFILING=true`) as `tt-ingest-gw`,
   `tt-ingest-writer`, `tt-api`, `tt-alert-engine`, `tt-notifier`, `tt-loadtest-ctl` / `tt-loadtest-runner`, `tt-codeintel`,
-  `tt-symbolicator` (env `demo`) through the public ingest host; ingest-gw/writer skip that project's own requests (loop
-  guard, `TT_SELF_PROJECT_ID` = the DSN's project id),
+  `tt-symbolicator` (env `demo`) straight to `ingest-gw:4318` on the compose network (deploy.sh rewrites the DSN host; the
+  browser uses the public one); ingest-gw/writer skip that project's own requests (loop guard, `TT_SELF_PROJECT_ID` = the
+  DSN's project id),
 - the dashboard sends RUM as `tt-web`, with session replay for every session (text and inputs masked),
 - `trooper-agent` (profile `self`, `deploy/demo/agent.yaml`) reports Postgres (incl. top queries via `pg_stat_statements`),
   ClickHouse, Redis, Redpanda, the Docker VM and every container.

@@ -499,11 +499,14 @@ yet. There is a Mac mini (Apple Silicon, 16 GB) with Docker Desktop on hand. Ope
 - The repo is public: "Require approval for all external contributors" is mandatory so that fork PRs don't reach the self-hosted runner;
   no other workflow uses the `trooper-demo` label.
 - Self-observability (ADR-027) like any customer: the DSN of the project opened in the dashboard is the `demo` environment secret
-  `DEMO_TROOPER_DSN`; no special bootstrap. Go services and the dashboard RUM send to the public ingest host; the `trooper-agent`
-  container (`deploy/demo/agent.yaml`, modes `db,host`) sends Postgres/Redis/Redpanda and container metrics.
+  `DEMO_TROOPER_DSN`; no special bootstrap. The dashboard RUM sends to the public ingest host; the Go services and the `trooper-agent`
+  send to `ingest-gw:4318` on the compose network (deploy.sh rewrites the DSN host, so self-telemetry never crosses the tunnel);
+  the agent (`deploy/demo/agent.yaml`, modes `db,host`) sends Postgres/Redis/Redpanda and container metrics.
   `TT_SELF_PROJECT_ID` (loop protection) is derived from the DSN's project id.
-- Containers sending self-telemetry use `dns: [1.1.1.1, 8.8.8.8]` (so the home router's stale DNS cache doesn't resolve the public ingest
-  host elsewhere); `TROOPER_VERSION` = git short sha (deploy marker). Dashboard: long cache for `/assets/*`,
+- The tunnel runs with `protocol: http2`: on QUIC the home network dropped idle UDP flows and every hostname answered 530 about
+  once a minute.
+- The service containers use `dns: [1.1.1.1, 8.8.8.8]` (so the home router's stale DNS cache doesn't send outbound calls
+  elsewhere); `TROOPER_VERSION` = git short sha (deploy marker). Dashboard: long cache for `/assets/*`,
   `no-cache` for every other path; the build is copied with `rsync --delete-after` (no 404s during deploy).
 **Consequence:** Setup and steps are in `deploy/demo/README.md`. When the machine is off the demo is down too (no uptime guarantee); backups and
 short retention are separate work. On moving to production, the ADR-030 hosts and separate infrastructure apply.
