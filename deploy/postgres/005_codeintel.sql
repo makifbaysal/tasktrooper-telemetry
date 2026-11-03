@@ -52,7 +52,8 @@ CREATE INDEX IF NOT EXISTS alert_suggestions_project ON alert_suggestions (proje
 -- Monitors: alert-as-code. 'suggested' is kept for rows written before 005 (api reads it as 'code').
 ALTER TABLE monitors ADD COLUMN IF NOT EXISTS code_ref text;                       -- '<repo full name>:<path>' for source='code'
 ALTER TABLE monitors DROP CONSTRAINT IF EXISTS monitors_source_check;
-ALTER TABLE monitors ADD CONSTRAINT monitors_source_check CHECK (source IN ('manual', 'code', 'template', 'suggestion', 'suggested'));
+-- make migrate re-runs every file: the list must be the final one (014 adds 'agent'), or existing rows fail this check
+ALTER TABLE monitors ADD CONSTRAINT monitors_source_check CHECK (source IN ('manual', 'code', 'template', 'suggestion', 'suggested', 'agent'));
 CREATE INDEX IF NOT EXISTS monitors_code_ref ON monitors (project_id, code_ref) WHERE code_ref IS NOT NULL;
 
 -- Load test scenarios: generated drafts never run without approval.
