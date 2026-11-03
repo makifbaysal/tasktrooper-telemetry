@@ -32,3 +32,6 @@ coverage/
 local.properties
 /tools/trooper-cli/trooper-cli
 /deploy/self/.run/
+
+# agent worktrees (Claude Code)
+.claude/worktrees/
