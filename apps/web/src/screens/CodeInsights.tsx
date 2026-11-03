@@ -10,13 +10,14 @@ import {
 } from '@/components/ui';
 import { monitors, services, useData, type InventoryItem } from '@/data';
 import {
-  acceptSuggestion, acceptedSuggestions, analyzeRepo, codeIntelAvailable, codeLink, codeRefLink, deleteRepo, inventoryRows, refreshCodeIntel, rejectSuggestion, repoList,
-  rotateWebhookSecret, suggestionRows, type InventoryRow, type RepoInfo, type RepoWebhook, type SuggestionRow,
+  acceptedSuggestions, analyzeRepo, codeIntelAvailable, codeLink, codeRefLink, deleteRepo, inventoryRows, refreshCodeIntel, rejectSuggestion, repoList,
+  rotateWebhookSecret, suggestionRows, suggestionScope, type InventoryRow, type RepoInfo, type RepoWebhook, type SuggestionRow,
 } from '@/data/codeintel';
 import { ago } from '@/lib/format';
 import { LocalAICost } from '@/components/ui/LocalAICost';
 import { LocalAIState } from '@/components/ui/LocalAIState';
 import { CriticalityBadge } from './shared';
+import { AcceptSuggestionDrawer } from './Alerts';
 import { ConnectRepoDrawer, WebhookSetup } from './ConnectRepo';
 
 type Filter = 'all' | 'monitored' | 'unmonitored' | 'dead' | 'shadow';
@@ -377,18 +378,18 @@ function DriftRow({ icon, title, meta, count, onClick }: { icon: ReactNode; titl
 /** Code-sourced monitor suggestion (design-system § Suggestion card): accept creates the monitor, reject hides it. */
 export function SuggestionCard({ s, compact: small }: { s: SuggestionRow; compact?: boolean }) {
   const nav = useNavigate();
-  const [busy, setBusy] = useState<'accept' | 'reject' | null>(null);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [reviewing, setReviewing] = useState(false);
   const [done, setDone] = useState(acceptedSuggestions.get(s.id)?.monitor);
   const link = codeRefLink(s);
-  const svcId = serviceId(s.target.split(' · ')[0].replace(/ logs$/, ''));
-  const act = async (kind: 'accept' | 'reject') => {
-    setBusy(kind); setError('');
-    try {
-      if (kind === 'accept') setDone(await acceptSuggestion(s.id));
-      else await rejectSuggestion(s.id);
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
-    setBusy(null);
+  const scope = suggestionScope(s);
+  const svcId = serviceId(scope.service);
+  const openService = () => nav(svcId ? `/services/${svcId}?tab=alerts` : '/alerts');
+  const reject = async () => {
+    setBusy(true); setError('');
+    try { await rejectSuggestion(s.id); } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    setBusy(false);
   };
   const body = (
     <div className="stack" style={{ gap: 'var(--space-2)' }}>
@@ -403,7 +404,13 @@ export function SuggestionCard({ s, compact: small }: { s: SuggestionRow; compac
         <span className="muted" style={{ fontSize: 'var(--text-sm)' }}>{Math.round(s.confidence * 100)}% confidence</span>
       </div>
       {small && <span className="list__title">{s.title}</span>}
-      <div className="secondary mono" style={{ fontSize: 'var(--text-sm)' }}>{s.target}</div>
+      <div className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap', fontSize: 'var(--text-sm)' }}>
+        <span className="muted">Service</span>
+        {svcId
+          ? <a className="mono" href={`/services/${svcId}?tab=alerts`} onClick={(e) => { e.preventDefault(); openService(); }}>{scope.service}</a>
+          : <><span className="mono">{scope.service}</span><Badge>Not reporting yet</Badge></>}
+        {scope.endpoint && <><span className="muted">· Endpoint</span><span className="mono">{scope.endpoint}</span></>}
+      </div>
       <div className="mono">{s.condition}</div>
       <p className="secondary" style={{ margin: 0 }}>{s.rationale}</p>
       <div className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}>
@@ -414,20 +421,24 @@ export function SuggestionCard({ s, compact: small }: { s: SuggestionRow; compac
         {done ? (
           <>
             <StatusBadge status="ok" label="Monitor created" />
-            <Button size="sm" variant="ghost" icon={<ExternalLink size={12} />} onClick={() => nav(svcId ? `/services/${svcId}?tab=alerts` : '/')}>Open {done.name}</Button>
+            <Button size="sm" variant="ghost" icon={<ExternalLink size={12} />} onClick={openService}>Open {done.name}</Button>
           </>
         ) : (
           <>
-            <Button size="sm" variant="ghost" icon={<X size={14} />} disabled={!!busy} onClick={() => void act('reject')}>{busy === 'reject' ? 'Rejecting…' : 'Reject'}</Button>
+            <Button size="sm" variant="ghost" icon={<X size={14} />} disabled={busy} onClick={() => void reject()}>{busy ? 'Rejecting…' : 'Reject'}</Button>
             <Button size="sm" variant="ghost" onClick={() => nav('/alerts/new')}>Customize…</Button>
-            <Button size="sm" variant="primary" icon={<Check size={14} />} disabled={!!busy} onClick={() => void act('accept')}>{busy === 'accept' ? 'Creating…' : 'Accept'}</Button>
+            <Button size="sm" variant="primary" icon={<Check size={14} />} disabled={busy} onClick={() => setReviewing(true)}>Accept…</Button>
           </>
         )}
       </div>
       {error && <div className="row" style={{ gap: 'var(--space-2)' }}><StatusBadge status="critical" label="Failed" /><span className="secondary">{error}</span></div>}
     </div>
   );
-  return small ? body : <Card>{body}</Card>;
+  const drawer = reviewing && (
+    <AcceptSuggestionDrawer s={s} onClose={() => setReviewing(false)} onEdit={() => nav('/alerts/new')}
+      onCreated={(m) => { setDone(m); setReviewing(false); openService(); }} />
+  );
+  return <>{small ? body : <Card>{body}</Card>}{drawer}</>;
 }
 
 function RepoRow({ r }: { r: RepoInfo }) {

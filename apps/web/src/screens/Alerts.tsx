@@ -16,6 +16,7 @@ import {
   maintenanceAvailable, maintenanceWindows, monitorInput, resolvedIncidents, type ApiIncident, type ApiMonitor, type IncidentEvent, type MaintenanceWindow,
 } from '@/data/api/ops';
 import { can, denied } from '@/data/auth';
+import { acceptSuggestion, codeRefLink, rejectSuggestion, suggestionScope, type SuggestionRow } from '@/data/codeintel';
 import { logsFor } from '@/data/logs';
 import { LocalAICost } from '@/components/ui/LocalAICost';
 import { LocalAIState } from '@/components/ui/LocalAIState';
@@ -266,8 +267,14 @@ export function AlertsBody({ serviceId, endpointRef, scope }: { serviceId?: stri
   const isMuted = (m: Monitor) => m.state === 'muted';
   const toggleMute = (m: Monitor) => void setMonitorMute(m as ApiMonitor, !isMuted(m));
   const scopedWindows = maintenanceWindows.filter((w) => !serviceId || !w.scope.services?.length || w.scope.services.includes(serviceId));
-  const [decided, setDecided] = useState<Record<string, 'accepted' | 'rejected'>>({});
-  const pending = scopedSuggestions.filter((s) => !decided[s.id]);
+  const [sugBusy, setSugBusy] = useState(false);
+  const pending = scopedSuggestions as SuggestionRow[];
+  const reject = (id: string) => void rejectSuggestion(id).catch((e: unknown) => console.warn('[data] reject suggestion', e));
+  const acceptAll = async () => {
+    setSugBusy(true);
+    for (const s of [...pending]) await acceptSuggestion(s.id).catch((e: unknown) => console.warn('[data] accept suggestion', e));
+    setSugBusy(false);
+  };
 
   const incDrawer = useDrawer<Incident>();
   const newHref = scope ? scope.newHref : `/alerts/new${serviceId ? `?service=${serviceId}${endpointRef ? `&endpoint=${encodeURIComponent(endpointRef)}` : ''}` : ''}`;
@@ -326,8 +333,8 @@ export function AlertsBody({ serviceId, endpointRef, scope }: { serviceId?: stri
                   <div className="secondary">Scored by business impact; thresholds set from 14 days of real traffic. Click one for the reasoning.</div>
                 </div>
                 <Button onClick={() => nav('/code')}>View inventory</Button>
-                <Button variant="primary" icon={<Check size={14} />} disabled={!pending.length || !can('write')} title={can('write') ? undefined : denied('write')}
-                  onClick={() => setDecided(Object.fromEntries(scopedSuggestions.map((s) => [s.id, decided[s.id] ?? ('accepted' as const)])))}>Accept all {pending.length}</Button>
+                <Button variant="primary" icon={<Check size={14} />} disabled={!pending.length || sugBusy || !can('write')} title={can('write') ? undefined : denied('write')}
+                  onClick={() => void acceptAll()}>{sugBusy ? 'Creating…' : `Accept all ${pending.length}`}</Button>
               </div>
             </Card>
             {pending.length === 0
@@ -345,9 +352,9 @@ export function AlertsBody({ serviceId, endpointRef, scope }: { serviceId?: stri
                         <div className="row" style={{ gap: 'var(--space-2)', marginTop: 'var(--space-1)' }}>
                           <code className="mono truncate" style={{ flex: 1, fontSize: 'var(--text-xs)', background: 'var(--bg-sunken)', padding: '2px 6px', borderRadius: 'var(--radius-sm)' }}>{s.condition}</code>
                           <Button size="sm" variant="ghost" icon={<X size={12} />} disabled={!can('write')}
-                            onClick={(e) => { e.stopPropagation(); setDecided({ ...decided, [s.id]: 'rejected' }); }}>Dismiss</Button>
+                            onClick={(e) => { e.stopPropagation(); reject(s.id); }}>Dismiss</Button>
                           <Button size="sm" variant="primary" icon={<Check size={12} />} disabled={!can('write')}
-                            onClick={(e) => { e.stopPropagation(); setDecided({ ...decided, [s.id]: 'accepted' }); }}>Accept</Button>
+                            onClick={(e) => { e.stopPropagation(); sugDrawer.open(s); }}>Accept…</Button>
                         </div>
                       </div>
                     </Card>
@@ -385,8 +392,9 @@ export function AlertsBody({ serviceId, endpointRef, scope }: { serviceId?: stri
           onEdit={() => nav(`/alerts/new?kind=${monDrawer.item!.kind}${serviceId ? `&service=${serviceId}` : ''}&edit=${monDrawer.item!.id}${scope ? `&back=${encodeURIComponent(loc.pathname + loc.search)}` : ''}`)} />
       )}
       {sugDrawer.item && (
-        <SuggestionDrawer s={sugDrawer.item} onClose={sugDrawer.close} onEdit={() => nav(`/alerts/new?kind=${sugDrawer.item!.kind}`)}
-          onDecide={(d) => { setDecided({ ...decided, [sugDrawer.item!.id]: d }); sugDrawer.close(); }} />
+        <AcceptSuggestionDrawer s={sugDrawer.item as SuggestionRow} onClose={sugDrawer.close} onEdit={() => nav(`/alerts/new?kind=${sugDrawer.item!.kind}`)}
+          onReject={() => { reject(sugDrawer.item!.id); sugDrawer.close(); }}
+          onCreated={() => { sugDrawer.close(); setTab('monitors'); }} />
       )}
     </>
   );
@@ -743,28 +751,72 @@ function MonitorDrawer({ monitor: m, muted, onClose, onMute, onEdit, onDelete }:
   );
 }
 
-function SuggestionDrawer({ s, onClose, onEdit, onDecide }: { s: Suggestion; onClose: () => void; onEdit: () => void; onDecide: (d: 'accepted' | 'rejected') => void }) {
+const SEVERITY_OF: Record<Suggestion['criticality'], Monitor['severity']> = { critical: 'critical', important: 'warning', low: 'info' };
+
+/**
+ * Detail of a code-intel suggestion before it becomes a monitor: which service / endpoint it lands on, the rule, why,
+ * where in the code. "Create monitor" accepts it (with the edited name / severity) and calls onCreated.
+ */
+export function AcceptSuggestionDrawer({ s, onClose, onCreated, onEdit, onReject }: {
+  s: SuggestionRow; onClose: () => void; onCreated: (m: Pick<Monitor, 'id' | 'name' | 'target'>) => void; onEdit?: () => void; onReject?: () => void;
+}) {
+  const nav = useNavigate();
+  const scope = suggestionScope(s);
+  const svc = services.find((x) => x.name === scope.service || x.id === scope.service);
+  const draftSev = s.monitorDraft?.severity;
+  const [name, setName] = useState(s.monitorDraft?.name || s.title);
+  const [severity, setSeverity] = useState<string>(draftSev === 'critical' || draftSev === 'warning' || draftSev === 'info' ? draftSev : SEVERITY_OF[s.criticality]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const link = codeRefLink(s);
+  const create = async () => {
+    setBusy(true); setError('');
+    try { onCreated(await acceptSuggestion(s.id, { name: name.trim() || undefined, severity })); } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    setBusy(false);
+  };
   return (
     <Drawer open onClose={onClose} title={s.title}
       subtitle={<span className="row" style={{ gap: 'var(--space-2)' }}><CriticalityBadge c={s.criticality} /><span className="muted">{s.target}</span></span>}
       actions={<>
-        <Button size="sm" icon={<X size={12} />} disabled={!can('write')} onClick={() => onDecide('rejected')}>Dismiss</Button>
-        <Button size="sm" icon={<Pencil size={12} />} onClick={onEdit}>Edit</Button>
-        <Button size="sm" variant="primary" icon={<Check size={12} />} disabled={!can('write')} onClick={() => onDecide('accepted')}>Accept</Button>
+        {onReject && <Button size="sm" icon={<X size={12} />} disabled={busy || !can('write')} onClick={onReject}>Dismiss</Button>}
+        {onEdit && <Button size="sm" icon={<Pencil size={12} />} onClick={onEdit}>Edit</Button>}
+        <Button size="sm" variant="primary" icon={<Check size={12} />} disabled={busy || !can('write')} title={can('write') ? undefined : denied('write')}
+          onClick={() => void create()}>{busy ? 'Creating…' : 'Create monitor'}</Button>
       </>}>
-      <DrawerSection title="Why this alert">
-        <p className="secondary" style={{ margin: 0 }}>{s.rationale}</p>
+      {error && <div className="row" style={{ gap: 'var(--space-2)' }}><StatusBadge status="critical" label="Failed" /><span className="secondary">{error}</span></div>}
+      <DrawerSection title="Where it goes">
+        <KeyValues items={[
+          ['Service', svc
+            ? <a href={`/services/${svc.id}?tab=alerts`} onClick={(e) => { e.preventDefault(); onClose(); nav(`/services/${svc.id}?tab=alerts`); }}>{svc.name}</a>
+            : <span className="row" style={{ gap: 'var(--space-2)' }}><span className="mono">{scope.service}</span><Badge>Not reporting yet</Badge></span>],
+          ...(scope.endpoint ? [['Endpoint', <span className="mono">{scope.endpoint}</span>] as [ReactNode, ReactNode]] : []),
+          ['Shown under', svc ? `${svc.name} → Alerts` : 'Alerts (the service tab appears once it sends telemetry)'],
+        ]} />
       </DrawerSection>
       <DrawerSection title="Proposed monitor">
         <KeyValues items={[
           ['Condition', <span className="mono">{s.condition}</span>],
-          ['Type', KIND_LABEL[s.kind]],
+          ['Type', KIND_LABEL[s.kind] ?? s.kind],
           ['Confidence', `${Math.round(s.confidence * 100)}%`],
-          ['Threshold', s.calibrated ? 'Calibrated on 14 days of traffic' : <Badge tone="warning">Calibrating — no baseline yet</Badge>],
+          ['Threshold', s.calibrated ? 'Calibrated on 14 days of traffic' : <Badge icon={<CircleDashed />}>Default until traffic is observed</Badge>],
         ]} />
       </DrawerSection>
+      <DrawerSection title="Monitor">
+        <div className="stack" style={{ gap: 'var(--space-3)' }}>
+          <Field label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
+          <Field label="Severity">
+            <Select value={severity} onChange={(e) => setSeverity(e.target.value)}
+              options={[{ value: 'critical', label: 'Critical' }, { value: 'warning', label: 'Warning' }, { value: 'info', label: 'Info' }]} />
+          </Field>
+        </div>
+      </DrawerSection>
+      <DrawerSection title="Why this alert">
+        <p className="secondary" style={{ margin: 0 }}>{s.rationale}</p>
+      </DrawerSection>
       <DrawerSection title="Found in code">
-        <span className="row mono" style={{ gap: 'var(--space-2)', fontSize: 'var(--text-sm)' }}><FileCode2 size={14} className="muted" />{s.codeRef}</span>
+        {link
+          ? <a className="row mono" style={{ gap: 'var(--space-2)', fontSize: 'var(--text-sm)' }} href={link} target="_blank" rel="noreferrer"><FileCode2 size={14} aria-hidden />{s.codeRef}<ExternalLink size={12} aria-hidden /></a>
+          : <span className="row mono" style={{ gap: 'var(--space-2)', fontSize: 'var(--text-sm)' }}><FileCode2 size={14} className="muted" aria-hidden />{s.codeRef}</span>}
       </DrawerSection>
     </Drawer>
   );

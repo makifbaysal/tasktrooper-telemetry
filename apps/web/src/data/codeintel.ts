@@ -5,7 +5,7 @@
  * them empty — screens show empty states instead of failing.
  */
 import { inventory, repos, suggestions } from './apm';
-import { API_URL, ApiError, api, invalidate, qs, registerHydrator } from './remote';
+import { API_URL, ApiError, api, invalidate, mutate, qs, registerHydrator } from './remote';
 import type { Criticality, InventoryItem, Monitor, Repo, Suggestion } from './types';
 
 // ---------------------------------------------------------------- types
@@ -58,7 +58,13 @@ export interface InventoryRow extends InventoryItem {
   repoId?: string;
 }
 
-export interface SuggestionRow extends Suggestion { repoId?: string }
+export interface SuggestionRow extends Suggestion { repoId?: string; monitorDraft?: { name?: string; severity?: string } | null }
+
+/** Service and endpoint a suggestion targets: target is `<service>[ logs] · <endpoint>`. */
+export function suggestionScope(s: Pick<Suggestion, 'target'>): { service: string; endpoint?: string } {
+  const [svc, ...rest] = s.target.split(' · ');
+  return { service: svc.replace(/ logs$/, ''), endpoint: rest.join(' · ') || undefined };
+}
 
 export interface ConnectRepoInput {
   provider: RepoProvider;
@@ -308,16 +314,18 @@ export async function analyzeRepo(id: string) {
 /** Suggestions accepted in this session (they leave the proposed list), with the monitor each created. */
 export const acceptedSuggestions = new Map<string, { suggestion: SuggestionRow; monitor: Pick<Monitor, 'id' | 'name' | 'target'> }>();
 
-/** Accept → a monitor is created (source=suggestion). Returns the new monitor. */
-export async function acceptSuggestion(id: string): Promise<Pick<Monitor, 'id' | 'name' | 'target'>> {
+/** Overrides of the suggestion's monitor draft on accept (POST /suggestions/{id}/accept body). */
+export interface SuggestionAcceptInput { name?: string; severity?: string }
+
+/** Accept → a monitor is created (source=suggestion). Refreshes the monitor list so the service's Alerts tab shows it. */
+export async function acceptSuggestion(id: string, o: SuggestionAcceptInput = {}): Promise<Pick<Monitor, 'id' | 'name' | 'target'>> {
   const s = suggestions.find((x) => x.id === id);
-  const out = await api<{ id?: string | number; monitorId?: string | number; monitor?: { id: string | number; name?: string } } | null>(
-    `/suggestions/${encodeURIComponent(id)}/accept`, { method: 'POST' });
+  const out = await mutate<{ id?: string | number; monitorId?: string | number; monitor?: { id: string | number; name?: string; target?: string } } | null>(
+    'POST', `/suggestions/${encodeURIComponent(id)}/accept`, o, ['/monitors']);
   const monId = String(out?.monitorId ?? out?.monitor?.id ?? out?.id ?? '');
-  const mon = { id: monId, name: out?.monitor?.name ?? s?.title ?? 'Monitor', target: s?.target ?? '' };
+  const mon = { id: monId, name: out?.monitor?.name ?? o.name ?? s?.title ?? 'Monitor', target: out?.monitor?.target ?? s?.target ?? '' };
   if (s) acceptedSuggestions.set(id, { suggestion: s, monitor: mon });
   await refreshCodeIntel();
-  invalidate('/monitors');
   return mon;
 }
 

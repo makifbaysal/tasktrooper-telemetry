@@ -98,7 +98,10 @@ Integration patterns (`screens/Integrations.tsx`): `ProviderMark` (provider iden
 `DeployList` (deploy marker list: version, commit message, author, source, link, build status).
 
 Code insights / load test patterns: `SuggestionCard` (`screens/CodeInsights.tsx` — suggestion card: criticality + "From code" + calibrated/not calibrated badge,
-target, condition mono, rationale, `file:line` GitHub link, Reject / Customize / Accept; after accept "Monitor created" + link to the monitor),
+target service (link to its Alerts tab, "Not reporting yet" badge when the service sends no telemetry) + endpoint, condition mono, rationale,
+`file:line` GitHub link, Reject / Customize / Accept…; Accept… opens `AcceptSuggestionDrawer` (`screens/Alerts.tsx`, also used by the service
+Alerts → Suggested tab: where it goes (service, endpoint, "Shown under"), proposed rule, editable name + severity, why, code ref; "Create monitor"
+accepts and opens the service's Alerts tab); after accept "Monitor created" + link to the monitor),
 `ConnectRepoDrawer` (`screens/ConnectRepo.tsx` — primary "Connect GitHub" (full-page redirect to the api), on return a repo picker via `?github=<id>`:
 search, Private/Added badges, multi-select; token / local path under "Advanced"), repo row states (Analyzing… / Analyzing push… +
 `pending_paths`, Disconnected warning, Analysis failed + error text, "Webhook active"), `RunBlockedCallout` + `ScenarioSource`
@@ -174,7 +177,7 @@ Charts live under `components/charts`, pure SVG: `TimeSeries`, `Columns` (stacke
 
 - **List screen:** PageHeader → filter row (Segmented + Search) → `Table` inside `Card flush`.
 - **Detail screen:** PageHeader with breadcrumb (at most 1 primary on the right) → 4 StatTiles → grid of 2–3 charts → Tabs → table/list.
-- **Suggestion card (from code):** title + criticality + type badges → target → condition (mono) → rationale → `file:line · confidence` → Dismiss / Edit / Accept.
+- **Suggestion card (from code):** title + criticality + type badges → target → condition (mono) → rationale → `file:line · confidence` → Dismiss / Edit / Accept… (Accept… opens `AcceptSuggestionDrawer`; the monitor is created from there).
 - Things that come from code are marked with a `Sparkles`/`Code2` icon + `accent` badge.
 
 ## Page composition (mandatory)
