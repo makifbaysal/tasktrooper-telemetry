@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/jackc/pgx/v5/pgxpool"
 	trooperredis "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/goredis"
 	trooperpgx "github.com/makifbaysal/tasktrooper-telemetry/sdks/go/integrations/pgx"
@@ -246,6 +247,7 @@ func RunWriter(ctx context.Context, cfg WriterConfig, log *slog.Logger) error {
 	if cfg.Telemetry {
 		cfg.Writer.Tel = selfobs.New(nil, cfg.SelfProjectID)
 		warnNoGuard(log, cfg.SelfProjectID)
+		cfg.S3.HTTPClient = selfobs.HTTPClient(awshttp.NewBuildableClient(), "s3") // replay uploads: client spans
 	}
 	defer obs.Serve(cfg.MetricsAddr, log)()
 	cfg.Writer.Topics, cfg.Writer.Blobs = replayStore(ctx, cfg.S3, cfg.Writer.Topics, log)

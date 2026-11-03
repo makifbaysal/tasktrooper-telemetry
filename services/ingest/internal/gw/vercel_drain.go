@@ -58,7 +58,7 @@ func (s *Server) handleVercel(w http.ResponseWriter, r *http.Request) error {
 		if errors.Is(err, auth.ErrInvalidKey) {
 			return errUnauthorized
 		}
-		s.log.Error("key lookup failed", "err", err)
+		s.log.ErrorContext(r.Context(), "key lookup failed", "err", err)
 		return &ingestError{status: http.StatusServiceUnavailable, msg: "auth backend unavailable", retryAfter: 5}
 	}
 	ctx := s.begin(r.Context(), key)

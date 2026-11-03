@@ -110,10 +110,17 @@ func TestWriterSelfTelemetryLoopGuard(t *testing.T) {
 			if n != tt.wantLogs {
 				t.Fatalf("otel logs = %q, want %d undecodable warnings", rec.Logs.Bodies(), tt.wantLogs)
 			}
-			if w.stats != (selfobs.FlushStats{}) {
+			if w.stats.Records != 0 || w.stats.Self != 0 || w.stats.Topics != nil {
 				t.Fatalf("stats not reset: %+v", w.stats)
 			}
 			for _, s := range rec.Spans.Ended() {
+				if s.Name() == "process flush" {
+					for _, kv := range s.Attributes() {
+						if kv.Key == "messaging.destination.name" && kv.Value.AsString() != topics.Traces {
+							t.Fatalf("flush topic %q", kv.Value.AsString())
+						}
+					}
+				}
 				if s.Name() == "INSERT spans" {
 					attrs := map[string]string{}
 					for _, kv := range s.Attributes() {

@@ -8,7 +8,8 @@ COPY services/alerting/go.mod services/alerting/go.sum services/alerting/
 WORKDIR /src/services/alerting
 RUN GOWORK=off go mod download
 COPY services/alerting/ .
-RUN CGO_ENABLED=0 GOWORK=off go build -trimpath -ldflags="-s -w" -o /out/app ./cmd/${CMD}
+ARG VERSION=dev
+RUN CGO_ENABLED=0 GOWORK=off go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/app ./cmd/${CMD}
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/app /app

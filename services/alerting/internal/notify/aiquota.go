@@ -182,7 +182,7 @@ func (d *Deliverer) deliverAIQuota(ctx context.Context, ch Channel, p Payload) e
 			return permanent("email channel %q: TT_NOTIFIER_SMTP_ADDR not configured", ch.Name)
 		}
 		from := orDefault(secret(ch.Config, "from"), orDefault(d.SMTP.From, "alerts@tasktrooper.local"))
-		return d.sendMail(d.SMTP.Addr, d.smtpAuth(), from, to, AIQuotaEmail(p, from, to, d.now()))
+		return d.mail(ctx, d.SMTP.Addr, d.smtpAuth(), from, to, AIQuotaEmail(p, from, to, d.now()))
 	}
 	return permanent("channel %q: unsupported type %q", ch.Name, ch.Type)
 }

@@ -34,12 +34,12 @@ func (e *Engine) evalKpis(ctx context.Context, now time.Time) {
 		}
 		end, err := e.writeSLI(ctx, k, now)
 		if err != nil {
-			e.log.Error("sli_1m write failed", "kpi", k.ID, "err", err)
+			e.log.ErrorContext(ctx, "sli_1m write failed", "kpi", k.ID, "err", err)
 			continue
 		}
 		for _, r := range k.Rules {
 			if err := e.evalRule(ctx, k, r, end, now); err != nil {
-				e.log.Error("kpi rule evaluation failed", "kpi", k.ID, "rule", r.ID, "err", err)
+				e.log.ErrorContext(ctx, "kpi rule evaluation failed", "kpi", k.ID, "rule", r.ID, "err", err)
 				continue
 			}
 			e.remindRule(ctx, k, r, now)
@@ -227,7 +227,7 @@ func (e *Engine) evalRule(ctx context.Context, k *model.Kpi, r model.KpiRule, en
 			return err
 		}
 		rs.incidentID = id
-		e.log.Info("kpi incident opened", "incident", id, "kpi", k.ID, "rule", r.ID, "burn", value)
+		e.log.InfoContext(ctx, "kpi incident opened", "incident", id, "kpi", k.ID, "rule", r.ID, "burn", value)
 	case statemachine.Resolve:
 		if rs.incidentID != 0 {
 			_, _, err := e.st.Resolve(ctx, 0, rs.incidentID, nil, r.Channels, map[string]any{"value": value}, sup, func(res store.Resolved) map[string]any {
@@ -244,7 +244,7 @@ func (e *Engine) evalRule(ctx context.Context, k *model.Kpi, r model.KpiRule, en
 				return err
 			}
 		}
-		e.log.Info("kpi incident resolved", "incident", rs.incidentID, "kpi", k.ID, "rule", r.ID)
+		e.log.InfoContext(ctx, "kpi incident resolved", "incident", rs.incidentID, "kpi", k.ID, "rule", r.ID)
 		rs.incidentID = 0
 	default:
 		if next.State == model.StateFiring && rs.incidentID != 0 && !noData {
@@ -300,11 +300,11 @@ func (e *Engine) remindRule(ctx context.Context, k *model.Kpi, r model.KpiRule, 
 		return p
 	})
 	if err != nil {
-		e.log.Error("kpi reminder failed", "kpi", k.ID, "rule", r.ID, "err", err)
+		e.log.ErrorContext(ctx, "kpi reminder failed", "kpi", k.ID, "rule", r.ID, "err", err)
 		return
 	}
 	if sent {
 		e.reg.Add("tt_alert_reminders_total", 1)
-		e.log.Info("kpi reminder enqueued", "incident", due.IncidentID, "kpi", k.ID, "rule", r.ID, "n", due.N)
+		e.log.InfoContext(ctx, "kpi reminder enqueued", "incident", due.IncidentID, "kpi", k.ID, "rule", r.ID, "n", due.N)
 	}
 }

@@ -56,12 +56,12 @@ func Start(ctx context.Context, service, version string, log *slog.Logger) func(
 }
 
 // Logger tees log records to OTel logs (with trace_id/span_id on the local output) when Enabled; the local
-// handler and its level are kept.
+// handler and its level are kept. Records logged under an SDK entry carry trooper.entry.route / .method (EntryRoute).
 func Logger(log *slog.Logger, service string) *slog.Logger {
 	if !Enabled() || log == nil {
 		return log
 	}
-	return slog.New(trooperslog.NewHandler(service, log.Handler(), trooperslog.WithLevel(minLevel(log))))
+	return slog.New(EntryRoute(trooperslog.NewHandler(service, log.Handler(), trooperslog.WithLevel(minLevel(log)))))
 }
 
 func minLevel(log *slog.Logger) slog.Level {
@@ -96,10 +96,10 @@ func StartSpan(ctx context.Context, name string, attrs ...attribute.KeyValue) (c
 	return tracer().Start(ctx, name, trace.WithSpanKind(trace.SpanKindInternal), trace.WithAttributes(attrs...))
 }
 
-// End records err (if any) and ends span.
+// End records err (if any, as an exception event with a stack trace) and ends span.
 func End(span trace.Span, err error) {
 	if err != nil {
-		span.RecordError(err)
+		span.RecordError(err, trace.WithStackTrace(true))
 		span.SetStatus(codes.Error, err.Error())
 	}
 	span.End()

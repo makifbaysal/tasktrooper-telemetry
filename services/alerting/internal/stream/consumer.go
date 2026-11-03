@@ -8,15 +8,20 @@ import (
 	"time"
 
 	"github.com/twmb/franz-go/pkg/kgo"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	"google.golang.org/protobuf/proto"
+
+	trooper "github.com/makifbaysal/tasktrooper-telemetry/sdks/go"
 
 	"github.com/tasktrooper/telemetry/services/pkg/topics"
 
 	"github.com/tasktrooper/telemetry/services/alerting/internal/eval"
 	"github.com/tasktrooper/telemetry/services/alerting/internal/model"
 	"github.com/tasktrooper/telemetry/services/alerting/internal/obs"
+	"github.com/tasktrooper/telemetry/services/alerting/internal/selftel"
 )
 
 // Engine is what the stream needs from the alert engine.
@@ -193,6 +198,56 @@ func (p *Processor) Due(now time.Time) []*model.Monitor {
 type Config struct {
 	Brokers []string
 	Group   string
+	// SelfProject (TT_SELF_PROJECT_ID) is the platform's own project: a poll batch made only of its records produces
+	// no consumer span (loop guard, contracts §27); 0 = guard off.
+	SelfProject int64
+}
+
+// HandleTopic processes the records of one topic from one poll inside a consumer span ("process <topic>", consumer
+// group cfg.Group, messaging.batch.message_count). Batches of only self-project records get no span.
+func (p *Processor) HandleTopic(ctx context.Context, cfg Config, topic string, recs []*kgo.Record) {
+	if len(recs) == 0 {
+		return
+	}
+	self := 0
+	if cfg.SelfProject != 0 {
+		for _, r := range recs {
+			if recordProject(r) == cfg.SelfProject {
+				self++
+			}
+		}
+	}
+	var span trace.Span
+	if self < len(recs) {
+		ctx, span = trooper.StartConsumer(ctx, nil, trooper.Message{System: "kafka", Destination: topic,
+			ConsumerGroup: orDefault(cfg.Group, Group), Partition: -1, Attributes: []attribute.KeyValue{
+				attribute.Int("messaging.batch.message_count", len(recs)),
+				attribute.Int("tt.self_records", self),
+			}})
+	}
+	for _, r := range recs {
+		p.Handle(ctx, r)
+	}
+	if span != nil {
+		selftel.End(span, nil)
+	}
+}
+
+func orDefault(s, d string) string {
+	if s == "" {
+		return d
+	}
+	return s
+}
+
+func recordProject(r *kgo.Record) int64 {
+	for _, h := range r.Headers {
+		if h.Key == topics.HeaderProjectID {
+			n, _ := strconv.ParseInt(string(h.Value), 10, 64)
+			return n
+		}
+	}
+	return 0
 }
 
 // Run consumes the ingest topics while the engine is leader (joining the group only then, so standbys do not
@@ -248,8 +303,8 @@ func Run(ctx context.Context, cfg Config, eng Engine, reg *obs.Registry, log *sl
 				log.Warn("stream fetch", "topic", t, "partition", part, "err", err)
 			}
 		})
-		fetches.EachRecord(func(r *kgo.Record) {
-			p.Handle(ctx, r)
+		fetches.EachTopic(func(ft kgo.FetchTopic) {
+			p.HandleTopic(ctx, cfg, ft.Topic, ft.Records())
 		})
 		for _, m := range p.Due(p.Now()) {
 			evalWG.Add(1)
@@ -265,12 +320,7 @@ func Run(ctx context.Context, cfg Config, eng Engine, reg *obs.Registry, log *sl
 
 // Handle decodes one Kafka record (project from the project_id header) and processes it.
 func (p *Processor) Handle(ctx context.Context, r *kgo.Record) {
-	var project int64
-	for _, h := range r.Headers {
-		if h.Key == topics.HeaderProjectID {
-			project, _ = strconv.ParseInt(string(h.Value), 10, 64)
-		}
-	}
+	project := recordProject(r)
 	p.count("tt_alert_stream_records_total", "topic", r.Topic)
 	if project == 0 || !p.Wants(project) {
 		return

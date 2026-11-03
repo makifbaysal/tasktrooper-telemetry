@@ -110,10 +110,10 @@ func (c *Checker) Run(ctx context.Context) {
 		selftel.End(span, err)
 		if err != nil {
 			if ctx.Err() == nil {
-				c.log().Error("AI quota check failed", "err", err)
+				c.log().ErrorContext(octx, "AI quota check failed", "err", err)
 			}
 		} else if n > 0 {
-			c.log().Info("AI quota notifications enqueued", "orgs", n)
+			c.log().InfoContext(octx, "AI quota notifications enqueued", "orgs", n)
 		}
 		select {
 		case <-ctx.Done():

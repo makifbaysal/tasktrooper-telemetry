@@ -82,7 +82,8 @@ func main() {
 	}, log)
 	if config.Bool("TT_ALERT_STREAM", false) {
 		go func() {
-			_ = stream.Run(ctx, stream.Config{Brokers: common.KafkaBrokers, Group: config.String("TT_ALERT_STREAM_GROUP", stream.Group)}, eng, reg, log)
+			_ = stream.Run(ctx, stream.Config{Brokers: common.KafkaBrokers, Group: config.String("TT_ALERT_STREAM_GROUP", stream.Group),
+				SelfProject: int64(config.Int("TT_SELF_PROJECT_ID", 0))}, eng, reg, log)
 		}()
 		if el.Shards > 1 {
 			// stream hits on monitors of this replica's shards arrive from the stream leader (shard 0)

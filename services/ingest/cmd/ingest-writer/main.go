@@ -16,6 +16,9 @@ import (
 
 const service = "tt-ingest-writer"
 
+// version is set at build time (-ldflags "-X main.version=...", Dockerfile ARG VERSION).
+var version = "dev"
+
 func main() {
 	cfg := app.WriterFromEnv()
 	log := logx.New("ingest-writer", cfg.Common.LogLevel)
@@ -23,7 +26,7 @@ func main() {
 	defer stop()
 
 	// Self-telemetry (ADR-027): only with TROOPER_DSN; otherwise nothing is installed.
-	shutdown, enabled, err := selfobs.Start(ctx, service)
+	shutdown, enabled, err := selfobs.Start(ctx, service, version)
 	if err != nil {
 		log.Warn("self-telemetry disabled", "err", err)
 	}

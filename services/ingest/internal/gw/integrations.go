@@ -76,7 +76,7 @@ func (c *IntegrationCache) Vercel(ctx context.Context, id int64) (*vercel.Integr
 	})
 	if err != nil {
 		if ok {
-			c.log.Warn("integration lookup failed, serving stale entry", "integration", id, "err", err)
+			c.log.WarnContext(ctx, "integration lookup failed, serving stale entry", "integration", id, "err", err)
 			return hitInteg(e.in)
 		}
 		return nil, err
@@ -142,7 +142,7 @@ func (p PGIntegrations) LoadVercel(ctx context.Context, id int64) (*vercel.Integ
 		if err != nil {
 			// The integration exists but its secret can't be resolved: data requests fail (401) until fixed.
 			if p.Log != nil {
-				p.Log.Warn("vercel drain secret unresolvable", "integration", id, "err", err)
+				p.Log.WarnContext(ctx, "vercel drain secret unresolvable", "integration", id, "err", err)
 			}
 			return in, nil
 		}

@@ -106,7 +106,7 @@ func TestStartFlushLoopGuard(t *testing.T) {
 			ictx, ins := selfobs.InsertSpan(ctx, "spans", 10)
 			_ = ictx
 			selfobs.EndSpan(ins, nil)
-			selfobs.EndSpan(span, nil)
+			span.End(nil)
 			if got := rec.SpanNames(); !slices.Equal(got, tt.wantSpans) {
 				t.Fatalf("spans = %q, want %q", got, tt.wantSpans)
 			}

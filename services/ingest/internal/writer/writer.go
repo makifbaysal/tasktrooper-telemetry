@@ -149,9 +149,9 @@ func (w *Writer) flushLocked(ctx context.Context) error {
 		return nil
 	}
 	start := time.Now()
-	ctx, span := w.cfg.Tel.StartFlush(ctx, w.cfg.Group, w.stats)
+	ctx, flush := w.cfg.Tel.StartFlush(ctx, w.cfg.Group, w.stats)
 	err := w.flushTraced(ctx, start)
-	selfobs.EndSpan(span, err)
+	flush.End(err)
 	return err
 }
 
@@ -309,17 +309,15 @@ func (w *Writer) countRecord(r *kgo.Record) bool {
 	if w.cfg.Tel == nil {
 		return false
 	}
-	w.stats.Records++
+	self := false
 	for _, h := range r.Headers {
 		if h.Key == topics.HeaderProjectID {
-			if w.cfg.Tel.IsSelfHeader(h.Value) {
-				w.stats.Self++
-				return true
-			}
-			return false
+			self = w.cfg.Tel.IsSelfHeader(h.Value)
+			break
 		}
 	}
-	return false
+	w.stats.Add(r.Topic, self)
+	return self
 }
 
 // addRecord buffers one consumed record (w.mu held).

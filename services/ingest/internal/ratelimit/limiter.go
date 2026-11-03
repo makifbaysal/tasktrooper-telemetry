@@ -67,7 +67,7 @@ func (l *Limiter) Allow(ctx context.Context, project uint32, rps int) (bool, tim
 			return ok, wait
 		}
 		l.downUntil.Store(time.Now().Add(5 * time.Second).UnixNano())
-		l.log.Warn("redis rate limit unavailable, falling back to in-memory", "err", err)
+		l.log.WarnContext(ctx, "redis rate limit unavailable, falling back to in-memory", "err", err)
 	}
 	return l.localAllow(project, rps, burst)
 }

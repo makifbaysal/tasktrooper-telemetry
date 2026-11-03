@@ -17,6 +17,8 @@ import (
 // Config configures the S3-compatible store (TT_S3_* env, bucket TT_REPLAY_S3_BUCKET).
 type Config struct {
 	Endpoint, Bucket, AccessKey, SecretKey, Region string
+	// HTTPClient overrides the SDK default client (self-telemetry wraps it with client spans); nil = default.
+	HTTPClient s3.HTTPClient
 }
 
 // S3 writes objects to one bucket.
@@ -38,6 +40,7 @@ func NewS3(ctx context.Context, cfg Config) (*S3, error) {
 		// SeaweedFS / MinIO: only send/validate checksums when required
 		RequestChecksumCalculation: aws.RequestChecksumCalculationWhenRequired,
 		ResponseChecksumValidation: aws.ResponseChecksumValidationWhenRequired,
+		HTTPClient:                 cfg.HTTPClient,
 	})
 	o := &S3{c: c, bucket: cfg.Bucket}
 	if _, err := c.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: &o.bucket}); err == nil {

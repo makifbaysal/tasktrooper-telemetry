@@ -17,6 +17,10 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+
+	"github.com/tasktrooper/telemetry/services/alerting/internal/selftel"
 )
 
 func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
@@ -170,7 +174,7 @@ func (d *Deliverer) Deliver(ctx context.Context, ch Channel, kind string, p Payl
 		}
 		return d.post(ctx, base, body, h)
 	case "email":
-		return d.email(ch, p)
+		return d.email(ctx, ch, p)
 	case "teams":
 		url := secret(ch.Config, "webhookUrl", "webhook_url", "url")
 		if url == "" {
@@ -210,7 +214,7 @@ func (d *Deliverer) post(ctx context.Context, url string, body []byte, headers m
 	return permanent("http %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))
 }
 
-func (d *Deliverer) email(ch Channel, p Payload) error {
+func (d *Deliverer) email(ctx context.Context, ch Channel, p Payload) error {
 	var to []string
 	switch v := ch.Config["to"].(type) {
 	case string:
@@ -241,7 +245,7 @@ func (d *Deliverer) email(ch Channel, p Payload) error {
 		}
 		auth = smtp.PlainAuth("", d.SMTP.User, d.SMTP.Password, host)
 	}
-	return d.sendMail(d.SMTP.Addr, auth, from, to, EmailMessage(p, from, to, d.Now()))
+	return d.mail(ctx, d.SMTP.Addr, auth, from, to, EmailMessage(p, from, to, d.Now()))
 }
 
 // Backoff is the delay before retry number attempt (1 = first retry): 30 s doubling, capped at 1 h,
@@ -267,4 +271,12 @@ func DecodeConfig(b []byte) map[string]any {
 	m := map[string]any{}
 	_ = json.Unmarshal(b, &m)
 	return m
+}
+
+// mail sends one message through sendMail inside an SMTP client span (peer.service smtp; recipients are not recorded).
+func (d *Deliverer) mail(ctx context.Context, addr string, a smtp.Auth, from string, to []string, msg []byte) error {
+	_, span := selftel.StartClient(ctx, "smtp send", "smtp", addr, attribute.Int("tt.email.recipients", len(to)))
+	err := d.sendMail(addr, a, from, to, msg)
+	selftel.End(span, err)
+	return err
 }
