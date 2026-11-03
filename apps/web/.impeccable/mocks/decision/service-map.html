@@ -1,0 +1,47 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:1440px;height:900px;overflow:hidden;background:#0b0f1c;color:#e6e9f0;font-family:Inter,sans-serif;position:relative}
+nav{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;gap:32px;height:72px;padding:0 64px;z-index:2}
+.logo{display:flex;align-items:center;gap:10px;font-weight:600;font-size:16px}
+.mark{width:28px;height:28px;border-radius:7px;background:#e6e9f0}
+.links{display:flex;gap:28px;font-size:14px;color:#9aa3b6}
+.sp{flex:1}
+.btn{height:38px;padding:0 18px;border-radius:8px;font-size:14px;font-weight:500;display:inline-flex;align-items:center}
+.pri{background:#e6e9f0;color:#0b0f1c}.sec{border:1px solid #2b3349;color:#e6e9f0}
+.copy{position:absolute;left:64px;top:128px;width:600px;z-index:2}
+h1{font-size:64px;line-height:68px;letter-spacing:-0.035em;font-weight:600}
+.copy p{margin-top:20px;font-size:18px;line-height:28px;color:#9aa3b6}
+.acts{display:flex;gap:12px;margin-top:28px}
+svg.map{position:absolute;inset:0}
+.n{font:500 13px "JetBrains Mono",monospace}
+.cause{position:absolute;left:64px;bottom:56px;width:640px;padding:20px 24px;border:1px solid #2b3349;border-radius:12px;background:#121831;z-index:2}
+.cause .k{font-size:12px;color:#e9b56a;margin-bottom:8px}
+.cause p{font-size:20px;line-height:30px}
+.cause b{font:500 17px "JetBrains Mono",monospace;color:#f1d3a3}
+.tag{position:absolute;right:64px;bottom:24px;font-size:12px;color:#9aa3b6}
+</style></head><body>
+<nav><div class="logo"><span class="mark"></span>TaskTrooper Telemetry</div>
+<div class="links"><span>Product</span><span>SDKs</span><span>Docs</span></div><span class="sp"></span><span class="btn sec">Sign in</span></nav>
+<svg class="map" viewBox="0 0 1440 900">
+ <g stroke="#232b40" stroke-width="1.5" fill="none">
+  <path d="M820 200 L1000 330"/><path d="M820 200 L1180 210"/><path d="M1000 330 L960 520"/><path d="M1180 210 L1290 400"/><path d="M1290 400 L1220 600"/><path d="M960 520 L1220 600"/><path d="M1000 330 L1290 400"/>
+ </g>
+ <g stroke="#e9b56a" stroke-width="2.5" fill="none"><path d="M820 200 L1000 330"/><path d="M1000 330 L960 520"/><path d="M960 520 L1120 720"/></g>
+ <g fill="#121831" stroke="#2b3349">
+  <rect x="740" y="180" width="160" height="40" rx="8"/><rect x="1110" y="190" width="140" height="40" rx="8"/><rect x="1220" y="380" width="140" height="40" rx="8"/><rect x="1150" y="580" width="140" height="40" rx="8"/>
+ </g>
+ <g fill="#1d2440" stroke="#e9b56a"><rect x="900" y="310" width="200" height="40" rx="8"/><rect x="880" y="500" width="160" height="40" rx="8"/><rect x="1050" y="700" width="140" height="40" rx="8"/></g>
+ <g class="n" fill="#c2c9d6"><text x="756" y="205">storefront-bff</text><text x="1126" y="215">auth-api</text><text x="1236" y="405">catalog-api</text><text x="1166" y="605">search</text></g>
+ <g class="n" fill="#f1d3a3"><text x="916" y="335">recommendation-api</text><text x="908" y="525">reco-db</text><text x="1066" y="725">migration 0042</text></g>
+ <g font-family="Inter" font-size="12" fill="#e9b56a"><text x="1110" y="300">p95 4.1 s ↑</text><text x="1050" y="470">query 63× slower</text></g>
+</svg>
+<div class="copy"><h1>Know why it’s slow, not just that it is.</h1>
+<p>APM, real-user monitoring, logs and load tests in one place. When something breaks, TaskTrooper walks the call tree and names the cause.</p>
+<div class="acts"><span class="btn pri">See how it works</span><span class="btn sec">Read the docs</span></div></div>
+<div class="cause"><div class="k">Root cause · confidence high</div>
+<p>Homepage slow because <b>storefront-bff → recommendation-api → reco-db</b> queries got 63× slower after migration 0042.</p></div>
+<div class="tag">Synthetic example</div>
+</body></html>

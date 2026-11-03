@@ -1,0 +1,54 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:1440px;height:900px;overflow:hidden;background:#f6f7fa;color:#0f1424;font-family:Inter,sans-serif}
+nav{display:flex;align-items:center;gap:32px;height:72px;padding:0 64px;border-bottom:1px solid #e2e5ec}
+.logo{display:flex;align-items:center;gap:10px;font-weight:600;font-size:16px}
+.mark{width:28px;height:28px;border-radius:7px;background:#15214b}
+.links{display:flex;gap:28px;font-size:14px;color:#4a5265}
+.sp{flex:1}
+.btn{height:38px;padding:0 18px;border-radius:8px;font-size:14px;font-weight:500;display:inline-flex;align-items:center}
+.pri{background:#15214b;color:#fff}.sec{border:1px solid #d5d9e2;background:#fff;color:#0f1424}
+h1{font-size:76px;line-height:80px;letter-spacing:-0.035em;font-weight:600;padding:56px 64px 0;max-width:1180px}
+h1 em{font-style:normal;color:#5b6478}
+.sub{display:flex;align-items:center;gap:24px;padding:24px 64px 0}
+.sub p{font-size:18px;line-height:28px;color:#4a5265;max-width:620px}
+.strip{position:absolute;left:0;right:0;top:470px;height:430px;display:grid;grid-template-columns:1fr 160px 1fr;background:#0f1424;color:#c2c9d6}
+.code{padding:32px 0 0 64px;font:13px/24px "JetBrains Mono",monospace}
+.code .f{color:#7d879c;margin-bottom:12px}
+.code .hl{background:rgba(233,181,106,.14);color:#f1d3a3;margin-left:-12px;padding-left:12px}
+.wires{position:relative}
+.wires svg{position:absolute;inset:0}
+.mon{padding:32px 64px 0 0;display:flex;flex-direction:column;gap:10px}
+.mon .h{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#7d879c;margin-bottom:4px}
+.row{display:grid;grid-template-columns:150px 1fr auto;gap:14px;align-items:center;padding:12px 14px;border:1px solid #232b40;border-radius:8px;font-size:14px}
+.row b{font:500 13px "JetBrains Mono",monospace;color:#fff}
+.row span{color:#9aa3b6}
+.row i{font-style:normal;font-size:12px;color:#e9b56a}
+.tag{position:absolute;right:64px;bottom:20px;font-size:12px;color:#9aa3b6}
+</style></head><body>
+<nav><div class="logo"><span class="mark"></span>TaskTrooper Telemetry</div>
+<div class="links"><span>Product</span><span>SDKs</span><span>Docs</span></div><span class="sp"></span>
+<span class="btn sec">Sign in</span></nav>
+<h1>Connect your repo. <em>It writes the alerts you would have written after the outage.</em></h1>
+<div class="sub"><p>APM, real-user monitoring, logs and load tests in one place. TaskTrooper reads your routes and consumers, then proposes the KPIs and monitors for them.</p>
+<span class="btn pri">See how it works</span><span class="btn sec">Read the docs</span></div>
+<div class="strip">
+ <div class="code"><div class="f">orders-api / internal/http/routes.go</div>
+ <div>r := chi.NewRouter()</div>
+ <div class="hl">r.Post("/orders", h.CreateOrder)</div>
+ <div class="hl">r.Get("/orders/{id}", h.GetOrder)</div>
+ <div>r.Get("/healthz", h.Health)</div>
+ <div class="hl">consumer.Handle("payments.settled", h.Settle)</div>
+ <div>r.Get("/metrics", promhttp.Handler())</div></div>
+ <div class="wires"><svg viewBox="0 0 160 430"><path d="M0 92 C80 92 80 90 160 90" stroke="#e9b56a" fill="none"/><path d="M0 116 C80 116 80 152 160 152" stroke="#e9b56a" fill="none"/><path d="M0 164 C80 164 80 214 160 214" stroke="#e9b56a" fill="none"/></svg></div>
+ <div class="mon"><div class="h">Proposed from code · orders-api</div>
+ <div class="row"><b>POST /orders</b><span>KPI 99.5% availability · 30d</span><i>critical path</i></div>
+ <div class="row"><b>GET /orders/:id</b><span>p95 latency under 300 ms</span><i>high traffic</i></div>
+ <div class="row"><b>payments.settled</b><span>consumer lag under 1,000 msgs</span><i>queue consumer</i></div>
+ </div>
+ <div class="tag">Synthetic example</div>
+</div>
+</body></html>

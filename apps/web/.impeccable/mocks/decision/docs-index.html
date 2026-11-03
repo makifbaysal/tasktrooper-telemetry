@@ -1,0 +1,59 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:1440px;height:900px;overflow:hidden;background:#fff;color:#0f1424;font-family:Inter,sans-serif}
+nav{display:flex;align-items:center;gap:32px;height:64px;padding:0 40px;border-bottom:1px solid #e2e5ec}
+.logo{display:flex;align-items:center;gap:10px;font-weight:600;font-size:15px}
+.mark{width:26px;height:26px;border-radius:7px;background:#15214b}
+.links{display:flex;gap:24px;font-size:14px;color:#4a5265}
+.sp{flex:1}
+.btn{height:36px;padding:0 16px;border-radius:8px;font-size:14px;font-weight:500;display:inline-flex;align-items:center}
+.pri{background:#15214b;color:#fff}.sec{border:1px solid #d5d9e2}
+.wrap{display:grid;grid-template-columns:240px 1fr 340px;height:836px}
+aside{border-right:1px solid #e2e5ec;padding:32px 24px;font-size:14px}
+aside .h{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#5b6478;margin:0 0 10px}
+aside div{padding:7px 10px;border-radius:6px;color:#4a5265}
+aside .on{background:#eef0f5;color:#0f1424;font-weight:500}
+main{padding:48px 56px}
+h1{font-size:52px;line-height:58px;letter-spacing:-0.03em;font-weight:600;max-width:720px}
+main>p{margin-top:16px;font-size:17px;line-height:27px;color:#4a5265;max-width:640px}
+.code{margin-top:32px;background:#0f1424;border-radius:12px;color:#c2c9d6;overflow:hidden}
+.tabs{display:flex;gap:4px;padding:10px 12px;border-bottom:1px solid #232b40;font-size:13px}
+.tabs span{padding:6px 10px;border-radius:6px;color:#5b6478}.tabs .on{background:#1d2440;color:#fff}
+pre{padding:20px 24px;font:13px/23px "JetBrains Mono",monospace}
+pre .c{color:#6c7690}.k{color:#f1d3a3}
+.step{display:flex;gap:12px;margin-top:20px;font-size:14px;color:#4a5265}
+.step b{color:#0f1424}
+.side{border-left:1px solid #e2e5ec;padding:48px 32px}
+.side .h{font-size:13px;font-weight:600;margin-bottom:16px}
+.side li{list-style:none;padding:12px 0;border-bottom:1px solid #eef0f5;font-size:14px;line-height:20px}
+.side li span{display:block;color:#5b6478;font-size:13px}
+</style></head><body>
+<nav><div class="logo"><span class="mark"></span>TaskTrooper Telemetry</div>
+<div class="links"><span>Product</span><span>Docs</span><span>Changelog</span></div><span class="sp"></span><span class="btn sec">Sign in</span></nav>
+<div class="wrap">
+<aside><p class="h">SDKs</p><div class="on">Go</div><div>Java / Kotlin (JVM)</div><div>.NET</div><div>Python</div><div>Node.js</div><div>Browser · React · Vue · Angular</div><div>React Native</div><div>Android</div><div>iOS</div><div>Flutter</div>
+<p class="h" style="margin-top:24px">Guides</p><div>Code insights</div><div>KPIs and alerts</div><div>Load tests</div></aside>
+<main><h1>Add one SDK. Get APM, RUM, logs and alerts that know your code.</h1>
+<p>Install, set a DSN, deploy. Your service shows up in the dashboard with the first request, even at zero traffic.</p>
+<div class="code"><div class="tabs"><span class="on">Go</span><span>JVM</span><span>.NET</span><span>Python</span><span>Node.js</span><span>Browser</span></div>
+<pre><span class="c"># 1. install</span>
+go get github.com/makifbaysal/tasktrooper-telemetry/sdks/go
+
+<span class="c">// 2. initialise</span>
+shutdown, err := trooper.Start(ctx, trooper.Config{
+    DSN:     os.Getenv(<span class="k">"TROOPER_DSN"</span>),
+    Service: <span class="k">"orders-api"</span>,
+})
+defer shutdown(ctx)</pre></div>
+<div class="step"><b>3. Deploy.</b> Traces, metrics and logs flow over OTLP; nothing else to configure.</div></main>
+<div class="side"><p class="h">After the first request</p><ul>
+<li>Service and endpoints<span>throughput, errors, p50/p95/p99 per route</span></li>
+<li>Traces and logs<span>linked by trace id</span></li>
+<li>Proposed KPIs and monitors<span>from your routes and consumers</span></li>
+<li>Root cause on incidents<span>your code or a dependency</span></li>
+<li>Load tests<span>generated from real traffic</span></li></ul></div>
+</div>
+</body></html>
