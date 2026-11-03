@@ -1,11 +1,14 @@
-// Package auth resolves "Authorization: Bearer <api key>" to a project via Postgres api_keys (kind api).
+// Package auth resolves "Authorization: Bearer <api key>" to a project via Postgres api_keys (kind api), or the
+// internal service credential (TT_INTERNAL_TOKEN) to the project named in x-trooper-project.
 package auth
 
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -94,4 +97,39 @@ func (a *Authenticator) Project(ctx context.Context, key string) (int64, error) 
 	a.cache[h] = entry{project: project, ok: err == nil, exp: now.Add(a.ttl)}
 	a.mu.Unlock()
 	return project, err
+}
+
+// Internal service credential (contracts §2): the api calls /v1/symbolicate for dashboard users (cookie sessions,
+// no api key) with `x-trooper-internal: <TT_INTERNAL_TOKEN>` + `x-trooper-project: <id>`.
+const (
+	HeaderInternal = "X-Trooper-Internal"
+	HeaderProject  = "X-Trooper-Project"
+)
+
+// Internal checks the internal token. A nil *Internal (TT_INTERNAL_TOKEN unset) rejects every request.
+type Internal struct{ tokenHash [32]byte }
+
+// NewInternal returns nil when token is empty (feature off).
+func NewInternal(token string) *Internal {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil
+	}
+	return &Internal{tokenHash: sha256.Sum256([]byte(token))}
+}
+
+// Project validates token (constant time over sha256 digests, so length does not leak) and parses project.
+func (i *Internal) Project(token, project string) (int64, error) {
+	if i == nil || token == "" || len(token) > 512 {
+		return 0, ErrUnauthorized
+	}
+	h := sha256.Sum256([]byte(strings.TrimSpace(token)))
+	if subtle.ConstantTimeCompare(h[:], i.tokenHash[:]) != 1 {
+		return 0, ErrUnauthorized
+	}
+	pid, err := strconv.ParseInt(strings.TrimSpace(project), 10, 64)
+	if err != nil || pid <= 0 || pid > int64(^uint32(0)) {
+		return 0, ErrUnauthorized
+	}
+	return pid, nil
 }

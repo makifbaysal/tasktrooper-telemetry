@@ -62,11 +62,11 @@ func (s *Server) incidentSummary(w http.ResponseWriter, r *http.Request) {
 			u.UserID = &uid
 		}
 		if rerr := s.Store.AssistantRecord(context.WithoutCancel(r.Context()), u); rerr != nil {
-			s.Log.Warn("AI usage not recorded", "err", rerr)
+			s.Log.WarnContext(r.Context(), "AI usage not recorded", "err", rerr)
 		}
 	}
 	if err != nil {
-		s.Log.Error("AI summary failed", "err", err)
+		s.Log.ErrorContext(r.Context(), "AI summary failed", "err", err)
 		writeJSON(w, http.StatusBadGateway, apiError{Error: "AI provider failed"})
 		return
 	}

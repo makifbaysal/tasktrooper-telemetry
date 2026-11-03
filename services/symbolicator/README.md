@@ -15,6 +15,9 @@ Turns minified / obfuscated / unsymbolicated stacks from RUM and APM errors back
 
 All `/v1` routes need `Authorization: Bearer <api key>` (Postgres `api_keys`, `kind='api'`, sha256 lookup,
 60 s cache incl. negative answers; DB down → 503). No seeded key (ADR-028): create one with `POST /api/v1/api-keys` (dashboard Team → API keys).
+`POST /v1/symbolicate` also accepts the internal credential (contracts §2) `x-trooper-internal: <TT_INTERNAL_TOKEN>` +
+`x-trooper-project: <id>` (constant-time compare; wrong token → 401, never falls back to the bearer key). The api uses it for
+dashboard users, who have a cookie session instead of an api key. Unset `TT_INTERNAL_TOKEN` = off.
 
 - `POST /v1/artifacts` — `multipart/form-data`: fields `kind` (`sourcemap|dsym|r8|proguard|dart|ndk`), `app`, `release`
   (= RUM `resource.version` / `service.version`), one or more file parts (any part name; the SDK uploaders use `file`). The **raw** `filename` is kept as the relative
@@ -88,6 +91,7 @@ downloaded to `TT_SYMBOLICATOR_CACHE_DIR`.
 | `TT_POSTGRES_URL`, `TT_REDIS_URL` (`off` disables the cache), `TT_LOG_LEVEL` | see `services/pkg/config` |
 | `TT_SYMBOLICATOR_CACHE_DIR` | `$TMPDIR/tt-symbolicator` |
 | `TT_SWIFT_DEMANGLE` | auto (`off` disables) |
+| `TT_INTERNAL_TOKEN` | — (internal credential off); same value as the api's |
 
 ## Self telemetry (ADR-027)
 

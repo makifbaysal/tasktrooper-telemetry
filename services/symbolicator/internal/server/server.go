@@ -34,8 +34,9 @@ const (
 type Config struct {
 	Store        *store.Store
 	Auth         *auth.Authenticator
-	Cache        ResultCache // nil → no result caching
-	CacheDir     string      // local copies of native debug files
+	Internal     *auth.Internal // TT_INTERNAL_TOKEN; nil = internal credential off (only /v1/symbolicate accepts it)
+	Cache        ResultCache    // nil → no result caching
+	CacheDir     string         // local copies of native debug files
 	Log          *slog.Logger
 	MaxDebugFile int64
 	MaxMap       int64
@@ -87,7 +88,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/artifacts", s.authed(s.upload))
 	mux.Handle("GET /v1/artifacts", s.authed(s.list))
 	mux.Handle("DELETE /v1/artifacts", s.authed(s.deleteRelease))
-	mux.Handle("POST /v1/symbolicate", s.authed(s.symbolicate))
+	mux.Handle("POST /v1/symbolicate", s.authedOrInternal(s.symbolicate))
 	// server spans sit inside the recoverer so a panic is recorded before the 500 (ADR-027)
 	return s.recoverer(selftel.Handler(mux))
 }
@@ -97,7 +98,26 @@ type ctxKey struct{}
 func projectFrom(ctx context.Context) int64 { p, _ := ctx.Value(ctxKey{}).(int64); return p }
 
 func (s *Server) authed(h func(http.ResponseWriter, *http.Request)) http.Handler {
+	return s.authFor(h, false)
+}
+
+// authedOrInternal also accepts the internal service credential (api → symbolicator for dashboard sessions).
+func (s *Server) authedOrInternal(h func(http.ResponseWriter, *http.Request)) http.Handler {
+	return s.authFor(h, true)
+}
+
+func (s *Server) authFor(h func(http.ResponseWriter, *http.Request), internal bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if tok := r.Header.Get(auth.HeaderInternal); internal && tok != "" {
+			project, err := s.cfg.Internal.Project(tok, r.Header.Get(auth.HeaderProject))
+			if err != nil {
+				writeErr(w, http.StatusUnauthorized, "invalid internal credential")
+				return
+			}
+			selftel.TagProject(r.Context(), project)
+			h(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, project)))
+			return
+		}
 		project, err := s.cfg.Auth.Project(r.Context(), auth.BearerKey(r))
 		if errors.Is(err, auth.ErrUnauthorized) {
 			writeErr(w, http.StatusUnauthorized, "invalid or missing api key (Authorization: Bearer <api key>)")
@@ -120,7 +140,7 @@ func (s *Server) recoverer(h http.Handler) http.Handler {
 				if rec == http.ErrAbortHandler {
 					panic(rec)
 				}
-				s.cfg.Log.Error("panic", "err", rec, "path", r.URL.Path, "stack", string(debug.Stack()))
+				s.cfg.Log.ErrorContext(r.Context(), "panic", "err", rec, "path", r.URL.Path, "stack", string(debug.Stack()))
 				writeErr(w, http.StatusInternalServerError, "internal error")
 			}
 		}()
@@ -142,7 +162,7 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	ixs, err := s.cfg.Store.ListIndexes(r.Context(), projectFrom(r.Context()), q.Get("app"), q.Get("release"))
 	if err != nil {
-		s.cfg.Log.Error("list artifacts", "err", err)
+		s.cfg.Log.ErrorContext(r.Context(), "list artifacts", "err", err)
 		writeErr(w, http.StatusBadGateway, "blob store error")
 		return
 	}

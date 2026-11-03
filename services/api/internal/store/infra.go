@@ -19,11 +19,11 @@ import (
 var collectorLabel = map[string]string{"agent": "TaskTrooper agent", "cloud": "Cloud integration", "direct": "Direct connection"}
 
 // DefaultPort per engine.
-var DefaultPort = map[string]int{"postgres": 5432, "mysql": 3306, "redis": 6379, "mongodb": 27017}
+var DefaultPort = map[string]int{"postgres": 5432, "mysql": 3306, "redis": 6379, "mongodb": 27017, "clickhouse": 9000}
 
 // depNames are the dependency names services use for a database ("postgres · orders-db").
 func depNames(engine, name string) []string {
-	systems := map[string][]string{"postgres": {"postgres", "postgresql"}, "mysql": {"mysql"}, "redis": {"redis"}, "mongodb": {"mongodb"}}[engine]
+	systems := map[string][]string{"postgres": {"postgres", "postgresql"}, "mysql": {"mysql"}, "redis": {"redis"}, "mongodb": {"mongodb"}, "clickhouse": {"clickhouse"}}[engine]
 	out := make([]string, 0, len(systems))
 	for _, s := range systems {
 		out = append(out, s+" · "+name)
@@ -50,6 +50,7 @@ type dbMeta struct {
 	meta                                      map[string]any
 	diskGb                                    float64
 	missing                                   bool
+	observed                                  bool // only in agent metrics, no databases row
 }
 
 func (d *DB) dbMetas(ctx context.Context, slug string) ([]dbMeta, error) {
@@ -143,6 +144,7 @@ func buildDatabase(m dbMeta, nodes []nodeStat, prev [2]float64) model.Database {
 		Source: collectorLabel[m.collector], AddedAt: ms(m.created), Since: ms(m.created), CredentialsRef: m.creds, CloudResourceID: m.cloud, User: m.user,
 		Nodes: []model.DbNode{}, Status: model.OK, PrevCPU: prev[0], PrevP95: prev[1],
 		Version: m.version, Zone: m.zone, InstanceClass: m.class, DiskGb: m.diskGb, IntegrationID: m.integration, Missing: m.missing, Meta: dbMetaPublic(m.meta),
+		Observed: m.observed,
 	}
 	if m.source != "" {
 		db.Source = m.source
@@ -230,7 +232,7 @@ func dbHealth(db model.Database) (model.Health, *model.Problem) {
 
 // ListDatabases returns registered databases with their current metrics.
 func (d *DB) ListDatabases(ctx context.Context, q Q) ([]model.Database, error) {
-	metas, err := d.dbMetas(ctx, "")
+	metas, err := d.allDbMetas(ctx, q, "")
 	if err != nil {
 		return nil, err
 	}
@@ -251,7 +253,7 @@ func (d *DB) ListDatabases(ctx context.Context, q Q) ([]model.Database, error) {
 
 // GetDatabase returns one database by slug.
 func (d *DB) GetDatabase(ctx context.Context, q Q, slug string) (*model.Database, error) {
-	metas, err := d.dbMetas(ctx, slug)
+	metas, err := d.allDbMetas(ctx, q, slug)
 	if err != nil {
 		return nil, err
 	}
@@ -401,7 +403,7 @@ func (d *DB) DatabaseQueries(ctx context.Context, q Q, slug string) ([]model.DbQ
 
 // DatabaseUsers returns the instrumented services that call a database, from edges_1m.
 func (d *DB) DatabaseUsers(ctx context.Context, q Q, slug string) ([]model.DbUser, error) {
-	metas, err := d.dbMetas(ctx, slug)
+	metas, err := d.allDbMetas(ctx, q, slug)
 	if err != nil {
 		return nil, err
 	}
@@ -459,7 +461,7 @@ func (d *DB) CreateDatabase(ctx context.Context, q Q, in model.DatabaseInput) (*
 		return nil, Invalid("name is required")
 	}
 	if _, ok := DefaultPort[in.Engine]; !ok {
-		return nil, Invalid("engine must be postgres|mysql|redis|mongodb")
+		return nil, Invalid("engine must be postgres|mysql|redis|mongodb|clickhouse")
 	}
 	if in.Collector == "" {
 		in.Collector = "agent"
@@ -530,6 +532,7 @@ type clusterMeta struct {
 	created                                  time.Time
 	integration, source, version             string
 	missing                                  bool
+	observed                                 bool // only in agent metrics, no broker_clusters row
 }
 
 func (d *DB) clusterMetas(ctx context.Context, slug string) ([]clusterMeta, error) {
@@ -818,7 +821,7 @@ func (d *DB) ListGroups(ctx context.Context, now time.Time, f GroupFilter) ([]mo
 		return nil, err
 	}
 	kinds := map[string]string{}
-	metas, err := d.clusterMetas(ctx, "")
+	metas, err := d.allClusterMetas(ctx, now, "")
 	if err != nil {
 		return nil, err
 	}
@@ -928,7 +931,7 @@ func (d *DB) ListTopics(ctx context.Context, now time.Time, cluster string) ([]m
 		}
 	}
 	kinds := map[string]string{}
-	metas, err := d.clusterMetas(ctx, cluster)
+	metas, err := d.allClusterMetas(ctx, now, cluster)
 	if err != nil {
 		return nil, err
 	}
@@ -1121,7 +1124,7 @@ func buildCluster(m clusterMeta, nodes []model.BrokerNode, groups []model.Consum
 	c := model.Cluster{
 		ID: m.slug, Name: m.name, Kind: m.kind, Endpoint: m.endpoint, Vhost: m.vhost, Source: collectorLabel[m.collector], Collector: m.collector,
 		Nodes: nodes, AddedAt: ms(m.created), CredentialsRef: m.creds, Topics: topics,
-		Version: m.version, IntegrationID: m.integration, Missing: m.missing,
+		Version: m.version, IntegrationID: m.integration, Missing: m.missing, Observed: m.observed,
 	}
 	if m.source != "" {
 		c.Source = m.source
@@ -1149,7 +1152,7 @@ func buildCluster(m clusterMeta, nodes []model.BrokerNode, groups []model.Consum
 
 // ListClusters returns broker clusters with nodes and lag summary.
 func (d *DB) ListClusters(ctx context.Context, now time.Time) ([]model.Cluster, error) {
-	metas, err := d.clusterMetas(ctx, "")
+	metas, err := d.allClusterMetas(ctx, now, "")
 	if err != nil {
 		return nil, err
 	}
@@ -1178,7 +1181,7 @@ func (d *DB) ListClusters(ctx context.Context, now time.Time) ([]model.Cluster, 
 
 // GetCluster returns one cluster.
 func (d *DB) GetCluster(ctx context.Context, now time.Time, slug string) (*model.Cluster, error) {
-	metas, err := d.clusterMetas(ctx, slug)
+	metas, err := d.allClusterMetas(ctx, now, slug)
 	if err != nil {
 		return nil, err
 	}

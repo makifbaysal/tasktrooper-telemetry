@@ -101,6 +101,7 @@ func run() error {
 	srv, err := server.New(server.Config{
 		Store:    store.NewStore(objs),
 		Auth:     auth.New(auth.PostgresLookup(pool), 60*time.Second),
+		Internal: auth.NewInternal(config.String("TT_INTERNAL_TOKEN", "")),
 		Cache:    cache,
 		CacheDir: config.String("TT_SYMBOLICATOR_CACHE_DIR", filepath.Join(os.TempDir(), "tt-symbolicator")),
 		Log:      log,

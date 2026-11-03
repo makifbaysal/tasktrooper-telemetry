@@ -32,14 +32,15 @@ type Config struct {
 }
 
 // FromEnv returns the replay store, or nil when TT_S3_ENDPOINT is not set (replay segments then answer 503).
-func FromEnv() *S3 {
+// hc (optional) is the HTTP client, e.g. wrapped with the selftel transport.
+func FromEnv(hc *http.Client) *S3 {
 	ep := config.String("TT_S3_ENDPOINT", "")
 	if ep == "" {
 		return nil
 	}
 	return NewS3(Config{Endpoint: ep, Bucket: config.String("TT_REPLAY_S3_BUCKET", "tt-replays"),
 		AccessKey: config.String("TT_S3_ACCESS_KEY", ""), SecretKey: config.String("TT_S3_SECRET_KEY", ""),
-		Region: config.String("TT_S3_REGION", "us-east-1")})
+		Region: config.String("TT_S3_REGION", "us-east-1"), HTTPClient: hc})
 }
 
 // S3 implements Reader on an S3-compatible endpoint (path-style; SeaweedFS in dev).

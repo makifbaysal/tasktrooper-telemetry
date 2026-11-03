@@ -111,6 +111,7 @@ func run(cfg config.Common, log *slog.Logger) error {
 	sym := symbolicate.New(config.String("TT_SYMBOLICATOR_URL", "http://localhost:8095"))
 	if sym != nil {
 		sym.HTTP = selftel.Client(sym.HTTP, "tt-symbolicator")
+		sym.InternalToken = config.String("TT_INTERNAL_TOKEN", "") // dashboard sessions have no bearer key (contracts §2)
 	}
 	srv := &server.Server{
 		Store:        st,
@@ -157,7 +158,8 @@ func run(cfg config.Common, log *slog.Logger) error {
 	if srv.Assistant.Provider == nil {
 		log.Info("assistant uses the offline mock (set TT_ASSISTANT_API_KEY and TT_ASSISTANT_MODEL for a model)")
 	}
-	if b := blob.FromEnv(); b != nil {
+	// S3 client spans (peer.service s3); nil (SDK default client) when self telemetry is off.
+	if b := blob.FromEnv(selftel.Client(nil, "s3")); b != nil {
 		srv.Replays = b
 	}
 	srv.StateKey = key

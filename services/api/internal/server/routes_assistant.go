@@ -381,7 +381,7 @@ func (s *Server) runTurn(r *http.Request, sse *sseWriter, a *assistant.Agent, t 
 		case errors.Is(err, assistant.ErrMaxSteps):
 			code, msg = "max_steps", "Stopped after the maximum number of steps; ask a narrower question or continue."
 		default:
-			s.Log.Warn("assistant turn failed", "err", err)
+			s.Log.WarnContext(r.Context(), "assistant turn failed", "err", err)
 		}
 		t.Fail(msg)
 		if a.Save != nil {

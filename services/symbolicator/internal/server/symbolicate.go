@@ -134,7 +134,7 @@ func (s *Server) run(ctx context.Context, project int64, req Request, platform s
 	case "javascript":
 		ix, err := s.cfg.Store.LoadIndex(ctx, project, store.KindSourcemap, req.App, req.Release)
 		if err != nil {
-			s.cfg.Log.Warn("load sourcemap index", "err", err)
+			s.cfg.Log.WarnContext(ctx, "load sourcemap index", "err", err)
 			ix = &store.Index{}
 		}
 		res := jsmap.Symbolicate(req.Stack, func(u string) (*jsmap.Bundle, bool) {
@@ -144,7 +144,7 @@ func (s *Server) run(ctx context.Context, project int64, req Request, platform s
 			}
 			b, err := s.bundle(ctx, f)
 			if err != nil {
-				s.cfg.Log.Warn("load sourcemap", "key", f.Key, "err", err)
+				s.cfg.Log.WarnContext(ctx, "load sourcemap", "key", f.Key, "err", err)
 				return nil, false
 			}
 			return b, true
@@ -276,7 +276,7 @@ func (s *Server) mapping(ctx context.Context, project int64, app, release string
 	for _, kind := range []string{store.KindR8, store.KindProguard} {
 		ix, err := s.cfg.Store.LoadIndex(ctx, project, kind, app, release)
 		if err != nil {
-			s.cfg.Log.Warn("load mapping index", "err", err)
+			s.cfg.Log.WarnContext(ctx, "load mapping index", "err", err)
 			continue
 		}
 		for i := range ix.Files {
@@ -294,12 +294,12 @@ func (s *Server) mapping(ctx context.Context, project int64, app, release string
 	}
 	data, err := s.cfg.Store.Get(ctx, newest.Key, s.cfg.MaxMap)
 	if err != nil {
-		s.cfg.Log.Warn("load mapping", "key", newest.Key, "err", err)
+		s.cfg.Log.WarnContext(ctx, "load mapping", "key", newest.Key, "err", err)
 		return nil
 	}
 	m, err := retrace.Parse(bytes.NewReader(data))
 	if err != nil {
-		s.cfg.Log.Warn("parse mapping", "key", newest.Key, "err", err)
+		s.cfg.Log.WarnContext(ctx, "parse mapping", "key", newest.Key, "err", err)
 		return nil
 	}
 	return s.mappings.add(key, m)
@@ -311,7 +311,7 @@ func (s *Server) provider(ctx context.Context, project int64, app, release strin
 	for _, kind := range []string{store.KindDSYM, store.KindDart, store.KindNDK} {
 		ix, err := s.cfg.Store.LoadIndex(ctx, project, kind, app, release)
 		if err != nil {
-			s.cfg.Log.Warn("load debug index", "err", err)
+			s.cfg.Log.WarnContext(ctx, "load debug index", "err", err)
 			continue
 		}
 		for i := range ix.Files {
@@ -333,7 +333,7 @@ func (s *Server) provider(ctx context.Context, project int64, app, release strin
 			var err error
 			sym, err = s.symbolizer(ctx, f, id)
 			if err != nil {
-				s.cfg.Log.Warn("open debug file", "key", f.Key, "id", id, "err", err)
+				s.cfg.Log.WarnContext(ctx, "open debug file", "key", f.Key, "id", id, "err", err)
 				sym = nil
 			}
 		}

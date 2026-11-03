@@ -500,6 +500,20 @@ paths:
         '400': { $ref: '#/components/responses/E400' }
         '401': { $ref: '#/components/responses/E401' }
         '500': { $ref: '#/components/responses/E500' }
+    post:
+      tags: [APM]
+      operationId: postDeploys
+      summary: 'Write a CI deploy marker (deploy_markers, source ci), one per service; idempotent per (service, environment, version). API key (Bearer) or session.'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/DeployInput' } } }
+      responses:
+        '201':
+          description: Created
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/DeployMarker' } } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '500': { $ref: '#/components/responses/E500' }
   /api/v1/traces:
     get:
       tags: [Traces]
@@ -3675,6 +3689,20 @@ components:
         author: { type: string }
         state: { type: string, enum: [building, ready, error, canceled] }
         integrationId: { type: string }
+    DeployInput:
+      type: object
+      description: 'At least one of service / services and one of version / commitSha.'
+      properties:
+        service: { type: string }
+        services: { type: array, items: { type: string }, maxItems: 100 }
+        version: { type: string, description: 'Defaults to commitSha' }
+        commitSha: { type: string, description: 'Appended to the commit message when it differs from version' }
+        message: { type: string }
+        author: { type: string }
+        url: { type: string, description: 'http(s) link to the CI run / release' }
+        environment: { type: string, default: production }
+        ts: { type: integer, description: 'Unix ms; default now' }
+        time: { type: string, format: date-time, description: 'RFC 3339, alternative to ts' }
     Frame:
       type: object
       required: [fn, file, line, col, inApp]
@@ -4185,6 +4213,7 @@ components:
         zone: { type: string }
         integrationId: { type: string }
         missing: { type: boolean }
+        observed: { type: boolean, description: 'Not registered; seen only in trooper-agent metrics (static agent.yaml target). Name = matching dependency target or id.' }
     DatabaseInput:
       type: object
       required: [name, engine, host, port, collector]
@@ -4255,6 +4284,7 @@ components:
         groups: { type: integer }
         integrationId: { type: string }
         missing: { type: boolean }
+        observed: { type: boolean, description: 'Not registered; seen only in trooper-agent metrics (static agent.yaml target). Name = matching dependency target or id.' }
     ClusterInput:
       type: object
       required: [name, kind, endpoint]

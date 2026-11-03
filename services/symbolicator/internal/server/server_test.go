@@ -40,7 +40,7 @@ func newEnv(t *testing.T, maxDebug, maxMap int64) *env {
 	}, time.Minute)
 	mem := store.NewMem()
 	cache := NewMemCache()
-	s, err := New(Config{Store: store.NewStore(mem), Auth: a, Cache: cache, CacheDir: t.TempDir(),
+	s, err := New(Config{Store: store.NewStore(mem), Auth: a, Internal: auth.NewInternal(testInternalToken), Cache: cache, CacheDir: t.TempDir(),
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), MaxDebugFile: maxDebug, MaxMap: maxMap,
 		Demangle: func([]string) map[string]string { return nil }})
 	if err != nil {

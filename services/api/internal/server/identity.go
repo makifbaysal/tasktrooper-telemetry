@@ -319,7 +319,7 @@ func (s *Server) writeAudit(ctx context.Context, a store.AuditRecord) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
 	if err := s.Store.WriteAudit(ctx, a); err != nil {
-		s.Log.Error("audit log write failed", "err", err, "action", a.Action)
+		s.Log.ErrorContext(ctx, "audit log write failed", "err", err, "action", a.Action)
 	}
 }
 
@@ -444,7 +444,7 @@ func (s *Server) oidcLogin(w http.ResponseWriter, r *http.Request) {
 	state, nonce, verifier := store.RandomToken(24), store.RandomToken(24), oauth2.GenerateVerifier()
 	target, err := s.OIDC.AuthURL(r.Context(), state, nonce, verifier)
 	if err != nil {
-		s.Log.Error("oidc login", "err", err)
+		s.Log.ErrorContext(r.Context(), "oidc login", "err", err)
 		writeJSON(w, http.StatusBadGateway, apiError{Error: "identity provider unavailable"})
 		return
 	}
@@ -485,7 +485,7 @@ func (s *Server) oidcCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	claims, err := s.OIDC.Exchange(r.Context(), qs(r, "code"), verifier, nonce)
 	if err != nil {
-		s.Log.Warn("oidc callback rejected", "err", err)
+		s.Log.WarnContext(r.Context(), "oidc callback rejected", "err", err)
 		s.loginError(w, r, "sign-in failed")
 		return
 	}
@@ -528,7 +528,7 @@ func (s *Server) identityRoutes(r chi.Router) {
 		if err == nil && p.OrgID > 0 {
 			ai, aerr := s.Store.MeAI(r.Context(), p.OrgID, p.UserID, s.Now())
 			if aerr != nil {
-				s.Log.Warn("me: ai usage unavailable", "err", aerr, "org", p.OrgID)
+				s.Log.WarnContext(r.Context(), "me: ai usage unavailable", "err", aerr, "org", p.OrgID)
 			}
 			me.AI = ai
 		}

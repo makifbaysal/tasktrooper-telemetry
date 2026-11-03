@@ -189,6 +189,16 @@ func (s *Server) routes(r chi.Router) {
 		v, err := s.Store.ListDeploys(r.Context(), q, store.DeployFilter{Service: qs(r, "service"), Source: qs(r, "source")})
 		s.reply(w, r, v, err)
 	}))
+	// CI deploy markers (source "ci"); API key or session auth, like every other write.
+	r.Post("/deploys", func(w http.ResponseWriter, r *http.Request) {
+		var in model.DeployInput
+		if err := decode(r, &in); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		v, err := s.Store.CreateDeploys(r.Context(), s.Now(), in)
+		s.created(w, r, v, err)
+	})
 	r.Get("/environments", func(w http.ResponseWriter, r *http.Request) {
 		v, err := s.Store.ListEnvironments(r.Context())
 		s.reply(w, r, v, err)
