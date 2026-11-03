@@ -71,10 +71,12 @@ fi
 step "dashboard"
 pnpm install --frozen-lockfile
 pnpm -r --filter "./sdks/js/packages/**" build
+# RUM of tt-web: every session recorded (masked text + inputs, low traffic), hidden sourcemaps for symbolicated stacks
 (cd apps/web && VITE_API_URL="$TT_PUBLIC_API_URL" VITE_INGEST_URL="$TT_PUBLIC_INGEST_URL" \
-  VITE_TROOPER_DSN="$web_dsn" VITE_TROOPER_ENV=demo VITE_TROOPER_VERSION="$TT_DEMO_VERSION" pnpm exec vite build)
-# new files first, old ones removed at the end: index.html is never missing while the site is served
-rsync -a --delete-after apps/web/dist/ "$TT_DEMO_WEB_DIR/"
+  VITE_TROOPER_DSN="$web_dsn" VITE_TROOPER_ENV=demo VITE_TROOPER_VERSION="$TT_DEMO_VERSION" \
+  VITE_TROOPER_REPLAY_SAMPLE_RATE=1 VITE_TROOPER_REPLAY_ON_ERROR_SAMPLE_RATE=1 TT_WEB_SOURCEMAP=hidden pnpm exec vite build)
+# new files first, old ones removed at the end: index.html is never missing while the site is served; maps are never served
+rsync -a --delete-after --exclude '*.map' apps/web/dist/ "$TT_DEMO_WEB_DIR/"
 
 step "services"
 "${dc[@]}" "${profiles[@]}" up -d --build ingest-gw ingest-writer api alert-engine notifier loadtest codeintel web "${agent[@]}"
@@ -83,6 +85,25 @@ step "health"
 wait_ok http://127.0.0.1:8080/healthz api
 wait_ok http://127.0.0.1:4318/healthz ingest-gw
 wait_ok http://127.0.0.1:8096/healthz codeintel
+wait_ok http://127.0.0.1:8095/healthz symbolicator
 wait_ok http://127.0.0.1:8081/ web
 "${dc[@]}" "${profiles[@]}" ps --format 'table {{.Service}}\t{{.Status}}'
+
+# Self project API key (kind api, DEMO_TROOPER_API_KEY): tt-web sourcemaps + one deploy marker per service
+if [ -n "${TROOPER_DSN:-}" ] && [ -n "${TROOPER_API_KEY:-}" ]; then
+  step "release"
+  docker run --rm --network tasktrooper_default -v "$PWD":/src -v trooper-demo-gomod:/go/pkg/mod -w /src/tools/trooper-cli \
+    -e TROOPER_API_KEY -e GOWORK=off golang:1.26-alpine \
+    go run . upload-sourcemaps --app tt-web --release "$TT_DEMO_VERSION" --url http://symbolicator:8095 /src/apps/web/dist \
+    || echo "sourcemap upload failed (stacks stay minified)" >&2
+  sha="$(git rev-parse HEAD)"
+  command -v jq >/dev/null || { echo "jq missing: no deploy marker" >&2; echo "deployed $(git rev-parse --short HEAD)"; exit 0; }
+  body="$(jq -n --arg v "$TT_DEMO_VERSION" --arg sha "$sha" --arg msg "$(git log -1 --format=%s)" \
+    --arg author "$(git log -1 --format=%an)" --arg url "${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-}/actions/runs/${GITHUB_RUN_ID:-}" \
+    '{services: ["tt-web","tt-api","tt-ingest-gw","tt-ingest-writer","tt-alert-engine","tt-notifier","tt-loadtest-ctl","tt-codeintel","tt-symbolicator","tt-trooper-agent"],
+      version: $v, commitSha: $sha, message: $msg, author: $author, url: $url, environment: "demo"}')"
+  curl -fsS -o /dev/null -X POST -H "Authorization: Bearer $TROOPER_API_KEY" -H 'Content-Type: application/json' \
+    --data "$body" http://127.0.0.1:8080/api/v1/deploys && echo "deploy marker sent" \
+    || echo "deploy marker failed" >&2
+fi
 echo "deployed $(git rev-parse --short HEAD)"

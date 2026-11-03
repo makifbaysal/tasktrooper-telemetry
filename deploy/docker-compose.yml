@@ -46,6 +46,8 @@ services:
 
   postgres:
     image: postgres:17
+    # pg_stat_statements: top / slow queries of the Databases screen (trooper-agent db mode, ADR-027)
+    command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements", "-c", "pg_stat_statements.track=all"]
     ports: ["5432:5432"]
     environment:
       POSTGRES_DB: trooper
@@ -143,7 +145,21 @@ services:
       TT_ASSISTANT_API_URL: ${TT_ASSISTANT_API_URL:-https://api.meta.ai/v1}
       TT_ASSISTANT_API_KEY: ${TT_ASSISTANT_API_KEY:-}
       TT_ASSISTANT_MODEL: ${TT_ASSISTANT_MODEL:-}
+      # error / RUM error stacks via the symbolicator (contracts §12); dashboard sessions use the internal credential
+      TT_SYMBOLICATOR_URL: ${TT_SYMBOLICATOR_URL:-http://symbolicator:8095}
     depends_on: [clickhouse, postgres]
+
+  # Symbolication: sourcemaps, dSYMs, R8 / Flutter / NDK symbols in S3 (trooper-cli uploads, contracts §12)
+  symbolicator:
+    profiles: [app]
+    build: { context: .., dockerfile: services/symbolicator/Dockerfile }
+    ports: ["8095:8095"]
+    environment:
+      <<: *svc_env
+      TT_S3_ENDPOINT: ${TT_S3_ENDPOINT:-http://s3:8333}
+      TT_S3_ACCESS_KEY: ${TT_S3_ACCESS_KEY:-trooper}
+      TT_S3_SECRET_KEY: ${TT_S3_SECRET_KEY:-trooper-secret}
+    depends_on: [postgres, redis, s3]
 
   alert-engine:
     profiles: [app]

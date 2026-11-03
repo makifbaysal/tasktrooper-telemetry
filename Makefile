@@ -74,7 +74,7 @@ self: ## self-observability: `api bootstrap` the TaskTrooper project (SELF_OWNER
 	dsn=$$(sed -E 's/.*"dsn":"([^"]*)".*/\1/' $(SELF_RUN)/bootstrap.json); \
 	project=$$(sed -E 's/.*"projectId":([0-9]+).*/\1/' $(SELF_RUN)/bootstrap.json); \
 	case "$$dsn" in http*) ;; *) echo "api bootstrap returned no dsn:"; cat $(SELF_RUN)/bootstrap.json; exit 1;; esac; \
-	TT_SELF_PG_PASSWORD=$${TT_SELF_PG_PASSWORD:-trooper} TROOPER_DSN="$$dsn" nohup $(SELF_RUN)/bin/trooper-agent \
+	TT_SELF_PG_PASSWORD=$${TT_SELF_PG_PASSWORD:-trooper} TT_SELF_CH_PASSWORD=$${TT_SELF_CH_PASSWORD:-trooper} TROOPER_DSN="$$dsn" nohup $(SELF_RUN)/bin/trooper-agent \
 		--config deploy/self/agent.yaml --agent-modes db,host --dsn "$$dsn" \
 		> $(SELF_RUN)/logs/trooper-agent.log 2>&1 & echo $$! > $(SELF_PID); \
 	sleep 1; kill -0 $$(cat $(SELF_PID)) 2>/dev/null || { echo "trooper-agent exited:"; tail -20 $(SELF_RUN)/logs/trooper-agent.log; exit 1; }; \

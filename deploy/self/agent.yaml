@@ -6,12 +6,12 @@
 #
 # Run by hand (repo root):
 #   (cd services/collector && GOWORK=off go build -o ../../deploy/self/.run/bin/trooper-agent ./cmd/trooper-agent)
-#   TT_SELF_PG_PASSWORD=trooper deploy/self/.run/bin/trooper-agent --config deploy/self/agent.yaml \
+#   TT_SELF_PG_PASSWORD=trooper TT_SELF_CH_PASSWORD=trooper deploy/self/.run/bin/trooper-agent --config deploy/self/agent.yaml \
 #     --agent-modes db,host --dsn "$(cat deploy/self/.run/bootstrap.json | sed -E 's/.*"dsn":"([^"]*)".*/\1/')"      # add --once to test the targets
 #
 # Modes are flags, not config: `db` scrapes the targets below; `host` reports this machine (CPU, memory, disk, network,
-# top processes) and every Docker container through the Docker Engine API — that is how ClickHouse (no `clickhouse`
-# db engine in the collector yet) and SeaweedFS show up: as containers tasktrooper-clickhouse-1 / -s3-1.
+# top processes) and every Docker container through the Docker Engine API (SeaweedFS shows up only as container
+# tasktrooper-s3-1; ClickHouse is both a `clickhouse` db target below and container tasktrooper-clickhouse-1).
 # Field reference: services/collector/README.md § Config reference. Unknown fields are rejected.
 interval: 15s
 timeout: 10s
@@ -30,7 +30,21 @@ databases:
     collector: agent
     credentialsRef: env:TT_SELF_PG_PASSWORD   # `make self` sets it to the compose default (trooper)
     node: tasktrooper-postgres-1
-    slowQueryMs: 500                      # top queries need pg_stat_statements (not enabled in the dev image)
+    slowQueryMs: 500                      # top queries: pg_stat_statements (preloaded by deploy/docker-compose.yml)
+
+  # telemetry store (spans, logs, metrics, RUM). name = db.namespace of the services' ClickHouse spans, so the
+  # dependency "clickhouse · telemetry" links to this database. Latency / slow / top queries: system.query_log.
+  - id: tt-clickhouse
+    name: telemetry
+    engine: clickhouse
+    host: localhost
+    port: 9000                            # native protocol
+    user: trooper                         # dev user; in production a trooper_monitor user with SELECT ON system.*
+    database: telemetry
+    collector: agent
+    credentialsRef: env:TT_SELF_CH_PASSWORD   # compose default: trooper
+    node: tasktrooper-clickhouse-1
+    slowQueryMs: 500
 
   # rate limits / caches (ingest-gw, api)
   - id: tt-redis
