@@ -7,7 +7,8 @@ COPY services/symbolicator/go.mod services/symbolicator/go.sum services/symbolic
 WORKDIR /src/services/symbolicator
 RUN GOWORK=off go mod download
 COPY services/symbolicator/ .
-RUN CGO_ENABLED=0 GOWORK=off go build -trimpath -ldflags="-s -w" -o /out/symbolicator ./cmd/symbolicator
+ARG VERSION=dev
+RUN CGO_ENABLED=0 GOWORK=off go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/symbolicator ./cmd/symbolicator
 
 # swift-demangle is not available in this image: Swift frames keep their mangled names (frame.mangled).
 FROM gcr.io/distroless/static-debian12:nonroot

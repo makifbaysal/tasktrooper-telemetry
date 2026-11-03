@@ -7,7 +7,8 @@ COPY services/pkg/ services/pkg/
 COPY services/codeintel/go.mod services/codeintel/go.sum services/codeintel/
 RUN cd services/codeintel && go mod download
 COPY services/codeintel/ services/codeintel/
-RUN cd services/codeintel && go build -trimpath -ldflags "-s -w" -o /out/codeintel ./cmd/codeintel
+ARG VERSION=dev
+RUN cd services/codeintel && go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/codeintel ./cmd/codeintel
 
 # Runtime needs the git CLI (shallow clones), so alpine instead of distroless.
 FROM alpine:3.22

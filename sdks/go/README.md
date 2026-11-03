@@ -147,7 +147,7 @@ Each integration is a separate Go module so you only download the frameworks you
 | `pgx` | `trooperpgx` | `exaring/otelpgx` (pgx v5) |
 | `goredis` | `trooperredis` | `redisotel` (go-redis v9) |
 | `mongo` | `troopermongo` | own `event.CommandMonitor` (mongo-driver v2) |
-| `slog` | `trooperslog` | `otelslog` + trace_id/span_id on your local handler |
+| `slog` | `trooperslog` | `otelslog` + trace_id/span_id on your local handler; `trooper.entry.route`/`method` from the request entry |
 | `zap` | `trooperzap` | `otelzap` |
 
 Server middlewares set `trooper.route`, `http.route`, `trooper.entry.route/method` (server + all child spans),

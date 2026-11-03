@@ -176,7 +176,7 @@ func (c *Client) Check(ctx context.Context, log *slog.Logger, wantOrg, wantProje
 	if wantOrg != 0 && !orgListed(me.Orgs, wantOrg) {
 		return fmt.Errorf("TT_ORG_ID=%d but the key's org is not %d; fix TT_API_KEY or TT_ORG_ID", wantOrg, wantOrg)
 	}
-	log.Debug("api key verified", "project", me.CurrentProjectID)
+	log.DebugContext(ctx, "api key verified", "project", me.CurrentProjectID)
 	return nil
 }
 

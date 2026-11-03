@@ -104,13 +104,13 @@ func (b *budget) Reserve(ctx context.Context, model string, estIn, estOut int64)
 	r.EstimateCredits = aiquota.CreditsAt(b.g.Config.Prices.For(model), estIn, estOut)
 	d, err := b.g.Store.Reserve(ctx, b.g.Config, r)
 	if err != nil {
-		b.log.Warn("AI quota check failed; LLM step skipped", "err", err)
+		b.log.WarnContext(ctx, "AI quota check failed; LLM step skipped", "err", err)
 		b.denied = "check_failed"
 		return false, b.denied
 	}
 	if !d.Allowed {
 		b.denied = d.Reason
-		b.log.Info("AI quota exceeded", "reason", d.Reason, "org_used", d.OrgUsed, "org_limit", d.OrgLimit,
+		b.log.InfoContext(ctx, "AI quota exceeded", "reason", d.Reason, "org_used", d.OrgUsed, "org_limit", d.OrgLimit,
 			"user_used", d.UserUsed, "user_limit", d.UserLimit, "estimate", r.EstimateCredits)
 		return false, d.Reason
 	}
@@ -126,7 +126,7 @@ func (b *budget) Record(ctx context.Context, model string, t enrich.Tokens) floa
 		InputTokens: tok.TotalInput(), OutputTokens: tok.Output, Credits: credits, Ref: b.ref,
 	})
 	if err != nil {
-		b.log.Error("record AI usage", "err", err, "credits", credits)
+		b.log.ErrorContext(ctx, "record AI usage", "err", err, "credits", credits)
 	}
 	return credits
 }

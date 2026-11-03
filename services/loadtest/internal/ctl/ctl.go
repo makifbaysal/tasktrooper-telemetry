@@ -108,7 +108,7 @@ func (c *Controller) Recover(ctx context.Context) error {
 			return err
 		}
 		c.metrics.Add("tt_loadtest_runs_finished_total", 1, "state", "error")
-		c.log.Warn("orphaned run marked error", "run", id)
+		c.log.WarnContext(ctx, "orphaned run marked error", "run", id)
 	}
 	return nil
 }
@@ -134,7 +134,7 @@ func (c *Controller) Run(ctx context.Context) error {
 			for c.activeCount() < c.cfg.MaxConcurrent {
 				ok, err := c.ClaimOnce(ctx)
 				if err != nil {
-					c.log.Error("claim", "err", err)
+					c.log.ErrorContext(ctx, "claim", "err", err)
 				}
 				if !ok {
 					break
@@ -188,7 +188,7 @@ func (c *Controller) ClaimOnce(ctx context.Context) (bool, error) {
 	if adm.Reject != "" {
 		span.SetAttributes(attribute.Bool("tt.loadtest.rejected", true))
 		c.metrics.Add("tt_loadtest_runs_rejected_total", 1)
-		c.log.Info("run rejected", "run", run.ID, "reason", adm.Reject)
+		c.log.InfoContext(ctx, "run rejected", "run", run.ID, "reason", adm.Reject)
 		return true, nil
 	}
 	c.metrics.Add("tt_loadtest_runs_claimed_total", 1)
@@ -219,7 +219,7 @@ func (c *Controller) ClaimOnce(ctx context.Context) (bool, error) {
 		}
 		a.handles[sh.Region] = h
 	}
-	c.log.Info("run started", "run", run.ID, "project", run.ProjectID, "regions", len(adm.Shards), "mode", plan.Mode,
+	c.log.InfoContext(ctx, "run started", "run", run.ID, "project", run.ProjectID, "regions", len(adm.Shards), "mode", plan.Mode,
 		"peak_vus", plan.PeakVUs(), "duration", dur.String(), "vu_minutes", adm.VUMinutes)
 	if len(a.handles) == 0 {
 		c.stopAll(ctx, a) // every shard failed → the next Supervise finalizes as error
@@ -234,7 +234,7 @@ func (c *Controller) stopAll(ctx context.Context, a *activeRun) {
 	a.stopping = true
 	for region, h := range a.handles {
 		if err := h.Stop(ctx); err != nil {
-			c.log.Warn("stop runner", "run", a.run.ID, "region", region, "err", err)
+			c.log.WarnContext(ctx, "stop runner", "run", a.run.ID, "region", region, "err", err)
 		}
 	}
 }
@@ -250,7 +250,7 @@ func (c *Controller) Supervise(ctx context.Context) {
 	c.metrics.Set("tt_loadtest_runs_active", float64(len(runs)))
 	for _, a := range runs {
 		if err := c.supervise(ctx, a); err != nil && ctx.Err() == nil {
-			c.log.Error("supervise", "run", a.run.ID, "err", err)
+			c.log.ErrorContext(ctx, "supervise", "run", a.run.ID, "err", err)
 		}
 	}
 }
@@ -355,7 +355,7 @@ func (c *Controller) supervise(ctx context.Context, a *activeRun) error {
 			return err
 		}
 		c.metrics.Add("tt_loadtest_runs_finished_total", 1, "state", f.State)
-		c.log.Info("run finished", "run", id, "state", f.State, "requests", f.Summary.Requests, "error_rate", f.Summary.ErrorRate,
+		c.log.InfoContext(ctx, "run finished", "run", id, "state", f.State, "requests", f.Summary.Requests, "error_rate", f.Summary.ErrorRate,
 			"p95", f.Summary.P95, "vu_minutes", f.VUMinutes, "error", f.Error)
 		c.stopAll(ctx, a)
 		c.drop(id)
@@ -387,7 +387,7 @@ func (c *Controller) drop(id int64) {
 func (c *Controller) reapStale(ctx context.Context) {
 	ids, err := c.st.StaleRuns(ctx, c.cfg.StaleAfter, c.cfg.Projects)
 	if err != nil {
-		c.log.Error("stale runs", "err", err)
+		c.log.ErrorContext(ctx, "stale runs", "err", err)
 		return
 	}
 	for _, id := range ids {
@@ -398,7 +398,7 @@ func (c *Controller) reapStale(ctx context.Context) {
 			continue
 		}
 		if err := c.st.ErrorRun(ctx, id, "run lost: no runner updates for "+c.cfg.StaleAfter.String()); err == nil {
-			c.log.Warn("stale run marked error", "run", id)
+			c.log.WarnContext(ctx, "stale run marked error", "run", id)
 		}
 	}
 }
@@ -411,7 +411,7 @@ func (c *Controller) VerifyDomains(ctx context.Context) {
 	t0 := time.Now()
 	list, err := c.st.PendingVerifications(ctx, c.cfg.Projects)
 	if err != nil {
-		c.log.Error("pending verifications", "err", err)
+		c.log.ErrorContext(ctx, "pending verifications", "err", err)
 		return
 	}
 	if len(list) == 0 {
@@ -427,15 +427,15 @@ func (c *Controller) VerifyDomains(ctx context.Context) {
 		if err != nil {
 			c.metrics.Add("tt_loadtest_domain_checks_failed_total", 1)
 			_ = c.st.MarkCheckFailed(ctx, d.ID, truncate(err.Error(), 500))
-			c.log.Info("domain not verified", "domain", d.Host, "project", d.ProjectID, "err", err)
+			c.log.InfoContext(ctx, "domain not verified", "domain", d.Host, "project", d.ProjectID, "err", err)
 			continue
 		}
 		if err := c.st.MarkVerified(ctx, d.ID, method); err != nil {
-			c.log.Error("mark verified", "err", err)
+			c.log.ErrorContext(ctx, "mark verified", "err", err)
 			continue
 		}
 		c.metrics.Add("tt_loadtest_domains_verified_total", 1, "method", method)
-		c.log.Info("domain verified", "domain", d.Host, "project", d.ProjectID, "method", method)
+		c.log.InfoContext(ctx, "domain verified", "domain", d.Host, "project", d.ProjectID, "method", method)
 	}
 }
 

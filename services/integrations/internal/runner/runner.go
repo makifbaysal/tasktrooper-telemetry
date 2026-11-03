@@ -126,7 +126,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	defer t.Stop()
 	for {
 		if err := r.Reconcile(ctx); err != nil {
-			r.o.Log.Error("load integrations", "err", err)
+			r.o.Log.ErrorContext(ctx, "load integrations", "err", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -222,8 +222,8 @@ type session struct {
 
 func (r *Runner) work(ctx context.Context, in model.Integration, trigger <-chan struct{}) {
 	s := &session{r: r, in: in, log: r.o.Log.With("integration", in.ID, "provider", in.Provider), trigger: trigger}
-	s.log.Info("integration started")
-	defer s.log.Info("integration stopped")
+	s.log.InfoContext(ctx, "integration started")
+	defer s.log.InfoContext(ctx, "integration stopped")
 	for {
 		err := s.build(ctx)
 		if err == nil {
@@ -238,7 +238,7 @@ func (r *Runner) work(ctx context.Context, in model.Integration, trigger <-chan 
 		now := time.Now()
 		if !now.Before(nextDiscover) || s.inv == nil || s.forced {
 			if s.forced {
-				s.log.Info("sync requested")
+				s.log.InfoContext(ctx, "sync requested")
 			}
 			s.forced = false
 			err := s.discover(ctx)
@@ -328,7 +328,7 @@ func (s *session) discover(ctx context.Context) (err error) {
 		derr = fmt.Errorf("discovery: %w", derr)
 	}
 	s.status(ctx, derr, inv.Count())
-	s.log.Info("discovery done", "databases", len(inv.Databases), "brokers", len(inv.Brokers), "functions", len(inv.Functions), "other", inv.Other,
+	s.log.InfoContext(ctx, "discovery done", "databases", len(inv.Databases), "brokers", len(inv.Brokers), "functions", len(inv.Functions), "other", inv.Other,
 		"took", time.Since(start).Round(time.Millisecond), "err", errString(derr))
 	return derr
 }
@@ -353,11 +353,11 @@ func (s *session) collect(ctx context.Context) (err error) {
 				cerr = errors.Join(cerr, fmt.Errorf("store meta: %w", err))
 			}
 		}
-		s.log.Debug("metrics sent", "samples", len(samples), "deploys", len(res.Deploys))
+		s.log.DebugContext(ctx, "metrics sent", "samples", len(samples), "deploys", len(res.Deploys))
 	}
 	if cerr != nil {
 		cerr = fmt.Errorf("metrics: %w", cerr)
-		s.log.Warn("metrics step failed", "err", cerr.Error())
+		s.log.WarnContext(ctx, "metrics step failed", "err", cerr.Error())
 	}
 	if s.discoverErr != nil {
 		cerr = errors.Join(fmt.Errorf("discovery: %w", s.discoverErr), cerr)
@@ -392,7 +392,7 @@ func (s *session) status(ctx context.Context, err error, resources int) {
 	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	if e := s.r.o.Store.SetStatus(sctx, s.in.ID, st, msg, resources); e != nil {
-		s.log.Error("update integration status", "err", e)
+		s.log.ErrorContext(ctx, "update integration status", "err", e)
 	}
 }
 

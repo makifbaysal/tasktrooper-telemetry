@@ -357,7 +357,7 @@ func (p *Provider) appSettingsService(ctx context.Context, s site) (string, erro
 	err := p.arm.Do(ctx, http.MethodPost, s.ID+"/config/appsettings/list", api(apiWeb), nil, &r)
 	if httpx.IsStatus(err, http.StatusForbidden) || httpx.IsStatus(err, http.StatusUnauthorized) || httpx.IsStatus(err, http.StatusNotFound) {
 		if _, logged := p.settingsLogged.LoadOrStore(strings.ToLower(s.ID), true); !logged && p.log != nil {
-			p.log.Info("azure: cannot read app settings (needs Website Contributor); service name from tags/App Insights", "app", s.Name)
+			p.log.InfoContext(ctx, "azure: cannot read app settings (needs Website Contributor); service name from tags/App Insights", "app", s.Name)
 		}
 		return "", nil
 	}
