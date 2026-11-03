@@ -222,7 +222,7 @@ func isSafe(method string) bool {
 // guard again as the viewer).
 func (s *Server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isSafe(r.Method) {
+		if isSafe(r.Method) || readOnlyPost(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -239,6 +239,16 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			s.audit(r, p, rec)
 		}
 	})
+}
+
+// readOnlyPosts are POST routes that only compute an answer (a body too big or structured for a query string) and change
+// nothing: a viewer may call them and they are not audited. Never add a route that writes, sends or connects anywhere.
+var readOnlyPosts = map[string]bool{
+	"/monitors/preview": true, // threshold back-test of an unsaved monitor (tt_preview_monitor)
+}
+
+func readOnlyPost(r *http.Request) bool {
+	return r.Method == http.MethodPost && readOnlyPosts[strings.TrimPrefix(r.URL.Path, "/api/v1")]
 }
 
 type bodyCapture struct {

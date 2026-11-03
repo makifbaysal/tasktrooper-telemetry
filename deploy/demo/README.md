@@ -69,7 +69,11 @@ cloudflared tunnel info trooper-demo     # a CONNECTOR ID line = connected
 `protocol: http2` (in the example config) keeps the tunnel on TCP. On QUIC the home network dropped the idle UDP flows:
 every minute `timeout: no recent network activity` in `/Library/Logs/com.cloudflare.cloudflared.err.log` and 530 on all
 hostnames until the reconnect. Existing machine: add the line to `/etc/cloudflared/config.yml`, then
-`sudo launchctl kickstart -k system/com.cloudflare.cloudflared`.
+`sudo launchctl kickstart -k system/com.cloudflare.cloudflared`. `edge-ip-version: "4"` too: on HTTP/2 over IPv6 the
+edge connections still dropped every ~2 minutes (`Error shutting down control stream: client disconnected`).
+
+The machine must never sleep (a sleeping Mac drops the tunnel; `pmset -g` showed `sleep 1`):
+`sudo pmset -a sleep 0 disksleep 0 powernap 0`.
 
 ## Deploy
 Actions → **deploy-demo** → Run workflow (branch `main`). The job checks out the commit, writes `deploy/.env` from
@@ -136,8 +140,10 @@ summary run the offline mock and codeintel uses static rules only.
 Open `https://telemetry.tasktrooper.ai`, sign in with Google, onboarding creates the org, project and ingest key (DSN).
 
 ## Shared demo login (ADR-035)
-One email + password account for people who want to look inside the demo without a Google account. It is a **viewer** of
-the org that owns the self project (read only: no monitors, KPIs, keys, members, integrations or deletes). `demo`
+One email + password account for people who want to look inside the demo without a Google account. It is a **member** of
+the org that owns the self project, so the jury can try everything: create / edit monitors, KPIs and load tests, approve
+the assistant's write tools. Members, API keys, integrations, AI quota and org settings stay admin-only, and the account
+cannot create orgs. Anything it changes is audited as that one user. `demo`
 environment: variable **`DEMO_LOGIN_EMAIL`** (e.g. `demo@tasktrooper.ai`), secret **`DEMO_LOGIN_PASSWORD`** (12–72 bytes):
 
 ```bash
@@ -145,7 +151,7 @@ gh variable set DEMO_LOGIN_EMAIL --env demo --body demo@tasktrooper.ai
 gh secret set DEMO_LOGIN_PASSWORD --env demo          # paste the password
 ```
 
-Then run deploy-demo. After the health checks `deploy.sh` runs `api set-password --project "$TT_SELF_PROJECT_ID" --role viewer`
+Then run deploy-demo. After the health checks `deploy.sh` runs `api set-password --project "$TT_SELF_PROJECT_ID" --role member`
 inside the api container (password over stdin). Idempotent: same password = no change; a new password signs out everyone
 using the old one. Skipped (with a log line) when either value is empty or self-observability (`DEMO_TROOPER_DSN`) is off.
 The api runs with `TT_AUTH_PASSWORD=true` and `TT_CLIENT_IP_HEADER=CF-Connecting-IP` (failed logins: 10 per visitor IP, 30

@@ -181,6 +181,9 @@ func TestSessionAuthAndRoles(t *testing.T) {
 		{name: "viewer reads", method: "GET", path: "/api/v1/services", session: "sess-5", hdr: []string{projectHeader, "80"}, want: 200},
 		{name: "viewer cannot write", method: "POST", path: "/api/v1/monitors", session: "sess-5", hdr: []string{projectHeader, "80"},
 			body: `{"name":"x","kind":"latency","severity":"info"}`, want: 403},
+		// past the viewer guard: the handler's own validation answers (400), not the guard (403)
+		{name: "viewer previews a monitor (read-only POST)", method: "POST", path: "/api/v1/monitors/preview", session: "sess-5", hdr: []string{projectHeader, "80"},
+			body: `{"kind":"latency","condition":{"op":">","threshold":1}}`, want: 400},
 		{name: "member writes", method: "POST", path: "/api/v1/monitors", session: "sess-5", hdr: []string{projectHeader, "43"},
 			body: `{"name":"x","kind":"latency","severity":"info"}`, want: 201},
 		{name: "foreign origin mutation", method: "POST", path: "/api/v1/monitors", session: "sess-5", hdr: []string{"Origin", "https://evil.example"},
