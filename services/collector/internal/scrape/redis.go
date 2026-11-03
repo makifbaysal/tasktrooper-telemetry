@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/redis/go-redis/v9/maintnotifications"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/tasktrooper/telemetry/services/collector/internal/config"
@@ -59,6 +60,7 @@ func NewRedis(t config.Database, log *slog.Logger) (*Redis, error) {
 	opt.DialTimeout = t.Timeout.D()
 	opt.ReadTimeout = t.Timeout.D()
 	opt.ClientName = "trooper-agent"
+	opt.MaintNotificationsConfig = &maintnotifications.Config{Mode: maintnotifications.ModeDisabled} // monitored servers are often Redis < 8
 	r := &Redis{t: t, cl: redis.NewClient(opt), log: log, c: rate.NewCounters(), stop: make(chan struct{})}
 	r.wg.Add(1)
 	go r.pinger(500 * time.Millisecond)

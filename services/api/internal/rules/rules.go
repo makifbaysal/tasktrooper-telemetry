@@ -235,7 +235,7 @@ func DescribeCondition(kind string, metric string, c model.MonitorCondition) str
 			metric = "p95"
 		}
 		what, val = metric, trim(c.Threshold)+" ms"
-	case metric == "error_rate":
+	case metric == "error_rate" || kind == "error_rate" && metric == "": // error_rate monitors carry no query.metric
 		what, val = "error rate", trim(c.Threshold*100)+"%"
 	case metric == "throughput" || metric == "rpm":
 		what, val = "throughput", Compact(c.Threshold)+"/min"
