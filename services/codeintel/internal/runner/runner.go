@@ -231,7 +231,7 @@ func (r *Runner) analyze(ctx context.Context, repo model.Repo) {
 		attribute.Int("tt.analysis.items", rep.Items), attribute.Int("tt.analysis.observed", rep.Observed),
 		attribute.Int("tt.analysis.suggestions", rep.Suggestions), attribute.Int("tt.analysis.scenarios", rep.Scenarios),
 		attribute.Int("tt.analysis.llm_items", rep.LLMItems), attribute.String("tt.analysis.llm_status", rep.LLM.Status))
-	if err := r.Store.FinishOK(fctx, repo.ID, started, rep.SHA, rep.Languages, rep.Services, rep.Summary()); err != nil {
+	if err := r.Store.FinishOK(fctx, repo.ID, started, rep.RecordedSHA(), rep.Languages, rep.Services, rep.Summary()); err != nil {
 		serr = err
 		log.ErrorContext(ctx, "record analysis", "err", err)
 		return
@@ -244,7 +244,7 @@ func (r *Runner) analyze(ctx context.Context, repo model.Repo) {
 	}
 	log.InfoContext(ctx, "analysis done", "sha", rep.SHA, "incremental", rep.Incremental, "diff_source", rep.DiffSource, "changed", rep.Changed, "items", rep.Items,
 		"observed", rep.Observed, "shadows", rep.Shadows, "suggestions", rep.Suggestions, "scenarios", rep.Scenarios,
-		"llm_items", rep.LLMItems, "llm_status", rep.LLM.Status, "llm_credits", rep.LLM.Credits, "monitors_created", rep.Monitors.Created, "monitors_updated", rep.Monitors.Updated,
+		"llm_items", rep.LLMItems, "llm_status", rep.LLM.Status, "folders", rep.Folders, "unmatched_folders", rep.Unmatched, "full_scan_next", rep.FullScanNext, "llm_credits", rep.LLM.Credits, "monitors_created", rep.Monitors.Created, "monitors_updated", rep.Monitors.Updated,
 		"monitors_deleted", rep.Monitors.Deleted, "dur", dur.Round(time.Millisecond))
 }
 

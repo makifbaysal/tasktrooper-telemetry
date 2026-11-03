@@ -19,6 +19,7 @@ import (
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/model"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/observe"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/selftel"
+	"github.com/tasktrooper/telemetry/services/codeintel/internal/servicemap"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/suggest"
 )
 
@@ -620,4 +621,49 @@ func nonNil(s []string) []string {
 		return []string{}
 	}
 	return s
+}
+
+// ---------- folder → service mapping (deploy/postgres/019_repo_service_mappings.sql) ----------
+
+// Mappings returns the repository's stored folder mappings.
+func (s *Store) Mappings(ctx context.Context, repoID int64) ([]servicemap.Mapping, error) {
+	rows, err := s.DB.Query(ctx, `SELECT path, detected_name, evidence, kind, items, coalesce(service, ''), status
+		FROM repo_service_mappings WHERE repository_id = $1 ORDER BY path`, repoID)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (servicemap.Mapping, error) {
+		var m servicemap.Mapping
+		err := r.Scan(&m.Path, &m.Detected, &m.Evidence, &m.Kind, &m.Items, &m.Service, &m.Status)
+		return m, err
+	})
+}
+
+// SaveMappings replaces the automatic mappings of a repository with list. Rows the user decided (confirmed /
+// ignored) keep their service and status, also when the user decided while this analysis ran.
+func (s *Store) SaveMappings(ctx context.Context, repo model.Repo, list []servicemap.Mapping) error {
+	tx, err := s.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	paths := make([]string, 0, len(list))
+	for _, m := range list {
+		paths = append(paths, m.Path)
+		if _, err := tx.Exec(ctx, `INSERT INTO repo_service_mappings (repository_id, project_id, path, detected_name, evidence, kind, items, service, status)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, nullif($8, ''), $9)
+			ON CONFLICT (repository_id, path) DO UPDATE SET detected_name = EXCLUDED.detected_name, evidence = EXCLUDED.evidence,
+			  kind = EXCLUDED.kind, items = EXCLUDED.items,
+			  service = CASE WHEN repo_service_mappings.status IN ('confirmed', 'ignored') THEN repo_service_mappings.service ELSE EXCLUDED.service END,
+			  status = CASE WHEN repo_service_mappings.status IN ('confirmed', 'ignored') THEN repo_service_mappings.status ELSE EXCLUDED.status END,
+			  updated_at = CASE WHEN repo_service_mappings.status IN ('confirmed', 'ignored') THEN repo_service_mappings.updated_at ELSE now() END`,
+			repo.ID, repo.ProjectID, m.Path, m.Detected, m.Evidence, m.Kind, m.Items, m.Service, m.Status); err != nil {
+			return fmt.Errorf("mapping %s: %w", m.Path, err)
+		}
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM repo_service_mappings WHERE repository_id = $1 AND NOT (path = ANY($2))
+		AND status NOT IN ('confirmed', 'ignored')`, repo.ID, paths); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }

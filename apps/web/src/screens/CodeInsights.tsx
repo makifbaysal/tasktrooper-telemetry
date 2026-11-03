@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import {
-  AlertTriangle, Bell, Check, ChevronRight, CircleDashed, Code2, ExternalLink, Eye, EyeOff, FileCode2, FolderGit2, GitBranch, Gauge, Plus,
+  AlertTriangle, Bell, Check, ChevronRight, CircleDashed, Code2, ExternalLink, Eye, EyeOff, FileCode2, FolderGit2, FolderTree, GitBranch, Gauge, Plus,
   RefreshCw, ShieldCheck, Sparkles, Trash2, Unplug, Webhook, X,
 } from 'lucide-react';
 import {
@@ -18,6 +18,7 @@ import { LocalAICost } from '@/components/ui/LocalAICost';
 import { LocalAIState } from '@/components/ui/LocalAIState';
 import { CriticalityBadge } from './shared';
 import { AcceptSuggestionDrawer } from './Alerts';
+import { RepoServicesDrawer, UnmappedFoldersNotice } from './RepoServices';
 import { ConnectRepoDrawer, WebhookSetup } from './ConnectRepo';
 
 type Filter = 'all' | 'monitored' | 'unmonitored' | 'dead' | 'shadow';
@@ -76,6 +77,7 @@ export function CodeInsights() {
   // back from the GitHub App installation: ?github=<integrationId> opens the repo picker
   const [githubId] = useState(() => params.get('github') ?? undefined);
   const [connecting, setConnecting] = useState(!!githubId);
+  const [mapping, setMapping] = useState<string | null>(null);
   useEffect(() => {
     if (params.has('github')) setParams((p) => { const n = new URLSearchParams(p); n.delete('github'); return n; }, { replace: true });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -110,6 +112,7 @@ export function CodeInsights() {
   };
 
   const repos = repoList();
+  const mappingRepo = mapping ? repos.find((r) => r.id === mapping) : undefined;
   const inventory = inventoryRows();
   const analyzing = repos.some((r) => r.status === 'analyzing');
 
@@ -176,6 +179,8 @@ export function CodeInsights() {
     <>
       {header}
       <AiQuotaNotice repos={repos} inventory={inventory} />
+      <UnmappedFoldersNotice repos={repos} onOpen={(r) => setMapping(r.id)} />
+      {mappingRepo && <RepoServicesDrawer repo={mappingRepo} onClose={() => setMapping(null)} />}
 
       {/* 1 — the headline: how much of what matters is protected */}
       <div className="grid grid-3">
@@ -268,7 +273,7 @@ export function CodeInsights() {
       {/* 5 — secondary: where the inventory comes from */}
       <Section title="Repositories">
         <Card flush>
-          <div className="list">{repos.map((r) => <RepoRow key={r.id} r={r} />)}</div>
+          <div className="list">{repos.map((r) => <RepoRow key={r.id} r={r} onServices={() => setMapping(r.id)} />)}</div>
         </Card>
       </Section>
 
@@ -441,7 +446,7 @@ export function SuggestionCard({ s, compact: small }: { s: SuggestionRow; compac
   return <>{small ? body : <Card>{body}</Card>}{drawer}</>;
 }
 
-function RepoRow({ r }: { r: RepoInfo }) {
+function RepoRow({ r, onServices }: { r: RepoInfo; onServices: () => void }) {
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -501,6 +506,8 @@ function RepoRow({ r }: { r: RepoInfo }) {
         : r.status === 'error'
           ? <StatusBadge status="critical" label="Analysis failed" />
           : <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>{r.analyzedAt ? `Analyzed ${ago(r.analyzedAt)}` : 'Ready'}</span>}
+      {r.unmappedServices > 0 && r.status !== 'disconnected' && <StatusBadge status="warning" label={`${r.unmappedServices} folder${r.unmappedServices === 1 ? '' : 's'} unlinked`} />}
+      <Button size="sm" variant="ghost" icon={<FolderTree size={14} />} disabled={r.status === 'disconnected'} onClick={onServices}>Services</Button>
       <Button size="sm" variant="ghost" icon={<RefreshCw size={14} />} disabled={busy || r.status === 'analyzing' || r.status === 'disconnected'} onClick={() => void run(() => analyzeRepo(r.id))}>Analyze now</Button>
       {confirm
         ? <>

@@ -1084,6 +1084,48 @@ func TestIntegration(t *testing.T) {
 			t.Errorf("analyze: %+v", repo)
 		}
 
+		// folder → service mapping (ADR-036): codeintel writes the rows, the user decides
+		if _, err := pool.Exec(ctx, `INSERT INTO repo_service_mappings (repository_id, project_id, path, detected_name, evidence, kind, items, service, status)
+		    VALUES ($1, 9101, 'svc/billing', 'billing', 'module', 'backend', 3, NULL, 'unmatched'),
+		           ($1, 9101, 'svc/orders', 'orders', 'module', 'backend', 5, 'it-api', 'matched')`, repo.ID); err != nil {
+			t.Fatal(err)
+		}
+		c.json("GET", "/repos/"+repo.ID, nil, 200, &repo)
+		if repo.UnmappedServices != 1 {
+			t.Errorf("unmappedServices = %d", repo.UnmappedServices)
+		}
+		var maps []model.RepoServiceMapping
+		c.json("GET", "/repos/"+repo.ID+"/services", nil, 200, &maps)
+		if len(maps) != 2 || maps[0].Path != "svc/billing" || maps[0].Status != "unmatched" || maps[1].Service != "it-api" {
+			t.Errorf("mappings: %+v", maps)
+		}
+		c.json("PUT", "/repos/"+repo.ID+"/services", map[string]any{"path": "svc/billing"}, 400, nil)                                 // no decision
+		c.json("PUT", "/repos/"+repo.ID+"/services", map[string]any{"path": "svc/billing", "service": "x", "ignore": true}, 400, nil) // two
+		c.json("PUT", "/repos/"+repo.ID+"/services", map[string]any{"path": "svc/billing", "service": "bad name"}, 400, nil)
+		c.json("PUT", "/repos/"+repo.ID+"/services", map[string]any{"path": "svc/nope", "service": "x"}, 404, nil)
+		var m model.RepoServiceMapping
+		c.json("PUT", "/repos/"+repo.ID+"/services", map[string]any{"path": "svc/billing", "service": "billing-api"}, 200, &m)
+		if m.Status != "confirmed" || m.Service != "billing-api" {
+			t.Errorf("confirm: %+v", m)
+		}
+		var sha *string
+		var pending []string
+		_ = pool.QueryRow(ctx, `SELECT last_analyzed_sha, pending_paths FROM repositories WHERE id = $1`, repo.ID).Scan(&sha, &pending)
+		if sha != nil || len(pending) != 1 || pending[0] != "*" {
+			t.Errorf("full re-analysis not queued: sha=%v pending=%v", sha, pending)
+		}
+		m = model.RepoServiceMapping{}
+		c.json("PUT", "/repos/"+repo.ID+"/services", map[string]any{"path": "svc/orders", "ignore": true}, 200, &m)
+		if m.Status != "ignored" || m.Service != "" {
+			t.Errorf("ignore: %+v", m)
+		}
+		m = model.RepoServiceMapping{}
+		c.json("PUT", "/repos/"+repo.ID+"/services", map[string]any{"path": "svc/orders", "reset": true}, 200, &m)
+		c.json("GET", "/repos/"+repo.ID, nil, 200, &repo)
+		if m.Status != "unmatched" || repo.UnmappedServices != 1 {
+			t.Errorf("reset: %+v, unmapped %d", m, repo.UnmappedServices)
+		}
+
 		var itemID, shadowID int64
 		if err := pool.QueryRow(ctx, `INSERT INTO inventory_items (repository_id, project_id, kind, key, file, line, service, criticality, observed, monitored, summary)
 		    VALUES ($1, 9101, 'endpoint', 'GET /orders/:id', 'orders.go', 42, 'it-api', 'high', true, false, 'reads an order') RETURNING id`, repo.ID).Scan(&itemID); err != nil {

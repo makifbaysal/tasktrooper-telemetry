@@ -76,7 +76,8 @@ func UICriticality(c string) string {
 const repoSelect = `SELECT r.id, r.provider, r.full_name, r.default_branch, coalesce(r.last_analyzed_sha, ''), coalesce(r.status, ''),
   r.analyze_requested_at, r.analyzed_at, coalesce(r.error, ''), coalesce(r.languages, '{}'), coalesce(r.services, '{}'),
   coalesce(r.installation_id, 0), coalesce(r.local_path, ''), coalesce(r.pending_paths, '{}'), r.analysis,
-  coalesce(r.base_url, ''), r.webhook_received_at FROM repositories r`
+  coalesce(r.base_url, ''), r.webhook_received_at,
+  (SELECT count(*) FROM repo_service_mappings m WHERE m.repository_id = r.id AND m.status = 'unmatched') FROM repositories r`
 
 func scanRepo(row pgx.Row) (model.Repo, error) {
 	var r model.Repo
@@ -87,7 +88,7 @@ func scanRepo(row pgx.Row) (model.Repo, error) {
 	var hookSeen *time.Time
 	if err := row.Scan(&id, &r.Provider, &r.Name, &r.Branch, &r.Sha, &status, &requested, &analyzed, &r.Error, &r.Languages,
 		&r.Services, &inst, &r.LocalPath, &r.PendingPaths, &analysis,
-		&r.BaseURL, &hookSeen); err != nil {
+		&r.BaseURL, &hookSeen, &r.UnmappedServices); err != nil {
 		return r, err
 	}
 	if len(analysis) > 0 && string(analysis) != "null" {
@@ -359,6 +360,95 @@ func (d *DB) DeleteRepo(ctx context.Context, id string) error {
 		}
 	}
 	return nil
+}
+
+// reServiceName is what a user may type as a service name (SDK service names: no spaces).
+var reServiceName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:/@-]{0,127}$`)
+
+// ListRepoServices returns the folder → service mappings of a repository (ADR-036).
+func (d *DB) ListRepoServices(ctx context.Context, id string) ([]model.RepoServiceMapping, error) {
+	n, err := parseID(id)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := d.GetRepo(ctx, id); err != nil {
+		return nil, err
+	}
+	rows, err := d.pg.Query(ctx, `SELECT path, detected_name, evidence, kind, items, coalesce(service, ''), status, updated_at
+	  FROM repo_service_mappings WHERE {{tenant}} AND repository_id = $1 ORDER BY path`, n)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.RepoServiceMapping{}
+	for rows.Next() {
+		var m model.RepoServiceMapping
+		var at time.Time
+		if err := rows.Scan(&m.Path, &m.Detected, &m.Evidence, &m.Kind, &m.Items, &m.Service, &m.Status, &at); err != nil {
+			return nil, err
+		}
+		m.UpdatedAt = ms(at)
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// SetRepoService records the user's decision for one folder and queues a full re-analysis: stored items of
+// untouched files carry the old service name, so an incremental analysis would not rename them.
+func (d *DB) SetRepoService(ctx context.Context, id string, in model.RepoServiceMappingInput) (*model.RepoServiceMapping, error) {
+	n, err := parseID(id)
+	if err != nil {
+		return nil, err
+	}
+	in.Service = strings.TrimSpace(in.Service)
+	set := 0
+	for _, b := range []bool{in.Service != "", in.Ignore, in.Reset} {
+		if b {
+			set++
+		}
+	}
+	switch {
+	case in.Path == "":
+		return nil, Invalid("path is required")
+	case set != 1:
+		return nil, Invalid("give exactly one of service, ignore or reset")
+	case in.Service != "" && !reServiceName.MatchString(in.Service):
+		return nil, Invalid("service: letters, digits and _ . : / @ - only, at most 128 characters")
+	}
+	status, service := "confirmed", any(in.Service)
+	switch {
+	case in.Ignore:
+		status, service = "ignored", nil
+	case in.Reset:
+		status, service = "unmatched", nil // codeintel matches it again in the next analysis
+	}
+	user := nullID(ActorOf(ctx).UserID)
+	err = d.inTx(ctx, func(t tqTx) error {
+		tag, err := t.Exec(`UPDATE repo_service_mappings SET status = $3, service = $4, decided_by = $5, updated_at = now()
+		  WHERE {{tenant}} AND repository_id = $1 AND path = $2`, n, in.Path, status, service, user)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		_, err = t.Exec(`UPDATE repositories SET analyze_requested_at = now(), pending_paths = '{*}', last_analyzed_sha = NULL,
+		  analyze_requested_by = $2 WHERE {{tenant}} AND id = $1`, n, user)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	list, err := d.ListRepoServices(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	for i := range list {
+		if list[i].Path == in.Path {
+			return &list[i], nil
+		}
+	}
+	return nil, ErrNotFound
 }
 
 // AnalyzeRepo queues an analysis (codeintel polls analyze_requested_at).

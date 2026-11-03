@@ -25,8 +25,31 @@ Setup/env: `services/codeintel/README.md`.
 - Webhook secret: for GitLab, Bitbucket and GitHub repos without the App, api generates a random secret on connect, seals it into
   `secrets` (`webhook_secret_ref`) and returns it **once** together with the webhook URL (`POST /repos/{id}/webhook-secret` rotates it).
   The first verified delivery writes `repositories.webhook_received_at` → `webhookActive` (UI "webhook active").
-- Monorepo: `.trooper/config.yaml` (`services: [{path, name}]`); otherwise SDK init calls (`TROOPER_SERVICE`,
+- Monorepo: a dashboard folder mapping (below) wins; then `.trooper/config.yaml` (`services: [{path, name}]`); otherwise SDK init calls (`TROOPER_SERVICE`,
   `service: "..."` + trooper), then the module root (go.mod/package.json/pyproject), finally the repo name.
+
+### Folder → service mapping
+
+ADR-036; table `repo_service_mappings` (contracts §13). Package `services/codeintel/internal/servicemap`.
+
+- Extraction lists every folder that owns non-dependency items (`extract.Root`): `path` (where the name was resolved),
+  `detected` name, `evidence` (config | sdk | module | repo), `kind` (mobile: pubspec / Package.swift / Android gradle /
+  react-native or expo; web: React/Vue/Angular/Next/Svelte `package.json` with views; backend: endpoints; worker: consumers or
+  crons only; else library) and the item count. Folders are listed for the whole checkout, also in incremental analyses.
+- Candidates are the services and apps with telemetry in 30 days (`observe.Traffic.Known()`: `red_1h|red_1m`, `consumer_1m`,
+  `rum_views_1m.app`). `servicemap.Best`: exact → same normalised name (`Orders_API` = `orders-api`) → same stem without one of
+  `service|server|backend|frontend|worker|svc|api|app|web` → the only name whose words end with the other's (`tt-api` ↔ `api`).
+  Two candidates at any step → no match (the user decides).
+- `servicemap.Link`: `confirmed` / `ignored` rows (user) and earlier `matched` rows are kept; new or `unmatched` folders are matched
+  again on every analysis. Decided rows of folders that no longer have items stay, so they apply when the folder comes back.
+- The next analysis passes `Overrides` (confirmed, and matched under a different name than the code uses) and `Ignore` to
+  extraction; items carry their folder (`model.Item.Root`, not persisted) so a match found in the same analysis renames them.
+- `SaveMappings` upserts the folders, keeps user decisions even when made during the analysis, deletes automatic rows of folders
+  that disappeared. Report: `folders`, `unmatched_folders`, `full_scan_next` in the "analysis done" log.
+- An incremental analysis whose mapping changed (`servicemap.Changed`) is recorded with an empty `last_analyzed_sha`, so the next
+  analysis is a full scan (stored items of untouched files still carry the old name). A user decision (api `PUT /repos/{id}/services`)
+  queues the full scan directly.
+- UI: Code insights banner "Some folders could not be linked to a service" + `RepoServicesDrawer` (Services button on each repository).
 - Triggers: first connection (full scan), push to the default branch (webhook file list → incremental), manual "re-
   analyze" (api `analyze_requested_at = now()`, `pending_paths = '{*}'`). `{*}` now means "list unknown": in a previously
   analyzed repo the changed files are found with `git diff last_analyzed_sha..HEAD` → still incremental (see

@@ -444,6 +444,13 @@ events ≤ 24 h old coming from the offline queue keep their own time.
   - `monitors` + `source text` ('manual'|'code'|'template'|'suggestion'), `code_ref text` (alert-as-code; read-only).
   - `loadtest_scenarios` + `state text` ('draft'|'ready', default 'ready'); codeintel writes `source='generated', state='draft'`.
 - `.trooper/config.yaml`: `services: [{ path: services/orders, name: orders-api }]`; if missing, detected from SDK init calls.
+- Folder → service mapping (ADR-036, migration `019_repo_service_mappings.sql`):
+  `repo_service_mappings (repository_id, project_id, path, detected_name, evidence config|sdk|module|repo,
+  kind backend|web|mobile|worker|library, items, service NULL, status matched|unmatched|confirmed|ignored, decided_by, updated_at,
+  PRIMARY KEY(repository_id, path))`. codeintel writes the folders and automatic matches (`matched` / `unmatched`) and never changes
+  `confirmed` / `ignored` rows; the api writes only the user's decision (`GET|PUT /repos/{id}/services`, body
+  `{path, service | ignore | reset}`) and then queues a full re-analysis (`pending_paths='{*}'`, `last_analyzed_sha=NULL`).
+  `Repo.unmappedServices` = count of `unmatched` rows.
 - `.trooper/monitors/*.yaml`: alerting.md § Rule schema format (name, kind, query, condition, severity, notify, labels).
 - Inventory `key` format: endpoint `"METHOD /route/:param"` (same as writer normalization), consumer = process name (`source` =
   topic/queue), cron = job name (`source` = schedule), view = route, dependency = `"<kind> · <name>"`.

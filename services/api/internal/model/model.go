@@ -1146,6 +1146,30 @@ type Repo struct {
 	// Analysis is codeintel's summary of the last analysis ({sha, items, llmItems, incremental, llm: {status:
 	// ok|disabled|quota_exceeded, reason?, credits, skipped?}}), passed through as stored.
 	Analysis json.RawMessage `json:"analysis,omitempty"`
+	// UnmappedServices counts folders no telemetry service fits (repo_service_mappings status 'unmatched'): the
+	// dashboard asks the user to link them.
+	UnmappedServices int `json:"unmappedServices"`
+}
+
+// RepoServiceMapping is one folder of a repository and the service its inventory items belong to (ADR-036).
+type RepoServiceMapping struct {
+	Path      string `json:"path"`     // "." = repository root
+	Detected  string `json:"detected"` // name the code gives the folder
+	Evidence  string `json:"evidence"` // config | sdk | module | repo
+	Kind      string `json:"kind"`     // backend | web | mobile | worker | library
+	Items     int    `json:"items"`
+	Service   string `json:"service,omitempty"`
+	Status    string `json:"status"` // matched | unmatched | confirmed | ignored
+	UpdatedAt int64  `json:"updatedAt"`
+}
+
+// RepoServiceMappingInput is the user's decision for one folder: link it to service, ignore it, or reset it to
+// automatic matching. Exactly one of service / ignore / reset.
+type RepoServiceMappingInput struct {
+	Path    string `json:"path"`
+	Service string `json:"service,omitempty"`
+	Ignore  bool   `json:"ignore,omitempty"`
+	Reset   bool   `json:"reset,omitempty"`
 }
 
 // RepoInput connects a repository: token (sealed), GitHub App installationId, or a local path (provider local).

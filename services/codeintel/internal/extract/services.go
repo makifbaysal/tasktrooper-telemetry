@@ -10,19 +10,33 @@ import (
 )
 
 // serviceMap resolves the service of a file (contracts §13):
+//  0. a folder mapping set in the dashboard (Options.Overrides; longest path prefix wins);
 //  1. `.trooper/config.yaml` `services: [{path, name}]` (longest path prefix wins);
 //  2. the nearest directory with a TaskTrooper SDK init (`service:` / `serviceName` / `TROOPER_SERVICE`);
 //  3. the nearest module root (go.mod, package.json, pyproject.toml, requirements.txt, setup.py, pom.xml,
 //     build.gradle[.kts], *.csproj, Package.swift, pubspec.yaml) → its directory name;
 //  4. the repository name.
 type serviceMap struct {
-	explicit []dirName // sorted by path length, longest first
-	detected map[string]string
-	roots    map[string]bool
-	repo     string
+	overrides []dirName // dashboard folder mappings, longest first
+	explicit  []dirName // sorted by path length, longest first
+	detected  map[string]string
+	roots     map[string]bool
+	repo      string
 }
 
 type dirName struct{ dir, name string }
+
+// Evidence says how a folder's service name was found (Root.Evidence).
+const (
+	EvidenceOverride = "override" // dashboard folder mapping
+	EvidenceConfig   = "config"   // .trooper/config.yaml
+	EvidenceSDK      = "sdk"      // SDK init / TROOPER_SERVICE
+	EvidenceModule   = "module"   // module root directory name
+	EvidenceRepo     = "repo"     // repository name
+)
+
+// resolved is the service of a file and the folder it was resolved from.
+type resolved struct{ name, root, evidence string }
 
 // TrooperConfig is `.trooper/config.yaml`.
 type TrooperConfig struct {
@@ -39,8 +53,14 @@ var (
 	reServiceKey  = regexp.MustCompile(`\b(?:service|serviceName|service_name|Service|ServiceName)\s*[:=]\s*["']([A-Za-z0-9_.-]+)["']`)
 )
 
-func newServiceMap(files []srcFile, repo string) *serviceMap {
+func newServiceMap(files []srcFile, repo string, overrides ...Override) *serviceMap {
 	m := &serviceMap{detected: map[string]string{}, roots: map[string]bool{}, repo: repo}
+	for _, o := range overrides {
+		if o.Name != "" {
+			m.overrides = append(m.overrides, dirName{cleanDir(o.Path), o.Name})
+		}
+	}
+	sort.SliceStable(m.overrides, func(i, j int) bool { return len(m.overrides[i].dir) > len(m.overrides[j].dir) })
 	for _, f := range files {
 		dir := path.Dir(f.rel)
 		switch {
@@ -49,7 +69,7 @@ func newServiceMap(files []srcFile, repo string) *serviceMap {
 			if yaml.Unmarshal(f.src, &c) == nil {
 				for _, s := range c.Services {
 					if s.Name != "" {
-						m.explicit = append(m.explicit, dirName{strings.Trim(path.Clean(s.Path), "/"), s.Name})
+						m.explicit = append(m.explicit, dirName{cleanDir(s.Path), s.Name})
 					}
 				}
 				if c.Service != "" {
@@ -99,15 +119,32 @@ func detectSDKService(f srcFile) string {
 	return ""
 }
 
-func (m *serviceMap) service(rel string) string {
+func (m *serviceMap) service(rel string) string { return m.resolve(rel).name }
+
+// cleanDir normalises a folder path: slash separated, no leading/trailing slash, "." for the repository root.
+func cleanDir(p string) string {
+	p = strings.Trim(path.Clean("/"+strings.TrimSpace(p)), "/")
+	if p == "" {
+		return "."
+	}
+	return p
+}
+
+// under reports whether rel is inside dir ("." is the whole repository).
+func under(rel, dir string) bool {
+	return dir == "." || rel == dir || strings.HasPrefix(rel, dir+"/")
+}
+
+// detectedName is the name the code itself gives the folder of rel, ignoring dashboard overrides.
+func (m *serviceMap) detectedName(rel string) resolved {
 	for _, e := range m.explicit {
-		if e.dir == "." || rel == e.dir || strings.HasPrefix(rel, e.dir+"/") {
-			return e.name
+		if under(rel, e.dir) {
+			return resolved{e.name, e.dir, EvidenceConfig}
 		}
 	}
 	for dir := path.Dir(rel); ; dir = path.Dir(dir) {
 		if n, ok := m.detected[dir]; ok {
-			return n
+			return resolved{n, dir, EvidenceSDK}
 		}
 		if dir == "." || dir == "/" {
 			break
@@ -115,8 +152,18 @@ func (m *serviceMap) service(rel string) string {
 	}
 	for dir := path.Dir(rel); dir != "." && dir != "/"; dir = path.Dir(dir) {
 		if m.roots[dir] {
-			return path.Base(dir)
+			return resolved{path.Base(dir), dir, EvidenceModule}
 		}
 	}
-	return m.repo
+	return resolved{m.repo, ".", EvidenceRepo}
+}
+
+// resolve returns the service of rel with the folder and evidence it came from.
+func (m *serviceMap) resolve(rel string) resolved {
+	for _, e := range m.overrides {
+		if under(rel, e.dir) {
+			return resolved{e.name, e.dir, EvidenceOverride}
+		}
+	}
+	return m.detectedName(rel)
 }

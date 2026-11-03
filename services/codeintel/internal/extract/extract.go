@@ -31,6 +31,24 @@ type Options struct {
 	Only map[string]bool
 	// RepoName names the service of files outside any module/service directory (default: root dir name).
 	RepoName string
+	// Overrides are folder → service mappings set in the dashboard; they win over everything the code says.
+	Overrides []Override
+	// Ignore lists folders whose items are left out of the inventory (dashboard "ignore this folder").
+	Ignore []string
+}
+
+// Override maps a folder (slash separated, "." = repository root) to a service name.
+type Override struct{ Path, Name string }
+
+// Root is one folder of the repository that owns inventory items: how the code names it, the service its items
+// get, and what kind of app it looks like. Roots cover the whole checkout, also in incremental analysis.
+type Root struct {
+	Path     string // folder the name was resolved from ("." = repository root)
+	Detected string // name the code gives it (config, SDK init, module dir or repo name)
+	Evidence string // EvidenceConfig | EvidenceSDK | EvidenceModule | EvidenceRepo
+	Service  string // service its items get (Detected unless a dashboard override applies)
+	Kind     string // backend | web | mobile | worker | library
+	Items    int    // items (dependencies excluded)
 }
 
 // Result is the inventory of a checkout.
@@ -38,6 +56,7 @@ type Result struct {
 	Items     []model.Item
 	Languages []string // by file count, most used first
 	Services  []string // sorted
+	Roots     []Root   // sorted by path
 	Files     int
 }
 
@@ -168,7 +187,7 @@ func Repo(root string, opt Options) (*Result, error) {
 // FromFiles runs every extractor over files already in memory.
 func FromFiles(files []srcFile, opt Options) *Result {
 	sort.Slice(files, func(i, j int) bool { return files[i].rel < files[j].rel })
-	svc := newServiceMap(files, opt.RepoName)
+	svc := newServiceMap(files, opt.RepoName, opt.Overrides...)
 	res := &Result{Files: len(files)}
 
 	var items []model.Item
@@ -211,11 +230,33 @@ func FromFiles(files []srcFile, opt Options) *Result {
 	items = append(items, extractSwift(swiftFiles)...)
 	items = append(items, extractDart(dartFiles)...)
 
+	roots := map[string]*Root{}
+	kinds := map[string]map[string]int{}
 	for i := range items {
-		if items[i].Service == "" {
-			items[i].Service = svc.service(items[i].File)
+		if items[i].Service != "" {
+			continue // the extractor named it (e.g. TROOPER_SERVICE in a k8s CronJob)
+		}
+		d, r := svc.detectedName(items[i].File), svc.resolve(items[i].File)
+		items[i].Service, items[i].Root = r.name, d.root
+		rt := roots[d.root]
+		if rt == nil {
+			rt = &Root{Path: d.root, Detected: d.name, Evidence: d.evidence, Service: r.name}
+			roots[d.root], kinds[d.root] = rt, map[string]int{}
+		}
+		if items[i].Kind != model.KindDependency {
+			rt.Items++
+			kinds[d.root][items[i].Kind]++
 		}
 	}
+	items = dropIgnored(items, opt.Ignore)
+	for p, rt := range roots {
+		if rt.Items == 0 {
+			continue // dependencies only: a library, nothing to link
+		}
+		rt.Kind = rootKind(files, p, kinds[p])
+		res.Roots = append(res.Roots, *rt)
+	}
+	sort.Slice(res.Roots, func(i, j int) bool { return res.Roots[i].Path < res.Roots[j].Path })
 	items = dedupe(items)
 	if opt.Only != nil {
 		kept := items[:0]
@@ -373,4 +414,62 @@ func containsCSV(list, v string) bool {
 		}
 	}
 	return false
+}
+
+// dropIgnored removes items of ignored folders.
+func dropIgnored(items []model.Item, ignore []string) []model.Item {
+	if len(ignore) == 0 {
+		return items
+	}
+	kept := items[:0]
+	for _, it := range items {
+		skip := false
+		for _, d := range ignore {
+			if under(it.File, cleanDir(d)) {
+				skip = true
+				break
+			}
+		}
+		if !skip {
+			kept = append(kept, it)
+		}
+	}
+	return kept
+}
+
+// rootKind guesses what a folder is from its manifests and the kinds of items in it.
+func rootKind(files []srcFile, dir string, kinds map[string]int) string {
+	mobile, web := false, false
+	for _, f := range files {
+		if f.lang != "manifest" || path.Dir(f.rel) != dir {
+			continue
+		}
+		switch base := path.Base(f.rel); {
+		case base == "pubspec.yaml", base == "Package.swift":
+			mobile = true
+		case strings.HasPrefix(base, "build.gradle") && bytes.Contains(f.src, []byte("com.android")):
+			mobile = true
+		case base == "package.json":
+			switch {
+			case bytes.Contains(f.src, []byte(`"react-native"`)), bytes.Contains(f.src, []byte(`"expo"`)):
+				mobile = true
+			case bytes.Contains(f.src, []byte(`"react"`)), bytes.Contains(f.src, []byte(`"vue"`)), bytes.Contains(f.src, []byte(`"@angular/core"`)),
+				bytes.Contains(f.src, []byte(`"next"`)), bytes.Contains(f.src, []byte(`"svelte"`)):
+				web = true
+			}
+		}
+	}
+	switch {
+	case mobile:
+		return "mobile"
+	case web && kinds[model.KindView] > 0:
+		return "web" // a web app with API routes (Next.js) is still the web app
+	case kinds[model.KindEndpoint] > 0:
+		return "backend"
+	case web || kinds[model.KindView] > 0:
+		return "web"
+	case kinds[model.KindConsumer] > 0 || kinds[model.KindCron] > 0:
+		return "worker"
+	}
+	return "library"
 }

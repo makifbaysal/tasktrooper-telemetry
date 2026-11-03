@@ -45,6 +45,20 @@ type Traffic struct {
 	Seen30d map[string]bool
 	// Services30d are services with any traffic in DeadWindow (dead is only claimed for instrumented services).
 	Services30d map[string]bool
+	// Apps30d are RUM apps (web / mobile) with views in DeadWindow; only used to link repository folders to apps.
+	Apps30d map[string]bool
+}
+
+// Known is every service and app name with telemetry (folder → service mapping candidates).
+func (t *Traffic) Known() map[string]bool {
+	out := make(map[string]bool, len(t.Services30d)+len(t.Apps30d))
+	for s := range t.Services30d {
+		out[s] = true
+	}
+	for s := range t.Apps30d {
+		out[s] = true
+	}
+	return out
 }
 
 // Source loads traffic for a tenant.
@@ -86,7 +100,7 @@ func Open(ctx context.Context, url string) (*ClickHouse, error) {
 
 // Traffic runs the matching queries. Every query filters org_id + project_id.
 func (c *ClickHouse) Traffic(ctx context.Context, orgID, projectID int64) (*Traffic, error) {
-	t := &Traffic{Seen30d: map[string]bool{}, Services30d: map[string]bool{}}
+	t := &Traffic{Seen30d: map[string]bool{}, Services30d: map[string]bool{}, Apps30d: map[string]bool{}}
 	org, proj := uint32(orgID), uint32(projectID)
 	rows, err := c.Conn.Query(ctx, `SELECT service, route, method, sum(count), sum(errors),
 			toFloat64(quantilesTDigestWeightedMerge(0.5, 0.75, 0.95, 0.99)(duration)[3])
@@ -143,6 +157,18 @@ func (c *ClickHouse) Traffic(ctx context.Context, orgID, projectID int64) (*Traf
 		t.Services30d[s] = true
 	}
 	rows.Close()
+
+	// RUM apps: a missing table (older schema) must not fail the analysis; the folders just stay unlinked.
+	if rows, err := c.Conn.Query(ctx, `SELECT DISTINCT app FROM telemetry.rum_views_1m
+		WHERE org_id = ? AND project_id = ? AND minute >= now() - INTERVAL 30 DAY AND views > 0`, org, proj); err == nil {
+		for rows.Next() {
+			var a string
+			if rows.Scan(&a) == nil && a != "" {
+				t.Apps30d[a] = true
+			}
+		}
+		rows.Close()
+	}
 	return t, nil
 }
 
