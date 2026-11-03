@@ -18,6 +18,7 @@ import (
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/extract"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/model"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/observe"
+	"github.com/tasktrooper/telemetry/services/codeintel/internal/servicemap"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/source"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/store"
 	"github.com/tasktrooper/telemetry/services/codeintel/internal/suggest"
@@ -32,6 +33,8 @@ type Store interface {
 	SaveSuggestions(ctx context.Context, repo model.Repo, list []suggest.Suggestion) (int, error)
 	SaveScenarios(ctx context.Context, repo model.Repo, list []suggest.Scenario) error
 	SyncCodeMonitors(ctx context.Context, repo model.Repo, mons []ascode.Monitor, broken []string) (store.SyncResult, error)
+	Mappings(ctx context.Context, repoID int64) ([]servicemap.Mapping, error)
+	SaveMappings(ctx context.Context, repo model.Repo, list []servicemap.Mapping) error
 }
 
 // Fetcher gets code onto disk (implemented by source.Fetcher).
@@ -85,6 +88,19 @@ type Report struct {
 	LLM         model.LLMStatus // ok | disabled | quota_exceeded (+ credits spent)
 	Monitors    store.SyncResult
 	Warnings    []string
+	// Folders: repository folders with items; Unmatched: those no telemetry service fits (the dashboard asks).
+	Folders, Unmatched int
+	// FullScanNext: the folder → service mapping changed during an incremental analysis, so stored items of untouched
+	// files still carry old service names; the analysis is recorded without a commit to force a full scan next.
+	FullScanNext bool
+}
+
+// RecordedSHA is the commit FinishOK stores: "" when the next analysis must be a full scan.
+func (r *Report) RecordedSHA() string {
+	if r.FullScanNext {
+		return ""
+	}
+	return r.SHA
 }
 
 // Incremental reports whether pending changed files allow an incremental analysis: the repository was analyzed
@@ -115,7 +131,11 @@ func (a *Analyzer) Run(ctx context.Context, repo model.Repo, pending []string) (
 	defer co.Cleanup()
 	rep.SHA = co.SHA
 
-	opt := extract.Options{RepoName: path.Base(repo.FullName)}
+	prevMaps, err := a.Store.Mappings(ctx, repo.ID)
+	if err != nil {
+		return nil, fmt.Errorf("load service mappings: %w", err)
+	}
+	opt := extract.Options{RepoName: path.Base(repo.FullName), Overrides: servicemap.Overrides(prevMaps), Ignore: servicemap.IgnoredPaths(prevMaps)}
 	changed := a.changedFiles(ctx, repo, pending, co, rep)
 	if changed != nil {
 		opt.Only = changed
@@ -180,16 +200,36 @@ func (a *Analyzer) Run(ctx context.Context, repo model.Repo, pending []string) (
 		return nil, fmt.Errorf("alert-as-code: %w", err)
 	}
 
-	// Observed traffic.
+	// Observed traffic, and the folders linked to the services it knows.
 	var shadows []model.Item
+	var tr *observe.Traffic
 	if a.Traffic != nil {
-		tr, err := a.Traffic.Traffic(ctx, repo.OrgID, repo.ProjectID)
-		if err != nil {
+		if tr, err = a.Traffic.Traffic(ctx, repo.OrgID, repo.ProjectID); err != nil {
 			rep.Warnings = append(rep.Warnings, "traffic: "+err.Error())
-			keepObserved(items, prev)
-		} else {
-			shadows = observe.Match(items, tr, rep.Services)
+			tr = nil
 		}
+	}
+	var known map[string]bool // nil: telemetry unreadable, earlier automatic matches are kept
+	if tr != nil {
+		known = tr.Known()
+	}
+	maps := servicemap.Link(res.Roots, prevMaps, known)
+	items = applyMappings(items, maps)
+	rep.Services = serviceNames(items)
+	for _, m := range maps {
+		if m.Items > 0 {
+			rep.Folders++
+		}
+		if m.Status == servicemap.Unmatched {
+			rep.Unmatched++
+		}
+	}
+	if changed != nil && servicemap.Changed(prevMaps, maps) {
+		rep.FullScanNext = true
+		rep.Warnings = append(rep.Warnings, "service mapping changed: the next analysis is a full scan")
+	}
+	if tr != nil {
+		shadows = observe.Match(items, tr, rep.Services)
 	} else {
 		keepObserved(items, prev)
 	}
@@ -251,6 +291,9 @@ func (a *Analyzer) Run(ctx context.Context, repo model.Repo, pending []string) (
 
 	if err := a.Store.SaveItems(ctx, repo, items, shadows, rep.Services); err != nil {
 		return nil, fmt.Errorf("save inventory: %w", err)
+	}
+	if err := a.Store.SaveMappings(ctx, repo, maps); err != nil {
+		return nil, fmt.Errorf("save service mappings: %w", err)
 	}
 	clusters, err := a.Store.Clusters(ctx, repo.ProjectID)
 	if err != nil {
@@ -352,4 +395,40 @@ func orDefault(s, d string) string {
 // Summary is the repositories.analysis jsonb of a finished analysis.
 func (r *Report) Summary() *model.Analysis {
 	return &model.Analysis{SHA: r.SHA, Incremental: r.Incremental, Items: r.Items, LLMItems: r.LLMItems, LLM: r.LLM}
+}
+
+// applyMappings gives fresh items the service of their folder (an automatic match found in this analysis may rename
+// it) and drops items of ignored folders. Stored items (no Root) keep their service.
+func applyMappings(items []*model.Item, maps []servicemap.Mapping) []*model.Item {
+	by := make(map[string]servicemap.Mapping, len(maps))
+	for _, m := range maps {
+		by[m.Path] = m
+	}
+	kept := items[:0]
+	for _, it := range items {
+		if m, ok := by[it.Root]; ok && it.Root != "" {
+			if m.Status == servicemap.Ignored {
+				continue
+			}
+			if m.Service != "" {
+				it.Service = m.Service
+			}
+		}
+		kept = append(kept, it)
+	}
+	return kept
+}
+
+// serviceNames is the sorted set of item services.
+func serviceNames(items []*model.Item) []string {
+	set := map[string]bool{}
+	for _, it := range items {
+		set[it.Service] = true
+	}
+	out := make([]string, 0, len(set))
+	for s := range set {
+		out = append(out, s)
+	}
+	sort.Strings(out)
+	return out
 }

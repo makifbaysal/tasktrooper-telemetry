@@ -101,7 +101,11 @@ Code insights / load test patterns: `SuggestionCard` (`screens/CodeInsights.tsx`
 target service (link to its Alerts tab, "Not reporting yet" badge when the service sends no telemetry) + endpoint, condition mono, rationale,
 `file:line` GitHub link, Reject / Customize / Accept…; Accept… opens `AcceptSuggestionDrawer` (`screens/Alerts.tsx`, also used by the service
 Alerts → Suggested tab: where it goes (service, endpoint, "Shown under"), proposed rule, editable name + severity, why, code ref; "Create monitor"
-accepts and opens the service's Alerts tab); after accept "Monitor created" + link to the monitor),
+accepts and opens the service's Alerts tab); after accept "Monitor created" + link to the monitor), `RepoServicesDrawer` (`screens/RepoServices.tsx`, ADR-036 — folder → service mapping of a
+repository: folder + kind · items · name in code and evidence, status (`StatusBadge` ok "Linked automatically" / accent "Set by you" /
+neutral "Ignored" / warning "Needs a service"), service `Select` (telemetry services + services linked elsewhere, "Use “<name>” (not
+reporting yet)", "Another name…" with a mono `Input`, "Ignore this folder") + Save, "Auto" resets a decision; unmatched rows first),
+`UnmappedFoldersNotice` (Code insights `Callout` with one button per repository that has unmatched folders),
 `ConnectRepoDrawer` (`screens/ConnectRepo.tsx` — primary "Connect GitHub" (full-page redirect to the api), on return a repo picker via `?github=<id>`:
 search, Private/Added badges, multi-select; token / local path under "Advanced"), repo row states (Analyzing… / Analyzing push… +
 `pending_paths`, Disconnected warning, Analysis failed + error text, "Webhook active"), `RunBlockedCallout` + `ScenarioSource`

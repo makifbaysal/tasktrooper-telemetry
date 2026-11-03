@@ -224,6 +224,19 @@ func (s *Server) codeInsightRoutes(r chi.Router) {
 	r.Delete("/repos/{id}", func(w http.ResponseWriter, r *http.Request) {
 		s.noContent(w, r, s.Store.DeleteRepo(r.Context(), param(r, "id")))
 	})
+	r.Get("/repos/{id}/services", func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Store.ListRepoServices(r.Context(), param(r, "id"))
+		s.reply(w, r, v, err)
+	})
+	r.Put("/repos/{id}/services", func(w http.ResponseWriter, r *http.Request) {
+		var in model.RepoServiceMappingInput
+		if err := decode(r, &in); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		v, err := s.Store.SetRepoService(r.Context(), param(r, "id"), in)
+		s.reply(w, r, v, err)
+	})
 	r.Post("/repos/{id}/analyze", func(w http.ResponseWriter, r *http.Request) {
 		v, err := s.Store.AnalyzeRepo(r.Context(), param(r, "id"))
 		if err != nil {

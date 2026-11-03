@@ -2263,6 +2263,37 @@ paths:
         '403': { $ref: '#/components/responses/E403' }
         '404': { $ref: '#/components/responses/E404' }
         '500': { $ref: '#/components/responses/E500' }
+  /api/v1/repos/{id}/services:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [Code insights]
+      operationId: getReposIdServices
+      summary: 'Folder → service mapping of the repository (ADR-036): detected folders, the service each is linked to, unmatched ones for the user'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/RepoServiceMapping' } } } }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '404': { $ref: '#/components/responses/E404' }
+        '500': { $ref: '#/components/responses/E500' }
+    put:
+      tags: [Code insights]
+      operationId: putReposIdServices
+      summary: 'Link a folder to a service, ignore it or reset it to automatic matching; queues a full re-analysis'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RepoServiceMappingInput' } } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/RepoServiceMapping' } } }
+        '400': { $ref: '#/components/responses/E400' }
+        '401': { $ref: '#/components/responses/E401' }
+        '403': { $ref: '#/components/responses/E403' }
+        '404': { $ref: '#/components/responses/E404' }
+        '500': { $ref: '#/components/responses/E500' }
   /api/v1/repos/{id}/analyze:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string } }
@@ -3375,6 +3406,28 @@ components:
         url: { type: string, description: 'Repository page on its host' }
         webhook: { $ref: '#/components/schemas/RepoWebhook' }
         analysis: { type: object, description: 'codeintel summary of the last analysis: {sha, incremental, items, llmItems, llm: {status: ok|disabled|quota_exceeded, reason?, credits (2 decimals), skipped?}}' }
+        unmappedServices: { type: integer, description: 'Folders no telemetry service fits (the dashboard asks the user to link them)' }
+    RepoServiceMapping:
+      type: object
+      required: [path, detected, evidence, kind, items, status, updatedAt]
+      properties:
+        path: { type: string, description: 'Folder, slash separated; "." = repository root' }
+        detected: { type: string, description: 'Name the code gives the folder' }
+        evidence: { type: string, enum: [config, sdk, module, repo], description: '.trooper/config.yaml, SDK init / TROOPER_SERVICE, module root directory, repository name' }
+        kind: { type: string, enum: [backend, web, mobile, worker, library] }
+        items: { type: integer, description: 'Inventory items (dependencies excluded)' }
+        service: { type: string, description: 'Linked service; absent while unmatched / ignored' }
+        status: { type: string, enum: [matched, unmatched, confirmed, ignored], description: 'matched = linked automatically to a service with telemetry; confirmed / ignored = the user decided' }
+        updatedAt: { type: integer, format: int64 }
+    RepoServiceMappingInput:
+      type: object
+      required: [path]
+      description: 'Exactly one of service, ignore, reset'
+      properties:
+        path: { type: string }
+        service: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_.:/@-]{0,127}$' }
+        ignore: { type: boolean, description: 'Leave the folder out of the inventory' }
+        reset: { type: boolean, description: 'Back to automatic matching' }
     RepoInput:
       type: object
       required: [provider, fullName]

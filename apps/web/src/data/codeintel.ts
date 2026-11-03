@@ -38,6 +38,34 @@ export interface RepoInfo extends Omit<Repo, 'status'> {
   localPath?: string;
   /** LLM step of the last analysis (api: `analysis.llm`, contracts §19) */
   llm?: RepoLlm;
+  /** folders no telemetry service fits: the user links them (ADR-036) */
+  unmappedServices: number;
+}
+
+/** One folder of a repository and the service its inventory belongs to (GET /repos/{id}/services, ADR-036). */
+export interface RepoServiceMapping {
+  path: string;
+  detected: string;
+  evidence: 'config' | 'sdk' | 'module' | 'repo';
+  kind: 'backend' | 'web' | 'mobile' | 'worker' | 'library';
+  items: number;
+  service?: string;
+  status: 'matched' | 'unmatched' | 'confirmed' | 'ignored';
+  updatedAt: number;
+}
+
+/** The user's decision for one folder: exactly one of service / ignore / reset. */
+export type RepoServiceDecision = { path: string } & ({ service: string } | { ignore: true } | { reset: true });
+
+export async function repoServices(id: string): Promise<RepoServiceMapping[]> {
+  return (await api<RepoServiceMapping[] | null>(`/repos/${encodeURIComponent(id)}/services`)) ?? [];
+}
+
+/** Saves a decision; the api queues a full re-analysis so the inventory moves to the new service. */
+export async function setRepoService(id: string, d: RepoServiceDecision): Promise<RepoServiceMapping> {
+  const out = await api<RepoServiceMapping>(`/repos/${encodeURIComponent(id)}/services`, { method: 'PUT', body: JSON.stringify(d) });
+  await refreshCodeIntel();
+  return out;
 }
 
 /** quota_exceeded: the AI quota stopped the LLM step; the rest of the inventory kept static criticality. */
@@ -105,7 +133,7 @@ interface RawRepo {
   analyzedAt?: number | string | null; services?: string[] | null; language?: string; languages?: string[] | null;
   status?: string; error?: string | null; provider?: string; url?: string; localPath?: string;
   installationId?: number | string | null; pendingPaths?: string[] | null; pending_paths?: string[] | null; webhookActive?: boolean | null;
-  baseUrl?: string | null; webhook?: RepoWebhook | null;
+  baseUrl?: string | null; webhook?: RepoWebhook | null; unmappedServices?: number | null;
   analysis?: { llm?: { status?: string; reason?: string | null; credits?: number | null; skipped?: number | null } | null } | null;
 }
 const STATUSES = new Set<RepoStatus>(['ready', 'analyzing', 'error', 'disconnected']);
@@ -153,6 +181,7 @@ const mapRepo = (r: RawRepo): RepoInfo => {
   pendingPaths: r.pendingPaths ?? r.pending_paths ?? undefined,
   webhookActive: r.webhookActive ?? (r.installationId != null ? true : undefined),
   webhook: r.webhook ?? undefined,
+  unmappedServices: r.unmappedServices ?? 0,
   llm: r.analysis?.llm?.status === 'ok' || r.analysis?.llm?.status === 'disabled' || r.analysis?.llm?.status === 'quota_exceeded'
     ? { status: r.analysis.llm.status, reason: r.analysis.llm.reason ?? undefined, credits: r.analysis.llm.credits ?? 0, skipped: r.analysis.llm.skipped ?? undefined }
     : undefined,

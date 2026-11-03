@@ -210,3 +210,61 @@ func TestTokenizer(t *testing.T) {
 		t.Fatalf("line %d", toks[len(toks)-1].line)
 	}
 }
+
+func TestServiceMapResolve(t *testing.T) {
+	files := []srcFile{
+		{rel: ".trooper/config.yaml", lang: "", src: []byte("services:\n  - path: apps/api\n    name: api\n")},
+		{rel: "svc/orders/go.mod", lang: "manifest", src: []byte("module x")},
+		{rel: "svc/orders/Dockerfile", lang: "config", src: []byte("ENV TROOPER_SERVICE=orders-svc\n")},
+		{rel: "svc/billing/go.mod", lang: "manifest", src: []byte("module y")},
+	}
+	m := newServiceMap(files, "monorepo", Override{Path: "svc/billing/", Name: "billing-api"}, Override{Path: "apps/api", Name: "edge"})
+	tests := []struct {
+		rel                     string
+		want                    resolved // resolve: what items get
+		wantDetected, wantDRoot string   // detectedName: how the code names the folder
+	}{
+		{"apps/api/x.ts", resolved{"edge", "apps/api", EvidenceOverride}, "api", "apps/api"},
+		{"svc/billing/h.go", resolved{"billing-api", "svc/billing", EvidenceOverride}, "billing", "svc/billing"},
+		{"svc/orders/main.go", resolved{"orders-svc", "svc/orders", EvidenceSDK}, "orders-svc", "svc/orders"},
+		{"tool.py", resolved{"monorepo", ".", EvidenceRepo}, "monorepo", "."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.rel, func(t *testing.T) {
+			if got := m.resolve(tt.rel); got != tt.want {
+				t.Fatalf("resolve = %+v, want %+v", got, tt.want)
+			}
+			if d := m.detectedName(tt.rel); d.name != tt.wantDetected || d.root != tt.wantDRoot {
+				t.Fatalf("detectedName = %+v, want %s @ %s", d, tt.wantDetected, tt.wantDRoot)
+			}
+		})
+	}
+}
+
+func TestRootKind(t *testing.T) {
+	files := []srcFile{
+		{rel: "apps/web/package.json", lang: "manifest", src: []byte(`{"dependencies":{"react":"19","next":"15"}}`)},
+		{rel: "apps/mobile/package.json", lang: "manifest", src: []byte(`{"dependencies":{"react-native":"0.76"}}`)},
+		{rel: "apps/flutter/pubspec.yaml", lang: "manifest", src: []byte(`name: x`)},
+		{rel: "svc/api/go.mod", lang: "manifest", src: []byte(`module x`)},
+	}
+	tests := []struct {
+		dir   string
+		kinds map[string]int
+		want  string
+	}{
+		{"apps/web", map[string]int{model.KindView: 3, model.KindEndpoint: 2}, "web"},
+		{"apps/mobile", map[string]int{model.KindView: 3}, "mobile"},
+		{"apps/flutter", map[string]int{model.KindView: 1}, "mobile"},
+		{"svc/api", map[string]int{model.KindEndpoint: 5, model.KindConsumer: 1}, "backend"},
+		{"svc/api", map[string]int{model.KindCron: 1}, "worker"},
+		{"svc/api", map[string]int{}, "library"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.dir+"/"+tt.want, func(t *testing.T) {
+			if got := rootKind(files, tt.dir, tt.kinds); got != tt.want {
+				t.Fatalf("rootKind = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}

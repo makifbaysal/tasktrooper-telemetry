@@ -196,7 +196,7 @@ func analyzeOnce(ctx context.Context, st *store.Store, an *analyze.Analyzer, id 
 		_ = st.FinishError(context.WithoutCancel(ctx), id, started, err.Error(), []string{store.FullScan})
 		return err
 	}
-	if err := st.FinishOK(ctx, id, started, rep.SHA, rep.Languages, rep.Services, rep.Summary()); err != nil {
+	if err := st.FinishOK(ctx, id, started, rep.RecordedSHA(), rep.Languages, rep.Services, rep.Summary()); err != nil {
 		return err
 	}
 	fmt.Printf("llm: %s %s (%.2f credits, %d skipped)\n", rep.LLM.Status, rep.LLM.Reason, rep.LLM.Credits, rep.LLM.Skipped)

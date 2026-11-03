@@ -70,11 +70,14 @@ func (r Repo) Due() bool {
 
 // Item is one inventory entry extracted from code (or observed only, when Shadow).
 type Item struct {
-	ID        int64  `json:"id,omitempty"`
-	Kind      string `json:"kind"`
-	Key       string `json:"key"`              // endpoint "METHOD /route/:param", consumer process, cron job, view route, dependency "<kind> · <name>"
-	Source    string `json:"source,omitempty"` // consumer topic/queue, cron schedule
-	Service   string `json:"service"`
+	ID      int64  `json:"id,omitempty"`
+	Kind    string `json:"kind"`
+	Key     string `json:"key"`              // endpoint "METHOD /route/:param", consumer process, cron job, view route, dependency "<kind> · <name>"
+	Source  string `json:"source,omitempty"` // consumer topic/queue, cron schedule
+	Service string `json:"service"`
+	// Root is the repository folder the service was resolved from (extract.Root.Path; never persisted, "" for stored
+	// items and items whose extractor named the service).
+	Root      string `json:"-"`
 	File      string `json:"file,omitempty"` // repo-relative, slash separated
 	Line      int    `json:"line,omitempty"`
 	Framework string `json:"framework,omitempty"`

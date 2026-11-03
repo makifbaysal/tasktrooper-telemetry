@@ -603,3 +603,22 @@ org, which means inviting every visitor by email. We want one shared, read-only 
 - A user with a password cannot `POST /orgs` (403): a shared login must not own orgs, ingest keys or invites.
 **Consequence:** Anyone with the shared password can read and change the demo org's monitors, KPIs and load tests; all of them are one user (shared AI credits and
 assistant threads, one audit identity). Limits are per api replica (no Redis yet). Not meant for customer accounts: those use OIDC.
+
+## ADR-036 — Folder → service mapping of connected repositories
+**Context:** codeintel named a repository folder by `.trooper/config.yaml`, an SDK init call, the module directory or the repository
+name, and used that name as the service of its inventory. In monorepos this name often differs from what the service reports
+(`services/api` vs `tt-api`), so endpoints and accepted monitors landed on a service page nobody sees, and nothing told the user.
+**Decision:**
+- Every analysis lists the **folders** that own items (`extract.Root`: path, name in code, evidence, kind backend|web|mobile|worker|
+  library from manifests + item kinds) and links each to a service with telemetry in the last 30 days (APM `red_*` / `consumer_1m`
+  services and RUM `rum_views_1m` apps): exact name → same normalised name → same stem without `-api/-service/-web/…` → the only
+  name ending with the other's words (`tt-api` ↔ `api`). Exactly one candidate is required; otherwise the folder is `unmatched`.
+- Folders that cannot be linked are **asked**: Code insights shows a banner and a per-repository "Services" drawer where the user
+  picks a telemetry service, keeps the name from the code (service not reporting yet), types another name, ignores the folder or
+  resets it to automatic. Decisions are stored (`confirmed` / `ignored`) and win over everything the code says; codeintel never
+  changes them. An automatic match is sticky (a quiet service keeps its folder).
+- Items get the linked service in the same analysis (`model.Item.Root`); ignored folders leave the inventory. A decision queues a
+  full re-analysis; an incremental analysis whose mapping changed is recorded without a commit so the next one is a full scan.
+**Consequence:** Inventory, suggestions and accepted monitors use the names the dashboard shows. Folders of examples / tools in a
+monorepo show up as "needs a service" until they are ignored or linked. `.trooper/config.yaml` stays the way to define the
+mapping in code; dashboard decisions override it.

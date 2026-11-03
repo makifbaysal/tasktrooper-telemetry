@@ -148,6 +148,8 @@ type Store interface {
 	CreateRepo(ctx context.Context, in model.RepoInput) (*model.Repo, error)
 	DeleteRepo(ctx context.Context, id string) error
 	AnalyzeRepo(ctx context.Context, id string) (*model.Repo, error)
+	ListRepoServices(ctx context.Context, id string) ([]model.RepoServiceMapping, error)
+	SetRepoService(ctx context.Context, id string, in model.RepoServiceMappingInput) (*model.RepoServiceMapping, error)
 	RotateRepoWebhookSecret(ctx context.Context, id string) (*model.Repo, error)
 	ListInventory(ctx context.Context, f store.InventoryFilter) ([]model.InventoryItem, error)
 	ListSuggestions(ctx context.Context, state string) ([]model.CodeSuggestion, error)

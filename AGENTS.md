@@ -119,5 +119,6 @@ Full check (exactly the same gates as CI): `make check` → gofmt, `go vet`, uni
 - [x] Assistant (`/assistant`): AI chat with history, @ mentions, images, MCP tools in process, approval-gated writes, widgets — ADR-033 (replaces Overview "Ask telemetry")
 - [x] Single LLM endpoint: assistant, incident summary and codeintel enrichment all use the OpenAI-compatible `TT_ASSISTANT_*` endpoint (Meta Muse Spark by default) — ADR-034
 - [x] Password login (`TT_AUTH_PASSWORD`, `api set-password`) for the shared viewer account of the demo — ADR-035
+- [x] Folder → service mapping on repo import: folders linked to telemetry services, unmatched ones asked in Code insights — ADR-036
 
 Next work: [`.ai/roadmap.md`](.ai/roadmap.md).
